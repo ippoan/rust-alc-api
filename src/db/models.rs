@@ -36,6 +36,21 @@ pub struct UpdateFace {
     pub face_photo_url: String,
 }
 
+// --- User ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct User {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub google_sub: String,
+    pub email: String,
+    pub name: String,
+    pub role: String,
+    pub refresh_token_hash: Option<String>,
+    pub refresh_token_expires_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+}
+
 // --- Measurement ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
