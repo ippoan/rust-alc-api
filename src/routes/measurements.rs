@@ -355,14 +355,10 @@ async fn get_face_photo(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    tracing::info!("face_photo proxy: url={face_url} key={key}");
-
     let data = state.storage.download(&key).await.map_err(|e| {
         tracing::error!("Failed to download face photo: {e}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
-
-    tracing::info!("face_photo proxy: downloaded {} bytes", data.len());
 
     Response::builder()
         .status(StatusCode::OK)
