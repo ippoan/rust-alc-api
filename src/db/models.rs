@@ -115,6 +115,7 @@ pub struct Measurement {
     pub pulse: Option<i32>,
     pub medical_measured_at: Option<DateTime<Utc>>,
     pub face_verified: Option<bool>,
+    pub medical_manual_input: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -135,6 +136,7 @@ pub struct CreateMeasurement {
     pub pulse: Option<i32>,
     pub medical_measured_at: Option<DateTime<Utc>>,
     pub face_verified: Option<bool>,
+    pub medical_manual_input: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -158,6 +160,7 @@ pub struct UpdateMeasurement {
     pub pulse: Option<i32>,
     pub medical_measured_at: Option<DateTime<Utc>>,
     pub face_verified: Option<bool>,
+    pub medical_manual_input: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -262,6 +265,7 @@ pub struct TenkoSession {
     pub diastolic: Option<i32>,
     pub pulse: Option<i32>,
     pub medical_measured_at: Option<DateTime<Utc>>,
+    pub medical_manual_input: Option<bool>,
     pub instruction_confirmed_at: Option<DateTime<Utc>>,
     pub report_vehicle_road_status: Option<String>,
     pub report_driver_alternation: Option<String>,
@@ -309,6 +313,7 @@ pub struct SubmitMedicalData {
     pub diastolic: Option<i32>,
     pub pulse: Option<i32>,
     pub medical_measured_at: Option<DateTime<Utc>>,
+    pub medical_manual_input: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]

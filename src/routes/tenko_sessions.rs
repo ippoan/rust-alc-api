@@ -90,7 +90,12 @@ async fn start_session(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    // セッション作成
+    // セッション作成 (業務前は体温・血圧から開始)
+    let initial_status = match schedule.tenko_type.as_str() {
+        "pre_operation" => "medical_pending",
+        _ => "identity_verified",
+    };
+
     let session = sqlx::query_as::<_, TenkoSession>(
         r#"
         INSERT INTO tenko_sessions (
@@ -98,7 +103,7 @@ async fn start_session(
             identity_verified_at, identity_face_photo_url, location,
             responsible_manager_name, started_at
         )
-        VALUES ($1, $2, $3, $4, 'identity_verified', NOW(), $5, $6, $7, NOW())
+        VALUES ($1, $2, $3, $4, $8, NOW(), $5, $6, $7, NOW())
         RETURNING *
         "#,
     )
@@ -109,6 +114,7 @@ async fn start_session(
     .bind(&body.identity_face_photo_url)
     .bind(&body.location)
     .bind(&schedule.responsible_manager_name)
+    .bind(initial_status)
     .fetch_one(&mut *conn)
     .await
     .map_err(|e| {
@@ -170,7 +176,7 @@ async fn submit_alcohol(
         "cancelled"
     } else {
         match session.tenko_type.as_str() {
-            "pre_operation" => "medical_pending",
+            "pre_operation" => "instruction_pending",
             "post_operation" => "report_pending",
             _ => return Err(StatusCode::INTERNAL_SERVER_ERROR),
         }
@@ -301,8 +307,9 @@ async fn submit_medical(
             diastolic = COALESCE($3, diastolic),
             pulse = COALESCE($4, pulse),
             medical_measured_at = COALESCE($5, NOW()),
+            medical_manual_input = $6,
             updated_at = NOW()
-        WHERE id = $6 AND tenant_id = $7
+        WHERE id = $7 AND tenant_id = $8
         RETURNING *
         "#,
     )
@@ -311,6 +318,7 @@ async fn submit_medical(
     .bind(body.diastolic)
     .bind(body.pulse)
     .bind(body.medical_measured_at)
+    .bind(body.medical_manual_input)
     .bind(id)
     .bind(tenant_id)
     .fetch_one(&mut *conn)
@@ -1163,7 +1171,7 @@ async fn submit_daily_inspection(
         "inspected_at": Utc::now(),
     });
 
-    let next_status = if has_ng { "cancelled" } else { "instruction_pending" };
+    let next_status = if has_ng { "cancelled" } else { "identity_verified" };
     let cancel_reason = if has_ng {
         Some("日常点検異常".to_string())
     } else {
