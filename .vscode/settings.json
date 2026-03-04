@@ -3,7 +3,8 @@
     "alc-app",
     "rust-nfc-bridge",
     "ble-medical-gateway",
-    "claude-skills"
+    "claude-skills",
+    "claude-hooks"
   ],
   "git.autoRepositoryDetection": true
 }
