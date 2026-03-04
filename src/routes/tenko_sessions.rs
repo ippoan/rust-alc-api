@@ -20,17 +20,13 @@ use crate::middleware::auth::{AuthUser, TenantId};
 use crate::AppState;
 
 /// JWT 必須ルート (管理者)
-pub fn jwt_router() -> Router<AppState> {
+/// テナント対応ルート (JWT or X-Tenant-ID)
+pub fn tenant_router() -> Router<AppState> {
     Router::new()
         .route("/tenko/sessions", get(list_sessions))
         .route("/tenko/dashboard", get(dashboard))
         .route("/tenko/sessions/{id}/interrupt", post(interrupt_session))
         .route("/tenko/sessions/{id}/resume", post(resume_session))
-}
-
-/// テナント対応ルート (キオスク)
-pub fn tenant_router() -> Router<AppState> {
-    Router::new()
         .route("/tenko/sessions/start", post(start_session))
         .route("/tenko/sessions/{id}", get(get_session))
         .route("/tenko/sessions/{id}/alcohol", put(submit_alcohol))

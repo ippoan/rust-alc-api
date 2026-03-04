@@ -14,8 +14,8 @@ use crate::db::tenant::set_current_tenant;
 use crate::middleware::auth::TenantId;
 use crate::AppState;
 
-/// JWT 必須ルート (管理者)
-pub fn jwt_router() -> Router<AppState> {
+/// テナント対応ルート (JWT or X-Tenant-ID)
+pub fn tenant_router() -> Router<AppState> {
     Router::new()
         .route("/tenko/schedules", post(create_schedule).get(list_schedules))
         .route("/tenko/schedules/batch", post(batch_create_schedules))
@@ -23,14 +23,10 @@ pub fn jwt_router() -> Router<AppState> {
             "/tenko/schedules/{id}",
             get(get_schedule).put(update_schedule).delete(delete_schedule),
         )
-}
-
-/// テナント対応ルート (キオスク)
-pub fn tenant_router() -> Router<AppState> {
-    Router::new().route(
-        "/tenko/schedules/pending/{employee_id}",
-        get(get_pending_schedules),
-    )
+        .route(
+            "/tenko/schedules/pending/{employee_id}",
+            get(get_pending_schedules),
+        )
 }
 
 async fn create_schedule(

@@ -15,8 +15,8 @@ use crate::db::tenant::set_current_tenant;
 use crate::middleware::auth::TenantId;
 use crate::AppState;
 
-/// JWT 必須ルート (管理者)
-pub fn jwt_router() -> Router<AppState> {
+/// テナント対応ルート (JWT or X-Tenant-ID)
+pub fn tenant_router() -> Router<AppState> {
     Router::new()
         .route(
             "/tenko/equipment-failures",
