@@ -1,18 +1,26 @@
 use axum::{
-    extract::State,
+    extract::{Path, State},
     http::StatusCode,
-    routing::post,
+    routing::{delete, get, post},
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::AppState;
 
-/// 公開ルート (認証不要)
+/// 公開ルート (認証不要) - Android アプリから呼ばれる
 pub fn public_router() -> Router<AppState> {
     Router::new()
         .route("/tenko-call/register", post(register))
         .route("/tenko-call/tenko", post(tenko))
+}
+
+/// テナント認証付きルート - 管理画面から呼ばれる
+pub fn tenant_router() -> Router<AppState> {
+    Router::new()
+        .route("/tenko-call/numbers", get(list_numbers).post(create_number))
+        .route("/tenko-call/numbers/{id}", delete(delete_number))
+        .route("/tenko-call/drivers", get(list_drivers))
 }
 
 // --- ドライバー登録 ---
@@ -189,4 +197,111 @@ async fn tenko(
         success: true,
         call_number: driver.1,
     }))
+}
+
+// --- マスタ管理 (テナント認証付き) ---
+
+#[derive(Debug, Serialize)]
+struct TenkoCallNumber {
+    id: i32,
+    call_number: String,
+    tenant_id: String,
+    label: Option<String>,
+    created_at: String,
+}
+
+async fn list_numbers(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<TenkoCallNumber>>, StatusCode> {
+    let rows = sqlx::query_as::<_, (i32, String, String, Option<String>, String)>(
+        "SELECT id, call_number, tenant_id, label, created_at::text FROM tenko_call_numbers ORDER BY id",
+    )
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("tenko_call list_numbers error: {e}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    Ok(Json(rows.into_iter().map(|r| TenkoCallNumber {
+        id: r.0, call_number: r.1, tenant_id: r.2, label: r.3, created_at: r.4,
+    }).collect()))
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateNumberRequest {
+    call_number: String,
+    tenant_id: Option<String>,
+    label: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct CreateNumberResponse {
+    success: bool,
+    id: i32,
+}
+
+async fn create_number(
+    State(state): State<AppState>,
+    Json(body): Json<CreateNumberRequest>,
+) -> Result<Json<CreateNumberResponse>, StatusCode> {
+    let tenant = body.tenant_id.unwrap_or_else(|| "default".into());
+    let row = sqlx::query_as::<_, (i32,)>(
+        "INSERT INTO tenko_call_numbers (call_number, tenant_id, label) VALUES ($1, $2, $3) RETURNING id",
+    )
+    .bind(&body.call_number)
+    .bind(&tenant)
+    .bind(&body.label)
+    .fetch_one(&state.pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("tenko_call create_number error: {e}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    Ok(Json(CreateNumberResponse { success: true, id: row.0 }))
+}
+
+async fn delete_number(
+    State(state): State<AppState>,
+    Path(id): Path<i32>,
+) -> Result<StatusCode, StatusCode> {
+    sqlx::query("DELETE FROM tenko_call_numbers WHERE id = $1")
+        .bind(id)
+        .execute(&state.pool)
+        .await
+        .map_err(|e| {
+            tracing::error!("tenko_call delete_number error: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Debug, Serialize)]
+struct TenkoCallDriver {
+    id: i32,
+    phone_number: String,
+    driver_name: String,
+    call_number: Option<String>,
+    tenant_id: String,
+    created_at: String,
+}
+
+async fn list_drivers(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<TenkoCallDriver>>, StatusCode> {
+    let rows = sqlx::query_as::<_, (i32, String, String, Option<String>, String, String)>(
+        "SELECT id, phone_number, driver_name, call_number, tenant_id, created_at::text FROM tenko_call_drivers ORDER BY id",
+    )
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("tenko_call list_drivers error: {e}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    Ok(Json(rows.into_iter().map(|r| TenkoCallDriver {
+        id: r.0, phone_number: r.1, driver_name: r.2, call_number: r.3, tenant_id: r.4, created_at: r.5,
+    }).collect()))
 }

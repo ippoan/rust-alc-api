@@ -33,6 +33,7 @@ pub fn router() -> Router<AppState> {
         .merge(health_baselines::tenant_router())
         .merge(equipment_failures::tenant_router())
         .merge(tenko_webhooks::tenant_router())
+        .merge(tenko_call::tenant_router())
         .layer(axum_middleware::from_fn(require_tenant));
 
     // 公開ルート (認証不要)
