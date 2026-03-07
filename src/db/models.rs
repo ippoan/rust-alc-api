@@ -69,6 +69,7 @@ pub struct FaceDataEntry {
     pub face_embedding: Option<Vec<f64>>,
     pub face_embedding_at: Option<DateTime<Utc>>,
     pub face_model_version: Option<String>,
+    pub face_approval_status: String,
 }
 
 #[derive(Debug, Deserialize)]

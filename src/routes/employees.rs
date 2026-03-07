@@ -233,8 +233,6 @@ async fn update_face(
             face_embedding_at = CASE WHEN $2 IS NOT NULL THEN NOW() ELSE face_embedding_at END,
             face_model_version = CASE WHEN $2 IS NOT NULL THEN $5 ELSE face_model_version END,
             face_approval_status = CASE WHEN $2 IS NOT NULL THEN 'pending' ELSE face_approval_status END,
-            face_approved_by = CASE WHEN $2 IS NOT NULL THEN NULL ELSE face_approved_by END,
-            face_approved_at = CASE WHEN $2 IS NOT NULL THEN NULL ELSE face_approved_at END,
             updated_at = NOW()
         WHERE id = $3 AND tenant_id = $4 AND deleted_at IS NULL
         RETURNING *
@@ -269,7 +267,7 @@ async fn list_face_data(
 
     let rows = sqlx::query_as::<_, FaceDataEntry>(
         r#"
-        SELECT id, face_embedding, face_embedding_at, face_model_version
+        SELECT id, face_embedding, face_embedding_at, face_model_version, face_approval_status
         FROM employees
         WHERE tenant_id = $1 AND deleted_at IS NULL AND face_embedding IS NOT NULL
           AND face_approval_status = 'approved'
