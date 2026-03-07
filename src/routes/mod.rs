@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod devices;
 pub mod employees;
 pub mod equipment_failures;
 pub mod health_baselines;
@@ -36,12 +37,14 @@ pub fn router() -> Router<AppState> {
         .merge(tenko_webhooks::tenant_router())
         .merge(tenko_call::tenant_router())
         .merge(timecard::tenant_router())
+        .merge(devices::tenant_router())
         .layer(axum_middleware::from_fn(require_tenant));
 
     // 公開ルート (認証不要)
     let public_routes = Router::new()
         .merge(auth::public_router())
-        .merge(tenko_call::public_router());
+        .merge(tenko_call::public_router())
+        .merge(devices::public_router());
 
     Router::new()
         .merge(public_routes)

@@ -26,3 +26,4 @@ rust-s3 = { version = "0.35", default-features = false, features = ["tokio-rustl
 csv = "1"
 hmac = "0.12"
 hex = "0.4"
+rand = "0.10.0"
