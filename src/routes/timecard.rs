@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::db::models::{
     CreateTimePunchByCard, CreateTimecardCard, TimePunch, TimePunchFilter,
-    TimePunchWithEmployee, TimePunchesResponse, TimecardCard,
+    TimePunchWithDevice, TimePunchWithEmployee, TimePunchesResponse, TimecardCard,
 };
 use crate::db::tenant::set_current_tenant;
 use crate::middleware::auth::TenantId;
@@ -220,13 +220,14 @@ async fn punch(
     // 打刻記録
     let punch = sqlx::query_as::<_, TimePunch>(
         r#"
-        INSERT INTO time_punches (tenant_id, employee_id)
-        VALUES ($1, $2)
+        INSERT INTO time_punches (tenant_id, employee_id, device_id)
+        VALUES ($1, $2, $3)
         RETURNING *
         "#,
     )
     .bind(tenant_id)
     .bind(employee_id)
+    .bind(body.device_id)
     .fetch_one(&mut *conn)
     .await
     .map_err(|e| {
@@ -286,26 +287,26 @@ async fn list_punches(
     set_current_tenant(&mut conn, &tenant_id.to_string()).await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let mut conditions = vec!["tenant_id = $1".to_string()];
+    let mut conditions = vec!["tp.tenant_id = $1".to_string()];
     let mut param_idx = 2u32;
 
     if filter.employee_id.is_some() {
-        conditions.push(format!("employee_id = ${param_idx}"));
+        conditions.push(format!("tp.employee_id = ${param_idx}"));
         param_idx += 1;
     }
     if filter.date_from.is_some() {
-        conditions.push(format!("punched_at >= ${param_idx}"));
+        conditions.push(format!("tp.punched_at >= ${param_idx}"));
         param_idx += 1;
     }
     if filter.date_to.is_some() {
-        conditions.push(format!("punched_at <= ${param_idx}"));
+        conditions.push(format!("tp.punched_at <= ${param_idx}"));
         param_idx += 1;
     }
 
     let where_clause = conditions.join(" AND ");
 
     // Count
-    let count_sql = format!("SELECT COUNT(*) FROM time_punches WHERE {where_clause}");
+    let count_sql = format!("SELECT COUNT(*) FROM time_punches tp WHERE {where_clause}");
     let mut count_query = sqlx::query_scalar::<_, i64>(&count_sql).bind(tenant_id);
     if let Some(eid) = filter.employee_id {
         count_query = count_query.bind(eid);
@@ -323,10 +324,15 @@ async fn list_punches(
 
     // List
     let sql = format!(
-        "SELECT * FROM time_punches WHERE {where_clause} ORDER BY punched_at DESC LIMIT ${param_idx} OFFSET ${}",
+        r#"SELECT tp.id, tp.tenant_id, tp.employee_id, tp.device_id, d.device_name,
+                  tp.punched_at, tp.created_at
+           FROM time_punches tp
+           LEFT JOIN devices d ON d.id = tp.device_id
+           WHERE {where_clause}
+           ORDER BY tp.punched_at DESC LIMIT ${param_idx} OFFSET ${}"#,
         param_idx + 1
     );
-    let mut query = sqlx::query_as::<_, TimePunch>(&sql).bind(tenant_id);
+    let mut query = sqlx::query_as::<_, TimePunchWithDevice>(&sql).bind(tenant_id);
     if let Some(eid) = filter.employee_id {
         query = query.bind(eid);
     }
@@ -385,9 +391,11 @@ async fn export_csv(
     let where_clause = conditions.join(" AND ");
     let sql = format!(
         r#"
-        SELECT tp.id, tp.punched_at, e.name as employee_name, e.code as employee_code
+        SELECT tp.id, tp.punched_at, e.name as employee_name, e.code as employee_code,
+               d.device_name
         FROM time_punches tp
         JOIN employees e ON e.id = tp.employee_id
+        LEFT JOIN devices d ON d.id = tp.device_id
         WHERE {where_clause}
         ORDER BY tp.punched_at DESC
         "#
@@ -399,6 +407,7 @@ async fn export_csv(
         punched_at: chrono::DateTime<chrono::Utc>,
         employee_name: String,
         employee_code: Option<String>,
+        device_name: Option<String>,
     }
 
     let mut query = sqlx::query_as::<_, CsvRow>(&sql).bind(tenant_id);
@@ -418,7 +427,7 @@ async fn export_csv(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let mut wtr = csv::Writer::from_writer(vec![]);
-    wtr.write_record(["ID", "社員コード", "社員名", "打刻日時"])
+    wtr.write_record(["ID", "社員コード", "社員名", "打刻日時", "デバイス"])
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     for r in &rows {
@@ -427,6 +436,7 @@ async fn export_csv(
             r.employee_code.clone().unwrap_or_default(),
             r.employee_name.clone(),
             r.punched_at.with_timezone(&chrono::FixedOffset::east_opt(9 * 3600).unwrap()).format("%Y-%m-%d %H:%M:%S").to_string(),
+            r.device_name.clone().unwrap_or_default(),
         ])
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     }

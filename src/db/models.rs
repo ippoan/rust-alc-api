@@ -494,6 +494,7 @@ pub struct TimePunch {
     pub id: Uuid,
     pub tenant_id: Uuid,
     pub employee_id: Uuid,
+    pub device_id: Option<Uuid>,
     pub punched_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
 }
@@ -501,6 +502,7 @@ pub struct TimePunch {
 #[derive(Debug, Deserialize)]
 pub struct CreateTimePunchByCard {
     pub card_id: String,
+    pub device_id: Option<Uuid>,
 }
 
 #[derive(Debug, Serialize)]
@@ -519,9 +521,20 @@ pub struct TimePunchFilter {
     pub per_page: Option<i64>,
 }
 
+#[derive(Debug, Clone, Serialize, FromRow)]
+pub struct TimePunchWithDevice {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub employee_id: Uuid,
+    pub device_id: Option<Uuid>,
+    pub device_name: Option<String>,
+    pub punched_at: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct TimePunchesResponse {
-    pub punches: Vec<TimePunch>,
+    pub punches: Vec<TimePunchWithDevice>,
     pub total: i64,
     pub page: i64,
     pub per_page: i64,
