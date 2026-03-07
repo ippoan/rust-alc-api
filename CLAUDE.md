@@ -108,6 +108,48 @@ Google OAuth 以外の端末登録フローを3種類サポート。
 - `useAuth.ts`: localStorage に `tenant_id` + `device_id` を保存
 - `activateDevice(tenantId, deviceId)` / `deactivateDevice()` / `isDeviceActivated`
 
+## 中間点呼 (TenkoCall) 機能
+
+運転者が電話番号で登録し、GPS位置情報付きで中間点呼を実施する機能。
+
+### テーブル
+
+- `tenko_call_numbers` — 電話番号マスタ (call_number UNIQUE, tenant_id, label)
+- `tenko_call_drivers` — 登録運転者 (phone_number UNIQUE, driver_name, call_number, employee_code, tenant_id)
+- `tenko_call_logs` — 点呼ログ (driver_id FK, phone_number, driver_name, latitude, longitude)
+- RLS: `tenko_call_numbers` / `tenko_call_drivers` は SELECT パブリック (認証前の検索用)、write はテナントスコープ
+
+### マイグレーション
+
+- `migrations/030_tenko_call_drivers.sql` — drivers + logs テーブル
+- `migrations/031_tenko_call_numbers.sql` — 電話番号マスタ
+- `migrations/032_tenko_call_rls.sql` — RLS ポリシー
+- `migrations/033_tenko_call_employee_code.sql` — employee_code 追加
+
+### バックエンド (`src/routes/tenko_call.rs`)
+
+- **public_router()** (認証不要):
+  - `POST /api/tenko-call/register` — 運転者登録 (call_number でマスタ検証 → phone_number で upsert)
+  - `POST /api/tenko-call/tenko` — 点呼実施 (phone_number → driver 特定 → GPS ログ記録 → call_number 返却)
+- **tenant_router()** (管理者認証):
+  - `GET /api/tenko-call/numbers` — 電話番号マスタ一覧
+  - `POST /api/tenko-call/numbers` — 電話番号追加
+  - `DELETE /api/tenko-call/numbers/{id}` — 電話番号削除
+  - `GET /api/tenko-call/drivers` — 登録運転者一覧
+
+### フロントエンド
+
+- `TenkoCallManager.vue` — 管理者: 電話番号管理 + QRコード生成
+- `AdminDashboard.vue` に「中間点呼」タブ追加
+- `EmployeeList.vue` — 乗務員一覧に中間点呼登録状況 (電話番号) を表示
+
+## AlcoholChecker Android アプリ
+
+- パス: `/home/yhonda/android/AlcoholChecker/`
+- ビルド: `cd /home/yhonda/android/AlcoholChecker && ./gradlew installDebug`
+- **署名不一致エラー**: 端末にリリース署名のAPKがある場合、デバッグビルドを上書きインストールできない。`adb uninstall com.example.alcoholchecker` してから再インストールすること
+- 複数 adb 接続時は `-s <device>` を指定（WiFi + ワイヤレスデバッグで2重接続になることがある）
+
 ## デプロイルール
 
 - コードの修正・変更が完了したら、デプロイするかどうかを **AskUserQuestion ツールの選択肢形式** で確認すること
