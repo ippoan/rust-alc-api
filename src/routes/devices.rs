@@ -25,6 +25,7 @@ pub fn public_router() -> Router<AppState> {
         .route("/devices/settings/{device_id}", get(get_device_settings))
         .route("/devices/register-fcm-token", put(register_fcm_token))
         .route("/devices/fcm-notify-call", post(fcm_notify_call))
+        .route("/devices/fcm-dismiss-test", post(fcm_dismiss_test))
 }
 
 /// テナント認証付きルート - 管理画面から呼ばれる
@@ -45,6 +46,7 @@ pub fn tenant_router() -> Router<AppState> {
         .route("/devices/{id}", delete(delete_device))
         .route("/devices/{id}/call-settings", put(update_call_settings))
         .route("/devices/{id}/test-fcm", post(test_fcm))
+        .route("/devices/test-fcm-all", post(test_fcm_all))
 }
 
 // ============================================================
@@ -1142,6 +1144,62 @@ fn should_notify_device(device: &FcmDevice) -> bool {
     in_range
 }
 
+// --- FCM テスト dismiss (認証不要 — 端末から呼ばれる) ---
+
+#[derive(Debug, Deserialize)]
+struct FcmDismissTestRequest {
+    device_id: Uuid,
+}
+
+async fn fcm_dismiss_test(
+    State(state): State<AppState>,
+    Json(body): Json<FcmDismissTestRequest>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let fcm = state.fcm.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+
+    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    // device_id からテナントを特定
+    let row = sqlx::query_as::<_, (Uuid,)>(
+        "SELECT tenant_id FROM alc_api.devices WHERE id = $1 AND status = 'active'",
+    )
+    .bind(body.device_id)
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(|e| {
+        tracing::error!("fcm_dismiss_test: query error: {e}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+    let tenant_id = row.0;
+
+    // 同一テナントの他の全デバイスに dismiss を送信
+    let tokens = sqlx::query_as::<_, (String,)>(
+        "SELECT fcm_token FROM alc_api.devices WHERE tenant_id = $1 AND id != $2 AND status = 'active' AND fcm_token IS NOT NULL",
+    )
+    .bind(tenant_id)
+    .bind(body.device_id)
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(|e| {
+        tracing::error!("fcm_dismiss_test: tokens query error: {e}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let mut sent = 0usize;
+    for (token,) in &tokens {
+        let mut data = std::collections::HashMap::new();
+        data.insert("type".to_string(), "test_dismiss".to_string());
+        if fcm.send_data_message(token, data).await.is_ok() {
+            sent += 1;
+        }
+    }
+
+    tracing::info!("fcm_dismiss_test: sent dismiss to {sent}/{} devices", tokens.len());
+    Ok(Json(serde_json::json!({ "sent": sent })))
+}
+
 // --- FCM テスト送信 (管理者認証) ---
 
 #[derive(Debug, Serialize)]
@@ -1199,6 +1257,88 @@ async fn test_fcm(
             Ok(Json(TestFcmResponse { success: false, error: Some(e.to_string()) }))
         }
     }
+}
+
+// --- FCM 一括テスト送信 (管理者認証) ---
+
+#[derive(Debug, Serialize)]
+struct TestFcmAllResponse {
+    sent: usize,
+    skipped: usize,
+    errors: usize,
+    results: Vec<TestFcmAllDeviceResult>,
+}
+
+#[derive(Debug, Serialize)]
+struct TestFcmAllDeviceResult {
+    device_id: Uuid,
+    device_name: String,
+    success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+async fn test_fcm_all(
+    State(state): State<AppState>,
+    Extension(tenant_id): Extension<TenantId>,
+) -> Result<Json<TestFcmAllResponse>, StatusCode> {
+    let fcm = state.fcm.as_ref().ok_or_else(|| {
+        tracing::warn!("test_fcm_all called but FCM is not configured");
+        StatusCode::SERVICE_UNAVAILABLE
+    })?;
+
+    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let tid = tenant_id.0.to_string();
+    set_current_tenant(&mut conn, &tid)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let rows = sqlx::query_as::<_, (Uuid, String, String)>(
+        "SELECT id, device_name, fcm_token FROM devices WHERE tenant_id = $1::uuid AND status = 'active' AND fcm_token IS NOT NULL",
+    )
+    .bind(&tid)
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(|e| {
+        tracing::error!("test_fcm_all query error: {e}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let mut sent = 0usize;
+    let mut errors = 0usize;
+    let mut results = Vec::new();
+
+    for (device_id, device_name, token) in &rows {
+        let mut data = std::collections::HashMap::new();
+        data.insert("type".to_string(), "test".to_string());
+        data.insert("timestamp".to_string(), chrono::Utc::now().timestamp_millis().to_string());
+
+        match fcm.send_data_message(token, data).await {
+            Ok(()) => {
+                sent += 1;
+                results.push(TestFcmAllDeviceResult {
+                    device_id: *device_id,
+                    device_name: device_name.clone(),
+                    success: true,
+                    error: None,
+                });
+            }
+            Err(e) => {
+                errors += 1;
+                results.push(TestFcmAllDeviceResult {
+                    device_id: *device_id,
+                    device_name: device_name.clone(),
+                    success: false,
+                    error: Some(e.to_string()),
+                });
+            }
+        }
+    }
+
+    let skipped = 0; // All active devices with tokens are sent
+    tracing::info!("FCM test-all: sent={sent}, errors={errors}, total={}", rows.len());
+
+    Ok(Json(TestFcmAllResponse { sent, skipped, errors, results }))
 }
 
 // ============================================================
