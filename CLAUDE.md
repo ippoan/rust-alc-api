@@ -161,6 +161,8 @@ Google OAuth 以外の端末登録フローを3種類サポート。
 - ビルド: `cd /home/yhonda/android/AlcoholChecker && ./gradlew installDebug`
 - **署名不一致エラー**: 端末にリリース署名のAPKがある場合、デバッグビルドを上書きインストールできない。`adb uninstall com.example.alcoholchecker` してから再インストールすること
 - 複数 adb 接続時は `-s <device>` を指定（WiFi + ワイヤレスデバッグで2重接続になることがある）
+- **バージョニング**: 明示的に指示があるまでパッチバージョン (x.y.Z) で上げること。メジャー・マイナーはユーザー指示時のみ
+- **リリース**: `master` ブランチに push + `versionName` 変更で CI が自動ビルド・GitHub Release・GitHub Pages デプロイ
 
 ## デプロイルール
 
