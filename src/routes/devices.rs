@@ -29,6 +29,7 @@ pub fn public_router() -> Router<AppState> {
         .route("/devices/fcm-dismiss-test", post(fcm_dismiss_test))
         .route("/devices/test-fcm-all-exclude", post(test_fcm_all_exclude))
         .route("/devices/report-version", put(report_version))
+        .route("/devices/trigger-update-dev", post(trigger_update_dev))
 }
 
 /// テナント認証付きルート - 管理画面から呼ばれる
@@ -1673,7 +1674,7 @@ async fn report_version(
     Ok(StatusCode::NO_CONTENT)
 }
 
-// --- OTA アップデートトリガー (テナント認証) ---
+// --- OTA アップデートトリガー ---
 
 #[derive(Debug, Deserialize)]
 struct TriggerUpdateBody {
@@ -1683,6 +1684,9 @@ struct TriggerUpdateBody {
     version_code: Option<i32>,
     #[serde(default)]
     version_name: Option<String>,
+    /// true: dev端末のみ, false/省略: 全端末
+    #[serde(default)]
+    dev_only: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1694,36 +1698,39 @@ struct TriggerUpdateResponse {
     results: Vec<TestFcmAllDeviceResult>,
 }
 
-async fn trigger_update(
-    State(state): State<AppState>,
-    Extension(tenant_id): Extension<TenantId>,
-    Json(body): Json<TriggerUpdateBody>,
-) -> Result<Json<TriggerUpdateResponse>, StatusCode> {
+/// 共通の OTA トリガー処理
+async fn send_update_fcm(
+    state: &AppState,
+    conn: &mut sqlx::pool::PoolConnection<sqlx::Postgres>,
+    tid: &str,
+    body: &TriggerUpdateBody,
+    dev_only: bool,
+) -> Result<TriggerUpdateResponse, StatusCode> {
     let fcm = state.fcm.as_ref().ok_or_else(|| {
         tracing::warn!("trigger_update called but FCM is not configured");
         StatusCode::SERVICE_UNAVAILABLE
     })?;
 
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let tid = tenant_id.0.to_string();
-    set_current_tenant(&mut conn, &tid)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    // is_dev_device=true の端末のみ対象
-    let rows = sqlx::query_as::<_, (Uuid, String, String, Option<i32>)>(
+    let query = if dev_only {
         r#"SELECT id, device_name, fcm_token, app_version_code
            FROM devices
            WHERE tenant_id = $1::uuid AND status = 'active'
-             AND fcm_token IS NOT NULL AND is_dev_device = true"#,
-    )
-    .bind(&tid)
-    .fetch_all(&mut *conn)
-    .await
-    .map_err(|e| {
-        tracing::error!("trigger_update query error: {e}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+             AND fcm_token IS NOT NULL AND is_dev_device = true"#
+    } else {
+        r#"SELECT id, device_name, fcm_token, app_version_code
+           FROM devices
+           WHERE tenant_id = $1::uuid AND status = 'active'
+             AND fcm_token IS NOT NULL"#
+    };
+
+    let rows = sqlx::query_as::<_, (Uuid, String, String, Option<i32>)>(query)
+        .bind(tid)
+        .fetch_all(&mut **conn)
+        .await
+        .map_err(|e| {
+            tracing::error!("trigger_update query error: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
     let device_id_filter: Option<std::collections::HashSet<Uuid>> =
         body.device_ids.as_ref().map(|ids| ids.iter().copied().collect());
@@ -1735,7 +1742,6 @@ async fn trigger_update(
     let mut results = Vec::new();
 
     for (device_id, device_name, token, current_version) in &rows {
-        // device_ids が指定されている場合はフィルタ
         if let Some(ref filter) = device_id_filter {
             if !filter.contains(device_id) {
                 skipped += 1;
@@ -1743,7 +1749,6 @@ async fn trigger_update(
             }
         }
 
-        // バージョンチェック: 既に最新ならスキップ
         if let Some(target_version) = body.version_code {
             if let Some(current) = current_version {
                 if *current >= target_version {
@@ -1792,16 +1797,90 @@ async fn trigger_update(
     }
 
     tracing::info!(
-        "trigger_update: sent={sent}, skipped={skipped}, already_updated={already_updated}, errors={errors}"
+        "trigger_update: sent={sent}, skipped={skipped}, already_updated={already_updated}, errors={errors}, dev_only={dev_only}"
     );
 
-    Ok(Json(TriggerUpdateResponse {
+    Ok(TriggerUpdateResponse {
         sent,
         skipped,
         already_updated,
         errors,
         results,
-    }))
+    })
+}
+
+/// テナント認証付き: 管理者ダッシュボードから全端末に OTA トリガー
+async fn trigger_update(
+    State(state): State<AppState>,
+    Extension(tenant_id): Extension<TenantId>,
+    Json(body): Json<TriggerUpdateBody>,
+) -> Result<Json<TriggerUpdateResponse>, StatusCode> {
+    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let tid = tenant_id.0.to_string();
+    set_current_tenant(&mut conn, &tid)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let dev_only = body.dev_only.unwrap_or(false);
+    let resp = send_update_fcm(&state, &mut conn, &tid, &body, dev_only).await?;
+    Ok(Json(resp))
+}
+
+/// X-Internal-Secret 認証: CI (GitHub Actions) から dev 端末に OTA トリガー
+async fn trigger_update_dev(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<TriggerUpdateBody>,
+) -> Result<Json<TriggerUpdateResponse>, StatusCode> {
+    // X-Internal-Secret 認証
+    let expected_secret = std::env::var("FCM_INTERNAL_SECRET").map_err(|_| {
+        tracing::warn!("trigger_update_dev: FCM_INTERNAL_SECRET not configured");
+        StatusCode::SERVICE_UNAVAILABLE
+    })?;
+    let provided = headers
+        .get("X-Internal-Secret")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if provided != expected_secret {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    // 全テナントの dev 端末を対象にする (RLS バイパスなし: テナント一覧を取得して順に処理)
+    let tenant_ids = sqlx::query_scalar::<_, String>(
+        "SELECT DISTINCT tenant_id::text FROM alc_api.devices WHERE status = 'active' AND is_dev_device = true AND fcm_token IS NOT NULL",
+    )
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(|e| {
+        tracing::error!("trigger_update_dev tenant query error: {e}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let mut total_resp = TriggerUpdateResponse {
+        sent: 0, skipped: 0, already_updated: 0, errors: 0, results: Vec::new(),
+    };
+
+    for tid in &tenant_ids {
+        set_current_tenant(&mut conn, tid)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        match send_update_fcm(&state, &mut conn, tid, &body, true).await {
+            Ok(resp) => {
+                total_resp.sent += resp.sent;
+                total_resp.skipped += resp.skipped;
+                total_resp.already_updated += resp.already_updated;
+                total_resp.errors += resp.errors;
+                total_resp.results.extend(resp.results);
+            }
+            Err(e) => {
+                tracing::error!("trigger_update_dev error for tenant {tid}: {e}");
+            }
+        }
+    }
+
+    Ok(Json(total_resp))
 }
 
 // ============================================================
