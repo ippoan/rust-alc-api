@@ -1,5 +1,8 @@
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use reqwest::Client;
+use ring::aead::{self, Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 /// LINE WORKS OAuth2 token endpoint
 const TOKEN_URL: &str = "https://auth.worksmobile.com/oauth2/v2.0/token";
@@ -21,9 +24,30 @@ pub struct LineworksSsoConfig {
 pub struct TokenResponse {
     pub access_token: String,
     pub token_type: String,
+    #[serde(deserialize_with = "deserialize_string_or_i64")]
     pub expires_in: i64,
     pub scope: Option<String>,
     pub refresh_token: Option<String>,
+}
+
+fn deserialize_string_or_i64<'de, D>(deserializer: D) -> Result<i64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de;
+    struct StringOrI64;
+    impl<'de> de::Visitor<'de> for StringOrI64 {
+        type Value = i64;
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str("string or i64")
+        }
+        fn visit_i64<E: de::Error>(self, v: i64) -> Result<i64, E> { Ok(v) }
+        fn visit_u64<E: de::Error>(self, v: u64) -> Result<i64, E> { Ok(v as i64) }
+        fn visit_str<E: de::Error>(self, v: &str) -> Result<i64, E> {
+            v.parse().map_err(de::Error::custom)
+        }
+    }
+    deserializer.deserialize_any(StringOrI64)
 }
 
 /// LINE WORKS user profile response
@@ -85,15 +109,15 @@ pub async fn exchange_code(
         .await
         .map_err(|e| format!("Token exchange request failed: {e}"))?;
 
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
+    let status = resp.status();
+    let body = resp.text().await.unwrap_or_default();
+
+    if !status.is_success() {
         return Err(format!("Token exchange failed: {status} {body}"));
     }
 
-    resp.json::<TokenResponse>()
-        .await
-        .map_err(|e| format!("Token response parse error: {e}"))
+    serde_json::from_str::<TokenResponse>(&body)
+        .map_err(|e| format!("Token response parse error: {e}, body: {body}"))
 }
 
 /// Fetch user profile using access token
@@ -117,6 +141,36 @@ pub async fn fetch_user_profile(
     resp.json::<UserProfile>()
         .await
         .map_err(|e| format!("User profile parse error: {e}"))
+}
+
+/// Decrypt client_secret stored as AES-256-GCM(base64(nonce + ciphertext + tag))
+/// Key is SHA-256 hash of JWT_SECRET (same as rust-logi)
+pub fn decrypt_secret(ciphertext_b64: &str, key_material: &str) -> Result<String, String> {
+    let mut key_bytes = [0u8; 32];
+    let hash = Sha256::digest(key_material.as_bytes());
+    key_bytes.copy_from_slice(&hash);
+
+    let unbound_key =
+        UnboundKey::new(&AES_256_GCM, &key_bytes).map_err(|e| format!("Key error: {e}"))?;
+    let key = LessSafeKey::new(unbound_key);
+
+    let data = BASE64
+        .decode(ciphertext_b64)
+        .map_err(|e| format!("Base64 decode error: {e}"))?;
+
+    if data.len() < 12 + aead::AES_256_GCM.tag_len() {
+        return Err("Ciphertext too short".to_string());
+    }
+
+    let (nonce_bytes, ciphertext_and_tag) = data.split_at(12);
+    let nonce = Nonce::assume_unique_for_key(nonce_bytes.try_into().unwrap());
+
+    let mut in_out = ciphertext_and_tag.to_vec();
+    let plaintext = key
+        .open_in_place(nonce, Aad::empty(), &mut in_out)
+        .map_err(|e| format!("Decryption error: {e}"))?;
+
+    String::from_utf8(plaintext.to_vec()).map_err(|e| format!("UTF-8 error: {e}"))
 }
 
 /// Build LINE WORKS authorize URL

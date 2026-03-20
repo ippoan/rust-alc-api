@@ -74,6 +74,10 @@ impl GoogleTokenVerifier {
         }
     }
 
+    pub fn client_id(&self) -> &str {
+        &self.client_id
+    }
+
     /// Authorization code を Google token endpoint で交換し、ID token を検証して claims を返す
     pub async fn exchange_code(&self, code: &str, redirect_uri: &str) -> Result<GoogleClaims, VerifyError> {
         let resp = self.http_client

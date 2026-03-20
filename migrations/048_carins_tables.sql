@@ -24,8 +24,14 @@ CREATE INDEX IF NOT EXISTS idx_files_org_deleted ON alc_api.files (tenant_id, de
 CREATE INDEX IF NOT EXISTS idx_files_s3_key ON alc_api.files (s3_key) WHERE s3_key IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_files_last_accessed ON alc_api.files (last_accessed_at);
 
-ALTER TABLE alc_api.files ENABLE ROW LEVEL SECURITY;
-ALTER TABLE alc_api.files FORCE ROW LEVEL SECURITY;
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'alc_api' AND c.relname = 'files' AND c.relrowsecurity) THEN
+        ALTER TABLE alc_api.files ENABLE ROW LEVEL SECURITY;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'alc_api' AND c.relname = 'files' AND c.relforcerowsecurity) THEN
+        ALTER TABLE alc_api.files FORCE ROW LEVEL SECURITY;
+    END IF;
+END $$;
 
 DO $$ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'files' AND schemaname = 'alc_api' AND policyname = 'tenant_isolation') THEN
@@ -58,8 +64,14 @@ CREATE TABLE IF NOT EXISTS alc_api.files_append (
 CREATE INDEX IF NOT EXISTS idx_files_append_organization_id ON alc_api.files_append (tenant_id);
 CREATE INDEX IF NOT EXISTS idx_files_append_file_uuid ON alc_api.files_append (file_uuid);
 
-ALTER TABLE alc_api.files_append ENABLE ROW LEVEL SECURITY;
-ALTER TABLE alc_api.files_append FORCE ROW LEVEL SECURITY;
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'alc_api' AND c.relname = 'files_append' AND c.relrowsecurity) THEN
+        ALTER TABLE alc_api.files_append ENABLE ROW LEVEL SECURITY;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'alc_api' AND c.relname = 'files_append' AND c.relforcerowsecurity) THEN
+        ALTER TABLE alc_api.files_append FORCE ROW LEVEL SECURITY;
+    END IF;
+END $$;
 
 DO $$ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'files_append' AND schemaname = 'alc_api' AND policyname = 'tenant_isolation') THEN
@@ -90,8 +102,14 @@ CREATE INDEX IF NOT EXISTS idx_file_access_logs_file_uuid ON alc_api.file_access
 CREATE INDEX IF NOT EXISTS idx_file_access_logs_accessed_at ON alc_api.file_access_logs (accessed_at);
 CREATE INDEX IF NOT EXISTS idx_file_access_logs_org_accessed ON alc_api.file_access_logs (tenant_id, accessed_at);
 
-ALTER TABLE alc_api.file_access_logs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE alc_api.file_access_logs FORCE ROW LEVEL SECURITY;
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'alc_api' AND c.relname = 'file_access_logs' AND c.relrowsecurity) THEN
+        ALTER TABLE alc_api.file_access_logs ENABLE ROW LEVEL SECURITY;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'alc_api' AND c.relname = 'file_access_logs' AND c.relforcerowsecurity) THEN
+        ALTER TABLE alc_api.file_access_logs FORCE ROW LEVEL SECURITY;
+    END IF;
+END $$;
 
 DO $$ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'file_access_logs' AND schemaname = 'alc_api' AND policyname = 'tenant_isolation') THEN
@@ -219,8 +237,14 @@ CREATE INDEX IF NOT EXISTS idx_car_inspection_car_id ON alc_api.car_inspection (
 CREATE INDEX IF NOT EXISTS idx_car_inspection_grantdate ON alc_api.car_inspection (tenant_id, "GrantdateY" DESC, "GrantdateM" DESC, "GrantdateD" DESC);
 CREATE INDEX IF NOT EXISTS idx_car_inspection_valid_period ON alc_api.car_inspection (tenant_id, "TwodimensionCodeInfoValidPeriodExpirdate");
 
-ALTER TABLE alc_api.car_inspection ENABLE ROW LEVEL SECURITY;
-ALTER TABLE alc_api.car_inspection FORCE ROW LEVEL SECURITY;
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'alc_api' AND c.relname = 'car_inspection' AND c.relrowsecurity) THEN
+        ALTER TABLE alc_api.car_inspection ENABLE ROW LEVEL SECURITY;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'alc_api' AND c.relname = 'car_inspection' AND c.relforcerowsecurity) THEN
+        ALTER TABLE alc_api.car_inspection FORCE ROW LEVEL SECURITY;
+    END IF;
+END $$;
 
 DO $$ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'car_inspection' AND schemaname = 'alc_api' AND policyname = 'tenant_isolation') THEN
@@ -256,8 +280,14 @@ CREATE TABLE IF NOT EXISTS alc_api.car_inspection_files (
 
 CREATE INDEX IF NOT EXISTS idx_car_inspection_files_organization_id ON alc_api.car_inspection_files (tenant_id);
 
-ALTER TABLE alc_api.car_inspection_files ENABLE ROW LEVEL SECURITY;
-ALTER TABLE alc_api.car_inspection_files FORCE ROW LEVEL SECURITY;
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'alc_api' AND c.relname = 'car_inspection_files' AND c.relrowsecurity) THEN
+        ALTER TABLE alc_api.car_inspection_files ENABLE ROW LEVEL SECURITY;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'alc_api' AND c.relname = 'car_inspection_files' AND c.relforcerowsecurity) THEN
+        ALTER TABLE alc_api.car_inspection_files FORCE ROW LEVEL SECURITY;
+    END IF;
+END $$;
 
 DO $$ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'car_inspection_files' AND schemaname = 'alc_api' AND policyname = 'tenant_isolation') THEN
@@ -293,8 +323,14 @@ CREATE TABLE IF NOT EXISTS alc_api.car_inspection_files_a (
 CREATE INDEX IF NOT EXISTS idx_car_inspection_files_a_organization_id ON alc_api.car_inspection_files_a (tenant_id);
 CREATE INDEX IF NOT EXISTS idx_car_inspection_files_a_lookup ON alc_api.car_inspection_files_a (tenant_id, "ElectCertMgNo", "GrantdateE", "GrantdateY", "GrantdateM", "GrantdateD", type, deleted_at);
 
-ALTER TABLE alc_api.car_inspection_files_a ENABLE ROW LEVEL SECURITY;
-ALTER TABLE alc_api.car_inspection_files_a FORCE ROW LEVEL SECURITY;
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'alc_api' AND c.relname = 'car_inspection_files_a' AND c.relrowsecurity) THEN
+        ALTER TABLE alc_api.car_inspection_files_a ENABLE ROW LEVEL SECURITY;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'alc_api' AND c.relname = 'car_inspection_files_a' AND c.relforcerowsecurity) THEN
+        ALTER TABLE alc_api.car_inspection_files_a FORCE ROW LEVEL SECURITY;
+    END IF;
+END $$;
 
 DO $$ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'car_inspection_files_a' AND schemaname = 'alc_api' AND policyname = 'tenant_isolation') THEN
@@ -330,8 +366,14 @@ CREATE TABLE IF NOT EXISTS alc_api.car_inspection_files_b (
 CREATE INDEX IF NOT EXISTS idx_car_inspection_files_b_organization_id ON alc_api.car_inspection_files_b (tenant_id);
 CREATE INDEX IF NOT EXISTS idx_car_inspection_files_b_lookup ON alc_api.car_inspection_files_b (tenant_id, "ElectCertMgNo", "GrantdateE", "GrantdateY", "GrantdateM", "GrantdateD", type, deleted_at);
 
-ALTER TABLE alc_api.car_inspection_files_b ENABLE ROW LEVEL SECURITY;
-ALTER TABLE alc_api.car_inspection_files_b FORCE ROW LEVEL SECURITY;
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'alc_api' AND c.relname = 'car_inspection_files_b' AND c.relrowsecurity) THEN
+        ALTER TABLE alc_api.car_inspection_files_b ENABLE ROW LEVEL SECURITY;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'alc_api' AND c.relname = 'car_inspection_files_b' AND c.relforcerowsecurity) THEN
+        ALTER TABLE alc_api.car_inspection_files_b FORCE ROW LEVEL SECURITY;
+    END IF;
+END $$;
 
 DO $$ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'car_inspection_files_b' AND schemaname = 'alc_api' AND policyname = 'tenant_isolation') THEN
@@ -367,8 +409,14 @@ CREATE TABLE IF NOT EXISTS alc_api.car_inspection_deregistration (
 
 CREATE INDEX IF NOT EXISTS idx_car_inspection_dereg_organization_id ON alc_api.car_inspection_deregistration (tenant_id);
 
-ALTER TABLE alc_api.car_inspection_deregistration ENABLE ROW LEVEL SECURITY;
-ALTER TABLE alc_api.car_inspection_deregistration FORCE ROW LEVEL SECURITY;
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'alc_api' AND c.relname = 'car_inspection_deregistration' AND c.relrowsecurity) THEN
+        ALTER TABLE alc_api.car_inspection_deregistration ENABLE ROW LEVEL SECURITY;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'alc_api' AND c.relname = 'car_inspection_deregistration' AND c.relforcerowsecurity) THEN
+        ALTER TABLE alc_api.car_inspection_deregistration FORCE ROW LEVEL SECURITY;
+    END IF;
+END $$;
 
 DO $$ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'car_inspection_deregistration' AND schemaname = 'alc_api' AND policyname = 'tenant_isolation') THEN
@@ -400,8 +448,14 @@ CREATE TABLE IF NOT EXISTS alc_api.car_inspection_deregistration_files (
 
 CREATE INDEX IF NOT EXISTS idx_car_inspection_dereg_files_organization_id ON alc_api.car_inspection_deregistration_files (tenant_id);
 
-ALTER TABLE alc_api.car_inspection_deregistration_files ENABLE ROW LEVEL SECURITY;
-ALTER TABLE alc_api.car_inspection_deregistration_files FORCE ROW LEVEL SECURITY;
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'alc_api' AND c.relname = 'car_inspection_deregistration_files' AND c.relrowsecurity) THEN
+        ALTER TABLE alc_api.car_inspection_deregistration_files ENABLE ROW LEVEL SECURITY;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'alc_api' AND c.relname = 'car_inspection_deregistration_files' AND c.relforcerowsecurity) THEN
+        ALTER TABLE alc_api.car_inspection_deregistration_files FORCE ROW LEVEL SECURITY;
+    END IF;
+END $$;
 
 DO $$ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'car_inspection_deregistration_files' AND schemaname = 'alc_api' AND policyname = 'tenant_isolation') THEN
@@ -433,8 +487,14 @@ CREATE TABLE IF NOT EXISTS alc_api.car_inspection_nfc_tags (
 CREATE INDEX IF NOT EXISTS idx_nfc_tags_org ON alc_api.car_inspection_nfc_tags (tenant_id);
 CREATE INDEX IF NOT EXISTS idx_nfc_tags_car_ins ON alc_api.car_inspection_nfc_tags (tenant_id, car_inspection_id);
 
-ALTER TABLE alc_api.car_inspection_nfc_tags ENABLE ROW LEVEL SECURITY;
-ALTER TABLE alc_api.car_inspection_nfc_tags FORCE ROW LEVEL SECURITY;
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'alc_api' AND c.relname = 'car_inspection_nfc_tags' AND c.relrowsecurity) THEN
+        ALTER TABLE alc_api.car_inspection_nfc_tags ENABLE ROW LEVEL SECURITY;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'alc_api' AND c.relname = 'car_inspection_nfc_tags' AND c.relforcerowsecurity) THEN
+        ALTER TABLE alc_api.car_inspection_nfc_tags FORCE ROW LEVEL SECURITY;
+    END IF;
+END $$;
 
 DO $$ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'car_inspection_nfc_tags' AND schemaname = 'alc_api' AND policyname = 'tenant_isolation') THEN
@@ -469,8 +529,14 @@ CREATE TABLE IF NOT EXISTS alc_api.pending_car_inspection_pdfs (
 
 CREATE INDEX IF NOT EXISTS idx_pending_pdf_org_ecmn ON alc_api.pending_car_inspection_pdfs (tenant_id, "ElectCertMgNo");
 
-ALTER TABLE alc_api.pending_car_inspection_pdfs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE alc_api.pending_car_inspection_pdfs FORCE ROW LEVEL SECURITY;
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'alc_api' AND c.relname = 'pending_car_inspection_pdfs' AND c.relrowsecurity) THEN
+        ALTER TABLE alc_api.pending_car_inspection_pdfs ENABLE ROW LEVEL SECURITY;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'alc_api' AND c.relname = 'pending_car_inspection_pdfs' AND c.relforcerowsecurity) THEN
+        ALTER TABLE alc_api.pending_car_inspection_pdfs FORCE ROW LEVEL SECURITY;
+    END IF;
+END $$;
 
 DO $$ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'pending_car_inspection_pdfs' AND schemaname = 'alc_api' AND policyname = 'tenant_isolation') THEN
@@ -508,8 +574,14 @@ CREATE TABLE IF NOT EXISTS alc_api.sso_provider_configs (
 
 CREATE INDEX IF NOT EXISTS idx_sso_provider_configs_lookup ON alc_api.sso_provider_configs (provider, external_org_id) WHERE enabled = true;
 
-ALTER TABLE alc_api.sso_provider_configs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE alc_api.sso_provider_configs FORCE ROW LEVEL SECURITY;
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'alc_api' AND c.relname = 'sso_provider_configs' AND c.relrowsecurity) THEN
+        ALTER TABLE alc_api.sso_provider_configs ENABLE ROW LEVEL SECURITY;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'alc_api' AND c.relname = 'sso_provider_configs' AND c.relforcerowsecurity) THEN
+        ALTER TABLE alc_api.sso_provider_configs FORCE ROW LEVEL SECURITY;
+    END IF;
+END $$;
 
 DO $$ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'sso_provider_configs' AND schemaname = 'alc_api' AND policyname = 'tenant_isolation') THEN

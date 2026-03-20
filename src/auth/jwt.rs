@@ -19,6 +19,8 @@ pub struct AppClaims {
     pub name: String,
     pub tenant_id: Uuid,
     pub role: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub org_slug: Option<String>,
     pub iat: i64,
     pub exp: i64,
 }
@@ -28,7 +30,7 @@ pub struct AppClaims {
 pub struct JwtSecret(pub String);
 
 /// Access token を発行
-pub fn create_access_token(user: &User, secret: &JwtSecret) -> Result<String, jsonwebtoken::errors::Error> {
+pub fn create_access_token(user: &User, secret: &JwtSecret, org_slug: Option<String>) -> Result<String, jsonwebtoken::errors::Error> {
     let now = Utc::now();
     let claims = AppClaims {
         sub: user.id,
@@ -36,6 +38,7 @@ pub fn create_access_token(user: &User, secret: &JwtSecret) -> Result<String, js
         name: user.name.clone(),
         tenant_id: user.tenant_id,
         role: user.role.clone(),
+        org_slug,
         iat: now.timestamp(),
         exp: (now + Duration::seconds(ACCESS_TOKEN_EXPIRY_SECS)).timestamp(),
     };
@@ -104,7 +107,7 @@ mod tests {
         let user = test_user();
         let secret = JwtSecret("test-secret-key-256-bits-long!!!".to_string());
 
-        let token = create_access_token(&user, &secret).unwrap();
+        let token = create_access_token(&user, &secret, Some("test-slug".to_string())).unwrap();
         let claims = verify_access_token(&token, &secret).unwrap();
 
         assert_eq!(claims.sub, user.id);
@@ -119,7 +122,7 @@ mod tests {
         let secret = JwtSecret("correct-secret-key-256-bits!!!".to_string());
         let wrong_secret = JwtSecret("wrong-secret-key-256-bits!!!!!".to_string());
 
-        let token = create_access_token(&user, &secret).unwrap();
+        let token = create_access_token(&user, &secret, Some("test-slug".to_string())).unwrap();
         assert!(verify_access_token(&token, &wrong_secret).is_err());
     }
 
