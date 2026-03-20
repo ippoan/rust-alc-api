@@ -1,9 +1,13 @@
 pub mod auth;
+pub mod car_inspection_files;
+pub mod car_inspections;
+pub mod carins_files;
 pub mod devices;
 pub mod employees;
 pub mod equipment_failures;
 pub mod health_baselines;
 pub mod measurements;
+pub mod nfc_tags;
 pub mod tenko_records;
 pub mod tenko_schedules;
 pub mod tenko_sessions;
@@ -38,6 +42,10 @@ pub fn router() -> Router<AppState> {
         .merge(tenko_call::tenant_router())
         .merge(timecard::tenant_router())
         .merge(devices::tenant_router())
+        .merge(car_inspections::tenant_router())
+        .merge(car_inspection_files::tenant_router())
+        .merge(carins_files::tenant_router())
+        .merge(nfc_tags::tenant_router())
         .layer(axum_middleware::from_fn(require_tenant));
 
     // 公開ルート (認証不要)

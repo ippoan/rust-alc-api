@@ -9,6 +9,7 @@ use uuid::Uuid;
 pub struct Tenant {
     pub id: Uuid,
     pub name: String,
+    pub slug: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -90,7 +91,8 @@ pub struct UpdateEmployee {
 pub struct User {
     pub id: Uuid,
     pub tenant_id: Uuid,
-    pub google_sub: String,
+    pub google_sub: Option<String>,
+    pub lineworks_id: Option<String>,
     pub email: String,
     pub name: String,
     pub role: String,
