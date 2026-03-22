@@ -29,6 +29,7 @@ pub fn public_router() -> Router<AppState> {
         .route("/devices/fcm-dismiss-test", post(fcm_dismiss_test))
         .route("/devices/test-fcm-all-exclude", post(test_fcm_all_exclude))
         .route("/devices/report-version", put(report_version))
+        .route("/devices/report-watchdog", put(report_watchdog_state))
         .route("/devices/trigger-update-dev", post(trigger_update_dev))
 }
 
@@ -84,6 +85,8 @@ struct Device {
     app_version_name: Option<String>,
     is_device_owner: bool,
     is_dev_device: bool,
+    always_on: bool,
+    watchdog_running: Option<bool>,
     created_at: String,
     updated_at: String,
 }
@@ -483,7 +486,7 @@ async fn list_devices(
                call_enabled, call_schedule, fcm_token,
                last_login_employee_id, last_login_employee_name, last_login_employee_role,
                app_version_code, app_version_name, is_device_owner, is_dev_device,
-               created_at::text, updated_at::text
+               always_on, watchdog_running, created_at::text, updated_at::text
         FROM devices
         ORDER BY created_at DESC
         "#,
@@ -1021,6 +1024,7 @@ struct DeviceSettingsResponse {
     last_login_employee_id: Option<Uuid>,
     last_login_employee_name: Option<String>,
     last_login_employee_role: Option<Vec<String>>,
+    always_on: bool,
 }
 
 async fn get_device_settings(
@@ -1028,7 +1032,7 @@ async fn get_device_settings(
     Path(device_id): Path<Uuid>,
 ) -> Result<Json<DeviceSettingsResponse>, StatusCode> {
     let row = sqlx::query_as::<_, DeviceSettingsResponse>(
-        "SELECT call_enabled, call_schedule, status, last_login_employee_id, last_login_employee_name, last_login_employee_role FROM devices WHERE id = $1",
+        "SELECT call_enabled, call_schedule, status, last_login_employee_id, last_login_employee_name, last_login_employee_role, always_on FROM devices WHERE id = $1",
     )
     .bind(device_id)
     .fetch_optional(&state.pool)
@@ -1048,6 +1052,7 @@ async fn get_device_settings(
 struct UpdateCallSettingsBody {
     call_enabled: bool,
     call_schedule: Option<serde_json::Value>,
+    always_on: Option<bool>,
 }
 
 async fn update_call_settings(
@@ -1056,6 +1061,7 @@ async fn update_call_settings(
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateCallSettingsBody>,
 ) -> Result<StatusCode, StatusCode> {
+    tracing::info!("update_call_settings: device={id} call_enabled={} always_on={:?}", body.call_enabled, body.always_on);
     let mut conn = state
         .pool
         .acquire()
@@ -1066,10 +1072,11 @@ async fn update_call_settings(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let result = sqlx::query(
-        "UPDATE devices SET call_enabled = $1, call_schedule = $2, updated_at = NOW() WHERE id = $3",
+        "UPDATE devices SET call_enabled = $1, call_schedule = $2, always_on = COALESCE($3, always_on), updated_at = NOW() WHERE id = $4",
     )
     .bind(body.call_enabled)
     .bind(&body.call_schedule)
+    .bind(body.always_on)
     .bind(id)
     .execute(&mut *conn)
     .await
@@ -1081,6 +1088,59 @@ async fn update_call_settings(
     if result.rows_affected() == 0 {
         return Err(StatusCode::NOT_FOUND);
     }
+
+    // always_on が変更された場合、FCM で端末に通知して設定を再取得させる
+    if body.always_on.is_some() {
+        if let Some(fcm) = state.fcm.as_ref() {
+            // RLS を回避して fcm_token を取得 (テナントスコープ付き conn ではなく pool を使用)
+            let token_row = sqlx::query_as::<_, (Option<String>,)>(
+                "SELECT fcm_token FROM alc_api.devices WHERE id = $1",
+            )
+            .bind(id)
+            .fetch_optional(&state.pool)
+            .await
+            .ok()
+            .flatten();
+
+            tracing::info!("FCM settings_changed: device={id} token={:?}", token_row.as_ref().map(|r| r.0.is_some()));
+
+            if let Some((Some(token),)) = token_row {
+                let mut data = std::collections::HashMap::new();
+                data.insert("type".to_string(), "settings_changed".to_string());
+                data.insert("timestamp".to_string(), chrono::Utc::now().timestamp_millis().to_string());
+                if let Err(e) = fcm.send_data_message(&token, data).await {
+                    tracing::warn!("FCM settings_changed to device {} failed: {e}", id);
+                }
+            }
+        }
+    }
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// --- 端末からのWatchdog状態報告 (認証不要) ---
+
+#[derive(Debug, Deserialize)]
+struct ReportWatchdogBody {
+    device_id: Uuid,
+    running: bool,
+}
+
+async fn report_watchdog_state(
+    State(state): State<AppState>,
+    Json(body): Json<ReportWatchdogBody>,
+) -> Result<StatusCode, StatusCode> {
+    sqlx::query(
+        "UPDATE alc_api.devices SET watchdog_running = $1, updated_at = NOW() WHERE id = $2",
+    )
+    .bind(body.running)
+    .bind(body.device_id)
+    .execute(&state.pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("report_watchdog_state error: {e}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -1415,7 +1475,7 @@ async fn test_fcm_all_exclude(
     let fcm = state.fcm.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
 
     let rows = sqlx::query_as::<_, (Uuid, String, String)>(
-        "SELECT id, device_name, fcm_token FROM alc_api.devices WHERE status = 'active' AND fcm_token IS NOT NULL",
+        "SELECT id, device_name, fcm_token FROM alc_api.devices WHERE status = 'active' AND fcm_token IS NOT NULL AND call_enabled = true",
     )
     .fetch_all(&state.pool)
     .await
