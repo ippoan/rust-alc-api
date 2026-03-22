@@ -114,6 +114,7 @@ pub struct Measurement {
     pub result: Option<String>,
     pub device_use_count: i32,
     pub face_photo_url: Option<String>,
+    pub video_url: Option<String>,
     pub measured_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -136,6 +137,7 @@ pub struct CreateMeasurement {
     #[serde(alias = "result")]
     pub result_type: String,
     pub face_photo_url: Option<String>,
+    pub video_url: Option<String>,
     pub measured_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub device_use_count: Option<i32>,
@@ -162,6 +164,7 @@ pub struct UpdateMeasurement {
     #[serde(alias = "result")]
     pub result_type: Option<String>,
     pub face_photo_url: Option<String>,
+    pub video_url: Option<String>,
     pub measured_at: Option<DateTime<Utc>>,
     pub device_use_count: Option<i32>,
     pub temperature: Option<f64>,

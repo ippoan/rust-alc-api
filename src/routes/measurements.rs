@@ -24,6 +24,7 @@ pub fn router() -> Router<AppState> {
 pub fn tenant_router() -> Router<AppState> {
     Router::new()
         .route("/measurements/{id}/face-photo", get(get_face_photo))
+        .route("/measurements/{id}/video", get(get_video))
 }
 
 /// 測定開始 — employee_id のみで status='started' レコードを作成
@@ -109,8 +110,9 @@ async fn update_measurement(
             medical_measured_at = COALESCE($11, medical_measured_at),
             face_verified = COALESCE($12, face_verified),
             medical_manual_input = COALESCE($13, medical_manual_input),
+            video_url = COALESCE($14, video_url),
             updated_at = NOW()
-        WHERE id = $14 AND tenant_id = $15
+        WHERE id = $15 AND tenant_id = $16
         RETURNING *
         "#,
     )
@@ -127,6 +129,7 @@ async fn update_measurement(
     .bind(body.medical_measured_at)
     .bind(body.face_verified)
     .bind(body.medical_manual_input)
+    .bind(&body.video_url)
     .bind(id)
     .bind(tenant_id)
     .fetch_optional(&mut *conn)
@@ -171,10 +174,10 @@ async fn create_measurement(
             tenant_id, employee_id, alcohol_level, result,
             face_photo_url, measured_at, device_use_count,
             temperature, systolic, diastolic, pulse, medical_measured_at,
-            face_verified, medical_manual_input, status
+            face_verified, medical_manual_input, video_url, status
         )
         VALUES ($1, $2, $3, $4, $5, COALESCE($6, NOW()), COALESCE($7, 0),
-                $8, $9, $10, $11, $12, $13, $14, 'completed')
+                $8, $9, $10, $11, $12, $13, $14, $15, 'completed')
         RETURNING *
         "#,
     )
@@ -192,6 +195,7 @@ async fn create_measurement(
     .bind(body.medical_measured_at)
     .bind(body.face_verified)
     .bind(body.medical_manual_input)
+    .bind(&body.video_url)
     .fetch_one(&mut *conn)
     .await
     .map_err(|e| {
@@ -369,6 +373,49 @@ async fn get_face_photo(
     Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "image/jpeg")
+        .header(header::CACHE_CONTROL, "private, max-age=3600")
+        .body(Body::from(data))
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+/// 録画プロキシ — ストレージから動画を取得して返却 (JWT 必須)
+async fn get_video(
+    State(state): State<AppState>,
+    tenant: axum::Extension<TenantId>,
+    Path(id): Path<Uuid>,
+) -> Result<Response, StatusCode> {
+    let tenant_id = tenant.0 .0;
+
+    let mut conn = state.pool.acquire().await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    set_current_tenant(&mut conn, &tenant_id.to_string()).await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let measurement = sqlx::query_as::<_, Measurement>(
+        "SELECT * FROM measurements WHERE id = $1 AND tenant_id = $2",
+    )
+    .bind(id)
+    .bind(tenant_id)
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+    let video_url = measurement.video_url.as_deref().ok_or(StatusCode::NOT_FOUND)?;
+
+    let key = state.storage.extract_key(video_url).ok_or_else(|| {
+        tracing::error!("Failed to extract key from video_url: {video_url}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let data = state.storage.download(&key).await.map_err(|e| {
+        tracing::error!("Failed to download video: {e}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "video/webm")
         .header(header::CACHE_CONTROL, "private, max-age=3600")
         .body(Body::from(data))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
