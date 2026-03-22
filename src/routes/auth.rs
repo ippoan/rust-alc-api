@@ -125,36 +125,75 @@ async fn issue_tokens_for_google_claims(
     let user = match existing_user {
         Some(user) => user,
         None => {
-            // 初回ログイン: テナント自動作成 + ユーザー作成
-            let tenant_name = google_claims
+            // 初回ログイン: 招待 → ドメイン → 新テナント の順で検索
+            let email_domain = google_claims
                 .email
                 .split('@')
                 .nth(1)
                 .unwrap_or("default")
                 .to_string();
 
-            let tenant = sqlx::query_as::<_, Tenant>(
-                "INSERT INTO tenants (name) VALUES ($1) RETURNING *",
+            // 1. tenant_allowed_emails でメール完全一致検索
+            let invitation = sqlx::query_as::<_, crate::db::models::TenantAllowedEmail>(
+                "SELECT * FROM tenant_allowed_emails WHERE email = $1",
             )
-            .bind(&tenant_name)
+            .bind(&google_claims.email)
+            .fetch_optional(&state.pool)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+            let (tenant_id, role) = if let Some(inv) = &invitation {
+                (inv.tenant_id, inv.role.clone())
+            } else {
+                // 2. tenants.email_domain でドメイン一致検索
+                let domain_tenant = sqlx::query_as::<_, Tenant>(
+                    "SELECT * FROM tenants WHERE email_domain = $1",
+                )
+                .bind(&email_domain)
+                .fetch_optional(&state.pool)
+                .await
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+                if let Some(t) = domain_tenant {
+                    (t.id, "admin".to_string())
+                } else {
+                    // 3. 新テナント作成 (従来の動作)
+                    let new_tenant = sqlx::query_as::<_, Tenant>(
+                        "INSERT INTO tenants (name, email_domain) VALUES ($1, $1) RETURNING *",
+                    )
+                    .bind(&email_domain)
+                    .fetch_one(&state.pool)
+                    .await
+                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                    (new_tenant.id, "admin".to_string())
+                }
+            };
+
+            let user = sqlx::query_as::<_, User>(
+                r#"
+                INSERT INTO users (tenant_id, google_sub, email, name, role)
+                VALUES ($1, $2, $3, $4, $5)
+                RETURNING *
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(&google_claims.sub)
+            .bind(&google_claims.email)
+            .bind(&google_claims.name)
+            .bind(&role)
             .fetch_one(&state.pool)
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-            sqlx::query_as::<_, User>(
-                r#"
-                INSERT INTO users (tenant_id, google_sub, email, name, role)
-                VALUES ($1, $2, $3, $4, 'admin')
-                RETURNING *
-                "#,
-            )
-            .bind(tenant.id)
-            .bind(&google_claims.sub)
-            .bind(&google_claims.email)
-            .bind(&google_claims.name)
-            .fetch_one(&state.pool)
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            // 招待レコードを消費 (使い済み)
+            if let Some(inv) = &invitation {
+                let _ = sqlx::query("DELETE FROM tenant_allowed_emails WHERE id = $1")
+                    .bind(inv.id)
+                    .execute(&state.pool)
+                    .await;
+            }
+
+            user
         }
     };
 

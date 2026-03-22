@@ -10,6 +10,18 @@ pub struct Tenant {
     pub id: Uuid,
     pub name: String,
     pub slug: Option<String>,
+    pub email_domain: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+// --- Tenant Allowed Email (招待) ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct TenantAllowedEmail {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub email: String,
+    pub role: String,
     pub created_at: DateTime<Utc>,
 }
 

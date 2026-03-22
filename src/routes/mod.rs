@@ -17,6 +17,7 @@ pub mod timecard;
 pub mod upload;
 pub mod sso_admin;
 pub mod bot_admin;
+pub mod tenant_users;
 
 use axum::{middleware as axum_middleware, Router};
 
@@ -29,6 +30,7 @@ pub fn router() -> Router<AppState> {
         .merge(auth::protected_router())
         .merge(sso_admin::router())
         .merge(bot_admin::router())
+        .merge(tenant_users::router())
         .layer(axum_middleware::from_fn(require_jwt));
 
     // テナント対応ルート (JWT or X-Tenant-ID)
