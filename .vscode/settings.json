@@ -6,7 +6,9 @@
     "claude-skills",
     "claude-hooks",
     "AlcoholChecker",
-    "TenkoCall"
+    "TenkoCall",
+    "nuxt-dtako-admin",
+    "daiun-salary"
   ],
   "git.autoRepositoryDetection": true
 }
