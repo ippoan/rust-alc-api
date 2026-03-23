@@ -19,7 +19,10 @@ pub mod sso_admin;
 pub mod bot_admin;
 pub mod tenant_users;
 pub mod carrying_items;
+pub mod communication_items;
+pub mod daily_health;
 pub mod driver_info;
+pub mod guidance_records;
 pub mod dtako_drivers;
 pub mod dtako_csv_proxy;
 pub mod dtako_operations;
@@ -66,7 +69,10 @@ pub fn router() -> Router<AppState> {
         .merge(carins_files::tenant_router())
         .merge(nfc_tags::tenant_router())
         .merge(carrying_items::tenant_router())
+        .merge(communication_items::tenant_router())
+        .merge(daily_health::tenant_router())
         .merge(driver_info::tenant_router())
+        .merge(guidance_records::tenant_router())
         .merge(dtako_csv_proxy::tenant_router())
         .merge(dtako_drivers::tenant_router())
         .merge(dtako_operations::tenant_router())
