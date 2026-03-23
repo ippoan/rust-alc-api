@@ -1,4 +1,6 @@
 mod auth;
+pub mod compare;
+pub mod csv_parser;
 mod db;
 pub mod fcm;
 mod middleware;
@@ -24,6 +26,8 @@ pub struct AppState {
     pub storage: Arc<dyn StorageBackend>,
     /// carins ファイル用 R2 ストレージ (carins-files バケット)
     pub carins_storage: Option<Arc<dyn StorageBackend>>,
+    /// dtako (digitacho) 用 R2 ストレージ (ohishi-dtako バケット)
+    pub dtako_storage: Option<Arc<dyn StorageBackend>>,
     pub fcm: Option<Arc<fcm::FcmSender>>,
 }
 
@@ -105,13 +109,29 @@ async fn main() -> anyhow::Result<()> {
             ) as Arc<dyn StorageBackend>
         });
 
+    // dtako (digitacho) 用 R2 (ohishi-dtako バケット、別 API トークン)
+    let dtako_storage: Option<Arc<dyn StorageBackend>> =
+        std::env::var("DTAKO_R2_BUCKET").ok().map(|bucket| {
+            let account_id = std::env::var("R2_ACCOUNT_ID")
+                .expect("R2_ACCOUNT_ID required for DTAKO_R2_BUCKET");
+            let access_key = std::env::var("DTAKO_R2_ACCESS_KEY")
+                .expect("DTAKO_R2_ACCESS_KEY required");
+            let secret_key = std::env::var("DTAKO_R2_SECRET_KEY")
+                .expect("DTAKO_R2_SECRET_KEY required");
+            tracing::info!("Dtako storage: R2 (bucket={})", bucket);
+            Arc::new(
+                storage::R2Backend::new(bucket, account_id, access_key, secret_key, None)
+                    .expect("Failed to init dtako R2 backend"),
+            ) as Arc<dyn StorageBackend>
+        });
+
     // FCM (optional — disabled if FCM_PROJECT_ID is not set)
     let fcm = std::env::var("FCM_PROJECT_ID").ok().map(|project_id| {
         tracing::info!("FCM enabled (project={})", project_id);
         Arc::new(fcm::FcmSender::new(project_id))
     });
 
-    let state = AppState { pool: pool.clone(), storage, carins_storage, fcm };
+    let state = AppState { pool: pool.clone(), storage, carins_storage, dtako_storage, fcm };
 
     // 点呼予定超過チェック バックグラウンドタスク
     let overdue_pool = pool;
@@ -130,10 +150,16 @@ async fn main() -> anyhow::Result<()> {
         .allow_methods(Any)
         .allow_headers(Any);
 
+    // Scraper URL (optional — dtako-scraper Cloud Run)
+    let scraper_url = std::env::var("SCRAPER_URL")
+        .unwrap_or_else(|_| "http://localhost:8081".into());
+    tracing::info!("Scraper URL: {}", scraper_url);
+
     let app = Router::new()
         .nest("/api", routes::router())
         .layer(Extension(google_verifier))
         .layer(Extension(jwt_secret))
+        .layer(Extension(routes::dtako_scraper::ScraperUrl(scraper_url)))
         .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state);

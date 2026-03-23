@@ -18,6 +18,19 @@ pub mod upload;
 pub mod sso_admin;
 pub mod bot_admin;
 pub mod tenant_users;
+pub mod carrying_items;
+pub mod driver_info;
+pub mod dtako_drivers;
+pub mod dtako_csv_proxy;
+pub mod dtako_operations;
+pub mod dtako_restraint_report;
+pub mod dtako_restraint_report_pdf;
+pub mod dtako_scraper;
+pub mod dtako_work_times;
+pub mod dtako_daily_hours;
+pub mod dtako_upload;
+pub mod dtako_vehicles;
+pub mod dtako_event_classifications;
 
 use axum::{middleware as axum_middleware, Router};
 
@@ -52,6 +65,19 @@ pub fn router() -> Router<AppState> {
         .merge(car_inspection_files::tenant_router())
         .merge(carins_files::tenant_router())
         .merge(nfc_tags::tenant_router())
+        .merge(carrying_items::tenant_router())
+        .merge(driver_info::tenant_router())
+        .merge(dtako_csv_proxy::tenant_router())
+        .merge(dtako_drivers::tenant_router())
+        .merge(dtako_operations::tenant_router())
+        .merge(dtako_restraint_report::tenant_router())
+        .merge(dtako_restraint_report_pdf::tenant_router())
+        .merge(dtako_scraper::tenant_router())
+        .merge(dtako_work_times::tenant_router())
+        .merge(dtako_daily_hours::tenant_router())
+        .merge(dtako_upload::tenant_router())
+        .merge(dtako_vehicles::tenant_router())
+        .merge(dtako_event_classifications::tenant_router())
         .layer(axum_middleware::from_fn(require_tenant));
 
     // 公開ルート (認証不要)

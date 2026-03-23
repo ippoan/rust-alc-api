@@ -17,7 +17,7 @@ chrono = { version = "0.4", features = ["serde"] }
 dotenvy = "0.15"
 anyhow = "1"
 tower = "0.5"
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.12", features = ["json", "stream"] }
 jsonwebtoken = "9"
 sha2 = "0.10"
 thiserror = "2"
@@ -30,3 +30,8 @@ hex = "0.4"
 rand = "0.10.0"
 urlencoding = "2"
 ring = "0.17"
+zip = "2"
+encoding_rs = "0.8"
+futures = "0.3"
+tokio-stream = "0.1"
+printpdf = "0.8"

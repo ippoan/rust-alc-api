@@ -309,6 +309,7 @@ pub struct TenkoSession {
     pub self_declaration: Option<serde_json::Value>,
     pub safety_judgment: Option<serde_json::Value>,
     pub daily_inspection: Option<serde_json::Value>,
+    pub carrying_items_checked: Option<serde_json::Value>,
     pub started_at: Option<DateTime<Utc>>,
     pub completed_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
@@ -713,4 +714,238 @@ pub struct EquipmentFailuresResponse {
     pub total: i64,
     pub page: i64,
     pub per_page: i64,
+}
+
+// --- Dtako: Office ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct DtakoOffice {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub office_cd: String,
+    pub office_name: String,
+}
+
+// --- Dtako: Vehicle ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct DtakoVehicle {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub vehicle_cd: String,
+    pub vehicle_name: String,
+}
+
+// --- Dtako: Event Classification ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct DtakoEventClassification {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub event_cd: String,
+    pub event_name: String,
+    pub classification: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateDtakoClassification {
+    pub classification: String,
+}
+
+// --- Dtako: Operation (KUDGURI) ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct DtakoOperation {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub unko_no: String,
+    pub crew_role: i32,
+    pub reading_date: chrono::NaiveDate,
+    pub operation_date: Option<chrono::NaiveDate>,
+    pub office_id: Option<Uuid>,
+    pub vehicle_id: Option<Uuid>,
+    pub driver_id: Option<Uuid>,
+    pub departure_at: Option<DateTime<Utc>>,
+    pub return_at: Option<DateTime<Utc>>,
+    pub garage_out_at: Option<DateTime<Utc>>,
+    pub garage_in_at: Option<DateTime<Utc>>,
+    pub meter_start: Option<f64>,
+    pub meter_end: Option<f64>,
+    pub total_distance: Option<f64>,
+    pub drive_time_general: Option<i32>,
+    pub drive_time_highway: Option<i32>,
+    pub drive_time_bypass: Option<i32>,
+    pub safety_score: Option<f64>,
+    pub economy_score: Option<f64>,
+    pub total_score: Option<f64>,
+    pub raw_data: serde_json::Value,
+    pub r2_key_prefix: Option<String>,
+    pub uploaded_at: DateTime<Utc>,
+    pub has_kudgivt: bool,
+}
+
+#[derive(Debug, Serialize, FromRow)]
+pub struct DtakoOperationListItem {
+    pub id: Uuid,
+    pub unko_no: String,
+    pub crew_role: i32,
+    pub reading_date: chrono::NaiveDate,
+    pub operation_date: Option<chrono::NaiveDate>,
+    pub driver_name: Option<String>,
+    pub vehicle_name: Option<String>,
+    pub total_distance: Option<f64>,
+    pub safety_score: Option<f64>,
+    pub economy_score: Option<f64>,
+    pub total_score: Option<f64>,
+    pub has_kudgivt: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DtakoOperationFilter {
+    pub date_from: Option<chrono::NaiveDate>,
+    pub date_to: Option<chrono::NaiveDate>,
+    pub driver_cd: Option<String>,
+    pub vehicle_cd: Option<String>,
+    pub page: Option<i64>,
+    pub per_page: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DtakoOperationsResponse {
+    pub operations: Vec<DtakoOperationListItem>,
+    pub total: i64,
+    pub page: i64,
+    pub per_page: i64,
+}
+
+// --- Dtako: Upload History ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct DtakoUploadHistory {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub uploaded_by: Option<Uuid>,
+    pub filename: String,
+    pub operations_count: i32,
+    pub r2_zip_key: Option<String>,
+    pub status: String,
+    pub error_message: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+// --- Dtako: Daily Work Hours ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct DtakoDailyWorkHours {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub driver_id: Uuid,
+    pub work_date: chrono::NaiveDate,
+    pub start_time: chrono::NaiveTime,
+    pub total_work_minutes: Option<i32>,
+    pub total_drive_minutes: Option<i32>,
+    pub total_rest_minutes: Option<i32>,
+    pub late_night_minutes: i32,
+    pub drive_minutes: i32,
+    pub cargo_minutes: i32,
+    pub overlap_drive_minutes: i32,
+    pub overlap_cargo_minutes: i32,
+    pub overlap_break_minutes: i32,
+    pub overlap_restraint_minutes: i32,
+    pub ot_late_night_minutes: i32,
+    pub total_distance: Option<f64>,
+    pub operation_count: i32,
+    pub unko_nos: Option<Vec<String>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DtakoDailyHoursFilter {
+    pub driver_id: Option<Uuid>,
+    pub date_from: Option<chrono::NaiveDate>,
+    pub date_to: Option<chrono::NaiveDate>,
+    pub page: Option<i64>,
+    pub per_page: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DtakoDailyHoursResponse {
+    pub items: Vec<DtakoDailyWorkHours>,
+    pub total: i64,
+    pub page: i64,
+    pub per_page: i64,
+}
+
+// --- Dtako: Daily Work Segments ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct DtakoDailyWorkSegment {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub driver_id: Uuid,
+    pub work_date: chrono::NaiveDate,
+    pub unko_no: String,
+    pub segment_index: i32,
+    pub start_at: DateTime<Utc>,
+    pub end_at: DateTime<Utc>,
+    pub work_minutes: i32,
+    pub labor_minutes: i32,
+    pub late_night_minutes: i32,
+    pub drive_minutes: i32,
+    pub cargo_minutes: i32,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DtakoSegmentsResponse {
+    pub segments: Vec<DtakoDailyWorkSegment>,
+}
+
+// --- Carrying Items ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct CarryingItem {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub item_name: String,
+    pub is_required: bool,
+    pub sort_order: i32,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateCarryingItem {
+    pub item_name: String,
+    pub is_required: Option<bool>,
+    pub sort_order: Option<i32>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateCarryingItem {
+    pub item_name: Option<String>,
+    pub is_required: Option<bool>,
+    pub sort_order: Option<i32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct CarryingItemCheck {
+    pub id: Uuid,
+    pub session_id: Uuid,
+    pub item_id: Uuid,
+    pub item_name: String,
+    pub checked: bool,
+    pub checked_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SubmitCarryingItemCheck {
+    pub item_id: Uuid,
+    pub checked: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SubmitCarryingItemChecks {
+    pub checks: Vec<SubmitCarryingItemCheck>,
 }

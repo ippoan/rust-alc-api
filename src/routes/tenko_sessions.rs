@@ -11,9 +11,9 @@ use uuid::Uuid;
 use crate::db::models::{
     CancelTenkoSession, EmployeeHealthBaseline, InterruptSession, MedicalDiffs, ResumeSession,
     SafetyJudgment, SelfDeclaration, StartTenkoSession, SubmitAlcoholResult,
-    SubmitDailyInspection, SubmitMedicalData, SubmitOperationReport, SubmitSelfDeclaration,
-    TenkoDashboard, TenkoRecord, TenkoSchedule, TenkoSession, TenkoSessionFilter,
-    TenkoSessionsResponse,
+    SubmitCarryingItemChecks, SubmitDailyInspection, SubmitMedicalData, SubmitOperationReport,
+    SubmitSelfDeclaration, TenkoDashboard, TenkoRecord, TenkoSchedule, TenkoSession,
+    TenkoSessionFilter, TenkoSessionsResponse,
 };
 use crate::db::tenant::set_current_tenant;
 use crate::middleware::auth::{AuthUser, TenantId};
@@ -44,6 +44,10 @@ pub fn tenant_router() -> Router<AppState> {
         .route(
             "/tenko/sessions/{id}/daily-inspection",
             put(submit_daily_inspection),
+        )
+        .route(
+            "/tenko/sessions/{id}/carrying-items",
+            put(submit_carrying_items),
         )
 }
 
@@ -1198,7 +1202,23 @@ async fn submit_daily_inspection(
         "inspected_at": Utc::now(),
     });
 
-    let next_status = if has_ng { "cancelled" } else { "identity_verified" };
+    let next_status = if has_ng {
+        "cancelled"
+    } else {
+        // テナントに携行品マスタがあれば carrying_items_pending、なければ identity_verified
+        let carrying_items_count: (i64,) = sqlx::query_as(
+            "SELECT COUNT(*)::BIGINT FROM alc_api.carrying_items WHERE tenant_id = $1",
+        )
+        .bind(tenant_id)
+        .fetch_one(&mut *conn)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        if carrying_items_count.0 > 0 {
+            "carrying_items_pending"
+        } else {
+            "identity_verified"
+        }
+    };
     let cancel_reason = if has_ng {
         Some("日常点検異常".to_string())
     } else {
@@ -1264,6 +1284,103 @@ async fn submit_daily_inspection(
             }
         });
     }
+
+    Ok(Json(session))
+}
+
+/// 携行品チェック結果送信
+async fn submit_carrying_items(
+    State(state): State<AppState>,
+    tenant: axum::Extension<TenantId>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<SubmitCarryingItemChecks>,
+) -> Result<Json<TenkoSession>, StatusCode> {
+    let tenant_id = tenant.0 .0;
+
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let session = sqlx::query_as::<_, TenkoSession>(
+        "SELECT * FROM tenko_sessions WHERE id = $1 AND tenant_id = $2",
+    )
+    .bind(id)
+    .bind(tenant_id)
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+    if session.status != "carrying_items_pending" {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    // 各チェック結果を tenko_carrying_item_checks に挿入
+    let now = Utc::now();
+    let mut check_results = Vec::new();
+    for check in &body.checks {
+        // item_name をマスタから取得
+        let item_name: Option<String> = sqlx::query_scalar(
+            "SELECT item_name FROM alc_api.carrying_items WHERE id = $1",
+        )
+        .bind(check.item_id)
+        .fetch_optional(&mut *conn)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+        let item_name = item_name.unwrap_or_default();
+
+        sqlx::query(
+            r#"INSERT INTO alc_api.tenko_carrying_item_checks
+               (session_id, item_id, item_name, checked, checked_at)
+               VALUES ($1, $2, $3, $4, $5)
+               ON CONFLICT (session_id, item_id) DO UPDATE SET
+               checked = EXCLUDED.checked, checked_at = EXCLUDED.checked_at"#,
+        )
+        .bind(id)
+        .bind(check.item_id)
+        .bind(&item_name)
+        .bind(check.checked)
+        .bind(if check.checked { Some(now) } else { None })
+        .execute(&mut *conn)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+        check_results.push(serde_json::json!({
+            "item_id": check.item_id,
+            "item_name": item_name,
+            "checked": check.checked,
+        }));
+    }
+
+    let carrying_json = serde_json::json!({
+        "items": check_results,
+        "checked_at": now,
+    });
+
+    // ステータスを identity_verified に遷移
+    let session = sqlx::query_as::<_, TenkoSession>(
+        r#"UPDATE tenko_sessions SET
+            status = 'identity_verified',
+            carrying_items_checked = $1,
+            updated_at = NOW()
+        WHERE id = $2 AND tenant_id = $3
+        RETURNING *"#,
+    )
+    .bind(&carrying_json)
+    .bind(id)
+    .bind(tenant_id)
+    .fetch_one(&mut *conn)
+    .await
+    .map_err(|e| {
+        tracing::error!("submit_carrying_items DB error: {e}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     Ok(Json(session))
 }
