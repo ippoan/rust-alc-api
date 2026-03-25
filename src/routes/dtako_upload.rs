@@ -55,17 +55,21 @@ async fn upload_zip(
     // Extract ZIP file from multipart
     let (filename, zip_bytes) = extract_file(&mut multipart).await?;
 
+    let mut conn = state.pool.acquire().await.map_err(internal_err)?;
+    crate::db::tenant::set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
+        .map_err(internal_err)?;
+
     // Create upload history record
     let upload_id = Uuid::new_v4();
     sqlx::query(
         r#"INSERT INTO alc_api.dtako_upload_history (id, tenant_id, uploaded_by, filename, status)
-           VALUES ($1, $2, $3, $4, 'processing')"#,
+           VALUES ($1, $2, NULL, $3, 'processing')"#,
     )
     .bind(upload_id)
     .bind(tenant_id)
-    .bind(tenant.0 .0)
     .bind(&filename)
-    .execute(&state.pool)
+    .execute(&mut *conn)
     .await
     .map_err(internal_err)?;
 
@@ -78,7 +82,7 @@ async fn upload_zip(
             )
             .bind(count)
             .bind(upload_id)
-            .execute(&state.pool)
+            .execute(&mut *conn)
             .await
             .map_err(internal_err)?;
 
@@ -90,13 +94,16 @@ async fn upload_zip(
         }
         Err(e) => {
             // Mark failure
-            let _ = sqlx::query(
+            if let Err(db_err) = sqlx::query(
                 "UPDATE alc_api.dtako_upload_history SET status = 'failed', error_message = $1 WHERE id = $2",
             )
             .bind(e.to_string())
             .bind(upload_id)
-            .execute(&state.pool)
-            .await;
+            .execute(&mut *conn)
+            .await
+            {
+                tracing::error!("Failed to mark upload as failed: {db_err}");
+            }
 
             Err((StatusCode::BAD_REQUEST, e.to_string()))
         }
@@ -131,19 +138,23 @@ async fn process_zip(
     filename: &str,
     zip_bytes: &[u8],
 ) -> Result<i32, anyhow::Error> {
-    // 1. Save original ZIP to R2
+    // 1. Save original ZIP to R2 (dtako bucket)
     let zip_key = format!("{}/uploads/{}/{}", tenant_id, upload_id, filename);
-    state
-        .storage
+    let dtako_st = state.dtako_storage.as_ref()
+        .ok_or_else(|| anyhow::anyhow!("DTAKO_R2_BUCKET not configured"))?;
+    dtako_st
         .upload(&zip_key, zip_bytes, "application/zip")
         .await
         .map_err(|e| anyhow::anyhow!("R2 upload failed: {e}"))?;
+
+    let mut conn = state.pool.acquire().await?;
+    crate::db::tenant::set_current_tenant(&mut conn, &tenant_id.to_string()).await?;
 
     // Update upload_history with R2 key
     sqlx::query("UPDATE alc_api.dtako_upload_history SET r2_zip_key = $1 WHERE id = $2")
         .bind(&zip_key)
         .bind(upload_id)
-        .execute(&state.pool)
+        .execute(&mut *conn)
         .await?;
 
     // 2. Extract ZIP
@@ -197,7 +208,7 @@ async fn process_zip(
         .bind(tenant_id)
         .bind(&row.unko_no)
         .bind(row.crew_role)
-        .execute(&state.pool)
+        .execute(&mut *conn)
         .await?;
 
         // Insert operation
@@ -243,7 +254,7 @@ async fn process_zip(
         .bind(row.total_score)
         .bind(&row.raw_data)
         .bind(&r2_key_prefix)
-        .execute(&state.pool)
+        .execute(&mut *conn)
         .await?;
 
         operations_count += 1;
@@ -279,6 +290,8 @@ async fn upsert_office(
     if office_cd.is_empty() {
         return Ok(None);
     }
+    let mut conn = state.pool.acquire().await?;
+    crate::db::tenant::set_current_tenant(&mut conn, &tenant_id.to_string()).await?;
     let rec = sqlx::query_as::<_, (Uuid,)>(
         r#"INSERT INTO alc_api.dtako_offices (tenant_id, office_cd, office_name)
            VALUES ($1, $2, $3)
@@ -288,7 +301,7 @@ async fn upsert_office(
     .bind(tenant_id)
     .bind(office_cd)
     .bind(office_name)
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *conn)
     .await?;
     Ok(Some(rec.0))
 }
@@ -302,6 +315,8 @@ async fn upsert_vehicle(
     if vehicle_cd.is_empty() {
         return Ok(None);
     }
+    let mut conn = state.pool.acquire().await?;
+    crate::db::tenant::set_current_tenant(&mut conn, &tenant_id.to_string()).await?;
     let rec = sqlx::query_as::<_, (Uuid,)>(
         r#"INSERT INTO alc_api.dtako_vehicles (tenant_id, vehicle_cd, vehicle_name)
            VALUES ($1, $2, $3)
@@ -311,7 +326,7 @@ async fn upsert_vehicle(
     .bind(tenant_id)
     .bind(vehicle_cd)
     .bind(vehicle_name)
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *conn)
     .await?;
     Ok(Some(rec.0))
 }
@@ -325,13 +340,15 @@ async fn upsert_driver(
     if driver_cd.is_empty() {
         return Ok(None);
     }
+    let mut conn = state.pool.acquire().await?;
+    crate::db::tenant::set_current_tenant(&mut conn, &tenant_id.to_string()).await?;
     // employees テーブルから driver_cd で検索
     let existing = sqlx::query_as::<_, (Uuid,)>(
         "SELECT id FROM alc_api.employees WHERE tenant_id = $1 AND driver_cd = $2 AND deleted_at IS NULL",
     )
     .bind(tenant_id)
     .bind(driver_cd)
-    .fetch_optional(&state.pool)
+    .fetch_optional(&mut *conn)
     .await?;
 
     if let Some(rec) = existing {
@@ -346,7 +363,7 @@ async fn upsert_driver(
         .bind(tenant_id)
         .bind(driver_cd)
         .bind(driver_name)
-        .fetch_one(&state.pool)
+        .fetch_one(&mut *conn)
         .await?;
         Ok(Some(rec.0))
     }
@@ -454,6 +471,9 @@ async fn calculate_daily_hours(
     progress_tx: Option<tokio::sync::mpsc::Sender<String>>,
 ) -> Result<(), anyhow::Error> {
     use std::collections::HashMap;
+
+    let mut conn = state.pool.acquire().await?;
+    crate::db::tenant::set_current_tenant(&mut conn, &tenant_id.to_string()).await?;
 
     // 0. 始業ベースのワークデイグルーピング（unko_no → work_date）
     let unko_work_date = crate::compare::group_operations_into_work_days(rows);
@@ -604,7 +624,7 @@ async fn calculate_daily_hours(
                 )
                 .bind(tenant_id)
                 .bind(driver_cd)
-                .fetch_optional(&state.pool)
+                .fetch_optional(&mut *conn)
                 .await?;
                 let id = rec.map(|r| r.0);
                 driver_id_cache.insert(driver_cd.clone(), id);
@@ -738,7 +758,7 @@ async fn calculate_daily_hours(
                 .bind(tenant_id)
                 .bind(did)
                 .bind(unko)
-                .execute(&state.pool)
+                .execute(&mut *conn)
                 .await?;
             }
             // unko_nosカラム（配列）に含まれるエントリも削除
@@ -748,7 +768,7 @@ async fn calculate_daily_hours(
             .bind(tenant_id)
             .bind(did)
             .bind(&all_unko_nos)
-            .execute(&state.pool)
+            .execute(&mut *conn)
             .await?;
         }
     }
@@ -770,7 +790,7 @@ async fn calculate_daily_hours(
         .bind(driver_id)
         .bind(work_date)
         .bind(_start_time)
-        .execute(&state.pool)
+        .execute(&mut *conn)
         .await?;
 
         sqlx::query(
@@ -802,7 +822,7 @@ async fn calculate_daily_hours(
         .bind(agg.overlap_break_minutes)
         .bind(agg.overlap_restraint_minutes)
         .bind(agg.ot_late_night_minutes)
-        .execute(&state.pool)
+        .execute(&mut *conn)
         .await?;
 
         // Delete and re-insert segments
@@ -812,7 +832,7 @@ async fn calculate_daily_hours(
         .bind(tenant_id)
         .bind(driver_id)
         .bind(work_date)
-        .execute(&state.pool)
+        .execute(&mut *conn)
         .await?;
 
         for seg in &agg.segments {
@@ -835,7 +855,7 @@ async fn calculate_daily_hours(
             .bind(seg.late_night_minutes)
             .bind(seg.drive_minutes)
             .bind(seg.cargo_minutes)
-            .execute(&state.pool)
+            .execute(&mut *conn)
             .await?;
         }
 
@@ -860,8 +880,11 @@ async fn load_kudgivt_from_zips(
     state: &AppState,
     tenant_id: Uuid,
     month_start: chrono::NaiveDate,
-    month_end: chrono::NaiveDate,
+    _month_end: chrono::NaiveDate,
 ) -> Result<Vec<KudgivtRow>, anyhow::Error> {
+    let mut conn = state.pool.acquire().await?;
+    crate::db::tenant::set_current_tenant(&mut conn, &tenant_id.to_string()).await?;
+
     // 該当月のupload_historyからZIPキーを取得
     let zip_keys: Vec<String> = sqlx::query_scalar(
         r#"SELECT DISTINCT r2_zip_key FROM alc_api.dtako_upload_history
@@ -871,7 +894,7 @@ async fn load_kudgivt_from_zips(
     )
     .bind(tenant_id)
     .bind(month_start)
-    .fetch_all(&state.pool)
+    .fetch_all(&mut *conn)
     .await?;
 
     let mut all_kudgivt = Vec::new();
@@ -928,12 +951,15 @@ async fn load_or_init_classifications(
 ) -> Result<std::collections::HashMap<String, EventClass>, anyhow::Error> {
     use std::collections::HashMap;
 
+    let mut conn = state.pool.acquire().await?;
+    crate::db::tenant::set_current_tenant(&mut conn, &tenant_id.to_string()).await?;
+
     // DBから既存の分類を取得
     let existing: Vec<(String, String)> = sqlx::query_as(
         "SELECT event_cd, classification FROM alc_api.dtako_event_classifications WHERE tenant_id = $1",
     )
     .bind(tenant_id)
-    .fetch_all(&state.pool)
+    .fetch_all(&mut *conn)
     .await?;
 
     let mut map: HashMap<String, EventClass> = HashMap::new();
@@ -960,7 +986,7 @@ async fn load_or_init_classifications(
         let (cls_str, ec) = default_classification(&row.event_cd);
         map.insert(row.event_cd.clone(), ec);
 
-        let _ = sqlx::query(
+        if let Err(e) = sqlx::query(
             r#"INSERT INTO alc_api.dtako_event_classifications (tenant_id, event_cd, event_name, classification)
                VALUES ($1, $2, $3, $4)
                ON CONFLICT (tenant_id, event_cd) DO NOTHING"#,
@@ -969,8 +995,11 @@ async fn load_or_init_classifications(
         .bind(&row.event_cd)
         .bind(&row.event_name)
         .bind(cls_str)
-        .execute(&state.pool)
-        .await;
+        .execute(&mut *conn)
+        .await
+        {
+            tracing::error!("Failed to insert event classification {}: {e}", row.event_cd);
+        }
     }
 
     Ok(map)
@@ -1030,6 +1059,11 @@ async fn internal_upload_zip(
     let (filename, zip_bytes) =
         file_data.ok_or_else(|| (StatusCode::BAD_REQUEST, "missing file field".into()))?;
 
+    let mut conn = state.pool.acquire().await.map_err(internal_err)?;
+    crate::db::tenant::set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
+        .map_err(internal_err)?;
+
     let upload_id = Uuid::new_v4();
     sqlx::query(
         r#"INSERT INTO alc_api.dtako_upload_history (id, tenant_id, uploaded_by, filename, status)
@@ -1039,7 +1073,7 @@ async fn internal_upload_zip(
     .bind(tenant_id)
     .bind(None::<Uuid>) // internal: no user
     .bind(&filename)
-    .execute(&state.pool)
+    .execute(&mut *conn)
     .await
     .map_err(internal_err)?;
 
@@ -1050,7 +1084,7 @@ async fn internal_upload_zip(
             )
             .bind(count)
             .bind(upload_id)
-            .execute(&state.pool)
+            .execute(&mut *conn)
             .await
             .map_err(internal_err)?;
 
@@ -1061,13 +1095,16 @@ async fn internal_upload_zip(
             }))
         }
         Err(e) => {
-            let _ = sqlx::query(
+            if let Err(db_err) = sqlx::query(
                 "UPDATE alc_api.dtako_upload_history SET status = 'failed', error_message = $1 WHERE id = $2",
             )
             .bind(e.to_string())
             .bind(upload_id)
-            .execute(&state.pool)
-            .await;
+            .execute(&mut *conn)
+            .await
+            {
+                tracing::error!("Failed to mark upload as failed: {db_err}");
+            }
 
             Err((StatusCode::BAD_REQUEST, e.to_string()))
         }
@@ -1124,12 +1161,18 @@ async fn internal_store_zip(
     let (filename, zip_bytes) =
         file_data.ok_or_else(|| (StatusCode::BAD_REQUEST, "missing file field".into()))?;
 
+    let mut conn = state.pool.acquire().await.map_err(internal_err)?;
+    crate::db::tenant::set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
+        .map_err(internal_err)?;
+
     let upload_id = Uuid::new_v4();
 
     // R2 に ZIP を保存 (pending/ プレフィックス → ライフサイクルルールで7日後に自動削除)
     let zip_key = format!("{}/pending/{}/{}", tenant_id, upload_id, filename);
-    state
-        .storage
+    let dtako_st = state.dtako_storage.as_ref()
+        .ok_or_else(|| (StatusCode::INTERNAL_SERVER_ERROR, "DTAKO_R2_BUCKET not configured".to_string()))?;
+    dtako_st
         .upload(&zip_key, &zip_bytes, "application/zip")
         .await
         .map_err(internal_err)?;
@@ -1144,7 +1187,7 @@ async fn internal_store_zip(
     .bind(None::<Uuid>)
     .bind(&filename)
     .bind(&zip_key)
-    .execute(&state.pool)
+    .execute(&mut *conn)
     .await
     .map_err(internal_err)?;
 
@@ -1168,18 +1211,23 @@ async fn enqueue_csv_split(state: &AppState, upload_id: Uuid) -> Result<(), anyh
 
 /// R2 から ZIP をダウンロードして CSV を unko_no 別に分割アップロード
 async fn split_csv_from_r2(state: &AppState, upload_id: Uuid) -> Result<(), anyhow::Error> {
+    let mut conn = state.pool.acquire().await?;
+
     let record = sqlx::query_as::<_, (Uuid, String)>(
         "SELECT tenant_id, r2_zip_key FROM alc_api.dtako_upload_history WHERE id = $1",
     )
     .bind(upload_id)
-    .fetch_optional(&state.pool)
+    .fetch_optional(&mut *conn)
     .await?
     .ok_or_else(|| anyhow::anyhow!("upload {} not found", upload_id))?;
 
     let (tenant_id, r2_zip_key) = record;
 
-    let zip_bytes = state
-        .storage
+    crate::db::tenant::set_current_tenant(&mut conn, &tenant_id.to_string()).await?;
+
+    let dtako_st = state.dtako_storage.as_ref()
+        .ok_or_else(|| anyhow::anyhow!("DTAKO_R2_BUCKET not configured"))?;
+    let zip_bytes = dtako_st
         .download(&r2_zip_key)
         .await
         .map_err(|e| anyhow::anyhow!("R2 download failed: {e}"))?;
@@ -1249,14 +1297,16 @@ async fn split_csv_from_r2(state: &AppState, upload_id: Uuid) -> Result<(), anyh
                 .map(|(i, _)| format!("${}", i + 2))
                 .collect();
             let sql = format!(
-                "UPDATE operations SET has_kudgivt = TRUE WHERE tenant_id = $1 AND unko_no IN ({})",
+                "UPDATE alc_api.dtako_operations SET has_kudgivt = TRUE WHERE tenant_id = $1 AND unko_no IN ({})",
                 placeholders.join(", ")
             );
             let mut query = sqlx::query(&sql).bind(tenant_id);
             for unko_no in chunk {
                 query = query.bind(unko_no);
             }
-            let _ = query.execute(&state.pool).await;
+            if let Err(e) = query.execute(&mut *conn).await {
+                tracing::error!("Failed to update has_kudgivt: {e}");
+            }
         }
         tracing::info!("has_kudgivt updated: {} operations", kudgivt_unko_nos.len());
     }
@@ -1291,11 +1341,13 @@ async fn internal_download(
     State(state): State<AppState>,
     Path(upload_id): Path<Uuid>,
 ) -> Result<Response, (StatusCode, String)> {
-    let record = sqlx::query_as::<_, (String, String)>(
-        "SELECT r2_zip_key, filename FROM alc_api.dtako_upload_history WHERE id = $1",
+    let mut conn = state.pool.acquire().await.map_err(internal_err)?;
+
+    let record = sqlx::query_as::<_, (Uuid, String, String)>(
+        "SELECT tenant_id, r2_zip_key, filename FROM alc_api.dtako_upload_history WHERE id = $1",
     )
     .bind(upload_id)
-    .fetch_optional(&state.pool)
+    .fetch_optional(&mut *conn)
     .await
     .map_err(internal_err)?
     .ok_or_else(|| {
@@ -1305,7 +1357,11 @@ async fn internal_download(
         )
     })?;
 
-    let (r2_zip_key, filename) = record;
+    let (tenant_id, r2_zip_key, filename) = record;
+
+    crate::db::tenant::set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
+        .map_err(internal_err)?;
 
     let zip_bytes = state.dtako_storage.as_ref().unwrap().download(&r2_zip_key).await.map_err(|e| {
         (
@@ -1340,12 +1396,14 @@ async fn internal_rerun(
     State(state): State<AppState>,
     Path(upload_id): Path<Uuid>,
 ) -> Result<Json<UploadResponse>, (StatusCode, String)> {
+    let mut conn = state.pool.acquire().await.map_err(internal_err)?;
+
     // upload_history から r2_zip_key を取得
     let record = sqlx::query_as::<_, (Uuid, String, String)>(
         "SELECT tenant_id, r2_zip_key, filename FROM alc_api.dtako_upload_history WHERE id = $1",
     )
     .bind(upload_id)
-    .fetch_optional(&state.pool)
+    .fetch_optional(&mut *conn)
     .await
     .map_err(internal_err)?
     .ok_or_else(|| {
@@ -1356,6 +1414,10 @@ async fn internal_rerun(
     })?;
 
     let (tenant_id, r2_zip_key, filename) = record;
+
+    crate::db::tenant::set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
+        .map_err(internal_err)?;
 
     // R2 から ZIP をダウンロード
     let zip_bytes = state.dtako_storage.as_ref().unwrap().download(&r2_zip_key).await.map_err(|e| {
@@ -1379,7 +1441,7 @@ async fn internal_rerun(
             )
             .bind(count)
             .bind(upload_id)
-            .execute(&state.pool)
+            .execute(&mut *conn)
             .await
             .map_err(internal_err)?;
 
@@ -1390,13 +1452,16 @@ async fn internal_rerun(
             }))
         }
         Err(e) => {
-            let _ = sqlx::query(
+            if let Err(db_err) = sqlx::query(
                 "UPDATE alc_api.dtako_upload_history SET status = 'failed', error_message = $1 WHERE id = $2",
             )
             .bind(e.to_string())
             .bind(upload_id)
-            .execute(&state.pool)
-            .await;
+            .execute(&mut *conn)
+            .await
+            {
+                tracing::error!("Failed to mark upload as failed: {db_err}");
+            }
 
             Err((StatusCode::BAD_REQUEST, e.to_string()))
         }
@@ -1429,6 +1494,18 @@ async fn internal_recalculate_all(
                 let _ = tx.send(format!("data: {s}\n\n")).await;
             }
         };
+
+        let mut conn = match state.pool.acquire().await {
+            Ok(c) => c,
+            Err(e) => {
+                send(serde_json::json!({"event":"error","message":format!("DB pool error: {e}")})).await;
+                return;
+            }
+        };
+        if let Err(e) = crate::db::tenant::set_current_tenant(&mut conn, &tenant_id.to_string()).await {
+            send(serde_json::json!({"event":"error","message":format!("set_current_tenant error: {e}")})).await;
+            return;
+        }
 
         let month_start = match chrono::NaiveDate::from_ymd_opt(year, month, 1) {
             Some(d) => d,
@@ -1478,7 +1555,7 @@ async fn internal_recalculate_all(
         .bind(tenant_id)
         .bind(month_start)
         .bind(fetch_end)
-        .fetch_all(&state.pool)
+        .fetch_all(&mut *conn)
         .await
         {
             Ok(o) => o,
@@ -1620,7 +1697,14 @@ async fn internal_recalculate_all(
 /// pending_retry / failed のアップロード一覧
 async fn list_pending_uploads(
     State(state): State<AppState>,
+    tenant: axum::Extension<TenantId>,
 ) -> Result<Json<Vec<serde_json::Value>>, (StatusCode, String)> {
+    let tenant_id = tenant.0 .0;
+    let mut conn = state.pool.acquire().await.map_err(internal_err)?;
+    crate::db::tenant::set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
+        .map_err(internal_err)?;
+
     let rows = sqlx::query_as::<
         _,
         (
@@ -1638,7 +1722,7 @@ async fn list_pending_uploads(
            ORDER BY created_at DESC
            LIMIT 50"#,
     )
-    .fetch_all(&state.pool)
+    .fetch_all(&mut *conn)
     .await
     .map_err(internal_err)?;
 
@@ -1688,6 +1772,18 @@ async fn recalculate_driver(
             }
         };
 
+        let mut conn = match state.pool.acquire().await {
+            Ok(c) => c,
+            Err(e) => {
+                send(serde_json::json!({"event":"error","message":format!("DB pool error: {e}")})).await;
+                return;
+            }
+        };
+        if let Err(e) = crate::db::tenant::set_current_tenant(&mut conn, &tenant_id.to_string()).await {
+            send(serde_json::json!({"event":"error","message":format!("set_current_tenant error: {e}")})).await;
+            return;
+        }
+
         let month_start = match chrono::NaiveDate::from_ymd_opt(year, month, 1) {
             Some(d) => d,
             None => {
@@ -1709,7 +1805,7 @@ async fn recalculate_driver(
         )
         .bind(driver_id)
         .bind(tenant_id)
-        .fetch_optional(&state.pool)
+        .fetch_optional(&mut *conn)
         .await
         {
             Ok(d) => d,
@@ -1756,7 +1852,7 @@ async fn recalculate_driver(
         .bind(driver_id)
         .bind(month_start)
         .bind(fetch_end)
-        .fetch_all(&state.pool)
+        .fetch_all(&mut *conn)
         .await
         {
             Ok(o) => o,
@@ -1950,13 +2046,26 @@ async fn recalculate_drivers_batch(
                     let error_count = error_count.clone();
                     let driver_id = *driver_id;
                     async move {
+                        // driver ごとに conn を取得して RLS 設定
+                        let mut conn = match state.pool.acquire().await {
+                            Ok(c) => c,
+                            Err(_) => {
+                                error_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                return;
+                            }
+                        };
+                        if crate::db::tenant::set_current_tenant(&mut conn, &tenant_id.to_string()).await.is_err() {
+                            error_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            return;
+                        }
+
                         // driver_cd取得
                         let driver_cd: Option<String> = sqlx::query_scalar(
                             "SELECT driver_cd FROM alc_api.employees WHERE id = $1 AND tenant_id = $2",
                         )
                         .bind(driver_id)
                         .bind(tenant_id)
-                        .fetch_optional(&state.pool)
+                        .fetch_optional(&mut *conn)
                         .await
                         .ok()
                         .flatten();
@@ -1992,7 +2101,7 @@ async fn recalculate_drivers_batch(
                         .bind(driver_id)
                         .bind(month_start)
                         .bind(fetch_end)
-                        .fetch_all(&state.pool)
+                        .fetch_all(&mut *conn)
                         .await;
 
                         let op_rows = match op_rows {
@@ -2102,6 +2211,12 @@ async fn list_uploads(
     State(state): State<AppState>,
     tenant: axum::Extension<TenantId>,
 ) -> Result<Json<Vec<serde_json::Value>>, (StatusCode, String)> {
+    let tenant_id = tenant.0 .0;
+    let mut conn = state.pool.acquire().await.map_err(internal_err)?;
+    crate::db::tenant::set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
+        .map_err(internal_err)?;
+
     let rows = sqlx::query_as::<
         _,
         (
@@ -2119,8 +2234,8 @@ async fn list_uploads(
            ORDER BY created_at DESC
            LIMIT 50"#,
     )
-    .bind(tenant.0 .0)
-    .fetch_all(&state.pool)
+    .bind(tenant_id)
+    .fetch_all(&mut *conn)
     .await
     .map_err(internal_err)?;
 
@@ -2176,18 +2291,30 @@ async fn split_csv_all_handler(
             }
         };
 
+        let mut conn = match state.pool.acquire().await {
+            Ok(c) => c,
+            Err(e) => {
+                send(serde_json::json!({"event":"error","message":format!("DB pool error: {e}")})).await;
+                return;
+            }
+        };
+        if let Err(e) = crate::db::tenant::set_current_tenant(&mut conn, &tenant_id.to_string()).await {
+            send(serde_json::json!({"event":"error","message":format!("set_current_tenant error: {e}")})).await;
+            return;
+        }
+
         // 未分割の運行のupload_idを特定
         let uploads: Vec<(Uuid, String)> = match sqlx::query_as(
             r#"SELECT DISTINCT uh.id, uh.filename
                FROM alc_api.dtako_operations o
-               JOIN upload_history uh ON uh.tenant_id = o.tenant_id
+               JOIN alc_api.dtako_upload_history uh ON uh.tenant_id = o.tenant_id
                WHERE o.tenant_id = $1 AND o.has_kudgivt = FALSE
                  AND uh.status = 'completed'
                  AND uh.r2_zip_key IS NOT NULL
                ORDER BY uh.filename"#,
         )
         .bind(tenant_id)
-        .fetch_all(&state.pool)
+        .fetch_all(&mut *conn)
         .await
         {
             Ok(u) => u,
