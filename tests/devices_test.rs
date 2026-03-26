@@ -774,6 +774,128 @@ async fn test_fcm_notify_call_no_fcm() {
 }
 
 #[tokio::test]
+async fn test_fcm_notify_call_with_token() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "FCM Notify Token").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    // デバイス作成 + FCM トークン登録 + call_enabled=true
+    let (device_id, _) = create_device_via_url_flow(&client, &base_url, &auth).await;
+    client.put(format!("{base_url}/api/devices/register-fcm-token"))
+        .json(&serde_json::json!({ "device_id": device_id, "fcm_token": "test-fcm-token-123" }))
+        .send().await.unwrap();
+    client.put(format!("{base_url}/api/devices/{device_id}/call-settings"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "call_enabled": true }))
+        .send().await.unwrap();
+
+    // FCM notify-call → should send to device
+    let res = client
+        .post(format!("{base_url}/api/devices/fcm-notify-call"))
+        .json(&serde_json::json!({ "room_ids": ["room-abc"] }))
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    assert!(body["sent"].as_i64().unwrap() >= 1, "should send to at least 1 device");
+}
+
+#[tokio::test]
+async fn test_fcm_notify_call_with_exclude() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "FCM Exclude").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    let (device_id, _) = create_device_via_url_flow(&client, &base_url, &auth).await;
+    client.put(format!("{base_url}/api/devices/register-fcm-token"))
+        .json(&serde_json::json!({ "device_id": device_id, "fcm_token": "token-exclude" }))
+        .send().await.unwrap();
+    client.put(format!("{base_url}/api/devices/{device_id}/call-settings"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "call_enabled": true }))
+        .send().await.unwrap();
+
+    // exclude this device → skipped
+    let res = client
+        .post(format!("{base_url}/api/devices/fcm-notify-call"))
+        .json(&serde_json::json!({
+            "room_ids": ["room-1"],
+            "exclude_device_ids": [device_id]
+        }))
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    assert!(body["skipped"].as_i64().unwrap() >= 1);
+}
+
+#[tokio::test]
+async fn test_fcm_notify_call_with_schedule() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "FCM Schedule").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    let (device_id, _) = create_device_via_url_flow(&client, &base_url, &auth).await;
+    client.put(format!("{base_url}/api/devices/register-fcm-token"))
+        .json(&serde_json::json!({ "device_id": device_id, "fcm_token": "token-sched" }))
+        .send().await.unwrap();
+
+    // call_enabled=true + schedule with narrow window that excludes current time
+    client.put(format!("{base_url}/api/devices/{device_id}/call-settings"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "call_enabled": true,
+            "call_schedule": {
+                "enabled": true,
+                "days": [0, 1, 2, 3, 4, 5, 6],
+                "startHour": 3,
+                "startMin": 0,
+                "endHour": 3,
+                "endMin": 1
+            }
+        }))
+        .send().await.unwrap();
+
+    // Schedule window is 03:00-03:01, current time is likely not in that range → skipped
+    let res = client
+        .post(format!("{base_url}/api/devices/fcm-notify-call"))
+        .json(&serde_json::json!({ "room_ids": ["room-1"] }))
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    assert!(body["skipped"].as_i64().unwrap() >= 1, "should skip due to schedule");
+}
+
+#[tokio::test]
+async fn test_fcm_notify_call_disabled() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "FCM Disabled").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    let (device_id, _) = create_device_via_url_flow(&client, &base_url, &auth).await;
+    client.put(format!("{base_url}/api/devices/register-fcm-token"))
+        .json(&serde_json::json!({ "device_id": device_id, "fcm_token": "token-disabled" }))
+        .send().await.unwrap();
+
+    // call_enabled=false → skipped
+    let res = client
+        .post(format!("{base_url}/api/devices/fcm-notify-call"))
+        .json(&serde_json::json!({ "room_ids": ["room-1"] }))
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
+}
+
+#[tokio::test]
 async fn test_device_owner_flow() {
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
@@ -1145,14 +1267,19 @@ async fn test_test_fcm_for_device() {
 
     let (device_id, _) = create_device_via_url_flow(&client, &base_url, &auth).await;
 
+    // FCM トークンを登録してからテスト
+    client.put(format!("{base_url}/api/devices/register-fcm-token"))
+        .json(&serde_json::json!({ "device_id": device_id, "fcm_token": "test-token-for-fcm" }))
+        .send().await.unwrap();
+
     let res = client
         .post(format!("{base_url}/api/devices/{device_id}/test-fcm"))
         .header("Authorization", &auth)
         .send()
         .await
         .unwrap();
-    // デバイスに fcm_token 未設定 → 400, or MockFcm → 200/204
-    assert!(res.status() == 200 || res.status() == 204 || res.status() == 400, "FCM test: {}", res.status());
+    // MockFcmSender → 200/204
+    assert!(res.status() == 200 || res.status() == 204, "FCM test: {}", res.status());
 }
 
 // ============================================================
