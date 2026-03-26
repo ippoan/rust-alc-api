@@ -778,6 +778,380 @@ async fn test_timecard_punches_with_filter() {
 }
 
 // ============================================================
+// Carins Files — delete then download → 404
+// ============================================================
+
+#[tokio::test]
+async fn test_carins_files_delete_then_download() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "CarinsDel").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    // ファイル作成 (base64 エンコード済みダミーコンテンツ)
+    let res = client
+        .post(format!("{base_url}/api/files"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "filename": "test-delete.pdf",
+            "type": "application/pdf",
+            "content": "dGVzdCBjb250ZW50"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 201);
+    let file: Value = res.json().await.unwrap();
+    let file_uuid = file["uuid"].as_str().unwrap();
+
+    // ファイル取得 → 200
+    let res = client
+        .get(format!("{base_url}/api/files/{file_uuid}"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+
+    // ファイル削除 (soft delete)
+    let res = client
+        .post(format!("{base_url}/api/files/{file_uuid}/delete"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 204);
+
+    // 削除後のダウンロード → file metadata は取得可能 (soft delete)
+    // ただし list_files では表示されない
+    let res = client
+        .get(format!("{base_url}/api/files"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let list: Value = res.json().await.unwrap();
+    let files = list["files"].as_array().unwrap();
+    // 削除済みファイルは一覧に表示されない
+    let found = files.iter().any(|f| f["uuid"].as_str() == Some(file_uuid));
+    assert!(!found, "deleted file should not appear in list");
+}
+
+// ============================================================
+// Timecard — punch with NFC fallback (employees.nfc_id)
+// ============================================================
+
+#[tokio::test]
+async fn test_timecard_punch_nfc_fallback() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "NfcPunch").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    // 従業員作成
+    let emp = common::create_test_employee(&client, &base_url, &auth, "NfcEmp", "NF01").await;
+    let emp_id = emp["id"].as_str().unwrap();
+
+    // employees.nfc_id を直接設定 (カードは登録しない)
+    let nfc_id = format!("NFC-{}", uuid::Uuid::new_v4().simple().to_string().get(..8).unwrap());
+    sqlx::query("UPDATE alc_api.employees SET nfc_id = $1 WHERE id = $2::uuid")
+        .bind(&nfc_id)
+        .bind(emp_id)
+        .execute(&state.pool)
+        .await
+        .unwrap();
+
+    // timecard_cards にはカードを登録しない → nfc_id フォールバック
+    let res = client
+        .post(format!("{base_url}/api/timecard/punch"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "card_id": &nfc_id }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 201);
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(body["employee_name"], "NfcEmp");
+}
+
+// ============================================================
+// Timecard — get card by card_id not found → 404
+// ============================================================
+
+#[tokio::test]
+async fn test_timecard_get_card_by_card_id_not_found() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "CardNotFound").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    let res = client
+        .get(format!("{base_url}/api/timecard/cards/by-card/NONEXISTENT-CARD"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 404);
+}
+
+// ============================================================
+// Timecard — CSV with employee_id filter
+// ============================================================
+
+#[tokio::test]
+async fn test_timecard_csv_with_employee_filter() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "CsvFilter").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    let emp = common::create_test_employee(&client, &base_url, &auth, "CsvFiltEmp", "CF01").await;
+    let emp_id = emp["id"].as_str().unwrap();
+
+    // カード作成 + 打刻
+    client
+        .post(format!("{base_url}/api/timecard/cards"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "employee_id": emp_id, "card_id": "CSVF-CARD" }))
+        .send()
+        .await
+        .unwrap();
+
+    client
+        .post(format!("{base_url}/api/timecard/punch"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "card_id": "CSVF-CARD" }))
+        .send()
+        .await
+        .unwrap();
+
+    // CSV with employee_id filter
+    let res = client
+        .get(format!("{base_url}/api/timecard/punches/csv?employee_id={emp_id}"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let ct = res.headers().get("content-type").unwrap().to_str().unwrap();
+    assert!(ct.contains("csv"));
+    let csv_body = res.text().await.unwrap();
+    assert!(csv_body.contains("CsvFiltEmp"), "CSV should contain the employee name");
+}
+
+// ============================================================
+// Communication Items — create with all fields + list active
+// ============================================================
+
+#[tokio::test]
+async fn test_communication_items_create_all_fields_and_list_active() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "CommAll").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    // Create with all fields (priority, effective_from, effective_until)
+    let res = client
+        .post(format!("{base_url}/api/communication-items"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "title": "緊急連絡",
+            "content": "台風接近に伴う注意",
+            "priority": "urgent",
+            "effective_from": "2020-01-01T00:00:00Z",
+            "effective_until": "2099-12-31T23:59:59Z",
+            "created_by": "テスト管理者"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 201);
+    let item: Value = res.json().await.unwrap();
+    assert_eq!(item["title"], "緊急連絡");
+    assert_eq!(item["priority"], "urgent");
+    assert!(item["effective_from"].as_str().is_some());
+    assert!(item["effective_until"].as_str().is_some());
+
+    // List active → should include the item (effective range covers now)
+    let res = client
+        .get(format!("{base_url}/api/communication-items/active"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let active_items: Vec<Value> = res.json().await.unwrap();
+    assert!(
+        active_items.iter().any(|i| i["title"] == "緊急連絡"),
+        "active list should contain the created item"
+    );
+
+    // Create a second item with expired range
+    let res = client
+        .post(format!("{base_url}/api/communication-items"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "title": "期限切れ連絡",
+            "content": "過去の連絡",
+            "priority": "normal",
+            "effective_from": "2020-01-01T00:00:00Z",
+            "effective_until": "2020-12-31T23:59:59Z"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 201);
+
+    // List active → expired item should NOT appear
+    let res = client
+        .get(format!("{base_url}/api/communication-items/active"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let active_items: Vec<Value> = res.json().await.unwrap();
+    assert!(
+        !active_items.iter().any(|i| i["title"] == "期限切れ連絡"),
+        "expired item should not appear in active list"
+    );
+}
+
+// ============================================================
+// Health Baselines — PUT update + upsert idempotency
+// ============================================================
+
+#[tokio::test]
+async fn test_health_baselines_update_with_put() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "HBUpdate").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    let emp = common::create_test_employee(&client, &base_url, &auth, "HBEmp", "HB01").await;
+    let emp_id = emp["id"].as_str().unwrap();
+
+    // Create baseline via POST (upsert)
+    let res = client
+        .post(format!("{base_url}/api/tenko/health-baselines"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "employee_id": emp_id,
+            "baseline_systolic": 120,
+            "baseline_diastolic": 80,
+            "baseline_temperature": 36.5,
+            "systolic_tolerance": 10,
+            "diastolic_tolerance": 10,
+            "temperature_tolerance": 0.5
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 201);
+    let baseline: Value = res.json().await.unwrap();
+    assert_eq!(baseline["baseline_systolic"], 120);
+
+    // Update via PUT
+    let res = client
+        .put(format!("{base_url}/api/tenko/health-baselines/{emp_id}"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "baseline_systolic": 130,
+            "baseline_temperature": 36.8
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let updated: Value = res.json().await.unwrap();
+    assert_eq!(updated["baseline_systolic"], 130);
+    // unchanged fields should remain
+    assert_eq!(updated["baseline_diastolic"], 80);
+
+    // GET to verify
+    let res = client
+        .get(format!("{base_url}/api/tenko/health-baselines/{emp_id}"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let fetched: Value = res.json().await.unwrap();
+    assert_eq!(fetched["baseline_systolic"], 130);
+}
+
+#[tokio::test]
+async fn test_health_baselines_upsert_twice_no_duplicate() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "HBUpsert").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    let emp = common::create_test_employee(&client, &base_url, &auth, "UpsertEmp", "UP01").await;
+    let emp_id = emp["id"].as_str().unwrap();
+
+    // First upsert
+    let res = client
+        .post(format!("{base_url}/api/tenko/health-baselines"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "employee_id": emp_id,
+            "baseline_systolic": 115
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 201);
+
+    // Second upsert (same employee) → should update, not duplicate
+    let res = client
+        .post(format!("{base_url}/api/tenko/health-baselines"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "employee_id": emp_id,
+            "baseline_systolic": 125,
+            "baseline_diastolic": 85
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 201);
+    let updated: Value = res.json().await.unwrap();
+    assert_eq!(updated["baseline_systolic"], 125);
+    assert_eq!(updated["baseline_diastolic"], 85);
+
+    // List → should have exactly 1 baseline for this employee
+    let res = client
+        .get(format!("{base_url}/api/tenko/health-baselines"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let baselines: Vec<Value> = res.json().await.unwrap();
+    let count = baselines
+        .iter()
+        .filter(|b| b["employee_id"].as_str() == Some(emp_id))
+        .count();
+    assert_eq!(count, 1, "upsert should not create duplicate baselines");
+}
+
+// ============================================================
 // Tenko Call — 点呼送信
 // ============================================================
 

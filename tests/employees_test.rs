@@ -507,3 +507,270 @@ async fn test_list_face_data_empty() {
     let data: Vec<Value> = res.json().await.unwrap();
     assert_eq!(data.len(), 0);
 }
+
+// ============================================================
+// Face flow edge cases
+// ============================================================
+
+/// update_face with valid 1024-dim embedding sets status to pending
+#[tokio::test]
+async fn test_update_face_valid_embedding_pending() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "FacePend").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    let emp = common::create_test_employee(&client, &base_url, &auth, "FacePendEmp", "FP01").await;
+    let id = emp["id"].as_str().unwrap();
+
+    let embedding: Vec<f64> = (0..1024).map(|i| (i as f64) * 0.001).collect();
+    let res = client
+        .put(format!("{base_url}/api/employees/{id}/face"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "face_embedding": embedding,
+            "face_model_version": "faceres-wasm-v1"
+        }))
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(body["face_approval_status"], "pending");
+    assert_eq!(body["face_model_version"], "faceres-wasm-v1");
+
+    // face-data should NOT include pending entries
+    let res = client
+        .get(format!("{base_url}/api/employees/face-data"))
+        .header("Authorization", &auth)
+        .send().await.unwrap();
+    let data: Vec<Value> = res.json().await.unwrap();
+    assert_eq!(data.len(), 0, "pending face should not appear in face-data");
+}
+
+/// Full flow: update_face -> approve -> visible in face-data
+#[tokio::test]
+async fn test_face_approve_visible_in_face_data() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "FaceVis").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    let emp = common::create_test_employee(&client, &base_url, &auth, "FaceVisEmp", "FV01").await;
+    let id = emp["id"].as_str().unwrap();
+
+    let embedding: Vec<f64> = (0..1024).map(|i| (i as f64) * 0.002).collect();
+    client.put(format!("{base_url}/api/employees/{id}/face"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "face_photo_url": "https://mock/face.jpg",
+            "face_embedding": embedding,
+            "face_model_version": "test-v2"
+        }))
+        .send().await.unwrap();
+
+    // Approve
+    let res = client
+        .put(format!("{base_url}/api/employees/{id}/face/approve"))
+        .header("Authorization", &auth)
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(body["face_approval_status"], "approved");
+    assert!(body["face_approved_at"].as_str().is_some());
+
+    // face-data should include approved entry with embedding
+    let res = client
+        .get(format!("{base_url}/api/employees/face-data"))
+        .header("Authorization", &auth)
+        .send().await.unwrap();
+    let data: Vec<Value> = res.json().await.unwrap();
+    assert_eq!(data.len(), 1);
+    assert_eq!(data[0]["id"], id);
+    assert_eq!(data[0]["face_model_version"], "test-v2");
+    assert!(data[0]["face_embedding"].as_array().is_some());
+}
+
+/// Reject flow: update_face -> reject -> not in face-data
+#[tokio::test]
+async fn test_face_reject_not_in_face_data() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "FaceRejND").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    let emp = common::create_test_employee(&client, &base_url, &auth, "FaceRejEmp", "FRN01").await;
+    let id = emp["id"].as_str().unwrap();
+
+    let embedding: Vec<f64> = (0..1024).map(|i| (i as f64) * 0.003).collect();
+    client.put(format!("{base_url}/api/employees/{id}/face"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "face_embedding": embedding,
+            "face_model_version": "test-v3"
+        }))
+        .send().await.unwrap();
+
+    // Reject
+    let res = client
+        .put(format!("{base_url}/api/employees/{id}/face/reject"))
+        .header("Authorization", &auth)
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(body["face_approval_status"], "rejected");
+
+    // face-data should NOT include rejected entries
+    let res = client
+        .get(format!("{base_url}/api/employees/face-data"))
+        .header("Authorization", &auth)
+        .send().await.unwrap();
+    let data: Vec<Value> = res.json().await.unwrap();
+    assert_eq!(data.len(), 0, "rejected face should not appear in face-data");
+}
+
+/// Approve on non-pending employee returns 404
+#[tokio::test]
+async fn test_face_approve_non_pending_returns_404() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "FaceAppNP").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    let emp = common::create_test_employee(&client, &base_url, &auth, "NoFaceEmp", "NF01").await;
+    let id = emp["id"].as_str().unwrap();
+
+    // No face registered, approval_status is not 'pending'
+    let res = client
+        .put(format!("{base_url}/api/employees/{id}/face/approve"))
+        .header("Authorization", &auth)
+        .send().await.unwrap();
+    assert_eq!(res.status(), 404);
+}
+
+/// Reject on non-pending employee returns 404
+#[tokio::test]
+async fn test_face_reject_non_pending_returns_404() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "FaceRejNP").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    let emp = common::create_test_employee(&client, &base_url, &auth, "NoFaceEmp2", "NF02").await;
+    let id = emp["id"].as_str().unwrap();
+
+    let res = client
+        .put(format!("{base_url}/api/employees/{id}/face/reject"))
+        .header("Authorization", &auth)
+        .send().await.unwrap();
+    assert_eq!(res.status(), 404);
+}
+
+/// Re-register face after approval resets to pending
+#[tokio::test]
+async fn test_face_reregister_resets_to_pending() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "FaceReReg").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    let emp = common::create_test_employee(&client, &base_url, &auth, "ReRegEmp", "RR01").await;
+    let id = emp["id"].as_str().unwrap();
+
+    let embedding: Vec<f64> = (0..1024).map(|i| (i as f64) * 0.001).collect();
+
+    // Register + approve
+    client.put(format!("{base_url}/api/employees/{id}/face"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "face_embedding": embedding,
+            "face_model_version": "v1"
+        }))
+        .send().await.unwrap();
+    client.put(format!("{base_url}/api/employees/{id}/face/approve"))
+        .header("Authorization", &auth)
+        .send().await.unwrap();
+
+    // Re-register with new embedding
+    let new_embedding: Vec<f64> = (0..1024).map(|i| (i as f64) * 0.005).collect();
+    let res = client
+        .put(format!("{base_url}/api/employees/{id}/face"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "face_embedding": new_embedding,
+            "face_model_version": "v2"
+        }))
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(body["face_approval_status"], "pending", "re-register should reset to pending");
+    assert_eq!(body["face_model_version"], "v2");
+
+    // face-data should be empty (pending, not approved)
+    let res = client
+        .get(format!("{base_url}/api/employees/face-data"))
+        .header("Authorization", &auth)
+        .send().await.unwrap();
+    let data: Vec<Value> = res.json().await.unwrap();
+    assert_eq!(data.len(), 0);
+}
+
+/// update_face on nonexistent employee returns 404
+#[tokio::test]
+async fn test_update_face_nonexistent_employee() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "FaceNE").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let client = reqwest::Client::new();
+
+    let fake_id = uuid::Uuid::new_v4();
+    let embedding: Vec<f64> = (0..1024).map(|i| (i as f64) * 0.001).collect();
+    let res = client
+        .put(format!("{base_url}/api/employees/{fake_id}/face"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .json(&serde_json::json!({
+            "face_embedding": embedding,
+            "face_model_version": "v1"
+        }))
+        .send().await.unwrap();
+    assert_eq!(res.status(), 404);
+}
+
+/// update_face with only face_photo_url (no embedding) should not change approval status
+#[tokio::test]
+async fn test_update_face_photo_only_no_status_change() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "FacePhoto").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    let emp = common::create_test_employee(&client, &base_url, &auth, "PhotoEmp", "PH01").await;
+    let id = emp["id"].as_str().unwrap();
+
+    // Update only photo URL, no embedding
+    let res = client
+        .put(format!("{base_url}/api/employees/{id}/face"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "face_photo_url": "https://mock/photo-only.jpg"
+        }))
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    // Status should remain null/none (not changed to pending since no embedding provided)
+    assert_ne!(body["face_approval_status"], "pending",
+        "photo-only update should not set status to pending");
+}

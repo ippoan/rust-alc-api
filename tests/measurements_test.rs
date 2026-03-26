@@ -513,3 +513,241 @@ async fn test_update_measurement_not_found() {
         .unwrap();
     assert_eq!(res.status(), 404);
 }
+
+// ============================================================
+// Update COALESCE behavior
+// ============================================================
+
+/// Update with partial fields preserves existing values (COALESCE)
+#[tokio::test]
+async fn test_update_measurement_coalesce_partial() {
+    let (base_url, auth, emp_id, client) = setup_with_employee().await;
+
+    // Create with medical data
+    let res = client
+        .post(format!("{base_url}/api/measurements"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "employee_id": emp_id,
+            "alcohol_value": 0.05,
+            "result_type": "pass",
+            "temperature": 36.5,
+            "systolic": 120,
+            "diastolic": 80,
+            "pulse": 72
+        }))
+        .send().await.unwrap();
+    assert_eq!(res.status(), 201);
+    let m: Value = res.json().await.unwrap();
+    let id = m["id"].as_str().unwrap();
+
+    // Update only alcohol_value, everything else should be preserved
+    let res = client
+        .put(format!("{base_url}/api/measurements/{id}"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "alcohol_value": 0.10 }))
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
+    let updated: Value = res.json().await.unwrap();
+    assert_eq!(updated["alcohol_value"], 0.10);
+    assert_eq!(updated["result_type"], "pass", "result_type should be preserved");
+    assert_eq!(updated["temperature"], 36.5, "temperature should be preserved");
+    assert_eq!(updated["systolic"], 120, "systolic should be preserved");
+    assert_eq!(updated["diastolic"], 80, "diastolic should be preserved");
+    assert_eq!(updated["pulse"], 72, "pulse should be preserved");
+}
+
+/// Update only medical fields preserves alcohol fields
+#[tokio::test]
+async fn test_update_measurement_coalesce_medical_only() {
+    let (base_url, auth, emp_id, client) = setup_with_employee().await;
+
+    let m = common::create_test_measurement(&client, &base_url, &auth, &emp_id).await;
+    let id = m["id"].as_str().unwrap();
+
+    // Update only temperature
+    let res = client
+        .put(format!("{base_url}/api/measurements/{id}"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "temperature": 37.2,
+            "systolic": 130,
+            "diastolic": 85,
+            "pulse": 80
+        }))
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
+    let updated: Value = res.json().await.unwrap();
+    assert_eq!(updated["temperature"], 37.2);
+    assert_eq!(updated["systolic"], 130);
+    assert_eq!(updated["alcohol_value"], 0.0, "alcohol_value should be preserved");
+    assert_eq!(updated["result_type"], "pass", "result_type should be preserved");
+}
+
+// ============================================================
+// Start then complete flow
+// ============================================================
+
+/// Start -> update with all fields -> verify completed
+#[tokio::test]
+async fn test_start_then_complete_with_medical() {
+    let (base_url, auth, emp_id, client) = setup_with_employee().await;
+
+    // Start
+    let res = client
+        .post(format!("{base_url}/api/measurements/start"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "employee_id": emp_id }))
+        .send().await.unwrap();
+    assert_eq!(res.status(), 201);
+    let m: Value = res.json().await.unwrap();
+    let id = m["id"].as_str().unwrap();
+    assert_eq!(m["status"], "started");
+    assert!(m["alcohol_value"].is_null());
+    assert!(m["temperature"].is_null());
+
+    // Complete with all fields
+    let res = client
+        .put(format!("{base_url}/api/measurements/{id}"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "status": "completed",
+            "alcohol_value": 0.0,
+            "result_type": "pass",
+            "temperature": 36.3,
+            "systolic": 115,
+            "diastolic": 75,
+            "pulse": 68,
+            "medical_manual_input": true,
+            "face_verified": true
+        }))
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
+    let updated: Value = res.json().await.unwrap();
+    assert_eq!(updated["status"], "completed");
+    assert_eq!(updated["alcohol_value"], 0.0);
+    assert_eq!(updated["result_type"], "pass");
+    assert_eq!(updated["temperature"], 36.3);
+    assert_eq!(updated["systolic"], 115);
+    assert_eq!(updated["diastolic"], 75);
+    assert_eq!(updated["pulse"], 68);
+    assert_eq!(updated["medical_manual_input"], true);
+    assert_eq!(updated["face_verified"], true);
+
+    // Verify via GET
+    let res = client
+        .get(format!("{base_url}/api/measurements/{id}"))
+        .header("Authorization", &auth)
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
+    let got: Value = res.json().await.unwrap();
+    assert_eq!(got["status"], "completed");
+    assert_eq!(got["temperature"], 36.3);
+}
+
+/// Start -> multiple partial updates -> verify accumulation
+#[tokio::test]
+async fn test_start_then_incremental_updates() {
+    let (base_url, auth, emp_id, client) = setup_with_employee().await;
+
+    // Start
+    let res = client
+        .post(format!("{base_url}/api/measurements/start"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "employee_id": emp_id }))
+        .send().await.unwrap();
+    let m: Value = res.json().await.unwrap();
+    let id = m["id"].as_str().unwrap();
+
+    // First update: face photo
+    let res = client
+        .put(format!("{base_url}/api/measurements/{id}"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "face_photo_url": "https://mock/face.jpg",
+            "face_verified": true
+        }))
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
+    let u1: Value = res.json().await.unwrap();
+    assert_eq!(u1["status"], "started", "status unchanged");
+    assert_eq!(u1["face_verified"], true);
+
+    // Second update: alcohol
+    let res = client
+        .put(format!("{base_url}/api/measurements/{id}"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "alcohol_value": 0.0,
+            "result_type": "pass"
+        }))
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
+    let u2: Value = res.json().await.unwrap();
+    assert_eq!(u2["face_verified"], true, "face_verified preserved from first update");
+    assert_eq!(u2["alcohol_value"], 0.0);
+
+    // Third update: complete
+    let res = client
+        .put(format!("{base_url}/api/measurements/{id}"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "status": "completed" }))
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
+    let u3: Value = res.json().await.unwrap();
+    assert_eq!(u3["status"], "completed");
+    assert_eq!(u3["alcohol_value"], 0.0, "alcohol preserved");
+    assert_eq!(u3["face_verified"], true, "face_verified preserved");
+}
+
+/// Update with invalid result_type returns 400
+#[tokio::test]
+async fn test_update_measurement_invalid_result_type() {
+    let (base_url, auth, emp_id, client) = setup_with_employee().await;
+
+    let m = common::create_test_measurement(&client, &base_url, &auth, &emp_id).await;
+    let id = m["id"].as_str().unwrap();
+
+    let res = client
+        .put(format!("{base_url}/api/measurements/{id}"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "result_type": "unknown" }))
+        .send().await.unwrap();
+    assert_eq!(res.status(), 400);
+}
+
+/// Update with video_url is preserved
+#[tokio::test]
+async fn test_update_measurement_video_url() {
+    let (base_url, auth, emp_id, client) = setup_with_employee().await;
+
+    let res = client
+        .post(format!("{base_url}/api/measurements/start"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "employee_id": emp_id }))
+        .send().await.unwrap();
+    let m: Value = res.json().await.unwrap();
+    let id = m["id"].as_str().unwrap();
+
+    let res = client
+        .put(format!("{base_url}/api/measurements/{id}"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "video_url": "https://mock/video.mp4",
+            "status": "completed",
+            "alcohol_value": 0.0,
+            "result_type": "pass"
+        }))
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
+    let updated: Value = res.json().await.unwrap();
+    assert_eq!(updated["video_url"], "https://mock/video.mp4");
+
+    // Verify via GET
+    let res = client
+        .get(format!("{base_url}/api/measurements/{id}"))
+        .header("Authorization", &auth)
+        .send().await.unwrap();
+    let got: Value = res.json().await.unwrap();
+    assert_eq!(got["video_url"], "https://mock/video.mp4");
+}

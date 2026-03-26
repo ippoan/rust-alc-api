@@ -417,6 +417,53 @@ async fn test_dtako_split_csv_all() {
 }
 
 // ============================================================
+// dtako restraint report — build_report 計算パス
+// ============================================================
+
+#[tokio::test]
+async fn test_dtako_restraint_report_full_month() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "DtakoRRFull").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    // ZIP アップロード
+    let zip_bytes = common::create_test_dtako_zip();
+    let file_part = reqwest::multipart::Part::bytes(zip_bytes)
+        .file_name("test.zip").mime_str("application/zip").unwrap();
+    let form = reqwest::multipart::Form::new().part("file", file_part);
+    client.post(format!("{base_url}/api/upload"))
+        .header("Authorization", &auth)
+        .multipart(form).send().await.unwrap();
+
+    // employee 作成
+    let emp = common::create_test_employee(&client, &base_url, &auth, "拘束運転者", "RR01").await;
+    let emp_id = emp["id"].as_str().unwrap();
+
+    // 3月レポート (31日分)
+    let res = client
+        .get(format!("{base_url}/api/restraint-report?driver_id={emp_id}&year=2026&month=3"))
+        .header("Authorization", &auth)
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    assert!(body["days"].as_array().unwrap().len() >= 28);
+    assert!(body["weekly_subtotals"].as_array().is_some());
+    assert!(body["monthly_total"].is_object());
+
+    // 2月レポート (28日分)
+    let res = client
+        .get(format!("{base_url}/api/restraint-report?driver_id={emp_id}&year=2026&month=2"))
+        .header("Authorization", &auth)
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(body["month"], 2);
+}
+
+// ============================================================
 // dtako daily-hours フィルタ
 // ============================================================
 
