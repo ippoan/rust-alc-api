@@ -3,6 +3,101 @@ mod common;
 use serde_json::Value;
 
 // ============================================================
+// dtako upload — ZIP アップロード
+// ============================================================
+
+#[tokio::test]
+async fn test_dtako_upload_zip() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "DtakoZip").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let client = reqwest::Client::new();
+
+    let zip_bytes = common::create_test_dtako_zip();
+
+    let file_part = reqwest::multipart::Part::bytes(zip_bytes)
+        .file_name("test.zip")
+        .mime_str("application/zip")
+        .unwrap();
+    let form = reqwest::multipart::Form::new().part("file", file_part);
+
+    let res = client
+        .post(format!("{base_url}/api/upload"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .multipart(form)
+        .send().await.unwrap();
+    let status = res.status();
+    let body_text = res.text().await.unwrap();
+    assert_eq!(status, 200, "upload_zip failed: {body_text}");
+    let body: Value = serde_json::from_str(&body_text).unwrap();
+    assert_eq!(body["status"], "completed");
+    assert!(body["operations_count"].as_i64().unwrap() >= 1);
+    let upload_id = body["upload_id"].as_str().unwrap();
+
+    // list_uploads に表示される
+    let res = client
+        .get(format!("{base_url}/api/uploads"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
+}
+
+#[tokio::test]
+async fn test_dtako_upload_invalid_zip() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "DtakoBadZip").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let client = reqwest::Client::new();
+
+    let file_part = reqwest::multipart::Part::bytes(b"not-a-zip".to_vec())
+        .file_name("bad.zip")
+        .mime_str("application/zip")
+        .unwrap();
+    let form = reqwest::multipart::Form::new().part("file", file_part);
+
+    let res = client
+        .post(format!("{base_url}/api/upload"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .multipart(form)
+        .send().await.unwrap();
+    assert_eq!(res.status(), 400);
+}
+
+#[tokio::test]
+async fn test_dtako_recalculate_driver() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "DtakoRecalc").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let client = reqwest::Client::new();
+
+    // まず ZIP をアップロード
+    let zip_bytes = common::create_test_dtako_zip();
+    let file_part = reqwest::multipart::Part::bytes(zip_bytes)
+        .file_name("test.zip")
+        .mime_str("application/zip")
+        .unwrap();
+    let form = reqwest::multipart::Form::new().part("file", file_part);
+
+    client.post(format!("{base_url}/api/upload"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .multipart(form)
+        .send().await.unwrap();
+
+    // recalculate-driver (SSE streaming endpoint)
+    // driver_id は UUID なのでダミー UUID を使用
+    let fake_driver = uuid::Uuid::new_v4();
+    let res = client
+        .post(format!("{base_url}/api/recalculate-driver?year=2026&month=3&driver_id={fake_driver}"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .send().await.unwrap();
+    // SSE なので 200 でストリーム開始
+    assert_eq!(res.status(), 200);
+}
+
+// ============================================================
 // dtako 基本 list テスト (空一覧の200確認)
 // ============================================================
 

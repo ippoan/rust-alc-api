@@ -131,11 +131,14 @@ pub async fn setup_app_state() -> AppState {
     let storage: Arc<dyn rust_alc_api::storage::StorageBackend> =
         Arc::new(MockStorage::new("test-bucket"));
 
+    let dtako_storage: Arc<dyn rust_alc_api::storage::StorageBackend> =
+        Arc::new(MockStorage::new("dtako-bucket"));
+
     AppState {
         pool,
         storage,
         carins_storage: None,
-        dtako_storage: None,
+        dtako_storage: Some(dtako_storage),
         fcm: None,
     }
 }
@@ -168,6 +171,32 @@ pub fn create_test_jwt(tenant_id: Uuid, role: &str) -> String {
         created_at: chrono::Utc::now(),
     };
     create_access_token(&user, &secret, None).expect("Failed to create test JWT")
+}
+
+/// dtako テスト用の最小 ZIP (KUDGURI.csv + KUDGIVT.csv) を生成
+pub fn create_test_dtako_zip() -> Vec<u8> {
+    use std::io::Write;
+
+    let kudguri_csv = "運行NO,読取日,事業所CD,事業所名,車輌CD,車輌名,乗務員CD1,乗務員名１,対象乗務員区分\n\
+                       1001,2026/03/01,OFF01,テスト事業所,VH01,テスト車両,DR01,テスト運転者,1\n";
+    let kudgivt_csv = "運行NO,読取日,乗務員CD1,乗務員名１,対象乗務員区分,開始日時,イベントCD,イベント名\n\
+                       1001,2026/03/01,DR01,テスト運転者,1,2026/03/01 08:00:00,100,出庫\n";
+
+    // Shift-JIS にエンコード
+    let (kudguri_bytes, _, _) = encoding_rs::SHIFT_JIS.encode(kudguri_csv);
+    let (kudgivt_bytes, _, _) = encoding_rs::SHIFT_JIS.encode(kudgivt_csv);
+
+    let mut buf = std::io::Cursor::new(Vec::new());
+    {
+        let mut zip = zip::ZipWriter::new(&mut buf);
+        let options = zip::write::SimpleFileOptions::default();
+        zip.start_file("KUDGURI.csv", options).unwrap();
+        zip.write_all(&kudguri_bytes).unwrap();
+        zip.start_file("KUDGIVT.csv", options).unwrap();
+        zip.write_all(&kudgivt_bytes).unwrap();
+        zip.finish().unwrap();
+    }
+    buf.into_inner()
 }
 
 /// テスト用 axum サーバーを起動し、base URL を返す
