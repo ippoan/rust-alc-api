@@ -370,11 +370,13 @@ Google OAuth 以外の端末登録フローを3種類サポート。
 ## テスト
 
 - テストインフラ: `docker-compose.yml` (PostgreSQL 16, port 54322) + `tests/common/mod.rs` ヘルパー
-- 実行: `source .test-config && cargo test`
-- カバレッジ: `source .test-config && cargo llvm-cov --summary-only`
-- 現在のカバレッジ: 72% line / 75% region (~400テスト)
-- 並列テストで env var 競合あり → `--test-threads=1` で全通過
+- 実行: `source .test-config && RUST_TEST_THREADS=1 cargo test`
+- カバレッジ: `/coverage-check` スキル使用 (`--full` で サマリ + 未カバー行を1回で取得)
+- 現在のカバレッジ: 83% line / 85% region (~530テスト)
+- 並列テストで env var 競合あり → `RUST_TEST_THREADS=1` で全通過
 - カバレッジ計画: `plans/coverage_100.md`
+- **DB エラー注入**: `BEGIN → ALTER TABLE RENAME → テスト → ROLLBACK` パターン (PostgreSQL DDL は ROLLBACK 可能)
+- **SSE テスト**: コアロジックを `pub async fn xxx_core()` に抽出し、SSE ラッパーとは別にテスト可能にする
 
 ## デプロイルール
 

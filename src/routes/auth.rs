@@ -15,8 +15,8 @@ use crate::auth::jwt::{
 };
 use crate::auth::lineworks;
 use crate::db::models::{Tenant, User};
-use crate::AppState;
 use crate::middleware::auth::AuthUser;
+use crate::AppState;
 
 /// 公開ルート (認証不要)
 pub fn public_router() -> Router<AppState> {
@@ -71,13 +71,10 @@ async fn google_login(
     Extension(jwt_secret): Extension<JwtSecret>,
     Json(body): Json<GoogleLoginRequest>,
 ) -> Result<Json<AuthResponse>, StatusCode> {
-    let google_claims = verifier
-        .verify(&body.id_token)
-        .await
-        .map_err(|e| {
-            tracing::warn!("Google token verification failed: {e}");
-            StatusCode::UNAUTHORIZED
-        })?;
+    let google_claims = verifier.verify(&body.id_token).await.map_err(|e| {
+        tracing::warn!("Google token verification failed: {e}");
+        StatusCode::UNAUTHORIZED
+    })?;
 
     issue_tokens_for_google_claims(&state, &jwt_secret, google_claims).await
 }
@@ -114,13 +111,11 @@ async fn issue_tokens_for_google_claims(
     google_claims: crate::auth::google::GoogleClaims,
 ) -> Result<Json<AuthResponse>, StatusCode> {
     // ユーザーを google_sub で検索
-    let existing_user = sqlx::query_as::<_, User>(
-        "SELECT * FROM users WHERE google_sub = $1",
-    )
-    .bind(&google_claims.sub)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let existing_user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE google_sub = $1")
+        .bind(&google_claims.sub)
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let user = match existing_user {
         Some(user) => user,
@@ -146,13 +141,12 @@ async fn issue_tokens_for_google_claims(
                 (inv.tenant_id, inv.role.clone())
             } else {
                 // 2. tenants.email_domain でドメイン一致検索
-                let domain_tenant = sqlx::query_as::<_, Tenant>(
-                    "SELECT * FROM tenants WHERE email_domain = $1",
-                )
-                .bind(&email_domain)
-                .fetch_optional(&state.pool)
-                .await
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                let domain_tenant =
+                    sqlx::query_as::<_, Tenant>("SELECT * FROM tenants WHERE email_domain = $1")
+                        .bind(&email_domain)
+                        .fetch_optional(&state.pool)
+                        .await
+                        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
                 if let Some(t) = domain_tenant {
                     (t.id, "admin".to_string())
@@ -288,9 +282,7 @@ async fn refresh_token(
 
 // --- Me ---
 
-async fn me(
-    Extension(auth_user): Extension<AuthUser>,
-) -> Json<UserResponse> {
+async fn me(Extension(auth_user): Extension<AuthUser>) -> Json<UserResponse> {
     Json(UserResponse {
         id: auth_user.user_id,
         email: auth_user.email,
@@ -353,7 +345,9 @@ async fn my_orgs(
         None => vec![],
     };
 
-    Ok(Json(MyOrgsResponse { organizations: orgs }))
+    Ok(Json(MyOrgsResponse {
+        organizations: orgs,
+    }))
 }
 
 // --- Google OAuth Redirect Flow ---
@@ -368,8 +362,8 @@ async fn google_redirect(
     Query(params): Query<GoogleRedirectParams>,
     Extension(verifier): Extension<GoogleTokenVerifier>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let oauth_state_secret = std::env::var("OAUTH_STATE_SECRET")
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let oauth_state_secret =
+        std::env::var("OAUTH_STATE_SECRET").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let state_payload = lineworks::state::StatePayload {
         redirect_uri: params.redirect_uri,
@@ -379,8 +373,8 @@ async fn google_redirect(
     };
     let signed_state = lineworks::state::sign(&state_payload, &oauth_state_secret);
 
-    let api_origin = std::env::var("API_ORIGIN")
-        .unwrap_or_else(|_| "https://alc-api.ippoan.org".to_string());
+    let api_origin =
+        std::env::var("API_ORIGIN").unwrap_or_else(|_| "https://alc-api.ippoan.org".to_string());
     let callback_uri = format!("{api_origin}/api/auth/google/callback");
 
     let google_auth_url = format!(
@@ -413,17 +407,17 @@ async fn google_callback(
     Extension(jwt_secret): Extension<JwtSecret>,
     Query(params): Query<GoogleCallbackParams>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let oauth_state_secret = std::env::var("OAUTH_STATE_SECRET")
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let oauth_state_secret =
+        std::env::var("OAUTH_STATE_SECRET").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let state_payload = lineworks::state::verify(&params.state, &oauth_state_secret)
-        .map_err(|e| {
+    let state_payload =
+        lineworks::state::verify(&params.state, &oauth_state_secret).map_err(|e| {
             tracing::warn!("Google state verification failed: {e}");
             StatusCode::BAD_REQUEST
         })?;
 
-    let api_origin = std::env::var("API_ORIGIN")
-        .unwrap_or_else(|_| "https://alc-api.ippoan.org".to_string());
+    let api_origin =
+        std::env::var("API_ORIGIN").unwrap_or_else(|_| "https://alc-api.ippoan.org".to_string());
     let callback_uri = format!("{api_origin}/api/auth/google/callback");
 
     let google_claims = verifier
@@ -473,37 +467,39 @@ async fn lineworks_redirect(
     State(state): State<AppState>,
     Query(params): Query<LineworksRedirectParams>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let oauth_state_secret = std::env::var("OAUTH_STATE_SECRET")
-        .map_err(|_| {
-            tracing::error!("OAUTH_STATE_SECRET not set");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    let oauth_state_secret = std::env::var("OAUTH_STATE_SECRET").map_err(|_| {
+        tracing::error!("OAUTH_STATE_SECRET not set");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     // address パラメータから domain を抽出（user@domain → domain）
-    let domain = params.domain
-        .or_else(|| params.address.as_ref().map(|a| {
-            a.split('@').last().unwrap_or(a).to_string()
-        }))
+    let domain = params
+        .domain
+        .or_else(|| {
+            params
+                .address
+                .as_ref()
+                .map(|a| a.split('@').last().unwrap_or(a).to_string())
+        })
         .ok_or_else(|| {
             tracing::warn!("Missing domain or address parameter");
             StatusCode::BAD_REQUEST
         })?;
 
     // DB から SSO config を検索（SECURITY DEFINER 関数でRLSバイパス）
-    let config = sqlx::query_as::<_, SsoConfigRow>(
-        "SELECT * FROM resolve_sso_config('lineworks', $1)",
-    )
-    .bind(&domain)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("SSO config query failed: {e}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?
-    .ok_or_else(|| {
-        tracing::warn!("No SSO config found for domain: {}", domain);
-        StatusCode::NOT_FOUND
-    })?;
+    let config =
+        sqlx::query_as::<_, SsoConfigRow>("SELECT * FROM resolve_sso_config('lineworks', $1)")
+            .bind(&domain)
+            .fetch_optional(&state.pool)
+            .await
+            .map_err(|e| {
+                tracing::error!("SSO config query failed: {e}");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?
+            .ok_or_else(|| {
+                tracing::warn!("No SSO config found for domain: {}", domain);
+                StatusCode::NOT_FOUND
+            })?;
 
     // HMAC-signed state 生成
     let state_payload = lineworks::state::StatePayload {
@@ -515,8 +511,8 @@ async fn lineworks_redirect(
     let signed_state = lineworks::state::sign(&state_payload, &oauth_state_secret);
 
     // callback URL
-    let api_origin = std::env::var("API_ORIGIN")
-        .unwrap_or_else(|_| "https://alc-api.mtamaramu.com".to_string());
+    let api_origin =
+        std::env::var("API_ORIGIN").unwrap_or_else(|_| "https://alc-api.mtamaramu.com".to_string());
     let callback_uri = format!("{api_origin}/api/auth/lineworks/callback");
     let encoded_callback = urlencoding::encode(&callback_uri);
 
@@ -550,36 +546,35 @@ async fn lineworks_callback(
     Extension(jwt_secret): Extension<JwtSecret>,
     Query(params): Query<LineworksCallbackParams>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let oauth_state_secret = std::env::var("OAUTH_STATE_SECRET")
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let oauth_state_secret =
+        std::env::var("OAUTH_STATE_SECRET").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // State 検証
-    let state_payload = lineworks::state::verify(&params.state, &oauth_state_secret)
-        .map_err(|e| {
+    let state_payload =
+        lineworks::state::verify(&params.state, &oauth_state_secret).map_err(|e| {
             tracing::warn!("State verification failed: {e}");
             StatusCode::BAD_REQUEST
         })?;
 
     // SSO config を DB から取得（SECURITY DEFINER 関数）
-    let config = sqlx::query_as::<_, SsoConfigRow>(
-        "SELECT * FROM resolve_sso_config('lineworks', $1)",
-    )
-    .bind(&state_payload.external_org_id)
-    .fetch_one(&state.pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("SSO config lookup failed: {e}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    let config =
+        sqlx::query_as::<_, SsoConfigRow>("SELECT * FROM resolve_sso_config('lineworks', $1)")
+            .bind(&state_payload.external_org_id)
+            .fetch_one(&state.pool)
+            .await
+            .map_err(|e| {
+                tracing::error!("SSO config lookup failed: {e}");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
 
     // callback URL 再構築（token exchange で必要）
-    let api_origin = std::env::var("API_ORIGIN")
-        .unwrap_or_else(|_| "https://alc-api.mtamaramu.com".to_string());
+    let api_origin =
+        std::env::var("API_ORIGIN").unwrap_or_else(|_| "https://alc-api.mtamaramu.com".to_string());
     let callback_uri = format!("{api_origin}/api/auth/lineworks/callback");
 
     // client_secret を復号（AES-256-GCM, SSO_ENCRYPTION_KEY で暗号化）
-    let encryption_key = std::env::var("SSO_ENCRYPTION_KEY")
-        .unwrap_or_else(|_| jwt_secret.0.clone());
+    let encryption_key =
+        std::env::var("SSO_ENCRYPTION_KEY").unwrap_or_else(|_| jwt_secret.0.clone());
     let client_secret = lineworks::decrypt_secret(&config.client_secret_encrypted, &encryption_key)
         .map_err(|e| {
             tracing::error!("client_secret decryption failed: {e}");
@@ -677,17 +672,16 @@ async fn woff_config(
     State(state): State<AppState>,
     Query(params): Query<WoffConfigParams>,
 ) -> Result<Json<WoffConfigResponse>, StatusCode> {
-    let config = sqlx::query_as::<_, SsoConfigRow>(
-        "SELECT * FROM resolve_sso_config('lineworks', $1)",
-    )
-    .bind(&params.domain)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("SSO config query failed: {e}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?
-    .ok_or(StatusCode::NOT_FOUND)?;
+    let config =
+        sqlx::query_as::<_, SsoConfigRow>("SELECT * FROM resolve_sso_config('lineworks', $1)")
+            .bind(&params.domain)
+            .fetch_optional(&state.pool)
+            .await
+            .map_err(|e| {
+                tracing::error!("SSO config query failed: {e}");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?
+            .ok_or(StatusCode::NOT_FOUND)?;
 
     let woff_id = config.woff_id.ok_or_else(|| {
         tracing::warn!("WOFF not configured for domain: {}", params.domain);
@@ -718,17 +712,16 @@ async fn woff_auth(
     Extension(jwt_secret): Extension<JwtSecret>,
     Json(body): Json<WoffAuthRequest>,
 ) -> Result<Json<WoffAuthResponse>, StatusCode> {
-    let config = sqlx::query_as::<_, SsoConfigRow>(
-        "SELECT * FROM resolve_sso_config('lineworks', $1)",
-    )
-    .bind(&body.domain_id)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("SSO config query failed: {e}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?
-    .ok_or(StatusCode::NOT_FOUND)?;
+    let config =
+        sqlx::query_as::<_, SsoConfigRow>("SELECT * FROM resolve_sso_config('lineworks', $1)")
+            .bind(&body.domain_id)
+            .fetch_optional(&state.pool)
+            .await
+            .map_err(|e| {
+                tracing::error!("SSO config query failed: {e}");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?
+            .ok_or(StatusCode::NOT_FOUND)?;
 
     // WOFF SDK は access_token を直接提供するので code exchange 不要
     let http_client = reqwest::Client::new();
@@ -852,13 +845,11 @@ async fn create_tenant(
     State(state): State<AppState>,
     Json(body): Json<CreateTenant>,
 ) -> Result<(StatusCode, Json<TenantResponse>), StatusCode> {
-    let tenant = sqlx::query_as::<_, Tenant>(
-        "INSERT INTO tenants (name) VALUES ($1) RETURNING *",
-    )
-    .bind(&body.name)
-    .fetch_one(&state.pool)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let tenant = sqlx::query_as::<_, Tenant>("INSERT INTO tenants (name) VALUES ($1) RETURNING *")
+        .bind(&body.name)
+        .fetch_one(&state.pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok((
         StatusCode::CREATED,

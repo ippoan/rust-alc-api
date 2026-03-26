@@ -6,8 +6,8 @@ use axum::{
 };
 use serde::Serialize;
 
-use crate::AppState;
 use crate::middleware::auth::TenantId;
+use crate::AppState;
 
 pub fn tenant_router() -> Router<AppState> {
     Router::new()
@@ -37,10 +37,7 @@ async fn upload_face_photo(
 
     let filename = format!("{}.jpg", uuid::Uuid::new_v4());
 
-    let data = field
-        .bytes()
-        .await
-        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    let data = field.bytes().await.map_err(|_| StatusCode::BAD_REQUEST)?;
 
     let object_path = format!("{tenant_id}/{filename}");
 
@@ -71,10 +68,7 @@ async fn upload_report_audio(
 
     let filename = format!("{}.webm", uuid::Uuid::new_v4());
 
-    let data = field
-        .bytes()
-        .await
-        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    let data = field.bytes().await.map_err(|_| StatusCode::BAD_REQUEST)?;
 
     let object_path = format!("{tenant_id}/report-audio/{filename}");
 
@@ -105,10 +99,7 @@ async fn upload_blow_video(
 
     let filename = format!("{}.webm", uuid::Uuid::new_v4());
 
-    let data = field
-        .bytes()
-        .await
-        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    let data = field.bytes().await.map_err(|_| StatusCode::BAD_REQUEST)?;
 
     let object_path = format!("{tenant_id}/blow-video/{filename}");
 

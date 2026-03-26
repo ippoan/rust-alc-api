@@ -1,6 +1,6 @@
 use axum::{
     body::Body,
-    extract::{Query, Path, State},
+    extract::{Path, Query, State},
     http::{header, StatusCode},
     response::Response,
     routing::get,
@@ -195,9 +195,8 @@ async fn export_csv(
     }
 
     let where_clause = conditions.join(" AND ");
-    let sql = format!(
-        "SELECT r.* FROM tenko_records r WHERE {where_clause} ORDER BY r.recorded_at DESC"
-    );
+    let sql =
+        format!("SELECT r.* FROM tenko_records r WHERE {where_clause} ORDER BY r.recorded_at DESC");
 
     let mut query = sqlx::query_as::<_, TenkoRecord>(&sql).bind(tenant_id);
     if let Some(employee_id) = filter.employee_id {
@@ -267,9 +266,15 @@ async fn export_csv(
             .as_ref()
             .map(|v| {
                 (
-                    v.get("illness").and_then(|b| b.as_bool()).map_or(String::new(), |b| b.to_string()),
-                    v.get("fatigue").and_then(|b| b.as_bool()).map_or(String::new(), |b| b.to_string()),
-                    v.get("sleep_deprivation").and_then(|b| b.as_bool()).map_or(String::new(), |b| b.to_string()),
+                    v.get("illness")
+                        .and_then(|b| b.as_bool())
+                        .map_or(String::new(), |b| b.to_string()),
+                    v.get("fatigue")
+                        .and_then(|b| b.as_bool())
+                        .map_or(String::new(), |b| b.to_string()),
+                    v.get("sleep_deprivation")
+                        .and_then(|b| b.as_bool())
+                        .map_or(String::new(), |b| b.to_string()),
                 )
             })
             .unwrap_or_default();
@@ -278,10 +283,20 @@ async fn export_csv(
             .safety_judgment
             .as_ref()
             .map(|v| {
-                let status = v.get("status").and_then(|s| s.as_str()).unwrap_or("").to_string();
-                let items = v.get("failed_items")
+                let status = v
+                    .get("status")
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let items = v
+                    .get("failed_items")
                     .and_then(|a| a.as_array())
-                    .map(|arr| arr.iter().filter_map(|i| i.as_str()).collect::<Vec<_>>().join(";"))
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|i| i.as_str())
+                            .collect::<Vec<_>>()
+                            .join(";")
+                    })
                     .unwrap_or_default();
                 (status, items)
             })
@@ -291,9 +306,24 @@ async fn export_csv(
             .daily_inspection
             .as_ref()
             .map(|v| {
-                let items = ["brakes", "tires", "lights", "steering", "wipers", "mirrors", "horn", "seatbelts"];
-                let has_ng = items.iter().any(|k| v.get(k).and_then(|s| s.as_str()) == Some("ng"));
-                if has_ng { "ng".to_string() } else { "ok".to_string() }
+                let items = [
+                    "brakes",
+                    "tires",
+                    "lights",
+                    "steering",
+                    "wipers",
+                    "mirrors",
+                    "horn",
+                    "seatbelts",
+                ];
+                let has_ng = items
+                    .iter()
+                    .any(|k| v.get(k).and_then(|s| s.as_str()) == Some("ng"));
+                if has_ng {
+                    "ng".to_string()
+                } else {
+                    "ok".to_string()
+                }
             })
             .unwrap_or_default();
 

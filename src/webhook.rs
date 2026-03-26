@@ -63,8 +63,7 @@ async fn deliver_webhook(
 
         // HMAC-SHA256 署名
         if let Some(ref secret) = config.secret {
-            let mut mac =
-                HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC key length");
+            let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC key length");
             mac.update(body.as_bytes());
             let signature = hex::encode(mac.finalize().into_bytes());
             req = req.header("X-Webhook-Signature", format!("sha256={signature}"));
@@ -104,8 +103,7 @@ async fn deliver_webhook(
         }
 
         if attempt < 3 {
-            tokio::time::sleep(std::time::Duration::from_secs(delays[attempt as usize - 1]))
-                .await;
+            tokio::time::sleep(std::time::Duration::from_secs(delays[attempt as usize - 1])).await;
         }
     }
 
@@ -186,12 +184,11 @@ pub async fn check_overdue_schedules(pool: &PgPool) -> Result<(), anyhow::Error>
 
         for schedule in &overdue_schedules {
             // 乗務員名を取得
-            let employee_name: Option<String> = sqlx::query_scalar(
-                "SELECT name FROM employees WHERE id = $1",
-            )
-            .bind(schedule.employee_id)
-            .fetch_optional(&mut *conn)
-            .await?;
+            let employee_name: Option<String> =
+                sqlx::query_scalar("SELECT name FROM employees WHERE id = $1")
+                    .bind(schedule.employee_id)
+                    .fetch_optional(&mut *conn)
+                    .await?;
 
             let minutes = (Utc::now() - schedule.scheduled_at).num_minutes();
 
@@ -211,12 +208,10 @@ pub async fn check_overdue_schedules(pool: &PgPool) -> Result<(), anyhow::Error>
             });
 
             // 通知済みマーク
-            sqlx::query(
-                "UPDATE tenko_schedules SET overdue_notified_at = NOW() WHERE id = $1",
-            )
-            .bind(schedule.id)
-            .execute(&mut *conn)
-            .await?;
+            sqlx::query("UPDATE tenko_schedules SET overdue_notified_at = NOW() WHERE id = $1")
+                .bind(schedule.id)
+                .execute(&mut *conn)
+                .await?;
 
             // Webhook 配信
             let _ = deliver_webhook(pool, config, "tenko_overdue", &payload).await;

@@ -33,7 +33,6 @@ pub fn tenant_router() -> Router<AppState> {
         )
 }
 
-
 #[derive(Debug, Deserialize)]
 struct GuidanceFilter {
     employee_id: Option<Uuid>,
@@ -252,13 +251,12 @@ async fn create_record(
 
     // 親がある場合は depth を計算
     let depth = if let Some(pid) = body.parent_id {
-        let parent_depth: Option<i32> = sqlx::query_scalar(
-            "SELECT depth FROM alc_api.guidance_records WHERE id = $1",
-        )
-        .bind(pid)
-        .fetch_optional(&mut *conn)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let parent_depth: Option<i32> =
+            sqlx::query_scalar("SELECT depth FROM alc_api.guidance_records WHERE id = $1")
+                .bind(pid)
+                .fetch_optional(&mut *conn)
+                .await
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
         match parent_depth {
             Some(d) if d >= 2 => {
@@ -422,18 +420,12 @@ async fn upload_attachment(
         .unwrap_or("application/octet-stream")
         .to_string();
 
-    let data = field
-        .bytes()
-        .await
-        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    let data = field.bytes().await.map_err(|_| StatusCode::BAD_REQUEST)?;
 
     let file_size = data.len() as i32;
 
     // 拡張子を元ファイル名から取得
-    let ext = original_name
-        .rsplit('.')
-        .next()
-        .unwrap_or("bin");
+    let ext = original_name.rsplit('.').next().unwrap_or("bin");
     let storage_filename = format!("{}.{}", Uuid::new_v4(), ext);
     let object_path = format!("{}/guidance/{}/{}", tenant_id, record_id, storage_filename);
 
@@ -481,8 +473,14 @@ async fn download_attachment(
     Path((record_id, att_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Response<Body>, StatusCode> {
     let tenant_id = tenant.0 .0;
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let att = sqlx::query_as::<_, GuidanceRecordAttachment>(
         "SELECT * FROM alc_api.guidance_record_attachments WHERE id = $1 AND record_id = $2",
@@ -495,7 +493,10 @@ async fn download_attachment(
     .ok_or(StatusCode::NOT_FOUND)?;
 
     let key = state.storage.extract_key(&att.storage_url).ok_or_else(|| {
-        tracing::error!("Failed to extract key from storage_url: {}", att.storage_url);
+        tracing::error!(
+            "Failed to extract key from storage_url: {}",
+            att.storage_url
+        );
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 

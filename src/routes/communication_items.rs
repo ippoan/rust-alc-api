@@ -14,10 +14,7 @@ use crate::AppState;
 
 pub fn tenant_router() -> Router<AppState> {
     Router::new()
-        .route(
-            "/communication-items",
-            get(list_items).post(create_item),
-        )
+        .route("/communication-items", get(list_items).post(create_item))
         .route(
             "/communication-items/{id}",
             get(get_item).put(update_item).delete(delete_item),

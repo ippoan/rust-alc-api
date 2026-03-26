@@ -17,11 +17,16 @@ use crate::AppState;
 /// テナント対応ルート (JWT or X-Tenant-ID)
 pub fn tenant_router() -> Router<AppState> {
     Router::new()
-        .route("/tenko/schedules", post(create_schedule).get(list_schedules))
+        .route(
+            "/tenko/schedules",
+            post(create_schedule).get(list_schedules),
+        )
         .route("/tenko/schedules/batch", post(batch_create_schedules))
         .route(
             "/tenko/schedules/{id}",
-            get(get_schedule).put(update_schedule).delete(delete_schedule),
+            get(get_schedule)
+                .put(update_schedule)
+                .delete(delete_schedule),
         )
         .route(
             "/tenko/schedules/pending/{employee_id}",

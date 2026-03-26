@@ -8,16 +8,25 @@ use axum::{
 };
 use uuid::Uuid;
 
-use crate::db::models::{CreateMeasurement, Measurement, MeasurementFilter, MeasurementsResponse, StartMeasurement, UpdateMeasurement};
+use crate::db::models::{
+    CreateMeasurement, Measurement, MeasurementFilter, MeasurementsResponse, StartMeasurement,
+    UpdateMeasurement,
+};
 use crate::db::tenant::set_current_tenant;
-use crate::AppState;
 use crate::middleware::auth::TenantId;
+use crate::AppState;
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/measurements", post(create_measurement).get(list_measurements))
+        .route(
+            "/measurements",
+            post(create_measurement).get(list_measurements),
+        )
         .route("/measurements/start", post(start_measurement))
-        .route("/measurements/{id}", get(get_measurement).put(update_measurement))
+        .route(
+            "/measurements/{id}",
+            get(get_measurement).put(update_measurement),
+        )
 }
 
 /// テナント対応ルート (顔写真プロキシ)
@@ -35,9 +44,13 @@ async fn start_measurement(
 ) -> Result<(StatusCode, Json<Measurement>), StatusCode> {
     let tenant_id = tenant.0 .0;
 
-    let mut conn = state.pool.acquire().await
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string()).await
+    set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let measurement = sqlx::query_as::<_, Measurement>(
@@ -89,9 +102,13 @@ async fn update_measurement(
         }
     }
 
-    let mut conn = state.pool.acquire().await
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string()).await
+    set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let measurement = sqlx::query_as::<_, Measurement>(
@@ -163,9 +180,13 @@ async fn create_measurement(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    let mut conn = state.pool.acquire().await
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string()).await
+    set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let measurement = sqlx::query_as::<_, Measurement>(
@@ -216,9 +237,13 @@ async fn list_measurements(
     let page = filter.page.unwrap_or(1).max(1);
     let offset = (page - 1) * per_page;
 
-    let mut conn = state.pool.acquire().await
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string()).await
+    set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // Build dynamic query
@@ -317,9 +342,13 @@ async fn get_measurement(
 ) -> Result<Json<Measurement>, StatusCode> {
     let tenant_id = tenant.0 .0;
 
-    let mut conn = state.pool.acquire().await
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string()).await
+    set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let measurement = sqlx::query_as::<_, Measurement>(
@@ -343,9 +372,13 @@ async fn get_face_photo(
 ) -> Result<Response, StatusCode> {
     let tenant_id = tenant.0 .0;
 
-    let mut conn = state.pool.acquire().await
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string()).await
+    set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let measurement = sqlx::query_as::<_, Measurement>(
@@ -358,7 +391,10 @@ async fn get_face_photo(
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     .ok_or(StatusCode::NOT_FOUND)?;
 
-    let face_url = measurement.face_photo_url.as_deref().ok_or(StatusCode::NOT_FOUND)?;
+    let face_url = measurement
+        .face_photo_url
+        .as_deref()
+        .ok_or(StatusCode::NOT_FOUND)?;
 
     let key = state.storage.extract_key(face_url).ok_or_else(|| {
         tracing::error!("Failed to extract key from face_photo_url: {face_url}");
@@ -386,9 +422,13 @@ async fn get_video(
 ) -> Result<Response, StatusCode> {
     let tenant_id = tenant.0 .0;
 
-    let mut conn = state.pool.acquire().await
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string()).await
+    set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let measurement = sqlx::query_as::<_, Measurement>(
@@ -401,7 +441,10 @@ async fn get_video(
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     .ok_or(StatusCode::NOT_FOUND)?;
 
-    let video_url = measurement.video_url.as_deref().ok_or(StatusCode::NOT_FOUND)?;
+    let video_url = measurement
+        .video_url
+        .as_deref()
+        .ok_or(StatusCode::NOT_FOUND)?;
 
     let key = state.storage.extract_key(video_url).ok_or_else(|| {
         tracing::error!("Failed to extract key from video_url: {video_url}");

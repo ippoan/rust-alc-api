@@ -3,16 +3,15 @@
 use axum::{
     extract::State,
     http::StatusCode,
-    Extension, Json,
-    routing::{get, post, delete},
-    Router,
+    routing::{delete, get, post},
+    Extension, Json, Router,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::AppState;
 use crate::db::tenant::set_current_tenant;
 use crate::middleware::auth::AuthUser;
+use crate::AppState;
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
 struct SsoConfigResponse {
@@ -62,8 +61,14 @@ async fn list_configs(
         return Err(StatusCode::FORBIDDEN);
     }
 
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &auth_user.tenant_id.to_string()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    set_current_tenant(&mut conn, &auth_user.tenant_id.to_string())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let configs = sqlx::query_as::<_, SsoConfigResponse>(
         r#"
@@ -111,8 +116,14 @@ async fn upsert_config(
 
     let enabled = body.enabled.unwrap_or(true);
 
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &auth_user.tenant_id.to_string()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    set_current_tenant(&mut conn, &auth_user.tenant_id.to_string())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let config = if let Some(encrypted) = encrypted_secret {
         sqlx::query_as::<_, SsoConfigResponse>(
@@ -178,8 +189,14 @@ async fn delete_config(
         return Err(StatusCode::FORBIDDEN);
     }
 
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &auth_user.tenant_id.to_string()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    set_current_tenant(&mut conn, &auth_user.tenant_id.to_string())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     sqlx::query("DELETE FROM sso_provider_configs WHERE tenant_id = $1 AND provider = $2")
         .bind(auth_user.tenant_id)
@@ -196,10 +213,10 @@ async fn delete_config(
 
 /// AES-256-GCM で暗号化（rust-logi と同じ形式）
 fn encrypt_secret(plaintext: &str, key_material: &str) -> Result<String, String> {
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
     use ring::aead::{self, Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
     use ring::rand::{SecureRandom, SystemRandom};
-    use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-    use sha2::{Sha256, Digest};
+    use sha2::{Digest, Sha256};
 
     let mut key_bytes = [0u8; 32];
     let hash = Sha256::digest(key_material.as_bytes());

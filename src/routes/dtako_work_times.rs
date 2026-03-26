@@ -57,8 +57,14 @@ async fn list_work_times(
     let per_page = filter.per_page.unwrap_or(50).min(200);
     let offset = (page - 1) * per_page;
 
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let total: (i64,) = sqlx::query_as(
         r#"SELECT COUNT(*)::BIGINT FROM alc_api.dtako_daily_work_segments

@@ -171,11 +171,13 @@ async fn update_item(
 
     // vehicle_conditions が指定された場合は全置換
     let conditions = if let Some(vcs) = &body.vehicle_conditions {
-        sqlx::query("DELETE FROM alc_api.carrying_item_vehicle_conditions WHERE carrying_item_id = $1")
-            .bind(id)
-            .execute(&mut *conn)
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        sqlx::query(
+            "DELETE FROM alc_api.carrying_item_vehicle_conditions WHERE carrying_item_id = $1",
+        )
+        .bind(id)
+        .execute(&mut *conn)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
         let mut conds = Vec::new();
         for vc in vcs {

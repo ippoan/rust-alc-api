@@ -1,9 +1,4 @@
-use axum::{
-    extract::State,
-    http::StatusCode,
-    routing::get,
-    Json, Router,
-};
+use axum::{extract::State, http::StatusCode, routing::get, Json, Router};
 
 use crate::db::models::DtakoVehicle;
 use crate::db::tenant::set_current_tenant;
@@ -19,8 +14,14 @@ async fn list_vehicles(
     tenant: axum::Extension<TenantId>,
 ) -> Result<Json<Vec<DtakoVehicle>>, StatusCode> {
     let tenant_id = tenant.0 .0;
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let vehicles = sqlx::query_as::<_, DtakoVehicle>(
         "SELECT * FROM alc_api.dtako_vehicles ORDER BY vehicle_cd",

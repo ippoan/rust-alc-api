@@ -26,8 +26,14 @@ async fn list_drivers(
     tenant: axum::Extension<TenantId>,
 ) -> Result<Json<Vec<Driver>>, StatusCode> {
     let tenant_id = tenant.0 .0;
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let drivers = sqlx::query_as::<_, Driver>(
         "SELECT id, tenant_id, driver_cd, name FROM alc_api.employees WHERE driver_cd IS NOT NULL AND deleted_at IS NULL ORDER BY driver_cd",

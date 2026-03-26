@@ -69,46 +69,45 @@ async fn start_session(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // スケジュールあり / なし (遠隔点呼) で分岐
-    let (tenko_type, responsible_manager_name, schedule_id_for_insert) =
-        if let Some(sid) = body.schedule_id {
-            // スケジュール検証: 存在・未消費・乗務員一致
-            let schedule = sqlx::query_as::<_, TenkoSchedule>(
-                "SELECT * FROM tenko_schedules WHERE id = $1 AND tenant_id = $2 AND consumed = FALSE",
-            )
-            .bind(sid)
-            .bind(tenant_id)
-            .fetch_optional(&mut *conn)
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-            .ok_or(StatusCode::NOT_FOUND)?;
+    let (tenko_type, responsible_manager_name, schedule_id_for_insert) = if let Some(sid) =
+        body.schedule_id
+    {
+        // スケジュール検証: 存在・未消費・乗務員一致
+        let schedule = sqlx::query_as::<_, TenkoSchedule>(
+            "SELECT * FROM tenko_schedules WHERE id = $1 AND tenant_id = $2 AND consumed = FALSE",
+        )
+        .bind(sid)
+        .bind(tenant_id)
+        .fetch_optional(&mut *conn)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
 
-            if schedule.employee_id != body.employee_id {
-                return Err(StatusCode::BAD_REQUEST);
-            }
+        if schedule.employee_id != body.employee_id {
+            return Err(StatusCode::BAD_REQUEST);
+        }
 
-            // スケジュール消費
-            sqlx::query(
-                "UPDATE tenko_schedules SET consumed = TRUE, updated_at = NOW() WHERE id = $1",
-            )
+        // スケジュール消費
+        sqlx::query("UPDATE tenko_schedules SET consumed = TRUE, updated_at = NOW() WHERE id = $1")
             .bind(schedule.id)
             .execute(&mut *conn)
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-            let tt = schedule.tenko_type.clone();
-            let rmn = schedule.responsible_manager_name.clone();
-            let sid = schedule.id;
+        let tt = schedule.tenko_type.clone();
+        let rmn = schedule.responsible_manager_name.clone();
+        let sid = schedule.id;
 
-            // consumed_by_session_id は session 作成後に更新するため schedule.id を返す
-            (tt, Some(rmn), Some(sid))
-        } else {
-            // 遠隔点呼: スケジュールなし
-            let tt = body
-                .tenko_type
-                .clone()
-                .unwrap_or_else(|| "pre_operation".to_string());
-            (tt, None::<String>, None::<Uuid>)
-        };
+        // consumed_by_session_id は session 作成後に更新するため schedule.id を返す
+        (tt, Some(rmn), Some(sid))
+    } else {
+        // 遠隔点呼: スケジュールなし
+        let tt = body
+            .tenko_type
+            .clone()
+            .unwrap_or_else(|| "pre_operation".to_string());
+        (tt, None::<String>, None::<Uuid>)
+    };
 
     // セッション作成 (業務前は体温・血圧から開始)
     let initial_status = match tenko_type.as_str() {
@@ -448,14 +447,13 @@ async fn submit_report(
     }
 
     // 指示事項があるか確認
-    let instruction: Option<String> = sqlx::query_scalar(
-        "SELECT instruction FROM tenko_schedules WHERE id = $1",
-    )
-    .bind(session.schedule_id)
-    .fetch_optional(&mut *conn)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-    .flatten();
+    let instruction: Option<String> =
+        sqlx::query_scalar("SELECT instruction FROM tenko_schedules WHERE id = $1")
+            .bind(session.schedule_id)
+            .fetch_optional(&mut *conn)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            .flatten();
 
     let next_status = if instruction.is_some() {
         "instruction_pending"
@@ -817,15 +815,14 @@ async fn create_tenko_record(
     session: &TenkoSession,
     tenant_id: Uuid,
 ) -> Result<TenkoRecord, StatusCode> {
-    let employee_name: String =
-        sqlx::query_scalar("SELECT name FROM employees WHERE id = $1")
-            .bind(session.employee_id)
-            .fetch_one(&mut **conn)
-            .await
-            .map_err(|e| {
-                tracing::error!("create_tenko_record: employee lookup error: {e}");
-                StatusCode::INTERNAL_SERVER_ERROR
-            })?;
+    let employee_name: String = sqlx::query_scalar("SELECT name FROM employees WHERE id = $1")
+        .bind(session.employee_id)
+        .fetch_one(&mut **conn)
+        .await
+        .map_err(|e| {
+            tracing::error!("create_tenko_record: employee lookup error: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
     let instruction: Option<String> =
         sqlx::query_scalar("SELECT instruction FROM tenko_schedules WHERE id = $1")
@@ -835,7 +832,8 @@ async fn create_tenko_record(
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
             .flatten();
 
-    let record_data = serde_json::to_value(session).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let record_data =
+        serde_json::to_value(session).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let canonical =
         serde_json::to_string(&record_data).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -976,8 +974,7 @@ async fn submit_self_declaration(
     })?;
 
     // 安全判定を自動実行
-    let session =
-        perform_safety_judgment(&mut conn, &session, tenant_id, &state.pool).await?;
+    let session = perform_safety_judgment(&mut conn, &session, tenant_id, &state.pool).await?;
 
     Ok(Json(session))
 }
@@ -1325,13 +1322,12 @@ async fn submit_carrying_items(
     let mut check_results = Vec::new();
     for check in &body.checks {
         // item_name をマスタから取得
-        let item_name: Option<String> = sqlx::query_scalar(
-            "SELECT item_name FROM alc_api.carrying_items WHERE id = $1",
-        )
-        .bind(check.item_id)
-        .fetch_optional(&mut *conn)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let item_name: Option<String> =
+            sqlx::query_scalar("SELECT item_name FROM alc_api.carrying_items WHERE id = $1")
+                .bind(check.item_id)
+                .fetch_optional(&mut *conn)
+                .await
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
         let item_name = item_name.unwrap_or_default();
 
@@ -1413,7 +1409,10 @@ async fn interrupt_session(
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     .ok_or(StatusCode::NOT_FOUND)?;
 
-    if matches!(session.status.as_str(), "completed" | "cancelled" | "interrupted") {
+    if matches!(
+        session.status.as_str(),
+        "completed" | "cancelled" | "interrupted"
+    ) {
         return Err(StatusCode::BAD_REQUEST);
     }
 

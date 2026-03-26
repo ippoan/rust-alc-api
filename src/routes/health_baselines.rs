@@ -20,7 +20,9 @@ pub fn tenant_router() -> Router<AppState> {
         )
         .route(
             "/tenko/health-baselines/{employee_id}",
-            get(get_baseline).put(update_baseline).delete(delete_baseline),
+            get(get_baseline)
+                .put(update_baseline)
+                .delete(delete_baseline),
         )
 }
 

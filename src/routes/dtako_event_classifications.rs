@@ -22,8 +22,14 @@ async fn list_event_classifications(
     tenant: axum::Extension<TenantId>,
 ) -> Result<Json<Vec<DtakoEventClassification>>, StatusCode> {
     let tenant_id = tenant.0 .0;
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let rows = sqlx::query_as::<_, DtakoEventClassification>(
         "SELECT * FROM alc_api.dtako_event_classifications ORDER BY event_cd",
@@ -54,8 +60,14 @@ async fn update_classification(
     }
 
     let tenant_id = tenant.0 .0;
-    let mut conn = state.pool.acquire().await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    set_current_tenant(&mut conn, &tenant_id.to_string()).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     let row = sqlx::query_as::<_, DtakoEventClassification>(
         "UPDATE alc_api.dtako_event_classifications SET classification = $1 WHERE id = $2 RETURNING *",

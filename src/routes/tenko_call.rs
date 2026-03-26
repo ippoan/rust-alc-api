@@ -66,10 +66,15 @@ async fn register(
     let tenant_id = match master {
         Some(row) => row.0,
         None => {
-            return Err((StatusCode::BAD_REQUEST, Json(RegisterResponse {
-                success: false, driver_id: 0, call_number: None,
-                error: Some("未登録の点呼用番号です".into()),
-            })));
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(RegisterResponse {
+                    success: false,
+                    driver_id: 0,
+                    call_number: None,
+                    error: Some("未登録の点呼用番号です".into()),
+                }),
+            ));
         }
     };
 
@@ -118,9 +123,15 @@ async fn register(
 }
 
 fn register_err(msg: &str) -> (StatusCode, Json<RegisterResponse>) {
-    (StatusCode::INTERNAL_SERVER_ERROR, Json(RegisterResponse {
-        success: false, driver_id: 0, call_number: None, error: Some(msg.into()),
-    }))
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(RegisterResponse {
+            success: false,
+            driver_id: 0,
+            call_number: None,
+            error: Some(msg.into()),
+        }),
+    )
 }
 
 // --- 点呼送信 ---
@@ -225,9 +236,17 @@ async fn list_numbers(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    Ok(Json(rows.into_iter().map(|r| TenkoCallNumber {
-        id: r.0, call_number: r.1, tenant_id: r.2, label: r.3, created_at: r.4,
-    }).collect()))
+    Ok(Json(
+        rows.into_iter()
+            .map(|r| TenkoCallNumber {
+                id: r.0,
+                call_number: r.1,
+                tenant_id: r.2,
+                label: r.3,
+                created_at: r.4,
+            })
+            .collect(),
+    ))
 }
 
 #[derive(Debug, Deserialize)]
@@ -261,7 +280,10 @@ async fn create_number(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    Ok(Json(CreateNumberResponse { success: true, id: row.0 }))
+    Ok(Json(CreateNumberResponse {
+        success: true,
+        id: row.0,
+    }))
 }
 
 async fn delete_number(
@@ -304,7 +326,17 @@ async fn list_drivers(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    Ok(Json(rows.into_iter().map(|r| TenkoCallDriver {
-        id: r.0, phone_number: r.1, driver_name: r.2, call_number: r.3, tenant_id: r.4, employee_code: r.5, created_at: r.6,
-    }).collect()))
+    Ok(Json(
+        rows.into_iter()
+            .map(|r| TenkoCallDriver {
+                id: r.0,
+                phone_number: r.1,
+                driver_name: r.2,
+                call_number: r.3,
+                tenant_id: r.4,
+                employee_code: r.5,
+                created_at: r.6,
+            })
+            .collect(),
+    ))
 }

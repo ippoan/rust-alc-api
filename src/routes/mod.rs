@@ -1,44 +1,45 @@
 pub mod auth;
+pub mod bot_admin;
 pub mod car_inspection_files;
 pub mod car_inspections;
 pub mod carins_files;
-pub mod devices;
-pub mod employees;
-pub mod equipment_failures;
-pub mod health_baselines;
-pub mod measurements;
-pub mod nfc_tags;
-pub mod tenko_records;
-pub mod tenko_schedules;
-pub mod tenko_sessions;
-pub mod tenko_webhooks;
-pub mod tenko_call;
-pub mod timecard;
-pub mod upload;
-pub mod sso_admin;
-pub mod bot_admin;
-pub mod tenant_users;
 pub mod carrying_items;
 pub mod communication_items;
 pub mod daily_health;
+pub mod devices;
 pub mod driver_info;
-pub mod guidance_records;
-pub mod dtako_drivers;
 pub mod dtako_csv_proxy;
+pub mod dtako_daily_hours;
+pub mod dtako_drivers;
+pub mod dtako_event_classifications;
 pub mod dtako_operations;
 pub mod dtako_restraint_report;
 pub mod dtako_restraint_report_pdf;
 pub mod dtako_scraper;
-pub mod dtako_work_times;
-pub mod dtako_daily_hours;
 pub mod dtako_upload;
 pub mod dtako_vehicles;
-pub mod dtako_event_classifications;
+pub mod dtako_work_times;
+pub mod employees;
+pub mod equipment_failures;
+pub mod guidance_records;
+pub mod health;
+pub mod health_baselines;
+pub mod measurements;
+pub mod nfc_tags;
+pub mod sso_admin;
+pub mod tenant_users;
+pub mod tenko_call;
+pub mod tenko_records;
+pub mod tenko_schedules;
+pub mod tenko_sessions;
+pub mod tenko_webhooks;
+pub mod timecard;
+pub mod upload;
 
 use axum::{middleware as axum_middleware, Router};
 
-use crate::AppState;
 use crate::middleware::auth::{require_jwt, require_tenant};
+use crate::AppState;
 
 pub fn router() -> Router<AppState> {
     // JWT 必須ルート
@@ -88,6 +89,7 @@ pub fn router() -> Router<AppState> {
 
     // 公開ルート (認証不要)
     let public_routes = Router::new()
+        .merge(health::router())
         .merge(auth::public_router())
         .merge(tenko_call::public_router())
         .merge(devices::public_router());

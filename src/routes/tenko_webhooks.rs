@@ -19,10 +19,7 @@ pub fn tenant_router() -> Router<AppState> {
             "/tenko/webhooks/{id}",
             get(get_webhook).delete(delete_webhook),
         )
-        .route(
-            "/tenko/webhooks/{id}/deliveries",
-            get(list_deliveries),
-        )
+        .route("/tenko/webhooks/{id}/deliveries", get(list_deliveries))
 }
 
 /// Webhook 作成/更新 (event_type が同じなら UPSERT)
@@ -152,17 +149,15 @@ async fn delete_webhook(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let result = sqlx::query(
-        "DELETE FROM webhook_configs WHERE id = $1 AND tenant_id = $2",
-    )
-    .bind(id)
-    .bind(tenant_id)
-    .execute(&mut *conn)
-    .await
-    .map_err(|e| {
-        tracing::error!("delete_webhook error: {e}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    let result = sqlx::query("DELETE FROM webhook_configs WHERE id = $1 AND tenant_id = $2")
+        .bind(id)
+        .bind(tenant_id)
+        .execute(&mut *conn)
+        .await
+        .map_err(|e| {
+            tracing::error!("delete_webhook error: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
     if result.rows_affected() == 0 {
         return Err(StatusCode::NOT_FOUND);

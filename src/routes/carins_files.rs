@@ -70,8 +70,14 @@ async fn list_files(
     Extension(tenant_id): Extension<TenantId>,
     Query(q): Query<ListQuery>,
 ) -> Result<Json<ListResponse>, StatusCode> {
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.0.to_string()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    set_current_tenant(&mut conn, &tenant_id.0.to_string())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let rows = if let Some(ref t) = q.type_filter {
         sqlx::query_as::<_, FileRow>(
@@ -99,8 +105,14 @@ async fn list_recent(
     State(state): State<AppState>,
     Extension(tenant_id): Extension<TenantId>,
 ) -> Result<Json<ListResponse>, StatusCode> {
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.0.to_string()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    set_current_tenant(&mut conn, &tenant_id.0.to_string())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let rows = sqlx::query_as::<_, FileRow>(
         &format!("SELECT {FILE_SELECT} FROM files WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT 50"),
@@ -119,18 +131,22 @@ async fn list_not_attached(
     State(state): State<AppState>,
     Extension(tenant_id): Extension<TenantId>,
 ) -> Result<Json<ListResponse>, StatusCode> {
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.0.to_string()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    set_current_tenant(&mut conn, &tenant_id.0.to_string())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let rows = sqlx::query_as::<_, FileRow>(
-        &format!(
-            r#"SELECT f.{FILE_SELECT_F}
+    let rows = sqlx::query_as::<_, FileRow>(&format!(
+        r#"SELECT f.{FILE_SELECT_F}
             FROM files f
             LEFT JOIN car_inspection_files_a cif ON f.uuid = cif.uuid
             WHERE f.deleted_at IS NULL AND cif.uuid IS NULL
             ORDER BY f.created_at DESC"#
-        ),
-    )
+    ))
     .fetch_all(&mut *conn)
     .await
     .map_err(|e| {
@@ -156,12 +172,18 @@ async fn get_file(
     Extension(tenant_id): Extension<TenantId>,
     Path(uuid): Path<String>,
 ) -> Result<Json<FileRow>, StatusCode> {
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.0.to_string()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    set_current_tenant(&mut conn, &tenant_id.0.to_string())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let row = sqlx::query_as::<_, FileRow>(
-        &format!("SELECT {FILE_SELECT} FROM files WHERE uuid = $1::uuid"),
-    )
+    let row = sqlx::query_as::<_, FileRow>(&format!(
+        "SELECT {FILE_SELECT} FROM files WHERE uuid = $1::uuid"
+    ))
     .bind(&uuid)
     .fetch_optional(&mut *conn)
     .await
@@ -179,8 +201,14 @@ async fn download_file(
     Extension(tenant_id): Extension<TenantId>,
     Path(uuid): Path<String>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.0.to_string()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    set_current_tenant(&mut conn, &tenant_id.0.to_string())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // Get file metadata
     let row = sqlx::query_as::<_, FileRow>(
@@ -203,10 +231,16 @@ async fn download_file(
 
     // Download from GCS
     if let Some(ref s3_key) = row.s3_key {
-        let data = state.carins_storage.as_ref().unwrap_or(&state.storage).download(s3_key).await.map_err(|e| {
-            tracing::error!("GCS download failed: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+        let data = state
+            .carins_storage
+            .as_ref()
+            .unwrap_or(&state.storage)
+            .download(s3_key)
+            .await
+            .map_err(|e| {
+                tracing::error!("GCS download failed: {e}");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
 
         let content_type = row.file_type.clone();
         let filename = row.filename.clone();
@@ -224,7 +258,9 @@ async fn download_file(
     } else if let Some(ref blob) = row.blob {
         // Legacy blob storage (base64)
         use base64::{engine::general_purpose::STANDARD, Engine};
-        let data = STANDARD.decode(blob).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let data = STANDARD
+            .decode(blob)
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         let content_type = row.file_type.clone();
         let filename = row.filename.clone();
 
@@ -256,8 +292,14 @@ async fn create_file(
     Extension(tenant_id): Extension<TenantId>,
     Json(body): Json<CreateFileRequest>,
 ) -> Result<(StatusCode, Json<FileRow>), StatusCode> {
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.0.to_string()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    set_current_tenant(&mut conn, &tenant_id.0.to_string())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let file_uuid = Uuid::new_v4();
     let now = chrono::Utc::now();
@@ -265,7 +307,9 @@ async fn create_file(
 
     // Decode base64 and upload to GCS
     use base64::{engine::general_purpose::STANDARD, Engine};
-    let data = STANDARD.decode(&body.content).map_err(|_| StatusCode::BAD_REQUEST)?;
+    let data = STANDARD
+        .decode(&body.content)
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
 
     state
         .storage
@@ -304,8 +348,14 @@ async fn delete_file(
     Extension(tenant_id): Extension<TenantId>,
     Path(uuid): Path<String>,
 ) -> Result<StatusCode, StatusCode> {
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.0.to_string()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    set_current_tenant(&mut conn, &tenant_id.0.to_string())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let now = chrono::Utc::now();
     let result = sqlx::query("UPDATE files SET deleted_at = $1 WHERE uuid = $2::uuid")
@@ -327,8 +377,14 @@ async fn restore_file(
     Extension(tenant_id): Extension<TenantId>,
     Path(uuid): Path<String>,
 ) -> Result<StatusCode, StatusCode> {
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.0.to_string()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    set_current_tenant(&mut conn, &tenant_id.0.to_string())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let result = sqlx::query("UPDATE files SET deleted_at = NULL WHERE uuid = $1::uuid")
         .bind(&uuid)

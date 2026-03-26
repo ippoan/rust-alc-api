@@ -48,8 +48,14 @@ async fn search_by_uuid(
     Extension(tenant_id): Extension<TenantId>,
     Query(q): Query<SearchQuery>,
 ) -> Result<Json<SearchResponse>, StatusCode> {
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.0.to_string()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    set_current_tenant(&mut conn, &tenant_id.0.to_string())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let nfc_uuid = normalize_nfc_uuid(&q.uuid);
 
@@ -88,8 +94,14 @@ async fn list_tags(
     Extension(tenant_id): Extension<TenantId>,
     Query(q): Query<ListQuery>,
 ) -> Result<Json<Vec<NfcTag>>, StatusCode> {
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.0.to_string()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    set_current_tenant(&mut conn, &tenant_id.0.to_string())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let rows = if let Some(ci_id) = q.car_inspection_id {
         sqlx::query_as::<_, NfcTag>(
@@ -121,8 +133,14 @@ async fn register_tag(
     Extension(tenant_id): Extension<TenantId>,
     Json(body): Json<RegisterRequest>,
 ) -> Result<(StatusCode, Json<NfcTag>), StatusCode> {
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.0.to_string()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    set_current_tenant(&mut conn, &tenant_id.0.to_string())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let nfc_uuid = normalize_nfc_uuid(&body.nfc_uuid);
 
@@ -153,8 +171,14 @@ async fn delete_tag(
     Extension(tenant_id): Extension<TenantId>,
     Path(nfc_uuid): Path<String>,
 ) -> Result<StatusCode, StatusCode> {
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.0.to_string()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    set_current_tenant(&mut conn, &tenant_id.0.to_string())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let normalized = normalize_nfc_uuid(&nfc_uuid);
 

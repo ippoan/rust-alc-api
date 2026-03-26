@@ -3,17 +3,16 @@
 use axum::{
     extract::{Path, State},
     http::StatusCode,
-    Extension, Json,
     routing::{delete, get, post},
-    Router,
+    Extension, Json, Router,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::AppState;
 use crate::db::models::TenantAllowedEmail;
 use crate::db::tenant::set_current_tenant;
 use crate::middleware::auth::AuthUser;
+use crate::AppState;
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
 struct UserResponse {
@@ -58,7 +57,11 @@ async fn list_users(
         return Err(StatusCode::FORBIDDEN);
     }
 
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     set_current_tenant(&mut conn, &auth_user.tenant_id.to_string())
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -85,7 +88,11 @@ async fn list_invitations(
         return Err(StatusCode::FORBIDDEN);
     }
 
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     set_current_tenant(&mut conn, &auth_user.tenant_id.to_string())
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -149,7 +156,11 @@ async fn delete_invitation(
         return Err(StatusCode::FORBIDDEN);
     }
 
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     set_current_tenant(&mut conn, &auth_user.tenant_id.to_string())
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -181,7 +192,11 @@ async fn delete_user(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     set_current_tenant(&mut conn, &auth_user.tenant_id.to_string())
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;

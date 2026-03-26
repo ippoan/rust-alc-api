@@ -2,16 +2,15 @@
 use axum::{
     extract::State,
     http::StatusCode,
-    Extension, Json,
-    routing::{get, post, delete},
-    Router,
+    routing::{delete, get, post},
+    Extension, Json, Router,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::AppState;
 use crate::db::tenant::set_current_tenant;
 use crate::middleware::auth::AuthUser;
+use crate::AppState;
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
 struct BotConfigResponse {
@@ -64,8 +63,14 @@ async fn list_configs(
         return Err(StatusCode::FORBIDDEN);
     }
 
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &auth_user.tenant_id.to_string()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    set_current_tenant(&mut conn, &auth_user.tenant_id.to_string())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let configs = sqlx::query_as::<_, BotConfigResponse>(
         r#"
@@ -100,8 +105,14 @@ async fn upsert_config(
     let provider = body.provider.as_deref().unwrap_or("lineworks");
     let enabled = body.enabled.unwrap_or(true);
 
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &auth_user.tenant_id.to_string()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    set_current_tenant(&mut conn, &auth_user.tenant_id.to_string())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let config = if let Some(ref id_str) = body.id {
         // 更新
@@ -114,7 +125,10 @@ async fn upsert_config(
                     StatusCode::INTERNAL_SERVER_ERROR
                 })?;
                 sqlx::query("UPDATE bot_configs SET client_secret_encrypted = $1 WHERE id = $2")
-                    .bind(&encrypted).bind(id).execute(&mut *conn).await
+                    .bind(&encrypted)
+                    .bind(id)
+                    .execute(&mut *conn)
+                    .await
                     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
             }
         }
@@ -125,7 +139,10 @@ async fn upsert_config(
                     StatusCode::INTERNAL_SERVER_ERROR
                 })?;
                 sqlx::query("UPDATE bot_configs SET private_key_encrypted = $1 WHERE id = $2")
-                    .bind(&encrypted).bind(id).execute(&mut *conn).await
+                    .bind(&encrypted)
+                    .bind(id)
+                    .execute(&mut *conn)
+                    .await
                     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
             }
         }
@@ -145,18 +162,16 @@ async fn upsert_config(
         .await
     } else {
         // 新規作成
-        let encrypted_secret = encrypt_secret(
-            body.client_secret.as_deref().unwrap_or(""), &key,
-        ).map_err(|e| {
-            tracing::error!("Encrypt client_secret failed: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-        let encrypted_pk = encrypt_secret(
-            body.private_key.as_deref().unwrap_or(""), &key,
-        ).map_err(|e| {
-            tracing::error!("Encrypt private_key failed: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+        let encrypted_secret = encrypt_secret(body.client_secret.as_deref().unwrap_or(""), &key)
+            .map_err(|e| {
+                tracing::error!("Encrypt client_secret failed: {e}");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
+        let encrypted_pk = encrypt_secret(body.private_key.as_deref().unwrap_or(""), &key)
+            .map_err(|e| {
+                tracing::error!("Encrypt private_key failed: {e}");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
 
         sqlx::query_as::<_, BotConfigResponse>(
             r#"
@@ -189,8 +204,14 @@ async fn delete_config(
 
     let id = Uuid::parse_str(&body.id).map_err(|_| StatusCode::BAD_REQUEST)?;
 
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &auth_user.tenant_id.to_string()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    set_current_tenant(&mut conn, &auth_user.tenant_id.to_string())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     sqlx::query("DELETE FROM bot_configs WHERE id = $1")
         .bind(id)
@@ -205,21 +226,23 @@ async fn delete_config(
 }
 
 fn encrypt_secret(plaintext: &str, key_material: &str) -> Result<String, String> {
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
     use ring::aead::{self, Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
     use ring::rand::{SecureRandom, SystemRandom};
-    use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-    use sha2::{Sha256, Digest};
+    use sha2::{Digest, Sha256};
 
     let mut key_bytes = [0u8; 32];
     let hash = Sha256::digest(key_material.as_bytes());
     key_bytes.copy_from_slice(&hash);
 
-    let unbound_key = UnboundKey::new(&AES_256_GCM, &key_bytes).map_err(|e| format!("Key error: {e}"))?;
+    let unbound_key =
+        UnboundKey::new(&AES_256_GCM, &key_bytes).map_err(|e| format!("Key error: {e}"))?;
     let key = LessSafeKey::new(unbound_key);
 
     let rng = SystemRandom::new();
     let mut nonce_bytes = [0u8; 12];
-    rng.fill(&mut nonce_bytes).map_err(|e| format!("RNG error: {e}"))?;
+    rng.fill(&mut nonce_bytes)
+        .map_err(|e| format!("RNG error: {e}"))?;
     let nonce = Nonce::assume_unique_for_key(nonce_bytes);
 
     let mut in_out = plaintext.as_bytes().to_vec();
@@ -227,7 +250,9 @@ fn encrypt_secret(plaintext: &str, key_material: &str) -> Result<String, String>
     in_out.extend(vec![0u8; tag_len]);
 
     key.seal_in_place_separate_tag(nonce, Aad::empty(), &mut in_out[..plaintext.len()])
-        .map(|tag| { in_out[plaintext.len()..].copy_from_slice(tag.as_ref()); })
+        .map(|tag| {
+            in_out[plaintext.len()..].copy_from_slice(tag.as_ref());
+        })
         .map_err(|e| format!("Encryption error: {e}"))?;
 
     let mut result = Vec::with_capacity(12 + in_out.len());

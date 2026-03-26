@@ -30,7 +30,11 @@ pub struct AppClaims {
 pub struct JwtSecret(pub String);
 
 /// Access token を発行
-pub fn create_access_token(user: &User, secret: &JwtSecret, org_slug: Option<String>) -> Result<String, jsonwebtoken::errors::Error> {
+pub fn create_access_token(
+    user: &User,
+    secret: &JwtSecret,
+    org_slug: Option<String>,
+) -> Result<String, jsonwebtoken::errors::Error> {
     let now = Utc::now();
     let claims = AppClaims {
         sub: user.id,
@@ -51,7 +55,10 @@ pub fn create_access_token(user: &User, secret: &JwtSecret, org_slug: Option<Str
 }
 
 /// Access token を検証してクレームを返す
-pub fn verify_access_token(token: &str, secret: &JwtSecret) -> Result<AppClaims, jsonwebtoken::errors::Error> {
+pub fn verify_access_token(
+    token: &str,
+    secret: &JwtSecret,
+) -> Result<AppClaims, jsonwebtoken::errors::Error> {
     let mut validation = Validation::new(Algorithm::HS256);
     validation.validate_exp = true;
 

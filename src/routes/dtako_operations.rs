@@ -5,7 +5,9 @@ use axum::{
     Json, Router,
 };
 
-use crate::db::models::{DtakoOperation, DtakoOperationFilter, DtakoOperationListItem, DtakoOperationsResponse};
+use crate::db::models::{
+    DtakoOperation, DtakoOperationFilter, DtakoOperationListItem, DtakoOperationsResponse,
+};
 use crate::db::tenant::set_current_tenant;
 use crate::middleware::auth::TenantId;
 use crate::AppState;
@@ -55,8 +57,14 @@ async fn calendar_dates(
     .pred_opt()
     .ok_or(StatusCode::BAD_REQUEST)?;
 
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let rows = sqlx::query_as::<_, (chrono::NaiveDate, i64)>(
         r#"SELECT reading_date, COUNT(*)::BIGINT
@@ -93,8 +101,14 @@ async fn list_operations(
     let per_page = filter.per_page.unwrap_or(50).min(200);
     let offset = (page - 1) * per_page;
 
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let total: (i64,) = sqlx::query_as(
         r#"SELECT COUNT(*)::BIGINT FROM alc_api.dtako_operations o
@@ -152,8 +166,14 @@ async fn get_operation(
     Path(unko_no): Path<String>,
 ) -> Result<Json<Vec<DtakoOperation>>, StatusCode> {
     let tenant_id = tenant.0 .0;
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let ops = sqlx::query_as::<_, DtakoOperation>(
         "SELECT * FROM alc_api.dtako_operations WHERE unko_no = $1 ORDER BY crew_role",
@@ -175,8 +195,14 @@ async fn delete_operation(
     Path(unko_no): Path<String>,
 ) -> Result<StatusCode, StatusCode> {
     let tenant_id = tenant.0 .0;
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let result = sqlx::query("DELETE FROM alc_api.dtako_operations WHERE unko_no = $1")
         .bind(&unko_no)

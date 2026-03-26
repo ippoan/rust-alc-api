@@ -8,11 +8,11 @@ use chrono::{DateTime, Datelike, NaiveDate, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::middleware::auth::{AuthUser, TenantId};
-use crate::AppState;
 use crate::compare::{
     self, annotate_known_bugs, parse_restraint_csv, CsvDayRow, CsvDriverData, DiffItem,
 };
+use crate::middleware::auth::{AuthUser, TenantId};
+use crate::AppState;
 
 pub fn tenant_router() -> Router<AppState> {
     Router::new()
@@ -767,7 +767,9 @@ async fn compare_csv(
             }
         }
         // driver_cd でマッチ
-        let db_match = db_drivers.iter().find(|(_, cd, _)| cd.as_deref() == Some(&csv_d.driver_cd));
+        let db_match = db_drivers
+            .iter()
+            .find(|(_, cd, _)| cd.as_deref() == Some(&csv_d.driver_cd));
 
         let (driver_id, system_data, mut diffs) = if let Some((did, _, dname)) = db_match {
             // システムのレポートを取得

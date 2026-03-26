@@ -35,7 +35,10 @@ async fn get_csv_as_json(
         _ => return Err(StatusCode::BAD_REQUEST),
     };
 
-    let storage = state.dtako_storage.as_ref().ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
+    let storage = state
+        .dtako_storage
+        .as_ref()
+        .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // R2 key uses original tenant_id from operations table
     let r2_prefix: Option<String> = sqlx::query_scalar(

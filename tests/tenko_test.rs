@@ -2104,3 +2104,395 @@ async fn test_equipment_failure_list_filter_date_range() {
     let body: serde_json::Value = res.json().await.unwrap();
     assert_eq!(body["total"].as_i64().unwrap(), 0, "Expected 0 failures outside date range");
 }
+
+// ============================================================
+// Webhook — fire_event / check_overdue_schedules / deliver
+// ============================================================
+
+/// fire_event: 設定なし → noop (webhook_deliveries は空)
+#[tokio::test]
+async fn test_fire_event_no_config() {
+    let state = common::setup_app_state().await;
+    let _base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, &format!("WHNone{}", uuid::Uuid::new_v4().simple())).await;
+
+    let result = rust_alc_api::webhook::fire_event(
+        &state.pool, tenant_id, "alcohol_detected",
+        serde_json::json!({"test": true}),
+    ).await;
+    assert!(result.is_ok());
+}
+
+/// fire_event: 設定あり → tokio::spawn で配信 (配信先は受信サーバー)
+#[tokio::test]
+async fn test_fire_event_with_config_delivers() {
+    let state = common::setup_app_state().await;
+    let _base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, &format!("WHDeliv{}", uuid::Uuid::new_v4().simple())).await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    // 受信サーバーを起動
+    let received = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let received_clone = received.clone();
+    let receiver = axum::Router::new().route("/hook", axum::routing::post(move || {
+        let r = received_clone.clone();
+        async move {
+            r.store(true, std::sync::atomic::Ordering::SeqCst);
+            "ok"
+        }
+    }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let receiver_addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, receiver).await.unwrap() });
+
+    let receiver_url = format!("http://{receiver_addr}/hook");
+
+    // webhook config 作成 (REST API 経由)
+    let res = client
+        .post(format!("{_base_url}/api/tenko/webhooks"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "event_type": "alcohol_detected",
+            "url": receiver_url,
+            "secret": "test-secret-123"
+        }))
+        .send().await.unwrap();
+    assert!(res.status() == 200 || res.status() == 201);
+
+    // fire_event
+    rust_alc_api::webhook::fire_event(
+        &state.pool, tenant_id, "alcohol_detected",
+        serde_json::json!({"employee_id": "test", "value": 0.15}),
+    ).await.unwrap();
+
+    // 少し待ってから配信を確認 (tokio::spawn で非同期配信)
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    assert!(received.load(std::sync::atomic::Ordering::SeqCst), "Webhook should have been delivered");
+
+    // webhook_deliveries にログが記録されたか確認
+    let mut conn = state.pool.acquire().await.unwrap();
+    sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
+        .bind(tenant_id.to_string())
+        .execute(&mut *conn).await.unwrap();
+    let delivery_count: Option<i64> = sqlx::query_scalar(
+        "SELECT COUNT(*)::bigint FROM webhook_deliveries WHERE tenant_id = $1",
+    )
+    .bind(tenant_id)
+    .fetch_one(&mut *conn).await.unwrap();
+    assert!(delivery_count.unwrap_or(0) >= 1, "Expected delivery record in DB");
+}
+
+/// fire_event: 配信先がダウン → リトライ + エラーログ記録
+#[tokio::test]
+async fn test_fire_event_delivery_failure_retries() {
+    let state = common::setup_app_state().await;
+    let _base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, &format!("WHFail{}", uuid::Uuid::new_v4().simple())).await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    // 受信サーバーなし (常に 500 を返す)
+    let receiver = axum::Router::new().route("/fail", axum::routing::post(|| async {
+        (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "error")
+    }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let fail_addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, receiver).await.unwrap() });
+
+    let fail_url = format!("http://{fail_addr}/fail");
+
+    // webhook config
+    let res = client
+        .post(format!("{_base_url}/api/tenko/webhooks"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "event_type": "tenko_completed",
+            "url": fail_url,
+            "secret": null
+        }))
+        .send().await.unwrap();
+    assert!(res.status() == 200 || res.status() == 201);
+
+    // fire → リトライ (1s + 5s + 25s = 遅いが、500エラーは即返るのでsleep分のみ)
+    rust_alc_api::webhook::fire_event(
+        &state.pool, tenant_id, "tenko_completed",
+        serde_json::json!({"session_id": "test"}),
+    ).await.unwrap();
+
+    // リトライは非同期なので少し待つ (最初のリトライ1sだけ待てば少なくとも2回の配信ログがある)
+    tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+
+    let mut conn = state.pool.acquire().await.unwrap();
+    sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
+        .bind(tenant_id.to_string())
+        .execute(&mut *conn).await.unwrap();
+    let delivery_count: Option<i64> = sqlx::query_scalar(
+        "SELECT COUNT(*)::bigint FROM webhook_deliveries WHERE tenant_id = $1 AND success = false",
+    )
+    .bind(tenant_id)
+    .fetch_one(&mut *conn).await.unwrap();
+    assert!(delivery_count.unwrap_or(0) >= 1, "Expected failed delivery record(s)");
+}
+
+/// check_overdue_schedules: 設定なし → noop
+#[tokio::test]
+async fn test_check_overdue_no_config() {
+    let state = common::setup_app_state().await;
+    let _base_url = common::spawn_test_server(state.clone()).await;
+
+    let result = rust_alc_api::webhook::check_overdue_schedules(&state.pool).await;
+    assert!(result.is_ok());
+}
+
+// ============================================================
+// Safety Judgment — 基準値ありで医療判定
+// ============================================================
+
+/// 基準値あり + 医療値が基準外 → safety judgment fail → interrupted
+#[tokio::test]
+async fn test_safety_judgment_fail_with_baseline() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, &format!("SJFail{}", uuid::Uuid::new_v4().simple())).await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+    let emp = common::create_test_employee(&client, &base_url, &auth, "SJFailEmp",
+        &format!("SF{}", &uuid::Uuid::new_v4().simple().to_string()[..4])).await;
+    let emp_id = emp["id"].as_str().unwrap().to_string();
+
+    // 基準値を設定 (systolic=120, tolerance=10)
+    let res = client.post(format!("{base_url}/api/tenko/health-baselines"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "employee_id": emp_id,
+            "baseline_systolic": 120,
+            "baseline_diastolic": 80,
+            "baseline_temperature": 36.5,
+            "systolic_tolerance": 10,
+            "diastolic_tolerance": 10,
+            "temperature_tolerance": 0.5
+        }))
+        .send().await.unwrap();
+    assert!(res.status() == 200 || res.status() == 201, "baseline creation failed: {}", res.status());
+
+    // セッション開始
+    let session = start_session_remote(&client, &base_url, &auth, &emp_id).await;
+    let session_id = session["id"].as_str().unwrap();
+
+    // 医療データ (systolic=145 → diff=25 > tolerance=10)
+    client.put(format!("{base_url}/api/tenko/sessions/{session_id}/medical"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "temperature": 36.5,
+            "systolic": 145,
+            "diastolic": 80,
+            "pulse": 72,
+            "medical_manual_input": true
+        }))
+        .send().await.unwrap();
+
+    // 自己申告 (全て正常) → safety judgment が medical diff で fail
+    let res = client.put(format!("{base_url}/api/tenko/sessions/{session_id}/self-declaration"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "illness": false, "fatigue": false, "sleep_deprivation": false }))
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
+    let session: Value = res.json().await.unwrap();
+    assert_eq!(session["status"], "interrupted", "Should be interrupted due to systolic out of range");
+    // safety_judgment should contain failed_items
+    let judgment = &session["safety_judgment"];
+    assert_eq!(judgment["status"], "fail");
+    let failed = judgment["failed_items"].as_array().unwrap();
+    assert!(failed.iter().any(|v| v == "systolic"), "failed_items should include systolic");
+}
+
+/// 基準値あり + 全て範囲内 → safety judgment pass → daily_inspection_pending
+#[tokio::test]
+async fn test_safety_judgment_pass_with_baseline() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, &format!("SJPass{}", uuid::Uuid::new_v4().simple())).await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+    let emp = common::create_test_employee(&client, &base_url, &auth, "SJPassEmp",
+        &format!("SP{}", &uuid::Uuid::new_v4().simple().to_string()[..4])).await;
+    let emp_id = emp["id"].as_str().unwrap().to_string();
+
+    // 基準値を設定
+    client.post(format!("{base_url}/api/tenko/health-baselines"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "employee_id": emp_id,
+            "baseline_systolic": 120,
+            "baseline_diastolic": 80,
+            "baseline_temperature": 36.5,
+            "systolic_tolerance": 20,
+            "diastolic_tolerance": 20,
+            "temperature_tolerance": 1.0
+        }))
+        .send().await.unwrap();
+
+    let session = start_session_remote(&client, &base_url, &auth, &emp_id).await;
+    let session_id = session["id"].as_str().unwrap();
+
+    // 医療データ (全て範囲内)
+    client.put(format!("{base_url}/api/tenko/sessions/{session_id}/medical"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "temperature": 36.8,
+            "systolic": 125,
+            "diastolic": 85,
+            "pulse": 70,
+            "medical_manual_input": true
+        }))
+        .send().await.unwrap();
+
+    // 自己申告 (正常) → pass → daily_inspection_pending
+    let res = client.put(format!("{base_url}/api/tenko/sessions/{session_id}/self-declaration"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "illness": false, "fatigue": false, "sleep_deprivation": false }))
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
+    let session: Value = res.json().await.unwrap();
+    assert_eq!(session["status"], "daily_inspection_pending");
+    let judgment = &session["safety_judgment"];
+    assert_eq!(judgment["status"], "pass");
+}
+
+/// 複数の失敗項目 (temperature + fatigue)
+#[tokio::test]
+async fn test_safety_judgment_multiple_failures() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, &format!("SJMulti{}", uuid::Uuid::new_v4().simple())).await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+    let emp = common::create_test_employee(&client, &base_url, &auth, "SJMultiEmp",
+        &format!("SM{}", &uuid::Uuid::new_v4().simple().to_string()[..4])).await;
+    let emp_id = emp["id"].as_str().unwrap().to_string();
+
+    // 基準値
+    client.post(format!("{base_url}/api/tenko/health-baselines"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "employee_id": emp_id,
+            "baseline_systolic": 120,
+            "baseline_diastolic": 80,
+            "baseline_temperature": 36.5,
+            "systolic_tolerance": 10,
+            "diastolic_tolerance": 10,
+            "temperature_tolerance": 0.5
+        }))
+        .send().await.unwrap();
+
+    let session = start_session_remote(&client, &base_url, &auth, &emp_id).await;
+    let session_id = session["id"].as_str().unwrap();
+
+    // 医療データ (温度が範囲外)
+    client.put(format!("{base_url}/api/tenko/sessions/{session_id}/medical"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "temperature": 38.0,
+            "systolic": 120,
+            "diastolic": 80,
+            "medical_manual_input": true
+        }))
+        .send().await.unwrap();
+
+    // 自己申告 (fatigue=true) → ���度 + fatigue で2項目失敗
+    let res = client.put(format!("{base_url}/api/tenko/sessions/{session_id}/self-declaration"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "illness": false, "fatigue": true, "sleep_deprivation": false }))
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
+    let session: Value = res.json().await.unwrap();
+    assert_eq!(session["status"], "interrupted");
+    let failed = session["safety_judgment"]["failed_items"].as_array().unwrap();
+    assert!(failed.len() >= 2, "Expected 2+ failed items, got {:?}", failed);
+}
+
+/// check_overdue_schedules: overdue schedule + webhook config → 配信 + overdue_notified_at 更新
+#[tokio::test]
+async fn test_check_overdue_with_overdue_schedule() {
+    let state = common::setup_app_state().await;
+    let _base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, &format!("WHOver{}", uuid::Uuid::new_v4().simple())).await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    // employee
+    let emp = common::create_test_employee(&client, &_base_url, &auth, "OverdueEmp",
+        &format!("OD{}", &uuid::Uuid::new_v4().simple().to_string()[..4])).await;
+    let emp_id: uuid::Uuid = emp["id"].as_str().unwrap().parse().unwrap();
+
+    // 受信サーバー
+    let received = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let received_clone = received.clone();
+    let receiver = axum::Router::new().route("/overdue", axum::routing::post(move || {
+        let r = received_clone.clone();
+        async move {
+            r.store(true, std::sync::atomic::Ordering::SeqCst);
+            "ok"
+        }
+    }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, receiver).await.unwrap() });
+
+    // webhook config for tenko_overdue
+    let res = client
+        .post(format!("{_base_url}/api/tenko/webhooks"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "event_type": "tenko_overdue",
+            "url": format!("http://{addr}/overdue")
+        }))
+        .send().await.unwrap();
+    assert!(res.status() == 200 || res.status() == 201);
+
+    // 過去の予定を API で作成 (scheduled_at は過去に設定)
+    let two_hours_ago = (chrono::Utc::now() - chrono::Duration::hours(2)).to_rfc3339();
+    let res = client
+        .post(format!("{_base_url}/api/tenko/schedules"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "employee_id": emp_id,
+            "scheduled_at": two_hours_ago,
+            "tenko_type": "pre_operation",
+            "responsible_manager_name": "テスト管理者",
+            "instruction": "安全運転してください"
+        }))
+        .send().await.unwrap();
+    let status = res.status();
+    let body_text = res.text().await.unwrap();
+    assert!(status == 200 || status == 201, "schedule creation failed: {status} {body_text}");
+    let sched: serde_json::Value = serde_json::from_str(&body_text).unwrap();
+    let schedule_id: uuid::Uuid = sched["id"].as_str().unwrap().parse().unwrap();
+
+    // check_overdue_schedules (TENKO_OVERDUE_MINUTES デフォルト60分なので2時間前は overdue)
+    std::env::set_var("TENKO_OVERDUE_MINUTES", "60");
+    let result = rust_alc_api::webhook::check_overdue_schedules(&state.pool).await;
+    assert!(result.is_ok(), "check_overdue failed: {:?}", result.err());
+
+    // 少し待つ (deliver_webhook は sync in check_overdue, not spawned)
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+    // overdue_notified_at が更新されたか確認
+    let mut conn = state.pool.acquire().await.unwrap();
+    sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
+        .bind(tenant_id.to_string())
+        .execute(&mut *conn).await.unwrap();
+    let notified: Option<chrono::DateTime<chrono::Utc>> = sqlx::query_scalar(
+        "SELECT overdue_notified_at FROM tenko_schedules WHERE id = $1",
+    )
+    .bind(schedule_id)
+    .fetch_one(&mut *conn).await.unwrap();
+    assert!(notified.is_some(), "overdue_notified_at should be set");
+}

@@ -32,8 +32,14 @@ async fn list_current(
     State(state): State<AppState>,
     Extension(tenant_id): Extension<TenantId>,
 ) -> Result<Json<ListResponse>, StatusCode> {
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.0.to_string()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    set_current_tenant(&mut conn, &tenant_id.0.to_string())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let rows = sqlx::query_as::<_, (serde_json::Value,)>(
         r#"
@@ -84,8 +90,14 @@ async fn get_by_id(
     Extension(tenant_id): Extension<TenantId>,
     Path(id): Path<i32>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.0.to_string()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    set_current_tenant(&mut conn, &tenant_id.0.to_string())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let row = sqlx::query_as::<_, (serde_json::Value,)>(
         "SELECT to_jsonb(ci) FROM car_inspection ci WHERE id = $1",
@@ -145,8 +157,14 @@ async fn list_expired(
     State(state): State<AppState>,
     Extension(tenant_id): Extension<TenantId>,
 ) -> Result<Json<ListResponse>, StatusCode> {
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.0.to_string()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    set_current_tenant(&mut conn, &tenant_id.0.to_string())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let rows = sqlx::query_as::<_, (serde_json::Value,)>(
         r#"
@@ -172,8 +190,14 @@ async fn list_renew(
     State(state): State<AppState>,
     Extension(tenant_id): Extension<TenantId>,
 ) -> Result<Json<ListResponse>, StatusCode> {
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.0.to_string()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    set_current_tenant(&mut conn, &tenant_id.0.to_string())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let rows = sqlx::query_as::<_, (serde_json::Value,)>(
         r#"

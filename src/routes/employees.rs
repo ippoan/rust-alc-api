@@ -6,16 +6,23 @@ use axum::{
 };
 use uuid::Uuid;
 
-use crate::db::models::{CreateEmployee, Employee, FaceDataEntry, UpdateEmployee, UpdateFace, UpdateLicense, UpdateNfcId};
+use crate::db::models::{
+    CreateEmployee, Employee, FaceDataEntry, UpdateEmployee, UpdateFace, UpdateLicense, UpdateNfcId,
+};
 use crate::db::tenant::set_current_tenant;
-use crate::AppState;
 use crate::middleware::auth::TenantId;
+use crate::AppState;
 
 /// テナント対応ルート (JWT or X-Tenant-ID)
 pub fn tenant_router() -> Router<AppState> {
     Router::new()
         .route("/employees", post(create_employee).get(list_employees))
-        .route("/employees/{id}", get(get_employee).put(update_employee).delete(delete_employee))
+        .route(
+            "/employees/{id}",
+            get(get_employee)
+                .put(update_employee)
+                .delete(delete_employee),
+        )
         .route("/employees/{id}/face", put(update_face))
         .route("/employees/{id}/nfc", put(update_nfc_id))
         .route("/employees/{id}/license", put(update_license))
@@ -33,9 +40,13 @@ async fn create_employee(
 ) -> Result<(StatusCode, Json<Employee>), StatusCode> {
     let tenant_id = tenant.0 .0;
 
-    let mut conn = state.pool.acquire().await
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string()).await
+    set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let employee = sqlx::query_as::<_, Employee>(
@@ -66,9 +77,13 @@ async fn list_employees(
 ) -> Result<Json<Vec<Employee>>, StatusCode> {
     let tenant_id = tenant.0 .0;
 
-    let mut conn = state.pool.acquire().await
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string()).await
+    set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let employees = sqlx::query_as::<_, Employee>(
@@ -89,9 +104,13 @@ async fn get_employee(
 ) -> Result<Json<Employee>, StatusCode> {
     let tenant_id = tenant.0 .0;
 
-    let mut conn = state.pool.acquire().await
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string()).await
+    set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let employee = sqlx::query_as::<_, Employee>(
@@ -114,9 +133,13 @@ async fn get_employee_by_nfc(
 ) -> Result<Json<Employee>, StatusCode> {
     let tenant_id = tenant.0 .0;
 
-    let mut conn = state.pool.acquire().await
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string()).await
+    set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let employee = sqlx::query_as::<_, Employee>(
@@ -139,9 +162,13 @@ async fn get_employee_by_code(
 ) -> Result<Json<Employee>, StatusCode> {
     let tenant_id = tenant.0 .0;
 
-    let mut conn = state.pool.acquire().await
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string()).await
+    set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let employee = sqlx::query_as::<_, Employee>(
@@ -165,9 +192,13 @@ async fn update_employee(
 ) -> Result<Json<Employee>, StatusCode> {
     let tenant_id = tenant.0 .0;
 
-    let mut conn = state.pool.acquire().await
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string()).await
+    set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let employee = sqlx::query_as::<_, Employee>(
@@ -203,9 +234,13 @@ async fn delete_employee(
 ) -> Result<StatusCode, StatusCode> {
     let tenant_id = tenant.0 .0;
 
-    let mut conn = state.pool.acquire().await
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string()).await
+    set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let result = sqlx::query(
@@ -245,9 +280,13 @@ async fn update_face(
         }
     }
 
-    let mut conn = state.pool.acquire().await
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string()).await
+    set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let employee = sqlx::query_as::<_, Employee>(
@@ -285,9 +324,13 @@ async fn list_face_data(
 ) -> Result<Json<Vec<FaceDataEntry>>, StatusCode> {
     let tenant_id = tenant.0 .0;
 
-    let mut conn = state.pool.acquire().await
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string()).await
+    set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let rows = sqlx::query_as::<_, FaceDataEntry>(
@@ -314,9 +357,13 @@ async fn update_license(
 ) -> Result<Json<Employee>, StatusCode> {
     let tenant_id = tenant.0 .0;
 
-    let mut conn = state.pool.acquire().await
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string()).await
+    set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let employee = sqlx::query_as::<_, Employee>(
@@ -352,9 +399,13 @@ async fn update_nfc_id(
 ) -> Result<Json<Employee>, StatusCode> {
     let tenant_id = tenant.0 .0;
 
-    let mut conn = state.pool.acquire().await
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string()).await
+    set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let employee = sqlx::query_as::<_, Employee>(
@@ -385,9 +436,13 @@ async fn approve_face(
 ) -> Result<Json<Employee>, StatusCode> {
     let tenant_id = tenant.0 .0;
 
-    let mut conn = state.pool.acquire().await
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string()).await
+    set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let employee = sqlx::query_as::<_, Employee>(
@@ -420,9 +475,13 @@ async fn reject_face(
 ) -> Result<Json<Employee>, StatusCode> {
     let tenant_id = tenant.0 .0;
 
-    let mut conn = state.pool.acquire().await
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string()).await
+    set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let employee = sqlx::query_as::<_, Employee>(

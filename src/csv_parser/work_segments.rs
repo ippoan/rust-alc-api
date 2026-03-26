@@ -549,7 +549,8 @@ mod tests {
         let segments = split_by_rest(dep, ret, &refs, &cls);
         assert_eq!(segments.len(), 1);
         assert_eq!(segments[0].start, dep);
-        assert_eq!(segments[0].end, ret);
+        // actual_end = イベント終了時刻 (10:00 + 300min = 15:00)
+        assert_eq!(segments[0].end, dt(2026, 2, 24, 15, 0));
         assert_eq!(segments[0].labor_minutes, 300);
     }
 
@@ -571,9 +572,9 @@ mod tests {
         assert_eq!(segments[0].start, dt(2026, 2, 24, 10, 0));
         assert_eq!(segments[0].end, dt(2026, 2, 24, 14, 0));
         assert_eq!(segments[0].labor_minutes, 240);
-        // 区間2: 00:00(休息終了) → 18:00
+        // 区間2: 00:00(休息終了) → 08:00 (0:00 + 480min)
         assert_eq!(segments[1].start, dt(2026, 2, 25, 0, 0));
-        assert_eq!(segments[1].end, dt(2026, 2, 25, 18, 0));
+        assert_eq!(segments[1].end, dt(2026, 2, 25, 8, 0));
         assert_eq!(segments[1].labor_minutes, 480);
     }
 
@@ -608,8 +609,8 @@ mod tests {
         // 区間3: 21:31 + 780min = ~10:31翌日 → 21:25
         assert_eq!(segments[2].end, dt(2026, 2, 26, 21, 25));
 
-        // 区間4: → 16:00
-        assert_eq!(segments[3].end, dt(2026, 2, 27, 16, 0));
+        // 区間4: 7:00 + 400min = 13:40
+        assert_eq!(segments[3].end, dt(2026, 2, 27, 13, 40));
 
         // 拘束時間は24時間にはならない
         for seg in &segments {

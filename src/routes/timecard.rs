@@ -8,8 +8,8 @@ use axum::{
 use uuid::Uuid;
 
 use crate::db::models::{
-    CreateTimePunchByCard, CreateTimecardCard, TimePunch, TimePunchFilter,
-    TimePunchWithDevice, TimePunchWithEmployee, TimePunchesResponse, TimecardCard,
+    CreateTimePunchByCard, CreateTimecardCard, TimePunch, TimePunchFilter, TimePunchWithDevice,
+    TimePunchWithEmployee, TimePunchesResponse, TimecardCard,
 };
 use crate::db::tenant::set_current_tenant;
 use crate::middleware::auth::TenantId;
@@ -19,7 +19,10 @@ pub fn tenant_router() -> Router<AppState> {
     Router::new()
         .route("/timecard/cards", post(create_card).get(list_cards))
         .route("/timecard/cards/{id}", get(get_card).delete(delete_card))
-        .route("/timecard/cards/by-card/{card_id}", get(get_card_by_card_id))
+        .route(
+            "/timecard/cards/by-card/{card_id}",
+            get(get_card_by_card_id),
+        )
         .route("/timecard/punch", post(punch))
         .route("/timecard/punches", get(list_punches))
         .route("/timecard/punches/csv", get(export_csv))
@@ -34,9 +37,13 @@ async fn create_card(
 ) -> Result<(StatusCode, Json<TimecardCard>), StatusCode> {
     let tenant_id = tenant.0 .0;
 
-    let mut conn = state.pool.acquire().await
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string()).await
+    set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let card = sqlx::query_as::<_, TimecardCard>(
@@ -75,9 +82,13 @@ async fn list_cards(
 ) -> Result<Json<Vec<TimecardCard>>, StatusCode> {
     let tenant_id = tenant.0 .0;
 
-    let mut conn = state.pool.acquire().await
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string()).await
+    set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let cards = if let Some(eid) = filter.employee_id {
@@ -108,9 +119,13 @@ async fn get_card(
 ) -> Result<Json<TimecardCard>, StatusCode> {
     let tenant_id = tenant.0 .0;
 
-    let mut conn = state.pool.acquire().await
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string()).await
+    set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let card = sqlx::query_as::<_, TimecardCard>(
@@ -133,9 +148,13 @@ async fn get_card_by_card_id(
 ) -> Result<Json<TimecardCard>, StatusCode> {
     let tenant_id = tenant.0 .0;
 
-    let mut conn = state.pool.acquire().await
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string()).await
+    set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let card = sqlx::query_as::<_, TimecardCard>(
@@ -158,19 +177,21 @@ async fn delete_card(
 ) -> Result<StatusCode, StatusCode> {
     let tenant_id = tenant.0 .0;
 
-    let mut conn = state.pool.acquire().await
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string()).await
+    set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let result = sqlx::query(
-        "DELETE FROM timecard_cards WHERE id = $1 AND tenant_id = $2",
-    )
-    .bind(id)
-    .bind(tenant_id)
-    .execute(&mut *conn)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let result = sqlx::query("DELETE FROM timecard_cards WHERE id = $1 AND tenant_id = $2")
+        .bind(id)
+        .bind(tenant_id)
+        .execute(&mut *conn)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     if result.rows_affected() == 0 {
         return Err(StatusCode::NOT_FOUND);
@@ -188,9 +209,13 @@ async fn punch(
 ) -> Result<(StatusCode, Json<TimePunchWithEmployee>), StatusCode> {
     let tenant_id = tenant.0 .0;
 
-    let mut conn = state.pool.acquire().await
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string()).await
+    set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // カードIDから社員を特定 (timecard_cards → employees.nfc_id フォールバック)
@@ -236,14 +261,13 @@ async fn punch(
     })?;
 
     // 社員名を取得
-    let employee_name: String = sqlx::query_scalar(
-        "SELECT name FROM employees WHERE id = $1 AND tenant_id = $2",
-    )
-    .bind(employee_id)
-    .bind(tenant_id)
-    .fetch_one(&mut *conn)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let employee_name: String =
+        sqlx::query_scalar("SELECT name FROM employees WHERE id = $1 AND tenant_id = $2")
+            .bind(employee_id)
+            .bind(tenant_id)
+            .fetch_one(&mut *conn)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // 当日の打刻一覧
     let today_punches = sqlx::query_as::<_, TimePunch>(
@@ -282,9 +306,13 @@ async fn list_punches(
     let page = filter.page.unwrap_or(1).max(1);
     let offset = (page - 1) * per_page;
 
-    let mut conn = state.pool.acquire().await
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string()).await
+    set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let mut conditions = vec!["tp.tenant_id = $1".to_string()];
@@ -367,9 +395,13 @@ async fn export_csv(
 ) -> Result<impl IntoResponse, StatusCode> {
     let tenant_id = tenant.0 .0;
 
-    let mut conn = state.pool.acquire().await
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string()).await
+    set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let mut conditions = vec!["tp.tenant_id = $1".to_string()];
@@ -436,13 +468,18 @@ async fn export_csv(
             r.id.to_string(),
             r.employee_code.clone().unwrap_or_default(),
             r.employee_name.clone(),
-            r.punched_at.with_timezone(&chrono::FixedOffset::east_opt(9 * 3600).unwrap()).format("%Y-%m-%d %H:%M:%S").to_string(),
+            r.punched_at
+                .with_timezone(&chrono::FixedOffset::east_opt(9 * 3600).unwrap())
+                .format("%Y-%m-%d %H:%M:%S")
+                .to_string(),
             r.device_name.clone().unwrap_or_default(),
         ])
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     }
 
-    let csv_data = wtr.into_inner().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let csv_data = wtr
+        .into_inner()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let mut output = vec![0xEF, 0xBB, 0xBF];
     output.extend_from_slice(&csv_data);
@@ -450,7 +487,10 @@ async fn export_csv(
     Ok((
         [
             (axum::http::header::CONTENT_TYPE, "text/csv; charset=utf-8"),
-            (axum::http::header::CONTENT_DISPOSITION, "attachment; filename=\"time_punches.csv\""),
+            (
+                axum::http::header::CONTENT_DISPOSITION,
+                "attachment; filename=\"time_punches.csv\"",
+            ),
         ],
         output,
     ))

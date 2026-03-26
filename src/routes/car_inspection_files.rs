@@ -1,9 +1,4 @@
-use axum::{
-    extract::State,
-    http::StatusCode,
-    routing::get,
-    Extension, Json, Router,
-};
+use axum::{extract::State, http::StatusCode, routing::get, Extension, Json, Router};
 use serde::Serialize;
 use sqlx::FromRow;
 use uuid::Uuid;
@@ -13,8 +8,7 @@ use crate::middleware::auth::TenantId;
 use crate::AppState;
 
 pub fn tenant_router() -> Router<AppState> {
-    Router::new()
-        .route("/car-inspection-files/current", get(list_current))
+    Router::new().route("/car-inspection-files/current", get(list_current))
 }
 
 #[derive(Debug, Clone, FromRow, Serialize)]
@@ -47,8 +41,14 @@ async fn list_current(
     State(state): State<AppState>,
     Extension(tenant_id): Extension<TenantId>,
 ) -> Result<Json<ListResponse>, StatusCode> {
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.0.to_string()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    set_current_tenant(&mut conn, &tenant_id.0.to_string())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let rows = sqlx::query_as::<_, CarInspectionFile>(
         r#"

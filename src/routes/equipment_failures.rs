@@ -289,9 +289,8 @@ async fn export_csv(
     let _ = param_idx;
 
     let where_clause = conditions.join(" AND ");
-    let sql = format!(
-        "SELECT * FROM equipment_failures WHERE {where_clause} ORDER BY detected_at DESC"
-    );
+    let sql =
+        format!("SELECT * FROM equipment_failures WHERE {where_clause} ORDER BY detected_at DESC");
     let mut query = sqlx::query_as::<_, EquipmentFailure>(&sql).bind(tenant_id);
     if let Some(df) = filter.date_from {
         query = query.bind(df);
@@ -345,10 +344,7 @@ async fn export_csv(
 
     Ok((
         [
-            (
-                axum::http::header::CONTENT_TYPE,
-                "text/csv; charset=utf-8",
-            ),
+            (axum::http::header::CONTENT_TYPE, "text/csv; charset=utf-8"),
             (
                 axum::http::header::CONTENT_DISPOSITION,
                 "attachment; filename=\"equipment_failures.csv\"",
