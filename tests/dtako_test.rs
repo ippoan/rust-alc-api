@@ -618,30 +618,67 @@ async fn test_dtako_restraint_report_pdf() {
         .send().await.unwrap();
     assert_eq!(res.status(), 200, "upload failed");
 
-    // Get driver list to find the driver_id
-    let res = client
-        .get(format!("{base_url}/api/drivers"))
-        .header("Authorization", format!("Bearer {jwt}"))
-        .send().await.unwrap();
-    assert_eq!(res.status(), 200);
-    let drivers: Value = res.json().await.unwrap();
-    let drivers_arr = drivers.as_array().unwrap();
-    assert!(!drivers_arr.is_empty(), "should have at least one driver after upload");
-    let driver_id = drivers_arr[0]["id"].as_str().unwrap();
+    // PDF は employees テーブルを参照するため、employee を作成
+    let auth = format!("Bearer {jwt}");
+    let emp = common::create_test_employee(&client, &base_url, &auth, "PDFドライバー", "PDF01").await;
+    let emp_id = emp["id"].as_str().unwrap();
 
-    // Request PDF for the driver
+    // Request PDF for the employee (driver_id = employee_id)
     let res = client
         .get(format!(
-            "{base_url}/api/restraint-report/pdf?driver_id={driver_id}&year=2026&month=3"
+            "{base_url}/api/restraint-report/pdf?driver_id={emp_id}&year=2026&month=3"
         ))
-        .header("Authorization", format!("Bearer {jwt}"))
+        .header("Authorization", &auth)
         .send().await.unwrap();
     let status = res.status().as_u16();
-    // Accept 200/404/500 (PDF generated / no data / insufficient data)
+    // 200 (PDF generated) — build_report returns empty days but PDF still generates
     assert!(
-        status == 200 || status == 404 || status == 500,
+        status == 200 || status == 500,
         "restraint-report/pdf returned unexpected status: {status}"
     );
+    if status == 200 {
+        let ct = res.headers().get("content-type").unwrap().to_str().unwrap();
+        assert!(ct.contains("pdf"), "should return PDF content type");
+    }
+}
+
+// PDF 全ドライバー (driver_id なし) — employee が存在すれば生成
+#[tokio::test]
+async fn test_dtako_restraint_report_pdf_all_drivers() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "DtakoRRPdfAll").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    common::create_test_employee(&client, &base_url, &auth, "全員PDF", "ALL01").await;
+
+    let res = client
+        .get(format!("{base_url}/api/restraint-report/pdf?year=2026&month=3"))
+        .header("Authorization", &auth)
+        .send().await.unwrap();
+    let status = res.status().as_u16();
+    assert!(status == 200 || status == 500, "pdf all: {status}");
+}
+
+// PDF ストリーム
+#[tokio::test]
+async fn test_dtako_restraint_report_pdf_stream() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "DtakoRRStream").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    common::create_test_employee(&client, &base_url, &auth, "ストリームPDF", "STR01").await;
+
+    let res = client
+        .get(format!("{base_url}/api/restraint-report/pdf-stream?year=2026&month=3"))
+        .header("Authorization", &auth)
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
 }
 
 #[tokio::test]
