@@ -1148,6 +1148,44 @@ async fn test_car_inspections_get_by_fake_id_returns_404() {
 }
 
 // ============================================================
+// Bot Admin — update (既存config更新)
+// ============================================================
+
+#[tokio::test]
+#[ignore] // llvm-cov 環境で env var 競合
+async fn test_bot_admin_update_config() {
+    std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "BotUpd").await;
+    let (user_id, _) = common::create_test_user_in_db(&state.pool, tenant_id, "botupd@test.com", "admin").await;
+    let jwt = common::create_test_jwt_for_user(user_id, tenant_id, "botupd@test.com", "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    // create
+    let res = client.post(format!("{base_url}/api/admin/bot/configs"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "name": "UpdBot", "client_id": "upd-cid", "service_account": "upd@sa", "bot_id": "upd-bot"
+        }))
+        .send().await.unwrap();
+    let body: Value = res.json().await.unwrap();
+    let bot_id = body["id"].as_str().unwrap().to_string();
+
+    // update (upsert with same id)
+    let res = client.post(format!("{base_url}/api/admin/bot/configs"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "id": bot_id, "name": "UpdBot2", "client_id": "upd-cid2",
+            "client_secret": "secret2", "service_account": "upd@sa2",
+            "private_key": "key2", "bot_id": "upd-bot2"
+        }))
+        .send().await.unwrap();
+    assert!(res.status() == 200 || res.status() == 201);
+}
+
+// ============================================================
 // NFC Tags (基本)
 // ============================================================
 

@@ -197,6 +197,97 @@ async fn test_schedule_pending_for_employee() {
 }
 
 // ============================================================
+// Tenko Schedules — edge cases
+// ============================================================
+
+#[tokio::test]
+async fn test_schedule_get_not_found() {
+    let (base_url, auth, _emp_id, client) = setup_tenko().await;
+    let fake = uuid::Uuid::new_v4();
+    let res = client.get(format!("{base_url}/api/tenko/schedules/{fake}"))
+        .header("Authorization", &auth).send().await.unwrap();
+    assert_eq!(res.status(), 404);
+}
+
+#[tokio::test]
+async fn test_schedule_delete_not_found() {
+    let (base_url, auth, _emp_id, client) = setup_tenko().await;
+    let fake = uuid::Uuid::new_v4();
+    let res = client.delete(format!("{base_url}/api/tenko/schedules/{fake}"))
+        .header("Authorization", &auth).send().await.unwrap();
+    assert_eq!(res.status(), 404);
+}
+
+#[tokio::test]
+async fn test_schedule_update_not_found() {
+    let (base_url, auth, _emp_id, client) = setup_tenko().await;
+    let fake = uuid::Uuid::new_v4();
+    let res = client.put(format!("{base_url}/api/tenko/schedules/{fake}"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "responsible_manager_name": "test" }))
+        .send().await.unwrap();
+    assert_eq!(res.status(), 404);
+}
+
+#[tokio::test]
+async fn test_schedule_invalid_tenko_type() {
+    let (base_url, auth, emp_id, client) = setup_tenko().await;
+    let res = client.post(format!("{base_url}/api/tenko/schedules"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "employee_id": emp_id, "tenko_type": "invalid_type",
+            "responsible_manager_name": "mgr", "scheduled_at": "2099-01-01T00:00:00Z"
+        }))
+        .send().await.unwrap();
+    assert_eq!(res.status(), 400);
+}
+
+// ============================================================
+// Equipment Failures — edge cases
+// ============================================================
+
+#[tokio::test]
+async fn test_equipment_failure_get_not_found() {
+    let (base_url, auth, _emp_id, client) = setup_tenko().await;
+    let fake = uuid::Uuid::new_v4();
+    let res = client.get(format!("{base_url}/api/tenko/equipment-failures/{fake}"))
+        .header("Authorization", &auth).send().await.unwrap();
+    assert_eq!(res.status(), 404);
+}
+
+#[tokio::test]
+async fn test_equipment_failure_invalid_type() {
+    let (base_url, auth, _emp_id, client) = setup_tenko().await;
+    let res = client.post(format!("{base_url}/api/tenko/equipment-failures"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "failure_type": "invalid_type", "description": "test" }))
+        .send().await.unwrap();
+    assert_eq!(res.status(), 400);
+}
+
+// ============================================================
+// Health Baselines — edge cases
+// ============================================================
+
+#[tokio::test]
+async fn test_health_baseline_get_not_found() {
+    let (base_url, auth, _emp_id, client) = setup_tenko().await;
+    let fake = uuid::Uuid::new_v4();
+    let res = client.get(format!("{base_url}/api/tenko/health-baselines/{fake}"))
+        .header("Authorization", &auth).send().await.unwrap();
+    assert_eq!(res.status(), 404);
+}
+
+#[tokio::test]
+async fn test_health_baseline_delete_not_found() {
+    let (base_url, auth, _emp_id, client) = setup_tenko().await;
+    let fake = uuid::Uuid::new_v4();
+    let res = client.delete(format!("{base_url}/api/tenko/health-baselines/{fake}"))
+        .header("Authorization", &auth).send().await.unwrap();
+    assert_eq!(res.status(), 404);
+}
+
+// ============================================================
 // Tenko Sessions — pre_operation フロー
 // ============================================================
 
