@@ -107,6 +107,34 @@ pub fn create_test_jwt_for_user(user_id: Uuid, tenant_id: Uuid, email: &str, rol
     create_access_token(&user, &secret, None).expect("Failed to create test JWT")
 }
 
+/// テスト用 MockFcmSender (送信を記録するだけ)
+pub struct MockFcmSender {
+    pub sent: std::sync::Mutex<Vec<(String, std::collections::HashMap<String, String>)>>,
+}
+
+impl MockFcmSender {
+    pub fn new() -> Self {
+        Self {
+            sent: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl rust_alc_api::fcm::FcmSenderTrait for MockFcmSender {
+    async fn send_data_message(
+        &self,
+        fcm_token: &str,
+        data: std::collections::HashMap<String, String>,
+    ) -> Result<(), rust_alc_api::fcm::FcmError> {
+        self.sent
+            .lock()
+            .unwrap()
+            .push((fcm_token.to_string(), data));
+        Ok(())
+    }
+}
+
 /// テスト用 DB URL (docker-compose の test-db に接続)
 pub fn test_database_url() -> String {
     std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
@@ -134,12 +162,15 @@ pub async fn setup_app_state() -> AppState {
     let dtako_storage: Arc<dyn rust_alc_api::storage::StorageBackend> =
         Arc::new(MockStorage::new("dtako-bucket"));
 
+    let mock_fcm: Arc<dyn rust_alc_api::fcm::FcmSenderTrait> =
+        Arc::new(MockFcmSender::new());
+
     AppState {
         pool,
         storage,
         carins_storage: None,
         dtako_storage: Some(dtako_storage),
-        fcm: None,
+        fcm: Some(mock_fcm),
     }
 }
 

@@ -1,6 +1,16 @@
 use reqwest::Client;
 use serde::Serialize;
 
+/// FCM 送信 trait (テスト用モック対応)
+#[async_trait::async_trait]
+pub trait FcmSenderTrait: Send + Sync {
+    async fn send_data_message(
+        &self,
+        fcm_token: &str,
+        data: std::collections::HashMap<String, String>,
+    ) -> Result<(), FcmError>;
+}
+
 #[derive(Clone)]
 pub struct FcmSender {
     client: Client,
@@ -31,9 +41,11 @@ impl FcmSender {
             project_id,
         }
     }
+}
 
-    /// Send a data-only FCM message (high priority, no notification key)
-    pub async fn send_data_message(
+#[async_trait::async_trait]
+impl FcmSenderTrait for FcmSender {
+    async fn send_data_message(
         &self,
         fcm_token: &str,
         data: std::collections::HashMap<String, String>,
@@ -74,7 +86,9 @@ impl FcmSender {
 
         Ok(())
     }
+}
 
+impl FcmSender {
     /// Get OAuth2 access token from Cloud Run metadata server
     async fn get_access_token(&self) -> Result<String, FcmError> {
         let url = "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token";

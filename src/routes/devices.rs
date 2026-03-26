@@ -10,13 +10,17 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::db::tenant::set_current_tenant;
+use crate::fcm::FcmSenderTrait;
 use crate::middleware::auth::{AuthUser, TenantId};
 use crate::AppState;
 
 /// 公開ルート (認証不要) - 端末側から呼ばれる
 pub fn public_router() -> Router<AppState> {
     Router::new()
-        .route("/devices/register/request", post(create_registration_request))
+        .route(
+            "/devices/register/request",
+            post(create_registration_request),
+        )
         .route(
             "/devices/register/status/{code}",
             get(check_registration_status),
@@ -172,7 +176,16 @@ async fn check_registration_status(
     State(state): State<AppState>,
     Path(code): Path<String>,
 ) -> Result<Json<RegistrationStatusResponse>, StatusCode> {
-    let row = sqlx::query_as::<_, (String, Option<Uuid>, Option<Uuid>, Option<String>, Option<String>)>(
+    let row = sqlx::query_as::<
+        _,
+        (
+            String,
+            Option<Uuid>,
+            Option<Uuid>,
+            Option<String>,
+            Option<String>,
+        ),
+    >(
         r#"
         SELECT status, device_id, tenant_id, expires_at::text,
                NULLIF(device_name, '') AS device_name
@@ -193,14 +206,12 @@ async fn check_registration_status(
     let status = if row.0 == "pending" {
         if let Some(ref expires_at) = row.3 {
             // 簡易チェック: DB側でも確認できるが、ここでも
-            let expired = sqlx::query_as::<_, (bool,)>(
-                "SELECT $1::timestamptz < NOW()",
-            )
-            .bind(expires_at)
-            .fetch_one(&state.pool)
-            .await
-            .map(|r| r.0)
-            .unwrap_or(false);
+            let expired = sqlx::query_as::<_, (bool,)>("SELECT $1::timestamptz < NOW()")
+                .bind(expires_at)
+                .fetch_one(&state.pool)
+                .await
+                .map(|r| r.0)
+                .unwrap_or(false);
             if expired {
                 "expired".to_string()
             } else {
@@ -276,7 +287,16 @@ async fn claim_registration(
     })?
     .ok_or_else(|| claim_err("無効な登録コードです"))?;
 
-    let (req_id, flow_type, tenant_id, status, _expires_at, stored_device_name, is_device_owner, is_dev_device) = req;
+    let (
+        req_id,
+        flow_type,
+        tenant_id,
+        status,
+        _expires_at,
+        stored_device_name,
+        is_device_owner,
+        is_dev_device,
+    ) = req;
 
     if status != "pending" {
         return Err(claim_err("このコードは既に使用済みです"));
@@ -710,7 +730,18 @@ async fn approve_device(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // リクエスト取得
-    let req = sqlx::query_as::<_, (Uuid, String, Option<String>, Option<String>, String, bool, bool)>(
+    let req = sqlx::query_as::<
+        _,
+        (
+            Uuid,
+            String,
+            Option<String>,
+            Option<String>,
+            String,
+            bool,
+            bool,
+        ),
+    >(
         r#"
         SELECT id, flow_type, phone_number, device_name, status, is_device_owner, is_dev_device
         FROM device_registration_requests
@@ -726,10 +757,7 @@ async fn approve_device(
     })?
     .ok_or(StatusCode::NOT_FOUND)?;
 
-    let device_name = body
-        .device_name
-        .or(req.3.clone())
-        .unwrap_or_default();
+    let device_name = body.device_name.or(req.3.clone()).unwrap_or_default();
 
     let device_type = if req.2.is_some() { "android" } else { "kiosk" };
     let approved_by = auth.as_ref().map(|a| a.user_id);
@@ -804,7 +832,18 @@ async fn approve_by_code(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // registration_code でリクエスト検索
-    let req = sqlx::query_as::<_, (Uuid, String, Option<String>, Option<String>, String, bool, bool)>(
+    let req = sqlx::query_as::<
+        _,
+        (
+            Uuid,
+            String,
+            Option<String>,
+            Option<String>,
+            String,
+            bool,
+            bool,
+        ),
+    >(
         r#"
         SELECT id, flow_type, phone_number, device_name, status, is_device_owner, is_dev_device
         FROM device_registration_requests
@@ -1061,7 +1100,11 @@ async fn update_call_settings(
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateCallSettingsBody>,
 ) -> Result<StatusCode, StatusCode> {
-    tracing::info!("update_call_settings: device={id} call_enabled={} always_on={:?}", body.call_enabled, body.always_on);
+    tracing::info!(
+        "update_call_settings: device={id} call_enabled={} always_on={:?}",
+        body.call_enabled,
+        body.always_on
+    );
     let mut conn = state
         .pool
         .acquire()
@@ -1102,12 +1145,18 @@ async fn update_call_settings(
             .ok()
             .flatten();
 
-            tracing::info!("FCM settings_changed: device={id} token={:?}", token_row.as_ref().map(|r| r.0.is_some()));
+            tracing::info!(
+                "FCM settings_changed: device={id} token={:?}",
+                token_row.as_ref().map(|r| r.0.is_some())
+            );
 
             if let Some((Some(token),)) = token_row {
                 let mut data = std::collections::HashMap::new();
                 data.insert("type".to_string(), "settings_changed".to_string());
-                data.insert("timestamp".to_string(), chrono::Utc::now().timestamp_millis().to_string());
+                data.insert(
+                    "timestamp".to_string(),
+                    chrono::Utc::now().timestamp_millis().to_string(),
+                );
                 if let Err(e) = fcm.send_data_message(&token, data).await {
                     tracing::warn!("FCM settings_changed to device {} failed: {e}", id);
                 }
@@ -1162,21 +1211,23 @@ async fn register_fcm_token(
     Json(body): Json<RegisterFcmTokenBody>,
 ) -> Result<StatusCode, StatusCode> {
     // device_select_by_id RLS ポリシーで tenant_id を取得
-    let tenant_id = sqlx::query_as::<_, (Uuid,)>(
-        "SELECT tenant_id FROM devices WHERE id = $1",
-    )
-    .bind(body.device_id)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("register_fcm_token lookup error: {e}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?
-    .ok_or(StatusCode::NOT_FOUND)?
-    .0;
+    let tenant_id = sqlx::query_as::<_, (Uuid,)>("SELECT tenant_id FROM devices WHERE id = $1")
+        .bind(body.device_id)
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(|e| {
+            tracing::error!("register_fcm_token lookup error: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .ok_or(StatusCode::NOT_FOUND)?
+        .0;
 
     // set_current_tenant で RLS UPDATE を通す
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     set_current_tenant(&mut conn, &tenant_id.to_string())
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -1209,20 +1260,22 @@ async fn update_last_login(
     State(state): State<AppState>,
     Json(body): Json<UpdateLastLoginBody>,
 ) -> Result<StatusCode, StatusCode> {
-    let tenant_id = sqlx::query_as::<_, (Uuid,)>(
-        "SELECT tenant_id FROM devices WHERE id = $1",
-    )
-    .bind(body.device_id)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("update_last_login lookup error: {e}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?
-    .ok_or(StatusCode::NOT_FOUND)?
-    .0;
+    let tenant_id = sqlx::query_as::<_, (Uuid,)>("SELECT tenant_id FROM devices WHERE id = $1")
+        .bind(body.device_id)
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(|e| {
+            tracing::error!("update_last_login lookup error: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .ok_or(StatusCode::NOT_FOUND)?
+        .0;
 
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     set_current_tenant(&mut conn, &tenant_id.to_string())
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -1241,7 +1294,12 @@ async fn update_last_login(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    tracing::info!("Last login updated for device {}: {} ({})", body.device_id, body.employee_name, body.employee_role.join(","));
+    tracing::info!(
+        "Last login updated for device {}: {} ({})",
+        body.device_id,
+        body.employee_name,
+        body.employee_role.join(",")
+    );
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1291,7 +1349,11 @@ async fn fcm_notify_call(
     })?;
 
     if body.room_ids.is_empty() {
-        return Ok(Json(FcmNotifyCallResponse { sent: 0, skipped: 0, errors: 0 }));
+        return Ok(Json(FcmNotifyCallResponse {
+            sent: 0,
+            skipped: 0,
+            errors: 0,
+        }));
     }
 
     // アクティブかつ FCM トークンありのデバイスを取得
@@ -1305,11 +1367,8 @@ async fn fcm_notify_call(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    let exclude_set: std::collections::HashSet<&str> = body
-        .exclude_device_ids
-        .iter()
-        .map(|s| s.as_str())
-        .collect();
+    let exclude_set: std::collections::HashSet<&str> =
+        body.exclude_device_ids.iter().map(|s| s.as_str()).collect();
 
     let room_ids_json = serde_json::to_string(&body.room_ids).unwrap_or_default();
     let timestamp = chrono::Utc::now().timestamp_millis().to_string();
@@ -1351,7 +1410,11 @@ async fn fcm_notify_call(
     }
 
     tracing::info!("FCM notify: sent={sent}, skipped={skipped}, errors={errors}");
-    Ok(Json(FcmNotifyCallResponse { sent, skipped, errors }))
+    Ok(Json(FcmNotifyCallResponse {
+        sent,
+        skipped,
+        errors,
+    }))
 }
 
 /// スケジュールチェック (room-registry.ts の shouldNotify() と同等)
@@ -1365,7 +1428,10 @@ fn should_notify_device(device: &FcmDevice) -> bool {
         None => return true, // スケジュール未設定 → 通知する
     };
 
-    let enabled = schedule.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true);
+    let enabled = schedule
+        .get("enabled")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
     if !enabled {
         return false;
     }
@@ -1386,9 +1452,18 @@ fn should_notify_device(device: &FcmDevice) -> bool {
     }
 
     // 時間範囲チェック
-    let start_hour = schedule.get("startHour").and_then(|v| v.as_i64()).unwrap_or(0) as u32;
-    let start_min = schedule.get("startMin").and_then(|v| v.as_i64()).unwrap_or(0) as u32;
-    let end_hour = schedule.get("endHour").and_then(|v| v.as_i64()).unwrap_or(24) as u32;
+    let start_hour = schedule
+        .get("startHour")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0) as u32;
+    let start_min = schedule
+        .get("startMin")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0) as u32;
+    let end_hour = schedule
+        .get("endHour")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(24) as u32;
     let end_min = schedule.get("endMin").and_then(|v| v.as_i64()).unwrap_or(0) as u32;
 
     let current = jst_now.hour() * 60 + jst_now.minute();
@@ -1417,7 +1492,11 @@ async fn fcm_dismiss_test(
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let fcm = state.fcm.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
 
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // device_id からテナントを特定
     let row = sqlx::query_as::<_, (Uuid,)>(
@@ -1456,7 +1535,10 @@ async fn fcm_dismiss_test(
         }
     }
 
-    tracing::info!("fcm_dismiss_test: sent dismiss to {sent}/{} devices", tokens.len());
+    tracing::info!(
+        "fcm_dismiss_test: sent dismiss to {sent}/{} devices",
+        tokens.len()
+    );
     Ok(Json(serde_json::json!({ "sent": sent })))
 }
 
@@ -1484,11 +1566,8 @@ async fn test_fcm_all_exclude(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    let exclude_set: std::collections::HashSet<&str> = body
-        .exclude_device_ids
-        .iter()
-        .map(|s| s.as_str())
-        .collect();
+    let exclude_set: std::collections::HashSet<&str> =
+        body.exclude_device_ids.iter().map(|s| s.as_str()).collect();
 
     let mut sent = 0usize;
     let mut errors = 0usize;
@@ -1501,7 +1580,10 @@ async fn test_fcm_all_exclude(
 
         let mut data = std::collections::HashMap::new();
         data.insert("type".to_string(), "test".to_string());
-        data.insert("timestamp".to_string(), chrono::Utc::now().timestamp_millis().to_string());
+        data.insert(
+            "timestamp".to_string(),
+            chrono::Utc::now().timestamp_millis().to_string(),
+        );
 
         match fcm.send_data_message(token, data).await {
             Ok(()) => {
@@ -1524,8 +1606,13 @@ async fn test_fcm_all_exclude(
         }
     }
 
-    tracing::info!("test_fcm_all_exclude: sent={sent}, errors={errors}, excluded={}", exclude_set.len());
-    Ok(Json(serde_json::json!({ "sent": sent, "errors": errors, "results": results })))
+    tracing::info!(
+        "test_fcm_all_exclude: sent={sent}, errors={errors}, excluded={}",
+        exclude_set.len()
+    );
+    Ok(Json(
+        serde_json::json!({ "sent": sent, "errors": errors, "results": results }),
+    ))
 }
 
 // --- FCM テスト送信 (管理者認証) ---
@@ -1547,7 +1634,11 @@ async fn test_fcm(
         StatusCode::SERVICE_UNAVAILABLE
     })?;
 
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let tid = tenant_id.0.to_string();
     set_current_tenant(&mut conn, &tid)
         .await
@@ -1573,16 +1664,25 @@ async fn test_fcm(
 
     let mut data = std::collections::HashMap::new();
     data.insert("type".to_string(), "test".to_string());
-    data.insert("timestamp".to_string(), chrono::Utc::now().timestamp_millis().to_string());
+    data.insert(
+        "timestamp".to_string(),
+        chrono::Utc::now().timestamp_millis().to_string(),
+    );
 
     match fcm.send_data_message(&token, data).await {
         Ok(()) => {
             tracing::info!("FCM test sent to device {}", id);
-            Ok(Json(TestFcmResponse { success: true, error: None }))
+            Ok(Json(TestFcmResponse {
+                success: true,
+                error: None,
+            }))
         }
         Err(e) => {
             tracing::error!("FCM test to device {} failed: {e}", id);
-            Ok(Json(TestFcmResponse { success: false, error: Some(e.to_string()) }))
+            Ok(Json(TestFcmResponse {
+                success: false,
+                error: Some(e.to_string()),
+            }))
         }
     }
 }
@@ -1615,7 +1715,11 @@ async fn test_fcm_all(
         StatusCode::SERVICE_UNAVAILABLE
     })?;
 
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let tid = tenant_id.0.to_string();
     set_current_tenant(&mut conn, &tid)
         .await
@@ -1639,7 +1743,10 @@ async fn test_fcm_all(
     for (device_id, device_name, token) in &rows {
         let mut data = std::collections::HashMap::new();
         data.insert("type".to_string(), "test".to_string());
-        data.insert("timestamp".to_string(), chrono::Utc::now().timestamp_millis().to_string());
+        data.insert(
+            "timestamp".to_string(),
+            chrono::Utc::now().timestamp_millis().to_string(),
+        );
 
         match fcm.send_data_message(token, data).await {
             Ok(()) => {
@@ -1664,9 +1771,17 @@ async fn test_fcm_all(
     }
 
     let skipped = 0; // All active devices with tokens are sent
-    tracing::info!("FCM test-all: sent={sent}, errors={errors}, total={}", rows.len());
+    tracing::info!(
+        "FCM test-all: sent={sent}, errors={errors}, total={}",
+        rows.len()
+    );
 
-    Ok(Json(TestFcmAllResponse { sent, skipped, errors, results }))
+    Ok(Json(TestFcmAllResponse {
+        sent,
+        skipped,
+        errors,
+        results,
+    }))
 }
 
 // ============================================================
@@ -1690,20 +1805,22 @@ async fn report_version(
     State(state): State<AppState>,
     Json(body): Json<ReportVersionBody>,
 ) -> Result<StatusCode, StatusCode> {
-    let tenant_id = sqlx::query_as::<_, (Uuid,)>(
-        "SELECT tenant_id FROM devices WHERE id = $1",
-    )
-    .bind(body.device_id)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("report_version lookup error: {e}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?
-    .ok_or(StatusCode::NOT_FOUND)?
-    .0;
+    let tenant_id = sqlx::query_as::<_, (Uuid,)>("SELECT tenant_id FROM devices WHERE id = $1")
+        .bind(body.device_id)
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(|e| {
+            tracing::error!("report_version lookup error: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .ok_or(StatusCode::NOT_FOUND)?
+        .0;
 
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     set_current_tenant(&mut conn, &tenant_id.to_string())
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -1729,7 +1846,11 @@ async fn report_version(
 
     tracing::info!(
         "Version reported for device {}: v{}({}), device_owner={}, dev_device={}",
-        body.device_id, body.version_name, body.version_code, body.is_device_owner, body.is_dev_device
+        body.device_id,
+        body.version_name,
+        body.version_code,
+        body.is_device_owner,
+        body.is_dev_device
     );
     Ok(StatusCode::NO_CONTENT)
 }
@@ -1792,8 +1913,10 @@ async fn send_update_fcm(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-    let device_id_filter: Option<std::collections::HashSet<Uuid>> =
-        body.device_ids.as_ref().map(|ids| ids.iter().copied().collect());
+    let device_id_filter: Option<std::collections::HashSet<Uuid>> = body
+        .device_ids
+        .as_ref()
+        .map(|ids| ids.iter().copied().collect());
 
     let mut sent = 0usize;
     let mut skipped = 0usize;
@@ -1826,7 +1949,10 @@ async fn send_update_fcm(
 
         let mut data = std::collections::HashMap::new();
         data.insert("type".to_string(), "app_update".to_string());
-        data.insert("timestamp".to_string(), chrono::Utc::now().timestamp_millis().to_string());
+        data.insert(
+            "timestamp".to_string(),
+            chrono::Utc::now().timestamp_millis().to_string(),
+        );
         if let Some(vc) = body.version_code {
             data.insert("version_code".to_string(), vc.to_string());
         }
@@ -1875,7 +2001,11 @@ async fn trigger_update(
     Extension(tenant_id): Extension<TenantId>,
     Json(body): Json<TriggerUpdateBody>,
 ) -> Result<Json<TriggerUpdateResponse>, StatusCode> {
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let tid = tenant_id.0.to_string();
     set_current_tenant(&mut conn, &tid)
         .await
@@ -1905,7 +2035,11 @@ async fn trigger_update_dev(
         return Err(StatusCode::UNAUTHORIZED);
     }
 
-    let mut conn = state.pool.acquire().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // 全テナントの dev 端末を対象にする (RLS バイパスなし: テナント一覧を取得して順に処理)
     let tenant_ids = sqlx::query_scalar::<_, String>(
@@ -1919,7 +2053,11 @@ async fn trigger_update_dev(
     })?;
 
     let mut total_resp = TriggerUpdateResponse {
-        sent: 0, skipped: 0, already_updated: 0, errors: 0, results: Vec::new(),
+        sent: 0,
+        skipped: 0,
+        already_updated: 0,
+        errors: 0,
+        results: Vec::new(),
     };
 
     for tid in &tenant_ids {

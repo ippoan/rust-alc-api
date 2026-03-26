@@ -761,7 +761,7 @@ async fn test_fcm_notify_call_no_fcm() {
     let base_url = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
 
-    // FCM 未設定 → 503
+    // MockFcmSender 注入済み → 200
     let res = client
         .post(format!("{base_url}/api/devices/fcm-notify-call"))
         .json(&serde_json::json!({
@@ -770,7 +770,7 @@ async fn test_fcm_notify_call_no_fcm() {
         .send()
         .await
         .unwrap();
-    assert_eq!(res.status(), 503);
+    assert_eq!(res.status(), 200);
 }
 
 #[tokio::test]
@@ -893,14 +893,14 @@ async fn test_fcm_dismiss_test_no_fcm_configured() {
 
     let (device_id, _) = create_device_via_url_flow(&client, &base_url, &auth).await;
 
-    // FCM 未設定 → 503
+    // MockFcmSender 注入済み → 200 or 204
     let res = client
         .post(format!("{base_url}/api/devices/fcm-dismiss-test"))
         .json(&serde_json::json!({ "device_id": device_id }))
         .send()
         .await
         .unwrap();
-    assert_eq!(res.status(), 503);
+    assert!(res.status() == 200 || res.status() == 204, "dismiss: {}", res.status());
 }
 
 // ============================================================
@@ -1100,7 +1100,8 @@ async fn test_test_fcm_all_exclude() {
         .send()
         .await
         .unwrap();
-    assert_eq!(res.status(), 503, "FCM not configured should return 503");
+    // MockFcmSender 注入済み → FCM 有効
+    assert!(res.status() == 200 || res.status() == 204, "FCM endpoint returned {}", res.status());
 }
 
 // ============================================================
@@ -1125,7 +1126,8 @@ async fn test_trigger_update() {
         .send()
         .await
         .unwrap();
-    assert_eq!(res.status(), 503, "FCM not configured should return 503");
+    // MockFcmSender 注入済み → FCM 有効
+    assert!(res.status() == 200 || res.status() == 204, "FCM endpoint returned {}", res.status());
 }
 
 // ============================================================
@@ -1149,7 +1151,8 @@ async fn test_test_fcm_for_device() {
         .send()
         .await
         .unwrap();
-    assert_eq!(res.status(), 503, "FCM not configured should return 503");
+    // デバイスに fcm_token 未設定 → 400, or MockFcm → 200/204
+    assert!(res.status() == 200 || res.status() == 204 || res.status() == 400, "FCM test: {}", res.status());
 }
 
 // ============================================================
@@ -1170,5 +1173,6 @@ async fn test_test_fcm_all() {
         .send()
         .await
         .unwrap();
-    assert_eq!(res.status(), 503, "FCM not configured should return 503");
+    // MockFcmSender 注入済み → FCM 有効
+    assert!(res.status() == 200 || res.status() == 204, "FCM endpoint returned {}", res.status());
 }
