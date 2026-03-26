@@ -372,9 +372,49 @@ Google OAuth 以外の端末登録フローを3種類サポート。
 - テストインフラ: `docker-compose.yml` (PostgreSQL 16, port 54322) + `tests/common/mod.rs` ヘルパー
 - 実行: `source .test-config && RUST_TEST_THREADS=1 cargo test`
 - カバレッジ: `/coverage-check` スキル使用 (`--full` で サマリ + 未カバー行を1回で取得)
-- 現在のカバレッジ: 83% line / 85% region (~530テスト)
+- 現在のカバレッジ: **87.52%** (TOTAL 18009行, Miss 2247行)
+- 100% 達成済み (26ファイル): jwt, kudgivt, kudguri, csv_parser/mod, db/models, middleware/auth, daily_health, driver_info, dtako_csv_proxy, dtako_daily_hours, dtako_drivers, dtako_event_classifications, dtako_operations, dtako_upload, dtako_vehicles, dtako_work_times, health, health_baselines, mod, nfc_tags, dtako_upload
 - 並列テストで env var 競合あり → `RUST_TEST_THREADS=1` で全通過
 - カバレッジ計画: `plans/coverage_100.md`
+
+### 100% 未達成ファイル一覧
+
+| ファイル | Lines | Miss | Cover | 備考 |
+|---------|-------|------|-------|------|
+| auth/google.rs | 117 | 87 | 25.64% | Google JWT検証 (外部API依存) |
+| auth/lineworks.rs | 240 | 63 | 73.75% | LINE WORKS OAuth (外部API依存) |
+| compare/mod.rs | 3094 | 184 | 94.05% | 比較ロジック |
+| csv_parser/work_segments.rs | 464 | 32 | 93.10% | 作業区間パーサー |
+| fcm.rs | 26 | 26 | 0.00% | FCM送信 (外部API依存, trait mock済み) |
+| main.rs | 115 | 115 | 0.00% | エントリポイント (テスト対象外) |
+| routes/auth.rs | 557 | 176 | 68.40% | 認証ルート (Google/LINE WORKS) |
+| routes/bot_admin.rs | 179 | 23 | 87.15% | Bot管理 |
+| routes/car_inspection_files.rs | 38 | 3 | 92.11% | 車検証ファイル |
+| routes/car_inspections.rs | 173 | 16 | 90.75% | 車検証 |
+| routes/carins_files.rs | 284 | 39 | 86.27% | 車検証ファイル管理 |
+| routes/carrying_items.rs | 194 | 32 | 83.51% | 積載品目 |
+| routes/communication_items.rs | 228 | 11 | 95.18% | 連絡事項 |
+| routes/devices.rs | 1467 | 260 | 82.28% | デバイス管理 |
+| routes/dtako_restraint_report.rs | 1614 | 322 | 80.05% | 拘束時間レポート |
+| routes/dtako_restraint_report_pdf.rs | 1147 | 53 | 95.38% | 拘束時間PDF |
+| routes/dtako_scraper.rs | 145 | 140 | 3.45% | スクレイパー (外部依存) |
+| routes/employees.rs | 435 | 27 | 93.79% | 従業員管理 |
+| routes/equipment_failures.rs | 290 | 21 | 92.76% | 機器故障 |
+| routes/guidance_records.rs | 420 | 84 | 80.00% | 指導記録 |
+| routes/measurements.rs | 385 | 46 | 88.05% | 測定記録 |
+| routes/sso_admin.rs | 166 | 35 | 78.92% | SSO管理 |
+| routes/tenant_users.rs | 146 | 21 | 85.62% | テナントユーザー |
+| routes/tenko_call.rs | 217 | 53 | 75.58% | 中間点呼 |
+| routes/tenko_records.rs | 326 | 50 | 84.66% | 点呼記録 |
+| routes/tenko_schedules.rs | 325 | 22 | 93.23% | 点呼スケジュール |
+| routes/tenko_sessions.rs | 1263 | 149 | 88.20% | 点呼セッション |
+| routes/tenko_webhooks.rs | 162 | 33 | 79.63% | Webhook設定 |
+| routes/timecard.rs | 393 | 17 | 95.67% | タイムカード |
+| routes/upload.rs | 78 | 9 | 88.46% | アップロード |
+| storage/gcs.rs | 42 | 42 | 0.00% | GCS (本番のみ) |
+| storage/mod.rs | 11 | 11 | 0.00% | ストレージ抽象 |
+| storage/r2.rs | 39 | 39 | 0.00% | R2 (本番のみ) |
+| webhook.rs | 164 | 6 | 96.34% | Webhook配信 |
 - **DB エラー注入**: `BEGIN → ALTER TABLE RENAME → テスト → ROLLBACK` パターン (PostgreSQL DDL は ROLLBACK 可能)
 - **SSE テスト**: コアロジックを `pub async fn xxx_core()` に抽出し、SSE ラッパーとは別にテスト可能にする
 
