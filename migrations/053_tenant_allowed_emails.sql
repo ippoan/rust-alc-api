@@ -14,9 +14,10 @@ CREATE POLICY tenant_isolation ON alc_api.tenant_allowed_emails
   FOR ALL TO alc_api_app
   USING (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::UUID);
 
--- aoi を即座に招待登録
+-- aoi を即座に招待登録 (テナントが存在する場合のみ)
 INSERT INTO alc_api.tenant_allowed_emails (tenant_id, email, role)
-VALUES ('536859de-d43e-4932-9d16-f60cac8fa426', 'aoi@ohishiunyusouko.com', 'admin')
+SELECT '536859de-d43e-4932-9d16-f60cac8fa426', 'aoi@ohishiunyusouko.com', 'admin'
+WHERE EXISTS (SELECT 1 FROM alc_api.tenants WHERE id = '536859de-d43e-4932-9d16-f60cac8fa426')
 ON CONFLICT (email) DO NOTHING;
 
 -- テナントに email_domain カラム追加 (同ドメインの将来のユーザー用)

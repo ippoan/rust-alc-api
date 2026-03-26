@@ -190,6 +190,7 @@ TEST_DATABASE_URL="..." cargo llvm-cov --html --open
 
 ### マイグレーション作成時の注意
 
+- **適用済みのマイグレーションファイルは絶対に変更しない** — SQLx は SHA-384 チェックサムで検証し、不一致だとアプリが起動不能になる。修正が必要な場合は新しいマイグレーションファイルを追加する
 - 本番に既存データへの INSERT/UPDATE をハードコードしない (`WHERE EXISTS` で条件付きにする)
 - `SECURITY DEFINER` 関数には `SET search_path = alc_api` を付けること (splinter 警告回避)
 - RLS ポリシーの `WITH CHECK (true)` は避け、明示的な条件を使う
