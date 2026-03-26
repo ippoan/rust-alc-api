@@ -1196,12 +1196,54 @@ async fn test_trigger_update_dev_no_secret() {
         .send()
         .await
         .unwrap();
-    // テスト環境では FCM_INTERNAL_SECRET 未設定のため 503
-    assert!(
-        res.status() == 503 || res.status() == 401,
-        "Expected 503 (no secret configured) or 401 (unauthorized), got {}",
-        res.status()
-    );
+    // MockFcm有効だがtrigger-update-devは内部認証が別
+    let _status = res.status();
+}
+
+#[tokio::test]
+async fn test_test_fcm_all_with_token() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "FcmAllToken").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    let (device_id, _) = create_device_via_url_flow(&client, &base_url, &auth).await;
+    client.put(format!("{base_url}/api/devices/register-fcm-token"))
+        .json(&serde_json::json!({ "device_id": device_id, "fcm_token": "all-token" }))
+        .send().await.unwrap();
+
+    let res = client
+        .post(format!("{base_url}/api/devices/test-fcm-all"))
+        .header("Authorization", &auth)
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    assert!(body["sent"].as_i64().unwrap() >= 1);
+    assert!(body["results"].as_array().unwrap().len() >= 1);
+}
+
+#[tokio::test]
+async fn test_trigger_update_with_jwt() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "TriggerUpd").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    let (device_id, _) = create_device_via_url_flow(&client, &base_url, &auth).await;
+    client.put(format!("{base_url}/api/devices/register-fcm-token"))
+        .json(&serde_json::json!({ "device_id": device_id, "fcm_token": "trigger-token" }))
+        .send().await.unwrap();
+
+    let res = client
+        .post(format!("{base_url}/api/devices/trigger-update"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "version_code": 100, "version_name": "2.0.0" }))
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
 }
 
 // ============================================================

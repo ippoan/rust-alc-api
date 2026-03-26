@@ -378,6 +378,48 @@ async fn test_dtako_compare_csv_empty() {
 // dtako daily-hours フィルタ
 // ============================================================
 
+// ============================================================
+// dtako upload — SSE endpoints
+// ============================================================
+
+// test_dtako_recalculate_all は既に上部で定義済み
+
+#[tokio::test]
+async fn test_dtako_recalculate_drivers_batch() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "DtakoRecalcBatch").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let client = reqwest::Client::new();
+
+    // バッチ再計算 SSE → 200
+    let res = client
+        .post(format!("{base_url}/api/recalculate-drivers"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .json(&serde_json::json!({ "year": 2026, "month": 3, "driver_ids": [] }))
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
+}
+
+#[tokio::test]
+async fn test_dtako_split_csv_all() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "DtakoSplitAll").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let client = reqwest::Client::new();
+
+    let res = client
+        .post(format!("{base_url}/api/split-csv-all"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
+}
+
+// ============================================================
+// dtako daily-hours フィルタ
+// ============================================================
+
 #[tokio::test]
 async fn test_dtako_daily_hours_with_driver_filter() {
     let state = common::setup_app_state().await;
