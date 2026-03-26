@@ -17,7 +17,7 @@ chrono = { version = "0.4", features = ["serde"] }
 dotenvy = "0.15"
 anyhow = "1"
 tower = "0.5"
-reqwest = { version = "0.12", features = ["json", "stream"] }
+reqwest = { version = "0.12", features = ["json", "stream", "multipart"] }
 jsonwebtoken = "9"
 sha2 = "0.10"
 thiserror = "2"

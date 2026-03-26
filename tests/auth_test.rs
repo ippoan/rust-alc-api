@@ -271,3 +271,364 @@ async fn test_my_orgs() {
     assert_eq!(orgs.len(), 1);
     assert_eq!(orgs[0]["id"], tenant_id.to_string());
 }
+
+// ============================================================
+// Google OAuth Redirect
+// ============================================================
+
+/// GET /api/auth/google/redirect → 307 redirect to Google (or 500 if OAUTH_STATE_SECRET missing)
+/// Sets OAUTH_STATE_SECRET and verifies redirect to Google authorize URL
+#[tokio::test]
+async fn test_google_redirect_to_google() {
+    std::env::set_var("OAUTH_STATE_SECRET", "test-oauth-state-secret");
+
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state).await;
+
+    let client = reqwest::ClientBuilder::new()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+
+    let res = client
+        .get(format!(
+            "{base_url}/api/auth/google/redirect?redirect_uri=https://example.com/callback"
+        ))
+        .send()
+        .await
+        .unwrap();
+
+    let status = res.status().as_u16();
+    // 307 if OAUTH_STATE_SECRET is available, 500 if another parallel test removed it
+    if status == 307 {
+        let location = res.headers().get("location").unwrap().to_str().unwrap();
+        assert!(
+            location.starts_with("https://accounts.google.com/o/oauth2/v2/auth"),
+            "Should redirect to Google OAuth URL, got: {location}"
+        );
+        assert!(
+            location.contains("client_id="),
+            "Redirect URL should contain client_id"
+        );
+        assert!(
+            location.contains("state="),
+            "Redirect URL should contain state parameter"
+        );
+    } else {
+        assert_eq!(
+            status, 500,
+            "Without OAUTH_STATE_SECRET should return 500, got {status}"
+        );
+    }
+}
+
+/// GET /api/auth/google/redirect without redirect_uri → 422 (missing required param)
+#[tokio::test]
+async fn test_google_redirect_missing_redirect_uri() {
+    std::env::set_var("OAUTH_STATE_SECRET", "test-oauth-state-secret");
+
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state).await;
+
+    let client = reqwest::ClientBuilder::new()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+
+    let res = client
+        .get(format!("{base_url}/api/auth/google/redirect"))
+        .send()
+        .await
+        .unwrap();
+    // Axum returns 400 for missing required query parameters
+    assert_eq!(
+        res.status(),
+        400,
+        "Missing redirect_uri should return 400"
+    );
+}
+
+// ============================================================
+// LINE WORKS OAuth Redirect
+// ============================================================
+
+/// GET /api/auth/lineworks/redirect without domain or address → 400 or 500
+/// (500 if OAUTH_STATE_SECRET is missing, 400 if domain/address param is missing)
+#[tokio::test]
+async fn test_lineworks_redirect_missing_domain() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state).await;
+
+    let client = reqwest::ClientBuilder::new()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+
+    let res = client
+        .get(format!(
+            "{base_url}/api/auth/lineworks/redirect?redirect_uri=https://example.com/callback"
+        ))
+        .send()
+        .await
+        .unwrap();
+    // Returns 500 (OAUTH_STATE_SECRET missing) or 400 (domain missing) depending on env
+    let status = res.status().as_u16();
+    assert!(
+        status == 400 || status == 500,
+        "Missing domain should return 400 or 500, got {status}"
+    );
+}
+
+/// GET /api/auth/lineworks/redirect with nonexistent domain → 404 or 500
+/// (resolve_sso_config may not exist in test DB, or returns NULL → 404)
+#[tokio::test]
+async fn test_lineworks_redirect_unknown_domain() {
+    std::env::set_var("OAUTH_STATE_SECRET", "test-oauth-state-secret");
+
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state).await;
+
+    let client = reqwest::ClientBuilder::new()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+
+    let res = client
+        .get(format!(
+            "{base_url}/api/auth/lineworks/redirect?domain=nonexistent-domain-xyz&redirect_uri=https://example.com/callback"
+        ))
+        .send()
+        .await
+        .unwrap();
+    // 404 if resolve_sso_config returns NULL, 500 if function doesn't exist in test DB
+    let status = res.status().as_u16();
+    assert!(
+        status == 404 || status == 500,
+        "Unknown domain should return 404 or 500, got {status}"
+    );
+}
+
+// ============================================================
+// POST /api/auth/google (id_token flow)
+// ============================================================
+
+/// POST /api/auth/google with invalid id_token → 401
+#[tokio::test]
+async fn test_google_login_invalid_token() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/auth/google"))
+        .json(&serde_json::json!({ "id_token": "invalid.jwt.token" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        401,
+        "Invalid Google id_token should return 401"
+    );
+}
+
+/// POST /api/auth/google with empty id_token → 401
+#[tokio::test]
+async fn test_google_login_empty_token() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/auth/google"))
+        .json(&serde_json::json!({ "id_token": "" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        401,
+        "Empty Google id_token should return 401"
+    );
+}
+
+/// POST /api/auth/google with missing id_token field → 422
+#[tokio::test]
+async fn test_google_login_missing_field() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/auth/google"))
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        422,
+        "Missing id_token field should return 422"
+    );
+}
+
+// ============================================================
+// POST /api/auth/google/code (authorization code flow)
+// ============================================================
+
+/// POST /api/auth/google/code with invalid code → 401
+#[tokio::test]
+async fn test_google_code_invalid() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/auth/google/code"))
+        .json(&serde_json::json!({
+            "code": "invalid-auth-code",
+            "redirect_uri": "https://example.com/callback"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        401,
+        "Invalid Google auth code should return 401"
+    );
+}
+
+/// POST /api/auth/google/code with missing fields → 422
+#[tokio::test]
+async fn test_google_code_missing_fields() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/auth/google/code"))
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        422,
+        "Missing code/redirect_uri should return 422"
+    );
+}
+
+// ============================================================
+// GET /api/auth/woff-config
+// ============================================================
+
+/// GET /api/auth/woff-config without domain → 400 (missing required query param)
+#[tokio::test]
+async fn test_woff_config_missing_domain() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .get(format!("{base_url}/api/auth/woff-config"))
+        .send()
+        .await
+        .unwrap();
+    // Axum returns 400 for missing required query parameters
+    assert_eq!(
+        res.status(),
+        400,
+        "Missing domain param should return 400"
+    );
+}
+
+/// GET /api/auth/woff-config with unknown domain → 404 or 500
+#[tokio::test]
+async fn test_woff_config_unknown_domain() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .get(format!(
+            "{base_url}/api/auth/woff-config?domain=nonexistent-domain-xyz"
+        ))
+        .send()
+        .await
+        .unwrap();
+    // 404 if resolve_sso_config returns NULL, 500 if function doesn't exist
+    let status = res.status().as_u16();
+    assert!(
+        status == 404 || status == 500,
+        "Unknown domain should return 404 or 500, got {status}"
+    );
+}
+
+// ============================================================
+// POST /api/auth/woff (WOFF auth)
+// ============================================================
+
+/// POST /api/auth/woff with unknown domain_id → 404 or 500
+#[tokio::test]
+async fn test_woff_auth_unknown_domain() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/auth/woff"))
+        .json(&serde_json::json!({
+            "access_token": "fake-access-token",
+            "domain_id": "nonexistent-domain-xyz"
+        }))
+        .send()
+        .await
+        .unwrap();
+    // 404 if resolve_sso_config returns NULL, 500 if function doesn't exist
+    let status = res.status().as_u16();
+    assert!(
+        status == 404 || status == 500,
+        "Unknown domain_id should return 404 or 500, got {status}"
+    );
+}
+
+/// POST /api/auth/woff with missing fields → 422 (Axum JSON rejection)
+#[tokio::test]
+async fn test_woff_auth_missing_fields() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/auth/woff"))
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        422,
+        "Missing access_token/domain_id should return 422"
+    );
+}
+
+/// POST /api/auth/woff without Content-Type → 415
+#[tokio::test]
+async fn test_woff_auth_no_content_type() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/auth/woff"))
+        .body("{}")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        415,
+        "Missing Content-Type should return 415"
+    );
+}

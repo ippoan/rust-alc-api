@@ -877,3 +877,207 @@ async fn test_update_call_settings() {
     assert_eq!(body["call_enabled"], true);
     assert_eq!(body["always_on"], true);
 }
+
+// ============================================================
+// FCM dismiss test
+// ============================================================
+
+#[tokio::test]
+async fn test_fcm_dismiss_test_no_fcm_configured() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "FCM Dismiss").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    let (device_id, _) = create_device_via_url_flow(&client, &base_url, &auth).await;
+
+    // FCM 未設定 → 503
+    let res = client
+        .post(format!("{base_url}/api/devices/fcm-dismiss-test"))
+        .json(&serde_json::json!({ "device_id": device_id }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 503);
+}
+
+// ============================================================
+// update-last-login with non-existent device
+// ============================================================
+
+#[tokio::test]
+async fn test_update_last_login_not_found() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state).await;
+    let client = reqwest::Client::new();
+
+    let fake_device_id = uuid::Uuid::new_v4();
+    let res = client
+        .put(format!("{base_url}/api/devices/update-last-login"))
+        .json(&serde_json::json!({
+            "device_id": fake_device_id.to_string(),
+            "employee_id": uuid::Uuid::new_v4().to_string(),
+            "employee_name": "Ghost",
+            "employee_role": ["driver"]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 404);
+}
+
+// ============================================================
+// report-version with non-existent device
+// ============================================================
+
+#[tokio::test]
+async fn test_report_version_not_found() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state).await;
+    let client = reqwest::Client::new();
+
+    let fake_device_id = uuid::Uuid::new_v4();
+    let res = client
+        .put(format!("{base_url}/api/devices/report-version"))
+        .json(&serde_json::json!({
+            "device_id": fake_device_id.to_string(),
+            "version_code": 99,
+            "version_name": "9.9.9"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 404);
+}
+
+// ============================================================
+// Device Owner flow: claim + verify is_device_owner in list
+// ============================================================
+
+#[tokio::test]
+async fn test_device_owner_claim_and_verify_in_list() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "DO Verify").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    // Device Owner トークン生成
+    let res = client
+        .post(format!(
+            "{base_url}/api/devices/register/create-device-owner-token"
+        ))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "device_name": "DO List Device" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    let code = body["registration_code"].as_str().unwrap();
+
+    // 端末がクレーム → 即承認
+    let res = client
+        .post(format!("{base_url}/api/devices/register/claim"))
+        .json(&serde_json::json!({
+            "registration_code": code,
+            "device_name": "DO List Device"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    let device_id = body["device_id"].as_str().unwrap();
+
+    // report-version で is_device_owner=true を報告
+    let res = client
+        .put(format!("{base_url}/api/devices/report-version"))
+        .json(&serde_json::json!({
+            "device_id": device_id,
+            "version_code": 10,
+            "version_name": "1.0.0",
+            "is_device_owner": true
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 204);
+
+    // デバイス一覧で is_device_owner=true を確認
+    let res = client
+        .get(format!("{base_url}/api/devices"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let devices: Vec<Value> = res.json().await.unwrap();
+    let our_device = devices
+        .iter()
+        .find(|d| d["id"].as_str() == Some(device_id));
+    assert!(
+        our_device.is_some(),
+        "Device Owner device should appear in list"
+    );
+    assert_eq!(our_device.unwrap()["is_device_owner"], true);
+}
+
+// ============================================================
+// call-settings with non-existent device id
+// ============================================================
+
+#[tokio::test]
+async fn test_update_call_settings_not_found() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "Call NF").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let client = reqwest::Client::new();
+
+    let fake_id = uuid::Uuid::new_v4();
+    let res = client
+        .put(format!(
+            "{base_url}/api/devices/{fake_id}/call-settings"
+        ))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .json(&serde_json::json!({
+            "call_enabled": true
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 404);
+}
+
+// ============================================================
+// trigger-update-dev without X-Internal-Secret
+// ============================================================
+
+#[tokio::test]
+async fn test_trigger_update_dev_no_secret() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state).await;
+    let client = reqwest::Client::new();
+
+    // FCM_INTERNAL_SECRET が未設定の場合 → 503
+    // FCM_INTERNAL_SECRET が設定済みでもヘッダーなし → 401
+    let res = client
+        .post(format!("{base_url}/api/devices/trigger-update-dev"))
+        .json(&serde_json::json!({
+            "version_code": 100,
+            "version_name": "2.0.0"
+        }))
+        .send()
+        .await
+        .unwrap();
+    // テスト環境では FCM_INTERNAL_SECRET 未設定のため 503
+    assert!(
+        res.status() == 503 || res.status() == 401,
+        "Expected 503 (no secret configured) or 401 (unauthorized), got {}",
+        res.status()
+    );
+}
