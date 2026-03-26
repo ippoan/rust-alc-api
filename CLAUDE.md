@@ -372,7 +372,7 @@ Google OAuth 以外の端末登録フローを3種類サポート。
 - テストインフラ: `docker-compose.yml` (PostgreSQL 16, port 54322) + `tests/common/mod.rs` ヘルパー
 - 実行: `source .test-config && cargo test`
 - カバレッジ: `source .test-config && cargo llvm-cov --summary-only`
-- 現在のカバレッジ: 40.93% (Phase 1 完了)
+- 現在のカバレッジ: 69.85% line / 73.68% region (361テスト)
 - カバレッジ計画: `plans/coverage_100.md`
 
 ## デプロイルール
