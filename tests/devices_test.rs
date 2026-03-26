@@ -1233,6 +1233,64 @@ async fn test_trigger_update_dev_with_secret() {
 }
 
 #[tokio::test]
+async fn test_trigger_update_already_updated() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "TrigAlready").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    let (device_id, _) = create_device_via_url_flow(&client, &base_url, &auth).await;
+    client.put(format!("{base_url}/api/devices/register-fcm-token"))
+        .json(&serde_json::json!({ "device_id": device_id, "fcm_token": "already-token" }))
+        .send().await.unwrap();
+    // version_code=100 を報告
+    client.put(format!("{base_url}/api/devices/report-version"))
+        .json(&serde_json::json!({ "device_id": device_id, "version_code": 100, "version_name": "1.0" }))
+        .send().await.unwrap();
+
+    // version_code=50 で trigger → already_updated
+    let res = client
+        .post(format!("{base_url}/api/devices/trigger-update"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "version_code": 50, "version_name": "0.5" }))
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    assert!(body["already_updated"].as_i64().unwrap() >= 1);
+}
+
+#[tokio::test]
+async fn test_trigger_update_with_device_ids_filter() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "TrigFilter").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    let (device_id, _) = create_device_via_url_flow(&client, &base_url, &auth).await;
+    client.put(format!("{base_url}/api/devices/register-fcm-token"))
+        .json(&serde_json::json!({ "device_id": device_id, "fcm_token": "filter-token" }))
+        .send().await.unwrap();
+
+    // 存在しない device_id でフィルタ → skipped
+    let fake_id = uuid::Uuid::new_v4();
+    let res = client
+        .post(format!("{base_url}/api/devices/trigger-update"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "version_code": 200, "version_name": "2.0",
+            "device_ids": [fake_id.to_string()]
+        }))
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    assert!(body["skipped"].as_i64().unwrap() >= 1);
+}
+
+#[tokio::test]
 async fn test_trigger_update_dev_wrong_secret() {
     std::env::set_var("FCM_INTERNAL_SECRET", "test-internal-secret");
     let state = common::setup_app_state().await;

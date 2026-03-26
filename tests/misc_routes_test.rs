@@ -574,6 +574,50 @@ async fn test_guidance_records_crud() {
 }
 
 #[tokio::test]
+async fn test_guidance_records_upload_attachment() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "GuidAtt").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    let emp = common::create_test_employee(&client, &base_url, &auth, "AttEmp", "AT01").await;
+    let emp_id = emp["id"].as_str().unwrap();
+
+    // record 作成
+    let res = client.post(format!("{base_url}/api/guidance-records"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "employee_id": emp_id, "title": "添付テスト" }))
+        .send().await.unwrap();
+    let record: Value = res.json().await.unwrap();
+    let record_id = record["id"].as_str().unwrap();
+
+    // attachment upload (multipart)
+    let file_part = reqwest::multipart::Part::bytes(b"test attachment data".to_vec())
+        .file_name("test.pdf")
+        .mime_str("application/pdf")
+        .unwrap();
+    let form = reqwest::multipart::Form::new().part("file", file_part);
+
+    let res = client
+        .post(format!("{base_url}/api/guidance-records/{record_id}/attachments"))
+        .header("Authorization", &auth)
+        .multipart(form)
+        .send().await.unwrap();
+    assert!(res.status() == 200 || res.status() == 201, "attachment upload: {}", res.status());
+
+    // attachment list
+    let res = client
+        .get(format!("{base_url}/api/guidance-records/{record_id}/attachments"))
+        .header("Authorization", &auth)
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
+    let atts: Vec<Value> = res.json().await.unwrap();
+    assert!(!atts.is_empty());
+}
+
+#[tokio::test]
 async fn test_guidance_records_list_with_date_filter() {
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
