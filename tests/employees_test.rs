@@ -342,6 +342,153 @@ async fn test_get_employee_by_code() {
     assert_eq!(emp["name"], "CodeUser");
 }
 
+// ============================================================
+// Face / NFC / License 更新
+// ============================================================
+
+#[tokio::test]
+async fn test_update_nfc_id() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "NfcUpdate").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    let emp = common::create_test_employee(&client, &base_url, &auth, "NfcUpd", "NU01").await;
+    let id = emp["id"].as_str().unwrap();
+
+    let res = client
+        .put(format!("{base_url}/api/employees/{id}/nfc"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "nfc_id": "NEW-NFC-ID" }))
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
+    let updated: Value = res.json().await.unwrap();
+    assert_eq!(updated["nfc_id"], "NEW-NFC-ID");
+}
+
+#[tokio::test]
+async fn test_update_license() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "LicUpdate").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    let emp = common::create_test_employee(&client, &base_url, &auth, "LicUpd", "LU01").await;
+    let id = emp["id"].as_str().unwrap();
+
+    let res = client
+        .put(format!("{base_url}/api/employees/{id}/license"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "license_issue_date": "2020-01-01",
+            "license_expiry_date": "2030-01-01"
+        }))
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
+}
+
+#[tokio::test]
+async fn test_update_face_invalid_embedding() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "FaceInv").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    let emp = common::create_test_employee(&client, &base_url, &auth, "FaceInv", "FI01").await;
+    let id = emp["id"].as_str().unwrap();
+
+    // 1024次元でない embedding → 400
+    let res = client
+        .put(format!("{base_url}/api/employees/{id}/face"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "face_embedding": [0.1, 0.2, 0.3]
+        }))
+        .send().await.unwrap();
+    assert_eq!(res.status(), 400);
+}
+
+#[tokio::test]
+async fn test_update_face_and_approve() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "FaceApprove").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    let emp = common::create_test_employee(&client, &base_url, &auth, "FaceApp", "FA01").await;
+    let id = emp["id"].as_str().unwrap();
+
+    // 1024次元の embedding で顔登録
+    let embedding: Vec<f64> = (0..1024).map(|i| (i as f64) * 0.001).collect();
+    let res = client
+        .put(format!("{base_url}/api/employees/{id}/face"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "face_photo_url": "https://mock-storage/test-bucket/face.jpg",
+            "face_embedding": embedding,
+            "face_model_version": "test-v1"
+        }))
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
+    let updated: Value = res.json().await.unwrap();
+    assert_eq!(updated["face_approval_status"], "pending");
+
+    // 承認
+    let res = client
+        .put(format!("{base_url}/api/employees/{id}/face/approve"))
+        .header("Authorization", &auth)
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
+    let approved: Value = res.json().await.unwrap();
+    assert_eq!(approved["face_approval_status"], "approved");
+
+    // face-data に表示
+    let res = client
+        .get(format!("{base_url}/api/employees/face-data"))
+        .header("Authorization", &auth)
+        .send().await.unwrap();
+    let data: Vec<Value> = res.json().await.unwrap();
+    assert_eq!(data.len(), 1);
+}
+
+#[tokio::test]
+async fn test_update_face_and_reject() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "FaceReject").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    let emp = common::create_test_employee(&client, &base_url, &auth, "FaceRej", "FR01").await;
+    let id = emp["id"].as_str().unwrap();
+
+    let embedding: Vec<f64> = (0..1024).map(|i| (i as f64) * 0.001).collect();
+    client.put(format!("{base_url}/api/employees/{id}/face"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "face_embedding": embedding,
+            "face_model_version": "test-v1"
+        }))
+        .send().await.unwrap();
+
+    let res = client
+        .put(format!("{base_url}/api/employees/{id}/face/reject"))
+        .header("Authorization", &auth)
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
+    let rejected: Value = res.json().await.unwrap();
+    assert_eq!(rejected["face_approval_status"], "rejected");
+}
+
 #[tokio::test]
 async fn test_list_face_data_empty() {
     let state = common::setup_app_state().await;

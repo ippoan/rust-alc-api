@@ -549,6 +549,20 @@ async fn test_guidance_records_crud() {
         .unwrap();
     assert_eq!(res.status(), 200);
 
+    // List with filter
+    let res = client
+        .get(format!("{base_url}/api/guidance-records?employee_id={emp_id}"))
+        .header("Authorization", &auth)
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
+
+    // List attachments (empty)
+    let res = client
+        .get(format!("{base_url}/api/guidance-records/{record_id}/attachments"))
+        .header("Authorization", &auth)
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
+
     // Delete
     let res = client
         .delete(format!("{base_url}/api/guidance-records/{record_id}"))
@@ -557,6 +571,22 @@ async fn test_guidance_records_crud() {
         .await
         .unwrap();
     assert_eq!(res.status(), 204);
+}
+
+#[tokio::test]
+async fn test_guidance_records_list_with_date_filter() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "GuidDate").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    let res = client
+        .get(format!("{base_url}/api/guidance-records?date_from=2026-01-01T00:00:00Z&date_to=2026-12-31T23:59:59Z"))
+        .header("Authorization", &auth)
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
 }
 
 // ============================================================

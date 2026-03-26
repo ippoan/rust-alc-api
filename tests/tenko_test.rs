@@ -718,6 +718,132 @@ async fn test_equipment_failures_crud() {
 }
 
 // ============================================================
+// 携行品チェック付きフロー
+// ============================================================
+
+// tenko_carrying_item_checks テーブルのマイグレーションが未作成のためスキップ
+#[tokio::test]
+#[ignore]
+async fn test_pre_operation_with_carrying_items() {
+    let (base_url, auth, emp_id, client) = setup_tenko().await;
+
+    // 携行品マスタを作成 (daily_inspection → carrying_items_pending のトリガー)
+    let res = client
+        .post(format!("{base_url}/api/carrying-items"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "item_name": "免許証" }))
+        .send().await.unwrap();
+    assert!(res.status() == 200 || res.status() == 201);
+    let item: Value = res.json().await.unwrap();
+    let item_id = item["id"].as_str().unwrap();
+
+    // スケジュール作成 + セッション開始
+    let sid = create_schedule(&client, &base_url, &auth, &emp_id, "pre_operation").await;
+    let session = start_session(&client, &base_url, &auth, &emp_id, &sid).await;
+    let session_id = session["id"].as_str().unwrap();
+
+    // medical → self_declaration → daily_inspection → carrying_items_pending
+    client.put(format!("{base_url}/api/tenko/sessions/{session_id}/medical"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "temperature": 36.5, "systolic": 120, "diastolic": 80, "pulse": 72 }))
+        .send().await.unwrap();
+
+    client.put(format!("{base_url}/api/tenko/sessions/{session_id}/self-declaration"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "illness": false, "fatigue": false, "sleep_deprivation": false }))
+        .send().await.unwrap();
+
+    let res = client.put(format!("{base_url}/api/tenko/sessions/{session_id}/daily-inspection"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "brakes": "ok", "tires": "ok", "lights": "ok", "steering": "ok",
+            "wipers": "ok", "mirrors": "ok", "horn": "ok", "seatbelts": "ok"
+        }))
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
+    let session: Value = res.json().await.unwrap();
+    assert_eq!(session["status"], "carrying_items_pending");
+
+    // 携行品チェック送信
+    let res = client
+        .put(format!("{base_url}/api/tenko/sessions/{session_id}/carrying-items"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "checks": [{ "item_id": item_id, "checked": true }]
+        }))
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
+    let session: Value = res.json().await.unwrap();
+    assert_eq!(session["status"], "identity_verified");
+}
+
+// ============================================================
+// 日常点検 NG → キャンセル
+// ============================================================
+
+#[tokio::test]
+async fn test_daily_inspection_ng_cancels() {
+    let (base_url, auth, emp_id, client) = setup_tenko().await;
+
+    let session = start_session_remote(&client, &base_url, &auth, &emp_id).await;
+    let session_id = session["id"].as_str().unwrap();
+
+    // medical → self_declaration → daily_inspection (NG)
+    client.put(format!("{base_url}/api/tenko/sessions/{session_id}/medical"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "temperature": 36.5 }))
+        .send().await.unwrap();
+
+    client.put(format!("{base_url}/api/tenko/sessions/{session_id}/self-declaration"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "illness": false, "fatigue": false, "sleep_deprivation": false }))
+        .send().await.unwrap();
+
+    let res = client.put(format!("{base_url}/api/tenko/sessions/{session_id}/daily-inspection"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "brakes": "ng", "tires": "ok", "lights": "ok", "steering": "ok",
+            "wipers": "ok", "mirrors": "ok", "horn": "ok", "seatbelts": "ok"
+        }))
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
+    let session: Value = res.json().await.unwrap();
+    assert_eq!(session["status"], "cancelled");
+}
+
+// ============================================================
+// 自己申告で安全判定 fail → interrupted
+// ============================================================
+
+#[tokio::test]
+async fn test_self_declaration_with_illness_interrupts() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, &format!("SelfDecl{}", uuid::Uuid::new_v4().simple())).await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+    let emp = common::create_test_employee(&client, &base_url, &auth, "IllEmp", &format!("IL{}", &uuid::Uuid::new_v4().simple().to_string()[..4])).await;
+    let emp_id = emp["id"].as_str().unwrap().to_string();
+
+    let session = start_session_remote(&client, &base_url, &auth, &emp_id).await;
+    let session_id = session["id"].as_str().unwrap();
+
+    client.put(format!("{base_url}/api/tenko/sessions/{session_id}/medical"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "temperature": 36.5 }))
+        .send().await.unwrap();
+
+    let res = client.put(format!("{base_url}/api/tenko/sessions/{session_id}/self-declaration"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "illness": true, "fatigue": false, "sleep_deprivation": false }))
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
+    let session: Value = res.json().await.unwrap();
+    assert_eq!(session["status"], "interrupted");
+}
+
+// ============================================================
 // Tenko Records — CSV + 個別取得
 // ============================================================
 
@@ -789,6 +915,36 @@ async fn test_session_list_with_filter() {
     // employee_id フィルタ
     let res = client
         .get(format!("{base_url}/api/tenko/sessions?employee_id={emp_id}"))
+        .header("Authorization", &auth)
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
+}
+
+// ============================================================
+// Tenko Records — フィルタ
+// ============================================================
+
+#[tokio::test]
+async fn test_tenko_records_with_filter() {
+    let (base_url, auth, emp_id, client) = setup_tenko().await;
+
+    // employee_id フィルタ
+    let res = client
+        .get(format!("{base_url}/api/tenko/records?employee_id={emp_id}"))
+        .header("Authorization", &auth)
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
+
+    // tenko_type フィルタ
+    let res = client
+        .get(format!("{base_url}/api/tenko/records?tenko_type=pre_operation"))
+        .header("Authorization", &auth)
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
+
+    // status フィルタ
+    let res = client
+        .get(format!("{base_url}/api/tenko/records?status=completed"))
         .header("Authorization", &auth)
         .send().await.unwrap();
     assert_eq!(res.status(), 200);
