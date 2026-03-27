@@ -14,3 +14,4 @@ mod dtako_daily_hours;
 mod dtako_scraper;
 mod google_auth;
 mod misc;
+mod tenko_call_coverage;
