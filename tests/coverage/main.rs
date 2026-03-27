@@ -7,6 +7,7 @@
 #[path = "../common/mod.rs"]
 mod common;
 
+mod auth_coverage;
 mod daily_health;
 mod dtako_csv_proxy;
 mod dtako_daily_hours;

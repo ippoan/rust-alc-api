@@ -38,3 +38,6 @@ encoding_rs = "0.8"
 futures = "0.3"
 tokio-stream = "0.1"
 printpdf = "0.8"
+
+[dev-dependencies]
+wiremock = "0.6"

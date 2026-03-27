@@ -4,10 +4,17 @@ use ring::aead::{self, Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
-/// LINE WORKS OAuth2 token endpoint
-const TOKEN_URL: &str = "https://auth.worksmobile.com/oauth2/v2.0/token";
-/// LINE WORKS user info endpoint
-const USERINFO_URL: &str = "https://www.worksapis.com/v1.0/users/me";
+/// LINE WORKS OAuth2 token endpoint (env var override for testing)
+fn token_url() -> String {
+    std::env::var("LINEWORKS_TOKEN_URL")
+        .unwrap_or_else(|_| "https://auth.worksmobile.com/oauth2/v2.0/token".to_string())
+}
+
+/// LINE WORKS user info endpoint (env var override for testing)
+fn userinfo_url() -> String {
+    std::env::var("LINEWORKS_USERINFO_URL")
+        .unwrap_or_else(|_| "https://www.worksapis.com/v1.0/users/me".to_string())
+}
 
 /// LINE WORKS SSO config from DB
 #[derive(Debug, Clone)]
@@ -101,7 +108,7 @@ pub async fn exchange_code(
     redirect_uri: &str,
 ) -> Result<TokenResponse, String> {
     let resp = client
-        .post(TOKEN_URL)
+        .post(&token_url())
         .form(&[
             ("grant_type", "authorization_code"),
             ("client_id", client_id),
@@ -130,7 +137,7 @@ pub async fn fetch_user_profile(
     access_token: &str,
 ) -> Result<UserProfile, String> {
     let resp = client
-        .get(USERINFO_URL)
+        .get(&userinfo_url())
         .bearer_auth(access_token)
         .send()
         .await

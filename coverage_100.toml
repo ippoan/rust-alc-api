@@ -101,6 +101,11 @@ path = "src/routes/mod.rs"
 type = "integration"
 
 [[files]]
+path = "src/routes/auth.rs"
+type = "integration"
+test_file = "tests/auth_test.rs"
+
+[[files]]
 path = "src/routes/nfc_tags.rs"
 type = "integration"
 test_file = "tests/coverage_100_test.rs"
