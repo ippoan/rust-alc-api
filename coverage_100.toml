@@ -72,6 +72,10 @@ type = "integration"
 test_file = "tests/coverage_100_test.rs"
 
 [[files]]
+path = "src/routes/dtako_scraper.rs"
+type = "integration"
+
+[[files]]
 path = "src/routes/dtako_upload.rs"
 type = "integration"
 test_file = "tests/dtako_test.rs"

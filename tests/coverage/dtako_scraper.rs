@@ -1,4 +1,5 @@
 use serde_json::Value;
+use tokio::io::AsyncWriteExt;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -584,6 +585,77 @@ async fn test_trigger_scrape_client_disconnect() {
         drop(res);
 
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        std::env::remove_var("TEST_SCRAPER_URL");
+    });
+}
+
+// ============================================================
+// trigger_scrape — SSE stream error (lines 161-163)
+// 不正な chunked encoding で bytes_stream Err を発生させる
+// ============================================================
+
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_trigger_scrape_stream_error() {
+    test_group!("dtako_scraper カバレッジ");
+    test_case!("不正な chunked encoding → bytes_stream Err", {
+        // 生 TCP サーバーで不正な chunked レスポンスを返す
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            // POST /scrape を受け付ける
+            if let Ok((mut stream, _)) = listener.accept().await {
+                // リクエストを読み捨て
+                let mut buf = [0u8; 4096];
+                let _ = tokio::io::AsyncReadExt::read(&mut stream, &mut buf).await;
+
+                // chunked transfer encoding で応答開始
+                let header = "HTTP/1.1 200 OK\r\n\
+                                  Content-Type: text/event-stream\r\n\
+                                  Transfer-Encoding: chunked\r\n\r\n";
+                let _ = stream.write_all(header.as_bytes()).await;
+
+                // 正常なチャンクを1つ送信
+                let chunk_data =
+                    "data:{\"event\":\"result\",\"comp_id\":\"S001\",\"status\":\"success\"}\n\n";
+                let chunk = format!("{:x}\r\n{}\r\n", chunk_data.len(), chunk_data);
+                let _ = stream.write_all(chunk.as_bytes()).await;
+                let _ = stream.flush().await;
+
+                // 少し待ってから不正なチャンクを送信して接続を切断
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                // 不正な chunked data (サイズと実際のデータが不一致)
+                let _ = stream.write_all(b"FFFFFF\r\n").await;
+                let _ = stream.flush().await;
+                // 接続を即座に切断
+                drop(stream);
+            }
+        });
+
+        std::env::set_var("TEST_SCRAPER_URL", format!("http://{addr}"));
+
+        let state = common::setup_app_state().await;
+        let base_url = common::spawn_test_server(state.clone()).await;
+        let tenant_id = common::create_test_tenant(&state.pool, "Scraper StreamErr").await;
+        let jwt = common::create_test_jwt(tenant_id, "admin");
+
+        let client = reqwest::Client::new();
+        let res = client
+            .post(format!("{base_url}/api/scraper/trigger"))
+            .header("Authorization", format!("Bearer {jwt}"))
+            .json(&serde_json::json!({ "start_date": "2026-03-20" }))
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(res.status(), 200);
+        // SSE ストリームを読み取る（途中でエラーになるが SSE は 200 で開始済み）
+        let _body = res.text().await.unwrap_or_default();
+
+        // 非同期タスクの完了を待つ
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
 
         std::env::remove_var("TEST_SCRAPER_URL");
     });
