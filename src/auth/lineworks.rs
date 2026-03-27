@@ -108,7 +108,7 @@ pub async fn exchange_code(
     redirect_uri: &str,
 ) -> Result<TokenResponse, String> {
     let resp = client
-        .post(&token_url())
+        .post(token_url())
         .form(&[
             ("grant_type", "authorization_code"),
             ("client_id", client_id),
@@ -137,7 +137,7 @@ pub async fn fetch_user_profile(
     access_token: &str,
 ) -> Result<UserProfile, String> {
     let resp = client
-        .get(&userinfo_url())
+        .get(userinfo_url())
         .bearer_auth(access_token)
         .send()
         .await
