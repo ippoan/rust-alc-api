@@ -1433,6 +1433,7 @@ pub async fn recalculate_all_core(
 }
 
 /// 月指定で再計算（R2の個別CSVから。SSEで進捗通知）
+#[allow(clippy::redundant_closure)]
 async fn internal_recalculate_all(
     State(state): State<AppState>,
     tenant: axum::Extension<TenantId>,
@@ -1464,8 +1465,8 @@ async fn internal_recalculate_all(
         }
     });
 
-    let stream =
-        tokio_stream::wrappers::ReceiverStream::new(rx).map(Ok::<_, std::convert::Infallible>);
+    let stream = tokio_stream::wrappers::ReceiverStream::new(rx)
+        .map(|msg| Ok::<_, std::convert::Infallible>(msg));
 
     Response::builder()
         .status(200)
@@ -1662,6 +1663,7 @@ pub async fn recalculate_driver_core(
 }
 
 /// 1ドライバー分の月次再計算（R2からKUDGIVT取得→再計算）— SSE ラッパー
+#[allow(clippy::redundant_closure)]
 async fn recalculate_driver(
     State(state): State<AppState>,
     tenant: axum::Extension<TenantId>,
@@ -1701,8 +1703,8 @@ async fn recalculate_driver(
         }
     });
 
-    let stream =
-        tokio_stream::wrappers::ReceiverStream::new(rx).map(Ok::<_, std::convert::Infallible>);
+    let stream = tokio_stream::wrappers::ReceiverStream::new(rx)
+        .map(|msg| Ok::<_, std::convert::Infallible>(msg));
 
     Response::builder()
         .status(200)
@@ -1814,6 +1816,7 @@ pub async fn recalculate_drivers_batch_core(
     Ok((done, errors))
 }
 
+#[allow(clippy::redundant_closure)]
 async fn recalculate_drivers_batch(
     State(state): State<AppState>,
     tenant: axum::Extension<TenantId>,
@@ -1848,8 +1851,8 @@ async fn recalculate_drivers_batch(
         }
     });
 
-    let stream =
-        tokio_stream::wrappers::ReceiverStream::new(rx).map(Ok::<_, std::convert::Infallible>);
+    let stream = tokio_stream::wrappers::ReceiverStream::new(rx)
+        .map(|msg| Ok::<_, std::convert::Infallible>(msg));
 
     Response::builder()
         .status(200)
@@ -1993,6 +1996,7 @@ pub async fn split_csv_all_core(
 }
 
 /// 全completedアップロードのCSV分割（SSE進捗）
+#[allow(clippy::redundant_closure)]
 async fn split_csv_all_handler(
     State(state): State<AppState>,
     tenant: axum::Extension<TenantId>,
@@ -2020,8 +2024,8 @@ async fn split_csv_all_handler(
         }
     });
 
-    let stream =
-        tokio_stream::wrappers::ReceiverStream::new(rx).map(Ok::<_, std::convert::Infallible>);
+    let stream = tokio_stream::wrappers::ReceiverStream::new(rx)
+        .map(|msg| Ok::<_, std::convert::Infallible>(msg));
 
     Response::builder()
         .status(200)
