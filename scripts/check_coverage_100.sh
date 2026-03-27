@@ -14,7 +14,14 @@
 set -euo pipefail
 
 UNIT_ONLY=false
-[[ "${1:-}" == "--unit-only" ]] && UNIT_ONLY=true
+EXTERNAL_CACHE=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --unit-only) UNIT_ONLY=true; shift ;;
+    --use-cache) EXTERNAL_CACHE="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
 
 CONFIG="coverage_100.toml"
 if [[ ! -f "$CONFIG" ]]; then
@@ -48,12 +55,17 @@ mkdir -p "$CACHE_DIR"
 PROJECT_HASH=$(echo "$PWD" | md5sum | cut -c1-8)
 CACHE_FILE="$CACHE_DIR/text-$PROJECT_HASH.txt"
 
-echo "Running cargo llvm-cov --text..."
-if [ "$UNIT_ONLY" = true ]; then
-  cargo llvm-cov --lib --text > "$CACHE_FILE" 2>&1 || { echo "cargo llvm-cov failed:"; tail -50 "$CACHE_FILE"; exit 101; }
+if [ -n "$EXTERNAL_CACHE" ]; then
+  echo "Using pre-built coverage data: $EXTERNAL_CACHE"
+  CACHE_FILE="$EXTERNAL_CACHE"
 else
-  [[ -f .test-config ]] && source .test-config
-  RUST_TEST_THREADS=1 cargo llvm-cov --text > "$CACHE_FILE" 2>&1 || { echo "cargo llvm-cov failed:"; tail -50 "$CACHE_FILE"; exit 101; }
+  echo "Running cargo llvm-cov --text..."
+  if [ "$UNIT_ONLY" = true ]; then
+    cargo llvm-cov --lib --text > "$CACHE_FILE" 2>&1 || { echo "cargo llvm-cov failed:"; tail -50 "$CACHE_FILE"; exit 101; }
+  else
+    [[ -f .test-config ]] && source .test-config
+    RUST_TEST_THREADS=1 cargo llvm-cov --text > "$CACHE_FILE" 2>&1 || { echo "cargo llvm-cov failed:"; tail -50 "$CACHE_FILE"; exit 101; }
+  fi
 fi
 
 # --- --text 出力から全ファイルの Lines/Miss を awk で集計 ---
