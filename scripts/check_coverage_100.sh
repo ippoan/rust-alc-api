@@ -125,6 +125,9 @@ for filepath in "${PATHS[@]}"; do
     COVERED=$((TOTAL - MISS))
     PCT=$(awk "BEGIN {printf \"%.1f\", $COVERED/$TOTAL*100}")
     echo "FAIL: $filepath — $COVERED/$TOTAL lines ($PCT%, $MISS lines missing)"
+    # 未カバー行を表示
+    FULL_PATH=$(grep "$filepath" "$SUMMARY_FILE" | awk '{print $1}')
+    awk -v fp="$FULL_PATH:" '$0 == fp {found=1; next} /^$/{found=0} found && /^[[:space:]]*[0-9]+\|[[:space:]]*0\|/ {print "      " $0}' "$CACHE_FILE" | head -20
     FAILED=1
   else
     echo "  OK: $filepath — $TOTAL/$TOTAL lines (100%)"
