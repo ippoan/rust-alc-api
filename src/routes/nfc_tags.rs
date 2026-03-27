@@ -1,12 +1,11 @@
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
-    routing::{delete, get, post},
+    routing::{delete, get},
     Extension, Json, Router,
 };
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
-use uuid::Uuid;
 
 use crate::db::tenant::set_current_tenant;
 use crate::middleware::auth::TenantId;

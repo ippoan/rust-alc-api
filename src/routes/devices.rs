@@ -10,7 +10,6 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::db::tenant::set_current_tenant;
-use crate::fcm::FcmSenderTrait;
 use crate::middleware::auth::{AuthUser, TenantId};
 use crate::AppState;
 
@@ -1490,13 +1489,11 @@ fn should_notify_device(device: &FcmDevice) -> bool {
     let start = start_hour * 60 + start_min;
     let end = end_hour * 60 + end_min;
 
-    let in_range = if start <= end {
+    if start <= end {
         current >= start && current < end
     } else {
         current >= start || current < end
-    };
-
-    in_range
+    }
 }
 
 // --- FCM テスト dismiss (認証不要 — 端末から呼ばれる) ---

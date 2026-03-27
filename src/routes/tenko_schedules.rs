@@ -383,7 +383,7 @@ fn validate_schedule(s: &CreateTenkoSchedule) -> Result<(), StatusCode> {
         return Err(StatusCode::BAD_REQUEST);
     }
     // 業務前は指示事項必須
-    if s.tenko_type == "pre_operation" && s.instruction.as_ref().map_or(true, |i| i.is_empty()) {
+    if s.tenko_type == "pre_operation" && s.instruction.as_ref().is_none_or(|i| i.is_empty()) {
         return Err(StatusCode::BAD_REQUEST);
     }
     Ok(())

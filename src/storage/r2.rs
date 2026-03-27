@@ -69,7 +69,7 @@ impl StorageBackend for R2Backend {
             .map_err(|e| StorageError::Upload(format!("R2 download: {e}")))?;
 
         let status = response.status_code();
-        if status < 200 || status >= 300 {
+        if !(200..300).contains(&status) {
             return Err(StorageError::Upload(format!(
                 "R2 download status {}: {}",
                 status,

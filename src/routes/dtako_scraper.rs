@@ -191,11 +191,7 @@ async fn trigger_scrape(
                                         }
                                     }
 
-                                    if tx
-                                        .send(Ok(Event::default().data(data.to_string())))
-                                        .await
-                                        .is_err()
-                                    {
+                                    if tx.send(Ok(Event::default().data(data))).await.is_err() {
                                         tracing::warn!("SSE proxy: client disconnected");
                                         return;
                                     }

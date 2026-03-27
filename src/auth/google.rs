@@ -30,8 +30,10 @@ struct JwkKey {
     kid: String,
     n: String,
     e: String,
+    #[allow(dead_code)]
     #[serde(default)]
     kty: String,
+    #[allow(dead_code)]
     #[serde(default)]
     alg: String,
 }

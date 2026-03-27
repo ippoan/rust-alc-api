@@ -4,7 +4,7 @@ use axum::{
     http::StatusCode,
     response::Response,
     routing::{get, post},
-    Extension, Json, Router,
+    Json, Router,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -1464,8 +1464,8 @@ async fn internal_recalculate_all(
         }
     });
 
-    let stream = tokio_stream::wrappers::ReceiverStream::new(rx)
-        .map(|msg| Ok::<_, std::convert::Infallible>(msg));
+    let stream =
+        tokio_stream::wrappers::ReceiverStream::new(rx).map(Ok::<_, std::convert::Infallible>);
 
     Response::builder()
         .status(200)
@@ -1701,8 +1701,8 @@ async fn recalculate_driver(
         }
     });
 
-    let stream = tokio_stream::wrappers::ReceiverStream::new(rx)
-        .map(|msg| Ok::<_, std::convert::Infallible>(msg));
+    let stream =
+        tokio_stream::wrappers::ReceiverStream::new(rx).map(Ok::<_, std::convert::Infallible>);
 
     Response::builder()
         .status(200)
@@ -1848,8 +1848,8 @@ async fn recalculate_drivers_batch(
         }
     });
 
-    let stream = tokio_stream::wrappers::ReceiverStream::new(rx)
-        .map(|msg| Ok::<_, std::convert::Infallible>(msg));
+    let stream =
+        tokio_stream::wrappers::ReceiverStream::new(rx).map(Ok::<_, std::convert::Infallible>);
 
     Response::builder()
         .status(200)
@@ -2020,8 +2020,8 @@ async fn split_csv_all_handler(
         }
     });
 
-    let stream = tokio_stream::wrappers::ReceiverStream::new(rx)
-        .map(|msg| Ok::<_, std::convert::Infallible>(msg));
+    let stream =
+        tokio_stream::wrappers::ReceiverStream::new(rx).map(Ok::<_, std::convert::Infallible>);
 
     Response::builder()
         .status(200)

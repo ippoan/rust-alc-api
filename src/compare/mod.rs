@@ -596,13 +596,13 @@ pub fn annotate_known_bugs(
         let first_bug_idx = diffs.iter().position(|d| d.known_bug.is_some());
 
         if let Some(idx) = first_bug_idx {
-            for i in idx..diffs.len() {
-                if diffs[i].known_bug.is_some() {
+            for diff in &mut diffs[idx..] {
+                if diff.known_bug.is_some() {
                     continue;
                 }
                 // 累計は始点以降の全日が影響を受ける
-                if diffs[i].field == "累計" {
-                    diffs[i].known_bug = Some("連鎖: 既知バグによる累計ずれ (#1)".to_string());
+                if diff.field == "累計" {
+                    diff.known_bug = Some("連鎖: 既知バグによる累計ずれ (#1)".to_string());
                 }
             }
         }
@@ -1005,6 +1005,7 @@ pub fn find_event_workday(
 }
 
 /// daily segmentをDayAggに蓄積する
+#[allow(clippy::too_many_arguments)]
 pub fn accumulate_daily_segment(
     entry: &mut DayAgg,
     work_mins: i32,
@@ -1087,7 +1088,6 @@ impl FerryInfo {
 }
 
 /// ZIP を処理して CsvDriverData を生成
-
 /// (driver_cd, work_date, start_time) — day_map等のキー型
 pub type DayKey = (String, NaiveDate, NaiveTime);
 
@@ -1114,6 +1114,7 @@ pub struct SegRec {
     pub end_at: NaiveDateTime,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn post_process_day_map(
     day_map: &mut HashMap<DayKey, DayAgg>,
     workday_boundaries: &mut HashMap<DayKey, (NaiveDateTime, NaiveDateTime)>,
@@ -1180,7 +1181,7 @@ fn merge_same_day_entries(
                     ) {
                         (Some(pe), Some(ns)) => {
                             let gap = (trunc_min(ns) - trunc_min(pe)).num_minutes();
-                            if gap >= 0 && gap < 180 {
+                            if (0..180).contains(&gap) {
                                 Some(gap as i32)
                             } else {
                                 None
@@ -1227,6 +1228,7 @@ fn merge_same_day_entries(
 }
 
 /// overlap計算: 連続workday間の24h境界チェーン処理
+#[allow(clippy::too_many_arguments)]
 fn process_overlap_chain(
     day_map: &mut HashMap<DayKey, DayAgg>,
     workday_boundaries: &mut HashMap<DayKey, (NaiveDateTime, NaiveDateTime)>,
@@ -1608,7 +1610,7 @@ pub fn build_day_map(
             let default_time = NaiveTime::from_hms_opt(0, 0, 0).unwrap();
             let entry = day_map
                 .entry((row.driver_cd.clone(), work_date, default_time))
-                .or_insert_with(DayAgg::default);
+                .or_default();
             entry.total_work_minutes += total_drive_mins;
             entry.unko_nos.push(row.unko_no.clone());
         }
@@ -1664,7 +1666,7 @@ pub fn build_day_map(
                 );
 
                 let segments =
-                    work_segments::split_by_rest(dep, ret, &event_slice, &classifications);
+                    work_segments::split_by_rest(dep, ret, &event_slice, classifications);
                 // workday境界でセグメントを分割（24hルール対応）
                 let span_days = (ret.date() - dep.date()).num_days();
                 // 全workday境界をイベント分割用に登録（分単位に揃える）
@@ -1756,7 +1758,7 @@ pub fn build_day_map(
                     let start_time = find_start_time(ds.start);
                     let entry = day_map
                         .entry((row.driver_cd.clone(), work_date, start_time))
-                        .or_insert_with(DayAgg::default);
+                        .or_default();
                     entry.total_work_minutes += ds.work_minutes;
                     entry.late_night_minutes += ds.late_night_minutes;
                     entry.drive_minutes += ds.drive_minutes;
@@ -1844,7 +1846,7 @@ pub fn build_day_map(
                 let event_slice: Vec<&KudgivtRow> = events.map(|e| e.to_vec()).unwrap_or_default();
 
                 let segments =
-                    work_segments::split_by_rest(dep, ret, &event_slice, &classifications);
+                    work_segments::split_by_rest(dep, ret, &event_slice, classifications);
                 let segments = work_segments::split_segments_at_24h(segments);
                 let mut segments = segments;
                 for &b in &boundaries_24h {
@@ -1870,7 +1872,7 @@ pub fn build_day_map(
                     let start_time = find_vwd_start_time(ds.start);
                     let entry = day_map
                         .entry((driver_cd.clone(), work_date, start_time))
-                        .or_insert_with(DayAgg::default);
+                        .or_default();
                     entry.from_multi_op = true;
                     entry.total_work_minutes += ds.work_minutes;
                     entry.late_night_minutes += ds.late_night_minutes;
@@ -1906,6 +1908,7 @@ pub fn build_day_map(
 }
 
 /// イベント直接集計: KUDGIVTイベントからDrive/Cargo/Break秒数を集計してday_mapを上書き
+#[allow(clippy::type_complexity)]
 fn aggregate_events_by_day<'a>(
     day_map: &mut HashMap<DayKey, DayAgg>,
     unko_segments: &HashMap<String, Vec<(NaiveDateTime, NaiveDateTime, NaiveDate, NaiveTime)>>,
@@ -2060,10 +2063,10 @@ fn aggregate_events_by_day<'a>(
                 agg.late_night_minutes = 0;
             }
         }
-        for ((date, st), _night) in &day_late_night {
-            if let Some(agg) = day_map.get_mut(&(driver_cd.clone(), *date, *st)) {
+        for &(date, st) in day_late_night.keys() {
+            if let Some(agg) = day_map.get_mut(&(driver_cd.clone(), date, st)) {
                 let ot_night =
-                    if let Some(events) = day_work_events.get(&(driver_cd.clone(), *date, *st)) {
+                    if let Some(events) = day_work_events.get(&(driver_cd.clone(), date, st)) {
                         let mut sorted = events.clone();
                         sorted.sort_by_key(|&(s, _)| s);
                         calc_ot_late_night_from_events(&sorted)

@@ -39,6 +39,7 @@ struct GuidanceFilter {
     guidance_type: Option<String>,
     date_from: Option<String>,
     date_to: Option<String>,
+    #[allow(dead_code)]
     parent_id: Option<String>, // "null" for top-level, UUID for children
     page: Option<i64>,
     per_page: Option<i64>,

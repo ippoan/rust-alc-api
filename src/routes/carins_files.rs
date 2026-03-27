@@ -1,7 +1,4 @@
-use std::sync::Arc;
-
 use axum::{
-    body::Body,
     extract::{Path, Query, State},
     http::{header, StatusCode},
     response::IntoResponse,
@@ -212,16 +209,14 @@ async fn download_file(
 
     // Get file metadata
     let row = sqlx::query_as::<_, FileRow>(
-        &format!(
-            "SELECT uuid::text, filename, type as file_type, \
+        "SELECT uuid::text, filename, type as file_type, \
              to_char(created_at, 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') as created, \
              to_char(deleted_at, 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') as deleted, \
              blob, s3_key, storage_class, \
              to_char(last_accessed_at, 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') as last_accessed_at, \
              access_count_weekly, access_count_total, \
              to_char(promoted_to_standard_at, 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') as promoted_to_standard_at \
-             FROM files WHERE uuid = $1::uuid"
-        ),
+             FROM files WHERE uuid = $1::uuid",
     )
     .bind(&uuid)
     .fetch_optional(&mut *conn)

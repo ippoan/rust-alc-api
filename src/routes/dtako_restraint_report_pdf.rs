@@ -345,8 +345,8 @@ async fn get_restraint_report_pdf_stream(
         }
     });
 
-    let stream = tokio_stream::wrappers::ReceiverStream::new(rx)
-        .map(|msg| Ok::<_, std::convert::Infallible>(msg));
+    let stream =
+        tokio_stream::wrappers::ReceiverStream::new(rx).map(Ok::<_, std::convert::Infallible>);
 
     Response::builder()
         .status(200)
@@ -726,7 +726,7 @@ fn render_driver_page(
         MARGIN_LEFT + 80.0,
         y,
         FONT_SIZE_SMALL,
-        &format!("{}", mt),
+        mt,
     );
     y -= 3.5;
     add_text(
@@ -845,6 +845,7 @@ fn draw_day_row_holiday(
     draw_vline(ops, cx, y, y - h, LINE_THIN);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_day_row(
     ops: &mut Vec<Op>,
     doc: &PdfDocument,
@@ -1400,6 +1401,7 @@ fn add_text(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn add_text_center_in_cell(
     ops: &mut Vec<Op>,
     doc: &PdfDocument,
@@ -1421,6 +1423,7 @@ fn add_text_center_in_cell(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn add_text_center_color(
     ops: &mut Vec<Op>,
     doc: &PdfDocument,
@@ -1470,6 +1473,7 @@ fn add_text_right(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn add_text_right_in_cell(
     ops: &mut Vec<Op>,
     doc: &PdfDocument,
@@ -1531,6 +1535,7 @@ fn draw_vline(ops: &mut Vec<Op>, x: f32, y1: f32, y2: f32, _thickness: f32) {
     ops.push(Op::RestoreGraphicsState);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_rect_fill(ops: &mut Vec<Op>, x: f32, y: f32, w: f32, h: f32, r: f32, g: f32, b: f32) {
     ops.push(Op::SaveGraphicsState);
     ops.push(Op::SetFillColor {

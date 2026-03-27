@@ -110,6 +110,7 @@ async fn deliver_webhook(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn record_delivery(
     pool: &PgPool,
     tenant_id: Uuid,

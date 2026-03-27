@@ -7,7 +7,6 @@ use axum::{
     Extension, Json, Router,
 };
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use crate::db::tenant::set_current_tenant;
 use crate::middleware::auth::AuthUser;

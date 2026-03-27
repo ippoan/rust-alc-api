@@ -386,7 +386,7 @@ async fn google_redirect(
          &state={}\
          &access_type=online\
          &prompt=select_account",
-        urlencoding::encode(&verifier.client_id()),
+        urlencoding::encode(verifier.client_id()),
         urlencoding::encode(&callback_uri),
         urlencoding::encode(&signed_state),
     );
@@ -479,7 +479,7 @@ async fn lineworks_redirect(
             params
                 .address
                 .as_ref()
-                .map(|a| a.split('@').last().unwrap_or(a).to_string())
+                .map(|a| a.split('@').next_back().unwrap_or(a).to_string())
         })
         .ok_or_else(|| {
             tracing::warn!("Missing domain or address parameter");

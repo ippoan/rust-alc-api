@@ -2,7 +2,7 @@ use axum::{
     extract::{Multipart, Query, State},
     http::StatusCode,
     routing::{get, post},
-    Extension, Json, Router,
+    Json, Router,
 };
 use chrono::{DateTime, Datelike, NaiveDate, Timelike, Utc};
 use serde::{Deserialize, Serialize};
@@ -11,7 +11,7 @@ use uuid::Uuid;
 use crate::compare::{
     self, annotate_known_bugs, parse_restraint_csv, CsvDayRow, CsvDriverData, DiffItem,
 };
-use crate::middleware::auth::{AuthUser, TenantId};
+use crate::middleware::auth::TenantId;
 use crate::AppState;
 
 pub fn tenant_router() -> Router<AppState> {
@@ -427,7 +427,7 @@ pub async fn build_report_with_name_conn(
             // dwh_listがない or 空の場合はセグメントから1行生成
             // dwh_listがある場合は各dwh行ごとに1行ずつ生成
             let dwh_entries: Vec<Option<&&DailyWorkHoursRow>> = match dwh_list {
-                Some(list) if !list.is_empty() => list.iter().map(|r| Some(r)).collect(),
+                Some(list) if !list.is_empty() => list.iter().map(Some).collect(),
                 _ => vec![None],
             };
 
@@ -472,7 +472,7 @@ pub async fn build_report_with_name_conn(
                     let st = dwh
                         .map(|r| format!("{}:{:02}", r.start_time.hour(), r.start_time.minute()));
                     // 終業はセグメントデータから（各dwh行に対応するセグメントを探す）
-                    let et = day_end.clone(); // TODO: dwh行ごとの終業時刻
+                    let _et = day_end.clone(); // TODO: dwh行ごとの終業時刻
                     (st, if dwh_idx == 0 { day_end.clone() } else { None })
                 } else {
                     (day_start.clone(), day_end.clone())
@@ -677,10 +677,7 @@ pub fn report_to_csv_days(report: &RestraintReportResponse) -> Vec<CsvDayRow> {
             overlap_subtotal: fmt_min(d.overlap_restraint_minutes),
             total: fmt_min(d.restraint_total_minutes),
             cumulative: fmt_min(d.restraint_cumulative_minutes),
-            rest: d
-                .rest_period_minutes
-                .map(|v| fmt_min(v))
-                .unwrap_or_default(),
+            rest: d.rest_period_minutes.map(fmt_min).unwrap_or_default(),
             actual_work: fmt_min(d.actual_work_minutes),
             overtime: fmt_min(d.overtime_minutes),
             late_night: fmt_min(d.late_night_minutes),
@@ -690,6 +687,7 @@ pub fn report_to_csv_days(report: &RestraintReportResponse) -> Vec<CsvDayRow> {
         .collect()
 }
 
+#[allow(dead_code)]
 fn parse_hhmm(s: &str) -> i32 {
     let s = s.trim();
     if s.is_empty() {
@@ -720,7 +718,7 @@ async fn compare_csv(
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("multipart error: {e}")))?
     {
-        if let Some(data) = field.bytes().await.ok() {
+        if let Ok(data) = field.bytes().await {
             csv_bytes = data.to_vec();
             break;
         }
@@ -927,6 +925,7 @@ async fn compare_csv(
 }
 
 /// CSV行とシステム行の差分を検出する（compare_csvの内部ロジック抽出）
+#[allow(dead_code)]
 fn detect_diffs(csv_days: &[CsvDayRow], sys_days: &[SystemDayRow]) -> Vec<DiffItem> {
     let mut diffs = Vec::new();
     for (csv_day, sys_day) in csv_days.iter().zip(sys_days.iter()) {

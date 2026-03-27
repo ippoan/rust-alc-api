@@ -20,7 +20,7 @@ pub fn tenant_router() -> Router<AppState> {
 }
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
-struct InstructionSummary {
+pub struct InstructionSummary {
     session_id: Uuid,
     instruction: String,
     instruction_confirmed_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -28,14 +28,14 @@ struct InstructionSummary {
 }
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
-struct DailyInspectionSummary {
+pub struct DailyInspectionSummary {
     session_id: Uuid,
     daily_inspection: serde_json::Value,
     recorded_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
-struct MeasurementSummary {
+pub struct MeasurementSummary {
     id: Uuid,
     temperature: Option<f64>,
     systolic: Option<i32>,
