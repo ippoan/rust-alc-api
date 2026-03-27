@@ -35,3 +35,6 @@ encoding_rs = "0.8"
 futures = "0.3"
 tokio-stream = "0.1"
 printpdf = "0.8"
+
+[profile.test]
+codegen-units = 1
