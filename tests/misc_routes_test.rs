@@ -2758,6 +2758,231 @@ async fn test_dtako_csv_proxy_kudguri() {
 }
 
 #[tokio::test]
+async fn test_dtako_csv_proxy_ferry() {
+    test_group!("デタコCSVプロキシ");
+    test_case!("ferry CSVをJSON形式で取得できる", {
+        let state = common::setup_app_state().await;
+        let base_url = common::spawn_test_server(state.clone()).await;
+        let tenant_id = common::create_test_tenant(&state.pool, "CsvFerry").await;
+        let jwt = common::create_test_jwt(tenant_id, "admin");
+        let auth = format!("Bearer {jwt}");
+        let client = reqwest::Client::new();
+
+        // Upload ZIP to create dtako_operations (unko_no=1001)
+        let zip_bytes = common::create_test_dtako_zip();
+        let file_part = reqwest::multipart::Part::bytes(zip_bytes)
+            .file_name("test.zip")
+            .mime_str("application/zip")
+            .unwrap();
+        let form = reqwest::multipart::Form::new().part("file", file_part);
+        let res = client
+            .post(format!("{base_url}/api/upload"))
+            .header("Authorization", &auth)
+            .multipart(form)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200);
+
+        // Upload KUDGFRY.csv to MockStorage
+        let csv = "h0,h1,h2\nval0,val1,val2\n";
+        let key = format!("{}/unko/1001/KUDGFRY.csv", tenant_id);
+        let (csv_bytes, _, _) = encoding_rs::SHIFT_JIS.encode(csv);
+        state.dtako_storage.as_ref().unwrap().upload(&key, &csv_bytes, "text/csv").await.unwrap();
+
+        let res = client
+            .get(format!("{base_url}/api/operations/1001/csv/ferry"))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200);
+        let body: Value = res.json().await.unwrap();
+        assert!(body["headers"].as_array().unwrap().len() > 0);
+    });
+}
+
+#[tokio::test]
+async fn test_dtako_csv_proxy_tolls() {
+    test_group!("デタコCSVプロキシ");
+    test_case!("tolls CSVをJSON形式で取得できる", {
+        let state = common::setup_app_state().await;
+        let base_url = common::spawn_test_server(state.clone()).await;
+        let tenant_id = common::create_test_tenant(&state.pool, "CsvTolls").await;
+        let jwt = common::create_test_jwt(tenant_id, "admin");
+        let auth = format!("Bearer {jwt}");
+        let client = reqwest::Client::new();
+
+        let zip_bytes = common::create_test_dtako_zip();
+        let file_part = reqwest::multipart::Part::bytes(zip_bytes)
+            .file_name("test.zip")
+            .mime_str("application/zip")
+            .unwrap();
+        let form = reqwest::multipart::Form::new().part("file", file_part);
+        let res = client
+            .post(format!("{base_url}/api/upload"))
+            .header("Authorization", &auth)
+            .multipart(form)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200);
+
+        let csv = "h0,h1\nval0,val1\n";
+        let key = format!("{}/unko/1001/KUDGSIR.csv", tenant_id);
+        let (csv_bytes, _, _) = encoding_rs::SHIFT_JIS.encode(csv);
+        state.dtako_storage.as_ref().unwrap().upload(&key, &csv_bytes, "text/csv").await.unwrap();
+
+        let res = client
+            .get(format!("{base_url}/api/operations/1001/csv/tolls"))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200);
+        let body: Value = res.json().await.unwrap();
+        assert!(body["headers"].as_array().unwrap().len() > 0);
+    });
+}
+
+#[tokio::test]
+async fn test_dtako_csv_proxy_speed() {
+    test_group!("デタコCSVプロキシ");
+    test_case!("speed CSVをJSON形式で取得できる", {
+        let state = common::setup_app_state().await;
+        let base_url = common::spawn_test_server(state.clone()).await;
+        let tenant_id = common::create_test_tenant(&state.pool, "CsvSpeed").await;
+        let jwt = common::create_test_jwt(tenant_id, "admin");
+        let auth = format!("Bearer {jwt}");
+        let client = reqwest::Client::new();
+
+        let zip_bytes = common::create_test_dtako_zip();
+        let file_part = reqwest::multipart::Part::bytes(zip_bytes)
+            .file_name("test.zip")
+            .mime_str("application/zip")
+            .unwrap();
+        let form = reqwest::multipart::Form::new().part("file", file_part);
+        let res = client
+            .post(format!("{base_url}/api/upload"))
+            .header("Authorization", &auth)
+            .multipart(form)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200);
+
+        let csv = "speed_col1,speed_col2\n100,200\n";
+        let key = format!("{}/unko/1001/SOKUDODATA.csv", tenant_id);
+        let (csv_bytes, _, _) = encoding_rs::SHIFT_JIS.encode(csv);
+        state.dtako_storage.as_ref().unwrap().upload(&key, &csv_bytes, "text/csv").await.unwrap();
+
+        let res = client
+            .get(format!("{base_url}/api/operations/1001/csv/speed"))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200);
+        let body: Value = res.json().await.unwrap();
+        assert!(body["headers"].as_array().unwrap().len() > 0);
+    });
+}
+
+#[tokio::test]
+async fn test_dtako_csv_proxy_invalid_type() {
+    test_group!("デタコCSVプロキシ");
+    test_case!("不正なCSVタイプで400を返す", {
+        let state = common::setup_app_state().await;
+        let base_url = common::spawn_test_server(state.clone()).await;
+        let tenant_id = common::create_test_tenant(&state.pool, "CsvBad").await;
+        let jwt = common::create_test_jwt(tenant_id, "admin");
+        let client = reqwest::Client::new();
+
+        let res = client
+            .get(format!("{base_url}/api/operations/1001/csv/unknown_type"))
+            .header("Authorization", format!("Bearer {jwt}"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 400);
+    });
+}
+
+#[tokio::test]
+async fn test_dtako_csv_proxy_not_found() {
+    test_group!("デタコCSVプロキシ");
+    test_case!("存在しないCSVで404を返す", {
+        let state = common::setup_app_state().await;
+        let base_url = common::spawn_test_server(state.clone()).await;
+        let tenant_id = common::create_test_tenant(&state.pool, "CsvNF").await;
+        let jwt = common::create_test_jwt(tenant_id, "admin");
+        let auth = format!("Bearer {jwt}");
+        let client = reqwest::Client::new();
+
+        // Upload ZIP to create operation record, but don't upload KUDGFRY.csv
+        let zip_bytes = common::create_test_dtako_zip();
+        let file_part = reqwest::multipart::Part::bytes(zip_bytes)
+            .file_name("test.zip")
+            .mime_str("application/zip")
+            .unwrap();
+        let form = reqwest::multipart::Form::new().part("file", file_part);
+        let res = client
+            .post(format!("{base_url}/api/upload"))
+            .header("Authorization", &auth)
+            .multipart(form)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200);
+
+        // KUDGFRY.csv is not in MockStorage → download fails → 404
+        let res = client
+            .get(format!("{base_url}/api/operations/1001/csv/ferry"))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 404);
+    });
+}
+
+#[tokio::test]
+async fn test_dtako_csv_proxy_no_operation_record() {
+    test_group!("デタコCSVプロキシ");
+    test_case!("操作レコードなしでフォールバックキーを使う", {
+        let state = common::setup_app_state().await;
+        let base_url = common::spawn_test_server(state.clone()).await;
+        let tenant_id = common::create_test_tenant(&state.pool, "CsvNoOp").await;
+        let jwt = common::create_test_jwt(tenant_id, "admin");
+        let auth = format!("Bearer {jwt}");
+        let client = reqwest::Client::new();
+
+        // Upload CSV to MockStorage with fallback key format (no dtako_operations record)
+        let csv = "col1,col2\nval1,val2\n";
+        let key = format!("{}/unko/9999/KUDGURI.csv", tenant_id);
+        let (csv_bytes, _, _) = encoding_rs::SHIFT_JIS.encode(csv);
+        state
+            .dtako_storage
+            .as_ref()
+            .unwrap()
+            .upload(&key, &csv_bytes, "text/csv")
+            .await
+            .unwrap();
+
+        // GET — r2_prefix query returns None → fallback key used
+        let res = client
+            .get(format!("{base_url}/api/operations/9999/csv/kudguri"))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200);
+        let body: Value = res.json().await.unwrap();
+        assert!(body["headers"].as_array().unwrap().len() > 0);
+    });
+}
+
+#[tokio::test]
 async fn test_dtako_csv_proxy_kudgivt() {
     test_group!("デタコCSVプロキシ");
     test_case!(

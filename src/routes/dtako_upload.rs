@@ -169,11 +169,8 @@ async fn process_zip(
 
     let kudgivt_text = csv_parser::decode_shift_jis(&kudgivt_file.1);
     let kudgivt_rows = parse_kudgivt(&kudgivt_text)?;
-    tracing::info!(
-        "KUDGIVT parsed: {} rows (tenant={})",
-        kudgivt_rows.len(),
-        tenant_id
-    );
+    #[rustfmt::skip]
+    tracing::info!("KUDGIVT parsed: {} rows (tenant={})", kudgivt_rows.len(), tenant_id);
 
     // 4. Upsert masters and insert operations
     let mut operations_count = 0i32;
@@ -247,11 +244,8 @@ async fn process_zip(
         operations_count += 1;
     }
 
-    tracing::info!(
-        "DB upsert done: {} operations (tenant={})",
-        operations_count,
-        tenant_id
-    );
+    #[rustfmt::skip]
+    tracing::info!("DB upsert done: {} operations (tenant={})", operations_count, tenant_id);
 
     // 5. Calculate daily_work_hours using KUDGIVT events
     // フェリー時間はCSV分割時にR2のKUDGFRYから取得済み（アップロード時はまだ未保存）
@@ -425,10 +419,7 @@ async fn load_ferry_minutes(
         }
     }
 
-    tracing::info!(
-        "Ferry minutes loaded: {} operations with ferry",
-        ferry_map.len()
-    );
+    tracing::info!("Ferry minutes loaded: {} operations with ferry", ferry_map.len());
     ferry_map
 }
 
@@ -901,11 +892,8 @@ async fn load_kudgivt_from_zips(
     let mut seen = std::collections::HashSet::new();
     all_kudgivt
         .retain(|row| seen.insert((row.unko_no.clone(), row.event_cd.clone(), row.start_at)));
-    tracing::info!(
-        "Total KUDGIVT from ZIPs: {} rows (deduped from {})",
-        all_kudgivt.len(),
-        before
-    );
+    #[rustfmt::skip]
+    tracing::info!("Total KUDGIVT from ZIPs: {} rows (deduped from {})", all_kudgivt.len(), before);
     Ok(all_kudgivt)
 }
 
@@ -1134,12 +1122,8 @@ pub(crate) async fn split_csv_from_r2(
         tracing::info!("has_kudgivt updated: {} operations", kudgivt_unko_nos.len());
     }
 
-    tracing::info!(
-        "CSV split done: {} files uploaded (upload_id={}, tenant={})",
-        csv_count,
-        upload_id,
-        tenant_id
-    );
+    #[rustfmt::skip]
+    tracing::info!("CSV split done: {} files uploaded (upload_id={}, tenant={})", csv_count, upload_id, tenant_id);
     Ok(())
 }
 
@@ -1246,12 +1230,8 @@ async fn internal_rerun(
             )
         })?;
 
-    tracing::info!(
-        "Rerun: upload_id={}, tenant={}, file={}",
-        upload_id,
-        tenant_id,
-        filename
-    );
+    #[rustfmt::skip]
+    tracing::info!("Rerun: upload_id={}, tenant={}, file={}", upload_id, tenant_id, filename);
 
     match process_zip(&state, tenant_id, upload_id, &filename, &zip_bytes).await {
         Ok(count) => {

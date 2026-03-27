@@ -3,6 +3,9 @@ name = "rust-alc-api"
 version = "0.1.0"
 edition = "2021"
 
+[lints.rust]
+unexpected_cfgs = { level = "allow", check-cfg = ['cfg(coverage)'] }
+
 [dependencies]
 axum = { version = "0.8", features = ["multipart"] }
 tokio = { version = "1", features = ["full"] }
@@ -35,6 +38,3 @@ encoding_rs = "0.8"
 futures = "0.3"
 tokio-stream = "0.1"
 printpdf = "0.8"
-
-[profile.test]
-codegen-units = 1

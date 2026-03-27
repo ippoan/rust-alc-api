@@ -89,6 +89,86 @@ async fn test_daily_health_db_error() {
     });
 }
 
+/// daily_health: safety_judgment の pass/fail カウント
+#[tokio::test]
+async fn test_daily_health_safety_judgment_counts() {
+    test_group!("カバレッジ 100% 補完");
+    test_case!("safety_judgment の pass/fail カウントが正しい", {
+        let state = common::setup_app_state().await;
+        let base_url = common::spawn_test_server(state.clone()).await;
+        let tenant_id = common::create_test_tenant(&state.pool, "DHJudge").await;
+        let jwt = common::create_test_jwt(tenant_id, "admin");
+        let auth = format!("Bearer {jwt}");
+        let client = reqwest::Client::new();
+
+        // Create 3 employees
+        let emp1 =
+            common::create_test_employee(&client, &base_url, &auth, "PassEmp", "PE01").await;
+        let emp1_id: uuid::Uuid = emp1["id"].as_str().unwrap().parse().unwrap();
+
+        let emp2 =
+            common::create_test_employee(&client, &base_url, &auth, "FailEmp", "FE01").await;
+        let emp2_id: uuid::Uuid = emp2["id"].as_str().unwrap().parse().unwrap();
+
+        // emp3 = unchecked (no session)
+        common::create_test_employee(&client, &base_url, &auth, "UncheckedEmp", "UE01").await;
+
+        // Insert completed tenko_sessions with safety_judgment
+        {
+            let mut conn = state.pool.acquire().await.unwrap();
+            sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
+                .bind(tenant_id.to_string())
+                .execute(&mut *conn)
+                .await
+                .unwrap();
+
+            // emp1: pass
+            sqlx::query(
+                r#"INSERT INTO alc_api.tenko_sessions
+                   (tenant_id, employee_id, tenko_type, status, completed_at, safety_judgment)
+                   VALUES ($1, $2, 'pre_operation', 'completed',
+                           '2026-03-27T01:00:00Z', '{"status":"pass"}'::jsonb)"#,
+            )
+            .bind(tenant_id)
+            .bind(emp1_id)
+            .execute(&mut *conn)
+            .await
+            .unwrap();
+
+            // emp2: fail
+            sqlx::query(
+                r#"INSERT INTO alc_api.tenko_sessions
+                   (tenant_id, employee_id, tenko_type, status, completed_at, safety_judgment)
+                   VALUES ($1, $2, 'pre_operation', 'completed',
+                           '2026-03-27T01:00:00Z', '{"status":"fail"}'::jsonb)"#,
+            )
+            .bind(tenant_id)
+            .bind(emp2_id)
+            .execute(&mut *conn)
+            .await
+            .unwrap();
+        }
+
+        // GET daily-health-status with date=2026-03-27
+        let res = client
+            .get(format!(
+                "{base_url}/api/tenko/daily-health-status?date=2026-03-27"
+            ))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200);
+        let body: serde_json::Value = res.json().await.unwrap();
+        let summary = &body["summary"];
+        assert_eq!(summary["total_employees"], 3);
+        assert_eq!(summary["pass_count"], 1);
+        assert_eq!(summary["fail_count"], 1);
+        assert_eq!(summary["unchecked_count"], 1);
+        assert_eq!(summary["checked_count"], 2);
+    });
+}
+
 /// nfc_tags: register_tag の INSERT を trigger で失敗させる
 #[tokio::test]
 async fn test_nfc_tag_register_db_error() {
