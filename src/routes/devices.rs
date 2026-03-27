@@ -1071,7 +1071,7 @@ async fn get_device_settings(
     Path(device_id): Path<Uuid>,
 ) -> Result<Json<DeviceSettingsResponse>, StatusCode> {
     let row = sqlx::query_as::<_, DeviceSettingsResponse>(
-        "SELECT call_enabled, call_schedule, status, last_login_employee_id, last_login_employee_name, last_login_employee_role, always_on FROM devices WHERE id = $1",
+        "SELECT * FROM alc_api.get_device_settings_by_id($1)",
     )
     .bind(device_id)
     .fetch_optional(&state.pool)
@@ -1179,17 +1179,36 @@ async fn report_watchdog_state(
     State(state): State<AppState>,
     Json(body): Json<ReportWatchdogBody>,
 ) -> Result<StatusCode, StatusCode> {
-    sqlx::query(
-        "UPDATE alc_api.devices SET watchdog_running = $1, updated_at = NOW() WHERE id = $2",
-    )
-    .bind(body.running)
-    .bind(body.device_id)
-    .execute(&state.pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("report_watchdog_state error: {e}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    let tenant_id = sqlx::query_as::<_, (Option<Uuid>,)>("SELECT alc_api.lookup_device_tenant($1)")
+        .bind(body.device_id)
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(|e| {
+            tracing::error!("report_watchdog_state lookup error: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .ok_or(StatusCode::NOT_FOUND)?
+        .0
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    let mut conn = state
+        .pool
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    set_current_tenant(&mut conn, &tenant_id.to_string())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    sqlx::query("UPDATE devices SET watchdog_running = $1, updated_at = NOW() WHERE id = $2")
+        .bind(body.running)
+        .bind(body.device_id)
+        .execute(&mut *conn)
+        .await
+        .map_err(|e| {
+            tracing::error!("report_watchdog_state error: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -1210,8 +1229,7 @@ async fn register_fcm_token(
     State(state): State<AppState>,
     Json(body): Json<RegisterFcmTokenBody>,
 ) -> Result<StatusCode, StatusCode> {
-    // device_select_by_id RLS ポリシーで tenant_id を取得
-    let tenant_id = sqlx::query_as::<_, (Uuid,)>("SELECT tenant_id FROM devices WHERE id = $1")
+    let tenant_id = sqlx::query_as::<_, (Option<Uuid>,)>("SELECT alc_api.lookup_device_tenant($1)")
         .bind(body.device_id)
         .fetch_optional(&state.pool)
         .await
@@ -1220,7 +1238,8 @@ async fn register_fcm_token(
             StatusCode::INTERNAL_SERVER_ERROR
         })?
         .ok_or(StatusCode::NOT_FOUND)?
-        .0;
+        .0
+        .ok_or(StatusCode::NOT_FOUND)?;
 
     // set_current_tenant で RLS UPDATE を通す
     let mut conn = state
@@ -1260,7 +1279,7 @@ async fn update_last_login(
     State(state): State<AppState>,
     Json(body): Json<UpdateLastLoginBody>,
 ) -> Result<StatusCode, StatusCode> {
-    let tenant_id = sqlx::query_as::<_, (Uuid,)>("SELECT tenant_id FROM devices WHERE id = $1")
+    let tenant_id = sqlx::query_as::<_, (Option<Uuid>,)>("SELECT alc_api.lookup_device_tenant($1)")
         .bind(body.device_id)
         .fetch_optional(&state.pool)
         .await
@@ -1269,7 +1288,8 @@ async fn update_last_login(
             StatusCode::INTERNAL_SERVER_ERROR
         })?
         .ok_or(StatusCode::NOT_FOUND)?
-        .0;
+        .0
+        .ok_or(StatusCode::NOT_FOUND)?;
 
     let mut conn = state
         .pool
@@ -1805,7 +1825,7 @@ async fn report_version(
     State(state): State<AppState>,
     Json(body): Json<ReportVersionBody>,
 ) -> Result<StatusCode, StatusCode> {
-    let tenant_id = sqlx::query_as::<_, (Uuid,)>("SELECT tenant_id FROM devices WHERE id = $1")
+    let tenant_id = sqlx::query_as::<_, (Option<Uuid>,)>("SELECT alc_api.lookup_device_tenant($1)")
         .bind(body.device_id)
         .fetch_optional(&state.pool)
         .await
@@ -1814,7 +1834,8 @@ async fn report_version(
             StatusCode::INTERNAL_SERVER_ERROR
         })?
         .ok_or(StatusCode::NOT_FOUND)?
-        .0;
+        .0
+        .ok_or(StatusCode::NOT_FOUND)?;
 
     let mut conn = state
         .pool
