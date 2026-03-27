@@ -76,9 +76,10 @@ fn default_limit() -> i64 {
 
 /// Cloud Run メタデータサーバーから ID トークンを取得
 async fn get_id_token(client: &Client, audience: &str) -> Result<String, String> {
+    let base = std::env::var("GCP_METADATA_URL")
+        .unwrap_or_else(|_| "http://metadata.google.internal".to_string());
     let url = format!(
-        "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?audience={}",
-        audience
+        "{base}/computeMetadata/v1/instance/service-accounts/default/identity?audience={audience}"
     );
     let res = client
         .get(&url)
@@ -155,54 +156,52 @@ async fn trigger_scrape(
         let mut event_count = 0usize;
 
         while let Some(chunk) = stream.next().await {
-            match chunk {
-                Ok(bytes) => {
-                    let chunk_str = String::from_utf8_lossy(&bytes);
-                    buffer.push_str(&chunk_str);
-
-                    while let Some(pos) = buffer.find("\n\n") {
-                        let message = buffer[..pos].to_string();
-                        buffer = buffer[pos + 2..].to_string();
-
-                        for line in message.lines() {
-                            if let Some(data) = line.strip_prefix("data:") {
-                                let data = data.trim();
-                                if !data.is_empty() {
-                                    event_count += 1;
-
-                                    if let Ok(evt) = serde_json::from_str::<SseEvent>(data) {
-                                        if evt.event.as_deref() == Some("result") {
-                                            if let Some(ref comp_id) = evt.comp_id {
-                                                let status =
-                                                    evt.status.as_deref().unwrap_or("error");
-                                                let message = evt.message.as_deref();
-                                                let _ = sqlx::query(
-                                                    r#"INSERT INTO alc_api.dtako_scrape_history (tenant_id, target_date, comp_id, status, message)
-                                                       VALUES ($1, $2, $3, $4, $5)"#,
-                                                )
-                                                .bind(tid)
-                                                .bind(target_date)
-                                                .bind(comp_id)
-                                                .bind(status)
-                                                .bind(message)
-                                                .execute(&pool)
-                                                .await;
-                                            }
-                                        }
-                                    }
-
-                                    if tx.send(Ok(Event::default().data(data))).await.is_err() {
-                                        tracing::warn!("SSE proxy: client disconnected");
-                                        return;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+            let bytes = match chunk {
+                Ok(b) => b,
                 Err(e) => {
                     tracing::warn!("SSE proxy stream error: {e}");
                     break;
+                }
+            };
+            let chunk_str = String::from_utf8_lossy(&bytes);
+            buffer.push_str(&chunk_str);
+
+            while let Some(pos) = buffer.find("\n\n") {
+                let message = buffer[..pos].to_string();
+                buffer = buffer[pos + 2..].to_string();
+
+                for line in message.lines() {
+                    if let Some(data) = line.strip_prefix("data:") {
+                        let data = data.trim();
+                        if !data.is_empty() {
+                            event_count += 1;
+
+                            if let Ok(evt) = serde_json::from_str::<SseEvent>(data) {
+                                if evt.event.as_deref() == Some("result") {
+                                    if let Some(ref comp_id) = evt.comp_id {
+                                        let status = evt.status.as_deref().unwrap_or("error");
+                                        let message = evt.message.as_deref();
+                                        let _ = sqlx::query(
+                                            r#"INSERT INTO alc_api.dtako_scrape_history (tenant_id, target_date, comp_id, status, message)
+                                               VALUES ($1, $2, $3, $4, $5)"#,
+                                        )
+                                        .bind(tid)
+                                        .bind(target_date)
+                                        .bind(comp_id)
+                                        .bind(status)
+                                        .bind(message)
+                                        .execute(&pool)
+                                        .await;
+                                    }
+                                }
+                            }
+
+                            if tx.send(Ok(Event::default().data(data))).await.is_err() {
+                                tracing::warn!("SSE proxy: client disconnected");
+                                return;
+                            }
+                        }
+                    }
                 }
             }
         }

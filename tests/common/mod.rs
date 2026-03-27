@@ -321,7 +321,10 @@ pub async fn spawn_test_server(state: AppState) -> String {
         .nest("/api", rust_alc_api::routes::router())
         .layer(Extension(google_verifier))
         .layer(Extension(jwt_secret))
-        .layer(Extension(ScraperUrl("http://localhost:9999".to_string())))
+        .layer(Extension(ScraperUrl(
+            std::env::var("TEST_SCRAPER_URL")
+                .unwrap_or_else(|_| "http://localhost:9999".to_string()),
+        )))
         .layer(cors)
         .with_state(state);
 
