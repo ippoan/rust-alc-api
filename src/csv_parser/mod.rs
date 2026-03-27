@@ -56,65 +56,88 @@ mod tests {
 
     #[test]
     fn test_extract_zip() {
-        use std::io::Write;
-        let mut buf = std::io::Cursor::new(Vec::new());
-        {
-            let mut zip = zip::ZipWriter::new(&mut buf);
-            let opts = zip::write::SimpleFileOptions::default();
-            zip.start_file("test.txt", opts).unwrap();
-            zip.write_all(b"hello world").unwrap();
-            zip.start_file("sub/data.csv", opts).unwrap();
-            zip.write_all(b"col1,col2\na,b").unwrap();
-            zip.finish().unwrap();
-        }
-        let files = extract_zip(&buf.into_inner()).unwrap();
-        assert_eq!(files.len(), 2);
-        assert_eq!(files[0].0, "test.txt");
-        assert_eq!(files[0].1, b"hello world");
-        assert_eq!(files[1].0, "sub/data.csv");
+        test_group!("CSVパーサー");
+        test_case!("ZIP展開", {
+            use std::io::Write;
+            let mut buf = std::io::Cursor::new(Vec::new());
+            {
+                let mut zip = zip::ZipWriter::new(&mut buf);
+                let opts = zip::write::SimpleFileOptions::default();
+                zip.start_file("test.txt", opts).unwrap();
+                zip.write_all(b"hello world").unwrap();
+                zip.start_file("sub/data.csv", opts).unwrap();
+                zip.write_all(b"col1,col2\na,b").unwrap();
+                zip.finish().unwrap();
+            }
+            let files = extract_zip(&buf.into_inner()).unwrap();
+            assert_eq!(files.len(), 2);
+            assert_eq!(files[0].0, "test.txt");
+            assert_eq!(files[0].1, b"hello world");
+            assert_eq!(files[1].0, "sub/data.csv");
+        });
     }
 
     #[test]
     fn test_extract_zip_invalid() {
-        assert!(extract_zip(b"not a zip").is_err());
+        test_group!("CSVパーサー");
+        test_case!("不正なZIPでエラー", {
+            assert!(extract_zip(b"not a zip").is_err());
+        });
     }
 
     #[test]
     fn test_decode_shift_jis() {
-        // "テスト" in Shift-JIS
-        let sjis_bytes = encoding_rs::SHIFT_JIS.encode("テスト").0.to_vec();
-        assert_eq!(decode_shift_jis(&sjis_bytes), "テスト");
+        test_group!("CSVパーサー");
+        test_case!("Shift-JISデコード", {
+            let sjis_bytes = encoding_rs::SHIFT_JIS.encode("テスト").0.to_vec();
+            assert_eq!(decode_shift_jis(&sjis_bytes), "テスト");
+        });
     }
 
     #[test]
     fn test_decode_shift_jis_ascii() {
-        assert_eq!(decode_shift_jis(b"hello"), "hello");
+        test_group!("CSVパーサー");
+        test_case!("ASCII文字のShift-JISデコード", {
+            assert_eq!(decode_shift_jis(b"hello"), "hello");
+        });
     }
 
     #[test]
     fn test_group_csv_by_unko_no() {
-        let csv = "運行NO,名前\n1001,田中\n1002,佐藤\n1001,鈴木\n";
-        let map = group_csv_by_unko_no(csv);
-        assert_eq!(map.len(), 2);
-        assert_eq!(map["1001"].len(), 2);
-        assert_eq!(map["1002"].len(), 1);
+        test_group!("CSVパーサー");
+        test_case!("運行NOでグループ化", {
+            let csv = "運行NO,名前\n1001,田中\n1002,佐藤\n1001,鈴木\n";
+            let map = group_csv_by_unko_no(csv);
+            assert_eq!(map.len(), 2);
+            assert_eq!(map["1001"].len(), 2);
+            assert_eq!(map["1002"].len(), 1);
+        });
     }
 
     #[test]
     fn test_group_csv_by_unko_no_empty_lines() {
-        let csv = "header\ndata1\n\n\ndata2\n";
-        let map = group_csv_by_unko_no(csv);
-        assert_eq!(map.len(), 2);
+        test_group!("CSVパーサー");
+        test_case!("空行を含むCSVのグループ化", {
+            let csv = "header\ndata1\n\n\ndata2\n";
+            let map = group_csv_by_unko_no(csv);
+            assert_eq!(map.len(), 2);
+        });
     }
 
     #[test]
     fn test_csv_header() {
-        assert_eq!(csv_header("col1,col2\nrow1"), Some("col1,col2"));
-        assert_eq!(csv_header("single line"), Some("single line"));
+        test_group!("CSVパーサー");
+        test_case!("CSVヘッダー取得", {
+            assert_eq!(csv_header("col1,col2\nrow1"), Some("col1,col2"));
+            assert_eq!(csv_header("single line"), Some("single line"));
+        });
     }
 
     #[test]
     fn test_csv_header_none() {
-        assert_eq!(csv_header(""), None);
+        test_group!("CSVパーサー");
+        test_case!("空CSVのヘッダーはNone", {
+            assert_eq!(csv_header(""), None);
+        });
     }
 }

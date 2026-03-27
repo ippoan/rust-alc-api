@@ -111,40 +111,52 @@ mod tests {
 
     #[test]
     fn test_create_and_verify_access_token() {
-        let user = test_user();
-        let secret = JwtSecret("test-secret-key-256-bits-long!!!".to_string());
+        test_group!("JWTトークン");
+        test_case!("アクセストークンの生成と検証", {
+            let user = test_user();
+            let secret = JwtSecret("test-secret-key-256-bits-long!!!".to_string());
 
-        let token = create_access_token(&user, &secret, Some("test-slug".to_string())).unwrap();
-        let claims = verify_access_token(&token, &secret).unwrap();
+            let token = create_access_token(&user, &secret, Some("test-slug".to_string())).unwrap();
+            let claims = verify_access_token(&token, &secret).unwrap();
 
-        assert_eq!(claims.sub, user.id);
-        assert_eq!(claims.email, user.email);
-        assert_eq!(claims.tenant_id, user.tenant_id);
-        assert_eq!(claims.role, "admin");
+            assert_eq!(claims.sub, user.id);
+            assert_eq!(claims.email, user.email);
+            assert_eq!(claims.tenant_id, user.tenant_id);
+            assert_eq!(claims.role, "admin");
+        });
     }
 
     #[test]
     fn test_verify_with_wrong_secret_fails() {
-        let user = test_user();
-        let secret = JwtSecret("correct-secret-key-256-bits!!!".to_string());
-        let wrong_secret = JwtSecret("wrong-secret-key-256-bits!!!!!".to_string());
+        test_group!("JWTトークン");
+        test_case!("不正なシークレットで検証失敗", {
+            let user = test_user();
+            let secret = JwtSecret("correct-secret-key-256-bits!!!".to_string());
+            let wrong_secret = JwtSecret("wrong-secret-key-256-bits!!!!!".to_string());
 
-        let token = create_access_token(&user, &secret, Some("test-slug".to_string())).unwrap();
-        assert!(verify_access_token(&token, &wrong_secret).is_err());
+            let token = create_access_token(&user, &secret, Some("test-slug".to_string())).unwrap();
+            assert!(verify_access_token(&token, &wrong_secret).is_err());
+        });
     }
 
     #[test]
     fn test_refresh_token_generation() {
-        let (raw, hash) = create_refresh_token();
-        assert!(raw.starts_with("rt_"));
-        assert_eq!(hash, hash_refresh_token(&raw));
+        test_group!("JWTトークン");
+        test_case!("リフレッシュトークン生成", {
+            let (raw, hash) = create_refresh_token();
+            assert!(raw.starts_with("rt_"));
+            assert_eq!(hash, hash_refresh_token(&raw));
+        });
     }
 
     #[test]
     fn test_refresh_token_hash_consistency() {
-        let token = "rt_test123";
-        let hash1 = hash_refresh_token(token);
-        let hash2 = hash_refresh_token(token);
-        assert_eq!(hash1, hash2);
+        test_group!("JWTトークン");
+        test_case!("リフレッシュトークンハッシュの一貫性", {
+            let token = "rt_test123";
+            let hash1 = hash_refresh_token(token);
+            let hash2 = hash_refresh_token(token);
+            assert_eq!(hash1, hash2);
+        });
     }
 }

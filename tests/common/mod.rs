@@ -1,3 +1,5 @@
+#[macro_use]
+pub mod test_macros;
 pub mod mock_storage;
 
 use std::sync::Arc;

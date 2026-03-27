@@ -1068,55 +1068,63 @@ mod tests {
 
     #[test]
     fn test_parse_csv_1021() {
-        let drivers = parse_restraint_csv(CSV_1021.as_bytes()).unwrap();
-        assert_eq!(drivers.len(), 1);
-        let d = &drivers[0];
-        assert_eq!(d.driver_name, "鈴木　昭");
-        assert_eq!(d.driver_cd, "1021");
-        assert_eq!(d.days.len(), 28); // 2月1日〜28日
-        assert_eq!(d.total_drive, "146:54");
-        assert_eq!(d.total_restraint, "242:40");
+        test_group!("拘束時間レポート");
+        test_case!("CSVパース: 鈴木昭(1021)", {
+            let drivers = parse_restraint_csv(CSV_1021.as_bytes()).unwrap();
+            assert_eq!(drivers.len(), 1);
+            let d = &drivers[0];
+            assert_eq!(d.driver_name, "鈴木　昭");
+            assert_eq!(d.driver_cd, "1021");
+            assert_eq!(d.days.len(), 28); // 2月1日〜28日
+            assert_eq!(d.total_drive, "146:54");
+            assert_eq!(d.total_restraint, "242:40");
 
-        // 2月1日: 稼働日
-        let day1 = &d.days[0];
-        assert_eq!(day1.date, "2月1日");
-        assert!(!day1.is_holiday);
-        assert_eq!(day1.drive, "2:43");
-        assert_eq!(day1.overlap_drive, "0:12");
-        assert_eq!(day1.subtotal, "5:18");
-        assert_eq!(day1.overlap_subtotal, "0:12");
-        assert_eq!(day1.total, "5:30");
-        assert_eq!(day1.cumulative, "5:18");
-        assert_eq!(day1.actual_work, "2:43");
+            // 2月1日: 稼働日
+            let day1 = &d.days[0];
+            assert_eq!(day1.date, "2月1日");
+            assert!(!day1.is_holiday);
+            assert_eq!(day1.drive, "2:43");
+            assert_eq!(day1.overlap_drive, "0:12");
+            assert_eq!(day1.subtotal, "5:18");
+            assert_eq!(day1.overlap_subtotal, "0:12");
+            assert_eq!(day1.total, "5:30");
+            assert_eq!(day1.cumulative, "5:18");
+            assert_eq!(day1.actual_work, "2:43");
 
-        // 2月3日: 休日
-        let day3 = &d.days[2];
-        assert_eq!(day3.date, "2月3日");
-        assert!(day3.is_holiday);
+            // 2月3日: 休日
+            let day3 = &d.days[2];
+            assert_eq!(day3.date, "2月3日");
+            assert!(day3.is_holiday);
+        });
     }
 
     #[test]
     fn test_parse_csv_1026() {
-        let drivers = parse_restraint_csv(CSV_1026.as_bytes()).unwrap();
-        assert_eq!(drivers.len(), 1);
-        let d = &drivers[0];
-        assert_eq!(d.driver_name, "一瀬　道広");
-        assert_eq!(d.driver_cd, "1026");
-        assert_eq!(d.total_drive, "173:21");
-        assert_eq!(d.total_restraint, "311:54");
+        test_group!("拘束時間レポート");
+        test_case!("CSVパース: 一瀬道広(1026)", {
+            let drivers = parse_restraint_csv(CSV_1026.as_bytes()).unwrap();
+            assert_eq!(drivers.len(), 1);
+            let d = &drivers[0];
+            assert_eq!(d.driver_name, "一瀬　道広");
+            assert_eq!(d.driver_cd, "1026");
+            assert_eq!(d.total_drive, "173:21");
+            assert_eq!(d.total_restraint, "311:54");
 
-        // 日跨ぎで同一日2行あるため28日以上
-        println!("1026 days count: {}", d.days.len());
-        for (i, day) in d.days.iter().enumerate() {
-            println!(
-                "  [{}] {} holiday={} drive={} subtotal={} total={} cumulative={}",
-                i, day.date, day.is_holiday, day.drive, day.subtotal, day.total, day.cumulative
-            );
-        }
+            // 日跨ぎで同一日2行あるため28日以上
+            println!("1026 days count: {}", d.days.len());
+            for (i, day) in d.days.iter().enumerate() {
+                println!(
+                    "  [{}] {} holiday={} drive={} subtotal={} total={} cumulative={}",
+                    i, day.date, day.is_holiday, day.drive, day.subtotal, day.total, day.cumulative
+                );
+            }
+        });
     }
 
     #[test]
     fn test_compare_1021_zero_diffs() {
+        test_group!("拘束時間レポート");
+        test_case!("1021差分0件保証", {
         // CSVの期待値をシステム側としても使う → 差分0件を保証
         let drivers = parse_restraint_csv(CSV_1021.as_bytes()).unwrap();
         let csv_d = &drivers[0];
@@ -1151,10 +1159,13 @@ mod tests {
             diffs.len(),
             diffs
         );
+        });
     }
 
     #[test]
     fn test_compare_detects_diff() {
+        test_group!("拘束時間レポート");
+        test_case!("差分検出テスト", {
         let drivers = parse_restraint_csv(CSV_1021.as_bytes()).unwrap();
         let csv_d = &drivers[0];
 
@@ -1187,6 +1198,7 @@ mod tests {
         assert_eq!(diffs[0].date, "2月1日");
         assert_eq!(diffs[0].csv_val, "2:43");
         assert_eq!(diffs[0].sys_val, "9:99");
+        });
     }
 
     /// DB値（daily_work_hours）からbuild_report_with_nameと同じ変換ロジックでSystemDayRowを生成
@@ -1254,6 +1266,8 @@ mod tests {
     /// 本番DB値を使った回帰テスト: DB→SystemDayRow変換→CSV比較で0件差分を保証
     #[test]
     fn test_compare_1021_with_db_mock() {
+        test_group!("拘束時間レポート");
+        test_case!("1021 DBモック比較", {
         let drivers = parse_restraint_csv(CSV_1021.as_bytes()).unwrap();
         let csv_d = &drivers[0];
 
@@ -1633,11 +1647,14 @@ mod tests {
                 );
             }
         }
+        });
     }
 
     /// 一瀬道広(1026) DB値テスト — 日跨ぎ運行（同一日2行）対応
     #[test]
     fn test_compare_1026_with_db_mock() {
+        test_group!("拘束時間レポート");
+        test_case!("1026 DBモック比較", {
         let drivers = parse_restraint_csv(CSV_1026.as_bytes()).unwrap();
         let csv_d = &drivers[0];
 
@@ -2015,6 +2032,7 @@ mod tests {
                 .collect::<Vec<_>>()
                 .join("\n")
         );
+        });
     }
 
     /// DB接続テスト: build_report_with_name → CSV変換 → 元CSVと比較
@@ -2022,6 +2040,8 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_csv_compare_1021_db() {
+        test_group!("拘束時間レポート");
+        test_case!("1021 DB接続比較", {
         let db_url = std::env::var("DATABASE_URL").expect("DATABASE_URL required");
         let pool = sqlx::PgPool::connect(&db_url)
             .await
@@ -2059,6 +2079,7 @@ mod tests {
                 .collect::<Vec<_>>()
                 .join("\n")
         );
+        });
     }
 
     /// DB接続テスト: 一瀬道広(1026) CSV比較
@@ -2066,6 +2087,8 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_csv_compare_1026_db() {
+        test_group!("拘束時間レポート");
+        test_case!("1026 DB接続比較", {
         let db_url = std::env::var("DATABASE_URL").expect("DATABASE_URL required");
         let pool = sqlx::PgPool::connect(&db_url)
             .await
@@ -2126,24 +2149,31 @@ mod tests {
             );
         }
         // 差分を出力して分析（まだ0件にはならない）
+        });
     }
 
     #[test]
     fn test_fmt_min() {
-        assert_eq!(fmt_min(0), "");
-        assert_eq!(fmt_min(60), "1:00");
-        assert_eq!(fmt_min(90), "1:30");
-        assert_eq!(fmt_min(318), "5:18");
-        assert_eq!(fmt_min(565), "9:25");
-        assert_eq!(fmt_min(14560), "242:40");
+        test_group!("拘束時間レポート");
+        test_case!("分→H:MM変換", {
+            assert_eq!(fmt_min(0), "");
+            assert_eq!(fmt_min(60), "1:00");
+            assert_eq!(fmt_min(90), "1:30");
+            assert_eq!(fmt_min(318), "5:18");
+            assert_eq!(fmt_min(565), "9:25");
+            assert_eq!(fmt_min(14560), "242:40");
+        });
     }
 
     #[test]
     fn test_parse_hhmm() {
-        assert_eq!(parse_hhmm(""), 0);
-        assert_eq!(parse_hhmm("5:18"), 318);
-        assert_eq!(parse_hhmm("9:25"), 565);
-        assert_eq!(parse_hhmm("242:40"), 14560);
-        assert_eq!(parse_hhmm("0:03"), 3);
+        test_group!("拘束時間レポート");
+        test_case!("H:MM→分変換", {
+            assert_eq!(parse_hhmm(""), 0);
+            assert_eq!(parse_hhmm("5:18"), 318);
+            assert_eq!(parse_hhmm("9:25"), 565);
+            assert_eq!(parse_hhmm("242:40"), 14560);
+            assert_eq!(parse_hhmm("0:03"), 3);
+        });
     }
 }

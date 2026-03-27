@@ -195,144 +195,177 @@ mod tests {
 
     #[test]
     fn test_display_name_full() {
-        let profile = UserProfile {
-            user_id: "uid".into(),
-            user_name: Some(UserName { last_name: Some("田中".into()), first_name: Some("太郎".into()) }),
-            email: Some("tanaka@example.com".into()),
-            domain_id: None,
-        };
-        assert_eq!(profile.display_name(), "田中太郎");
-        assert_eq!(profile.email_or_id(), "tanaka@example.com");
+        test_group!("LINE WORKS OAuth");
+        test_case!("フルネーム表示", {
+            let profile = UserProfile {
+                user_id: "uid".into(),
+                user_name: Some(UserName { last_name: Some("田中".into()), first_name: Some("太郎".into()) }),
+                email: Some("tanaka@example.com".into()),
+                domain_id: None,
+            };
+            assert_eq!(profile.display_name(), "田中太郎");
+            assert_eq!(profile.email_or_id(), "tanaka@example.com");
+        });
     }
 
     #[test]
     fn test_display_name_no_name() {
-        let profile = UserProfile {
-            user_id: "uid123".into(),
-            user_name: None,
-            email: None,
-            domain_id: None,
-        };
-        assert_eq!(profile.display_name(), "uid123");
-        assert_eq!(profile.email_or_id(), "uid123");
+        test_group!("LINE WORKS OAuth");
+        test_case!("名前なしでユーザーIDフォールバック", {
+            let profile = UserProfile {
+                user_id: "uid123".into(),
+                user_name: None,
+                email: None,
+                domain_id: None,
+            };
+            assert_eq!(profile.display_name(), "uid123");
+            assert_eq!(profile.email_or_id(), "uid123");
+        });
     }
 
     #[test]
     fn test_display_name_empty() {
-        let profile = UserProfile {
-            user_id: "uid".into(),
-            user_name: Some(UserName { last_name: None, first_name: None }),
-            email: None,
-            domain_id: None,
-        };
-        assert_eq!(profile.display_name(), "uid");
+        test_group!("LINE WORKS OAuth");
+        test_case!("空の名前でユーザーIDフォールバック", {
+            let profile = UserProfile {
+                user_id: "uid".into(),
+                user_name: Some(UserName { last_name: None, first_name: None }),
+                email: None,
+                domain_id: None,
+            };
+            assert_eq!(profile.display_name(), "uid");
+        });
     }
 
     #[test]
     fn test_authorize_url() {
-        let url = authorize_url("client123", "https://example.com/cb", "state-abc");
-        assert!(url.contains("client_id=client123"));
-        assert!(url.contains("redirect_uri=https://example.com/cb"));
-        assert!(url.contains("state=state-abc"));
-        assert!(url.starts_with("https://auth.worksmobile.com/oauth2/v2.0/authorize"));
+        test_group!("LINE WORKS OAuth");
+        test_case!("認可URL生成", {
+            let url = authorize_url("client123", "https://example.com/cb", "state-abc");
+            assert!(url.contains("client_id=client123"));
+            assert!(url.contains("redirect_uri=https://example.com/cb"));
+            assert!(url.contains("state=state-abc"));
+            assert!(url.starts_with("https://auth.worksmobile.com/oauth2/v2.0/authorize"));
+        });
     }
 
     #[test]
     fn test_state_sign_and_verify() {
-        let payload = state::StatePayload {
-            redirect_uri: "https://example.com".into(),
-            nonce: "nonce123".into(),
-            provider: "lineworks".into(),
-            external_org_id: "org1".into(),
-        };
-        let secret = "test-secret-key";
-        let signed = state::sign(&payload, secret);
-        let verified = state::verify(&signed, secret).unwrap();
-        assert_eq!(verified.redirect_uri, "https://example.com");
-        assert_eq!(verified.nonce, "nonce123");
+        test_group!("LINE WORKS OAuth");
+        test_case!("CSRF state署名と検証", {
+            let payload = state::StatePayload {
+                redirect_uri: "https://example.com".into(),
+                nonce: "nonce123".into(),
+                provider: "lineworks".into(),
+                external_org_id: "org1".into(),
+            };
+            let secret = "test-secret-key";
+            let signed = state::sign(&payload, secret);
+            let verified = state::verify(&signed, secret).unwrap();
+            assert_eq!(verified.redirect_uri, "https://example.com");
+            assert_eq!(verified.nonce, "nonce123");
+        });
     }
 
     #[test]
     fn test_state_verify_invalid_signature() {
-        let payload = state::StatePayload {
-            redirect_uri: "https://example.com".into(),
-            nonce: "n".into(),
-            provider: "lw".into(),
-            external_org_id: "o".into(),
-        };
-        let signed = state::sign(&payload, "secret1");
-        assert!(state::verify(&signed, "wrong-secret").is_err());
+        test_group!("LINE WORKS OAuth");
+        test_case!("不正な署名で検証失敗", {
+            let payload = state::StatePayload {
+                redirect_uri: "https://example.com".into(),
+                nonce: "n".into(),
+                provider: "lw".into(),
+                external_org_id: "o".into(),
+            };
+            let signed = state::sign(&payload, "secret1");
+            assert!(state::verify(&signed, "wrong-secret").is_err());
+        });
     }
 
     #[test]
     fn test_state_verify_invalid_format() {
-        assert!(state::verify("no-dot-separator", "secret").is_err());
+        test_group!("LINE WORKS OAuth");
+        test_case!("不正なフォーマットで検証失敗", {
+            assert!(state::verify("no-dot-separator", "secret").is_err());
+        });
     }
 
     #[test]
     fn test_decrypt_secret_roundtrip() {
-        use ring::aead::{self, Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
-        use ring::rand::{SecureRandom, SystemRandom};
+        test_group!("LINE WORKS OAuth");
+        test_case!("秘密鍵の暗号化・復号ラウンドトリップ", {
+            use ring::aead::{self, Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
+            use ring::rand::{SecureRandom, SystemRandom};
 
-        let key_material = "test-encryption-key-for-roundtrip";
-        let plaintext = "my-secret-client-key";
+            let key_material = "test-encryption-key-for-roundtrip";
+            let plaintext = "my-secret-client-key";
 
-        // encrypt (same logic as sso_admin::encrypt_secret)
-        let mut key_bytes = [0u8; 32];
-        let hash = sha2::Sha256::digest(key_material.as_bytes());
-        key_bytes.copy_from_slice(&hash);
-        let unbound = UnboundKey::new(&AES_256_GCM, &key_bytes).unwrap();
-        let key = LessSafeKey::new(unbound);
-        let rng = SystemRandom::new();
-        let mut nonce_bytes = [0u8; 12];
-        rng.fill(&mut nonce_bytes).unwrap();
-        let nonce = Nonce::assume_unique_for_key(nonce_bytes);
-        let mut in_out = plaintext.as_bytes().to_vec();
-        key.seal_in_place_append_tag(nonce, Aad::empty(), &mut in_out).unwrap();
-        let mut data = nonce_bytes.to_vec();
-        data.extend_from_slice(&in_out);
-        let ciphertext_b64 = BASE64.encode(&data);
+            // encrypt (same logic as sso_admin::encrypt_secret)
+            let mut key_bytes = [0u8; 32];
+            let hash = sha2::Sha256::digest(key_material.as_bytes());
+            key_bytes.copy_from_slice(&hash);
+            let unbound = UnboundKey::new(&AES_256_GCM, &key_bytes).unwrap();
+            let key = LessSafeKey::new(unbound);
+            let rng = SystemRandom::new();
+            let mut nonce_bytes = [0u8; 12];
+            rng.fill(&mut nonce_bytes).unwrap();
+            let nonce = Nonce::assume_unique_for_key(nonce_bytes);
+            let mut in_out = plaintext.as_bytes().to_vec();
+            key.seal_in_place_append_tag(nonce, Aad::empty(), &mut in_out).unwrap();
+            let mut data = nonce_bytes.to_vec();
+            data.extend_from_slice(&in_out);
+            let ciphertext_b64 = BASE64.encode(&data);
 
-        // decrypt
-        let decrypted = decrypt_secret(&ciphertext_b64, key_material).unwrap();
-        assert_eq!(decrypted, plaintext);
+            // decrypt
+            let decrypted = decrypt_secret(&ciphertext_b64, key_material).unwrap();
+            assert_eq!(decrypted, plaintext);
+        });
     }
 
     #[test]
     fn test_decrypt_secret_wrong_key() {
-        use ring::aead::{self, Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
-        use ring::rand::{SecureRandom, SystemRandom};
+        test_group!("LINE WORKS OAuth");
+        test_case!("不正なキーで復号失敗", {
+            use ring::aead::{self, Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
+            use ring::rand::{SecureRandom, SystemRandom};
 
-        let key_material = "correct-key";
-        let plaintext = "secret";
-        let mut key_bytes = [0u8; 32];
-        let hash = sha2::Sha256::digest(key_material.as_bytes());
-        key_bytes.copy_from_slice(&hash);
-        let unbound = UnboundKey::new(&AES_256_GCM, &key_bytes).unwrap();
-        let key = LessSafeKey::new(unbound);
-        let rng = SystemRandom::new();
-        let mut nonce_bytes = [0u8; 12];
-        rng.fill(&mut nonce_bytes).unwrap();
-        let nonce = Nonce::assume_unique_for_key(nonce_bytes);
-        let mut in_out = plaintext.as_bytes().to_vec();
-        key.seal_in_place_append_tag(nonce, Aad::empty(), &mut in_out).unwrap();
-        let mut data = nonce_bytes.to_vec();
-        data.extend_from_slice(&in_out);
-        let ciphertext_b64 = BASE64.encode(&data);
+            let key_material = "correct-key";
+            let plaintext = "secret";
+            let mut key_bytes = [0u8; 32];
+            let hash = sha2::Sha256::digest(key_material.as_bytes());
+            key_bytes.copy_from_slice(&hash);
+            let unbound = UnboundKey::new(&AES_256_GCM, &key_bytes).unwrap();
+            let key = LessSafeKey::new(unbound);
+            let rng = SystemRandom::new();
+            let mut nonce_bytes = [0u8; 12];
+            rng.fill(&mut nonce_bytes).unwrap();
+            let nonce = Nonce::assume_unique_for_key(nonce_bytes);
+            let mut in_out = plaintext.as_bytes().to_vec();
+            key.seal_in_place_append_tag(nonce, Aad::empty(), &mut in_out).unwrap();
+            let mut data = nonce_bytes.to_vec();
+            data.extend_from_slice(&in_out);
+            let ciphertext_b64 = BASE64.encode(&data);
 
-        // wrong key → decryption error
-        assert!(decrypt_secret(&ciphertext_b64, "wrong-key").is_err());
+            // wrong key → decryption error
+            assert!(decrypt_secret(&ciphertext_b64, "wrong-key").is_err());
+        });
     }
 
     #[test]
     fn test_decrypt_secret_invalid_base64() {
-        assert!(decrypt_secret("not-base64!!!", "key").is_err());
+        test_group!("LINE WORKS OAuth");
+        test_case!("不正なBase64で復号失敗", {
+            assert!(decrypt_secret("not-base64!!!", "key").is_err());
+        });
     }
 
     #[test]
     fn test_decrypt_secret_too_short() {
-        let short = base64::engine::general_purpose::STANDARD.encode(b"short");
-        assert!(decrypt_secret(&short, "key").is_err());
+        test_group!("LINE WORKS OAuth");
+        test_case!("短すぎる暗号文で復号失敗", {
+            let short = base64::engine::general_purpose::STANDARD.encode(b"short");
+            assert!(decrypt_secret(&short, "key").is_err());
+        });
     }
 }
 

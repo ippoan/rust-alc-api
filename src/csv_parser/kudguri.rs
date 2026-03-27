@@ -214,52 +214,61 @@ mod tests {
 
     #[test]
     fn test_parse_kudguri_sample() {
-        let csv = "運行NO,読取日,運行日,事業所CD,事業所名,車輌CD,車輌名,乗務員CD1,乗務員名１,対象乗務員区分,出社日時,退社日時,出庫日時,帰庫日時,出庫メーター,帰庫メーター,総走行距離,一般道運転時間,高速道運転時間,バイパス運転時間,安全評価点,経済評価点,総合評価点\n\
+        test_group!("CSVパーサー");
+        test_case!("KUDGURIサンプルパース", {
+            let csv = "運行NO,読取日,運行日,事業所CD,事業所名,車輌CD,車輌名,乗務員CD1,乗務員名１,対象乗務員区分,出社日時,退社日時,出庫日時,帰庫日時,出庫メーター,帰庫メーター,総走行距離,一般道運転時間,高速道運転時間,バイパス運転時間,安全評価点,経済評価点,総合評価点\n\
 2602241025060000000272,2026/02/27 00:00:00,2026/02/24 0:00:00,1,本社,272,帯広100け272,2,梅津　政弘,1,2026/02/24 10:13:11,2026/02/27 16:00:54,2026/02/24 10:25:06,2026/02/27 15:48:59,449854.1,451990.6,2136.5,108,1687,0,98,99,98";
 
-        let rows = parse_kudguri(csv).unwrap();
-        assert_eq!(rows.len(), 1);
-        let row = &rows[0];
-        assert_eq!(row.unko_no, "2602241025060000000272");
-        assert_eq!(
-            row.reading_date,
-            NaiveDate::from_ymd_opt(2026, 2, 27).unwrap()
-        );
-        assert_eq!(row.office_cd, "1");
-        assert_eq!(row.office_name, "本社");
-        assert_eq!(row.vehicle_cd, "272");
-        assert_eq!(row.driver_cd, "2");
-        assert_eq!(row.driver_name, "梅津　政弘");
-        assert_eq!(row.crew_role, 1);
-        assert!((row.total_distance.unwrap() - 2136.5).abs() < 0.01);
-        assert_eq!(row.drive_time_general, Some(108));
-        assert_eq!(row.drive_time_highway, Some(1687));
-        assert!((row.total_score.unwrap() - 98.0).abs() < 0.01);
+            let rows = parse_kudguri(csv).unwrap();
+            assert_eq!(rows.len(), 1);
+            let row = &rows[0];
+            assert_eq!(row.unko_no, "2602241025060000000272");
+            assert_eq!(
+                row.reading_date,
+                NaiveDate::from_ymd_opt(2026, 2, 27).unwrap()
+            );
+            assert_eq!(row.office_cd, "1");
+            assert_eq!(row.office_name, "本社");
+            assert_eq!(row.vehicle_cd, "272");
+            assert_eq!(row.driver_cd, "2");
+            assert_eq!(row.driver_name, "梅津　政弘");
+            assert_eq!(row.crew_role, 1);
+            assert!((row.total_distance.unwrap() - 2136.5).abs() < 0.01);
+            assert_eq!(row.drive_time_general, Some(108));
+            assert_eq!(row.drive_time_highway, Some(1687));
+            assert!((row.total_score.unwrap() - 98.0).abs() < 0.01);
+        });
     }
 
     #[test]
     fn test_parse_kudguri_empty_lines() {
-        let csv = "運行NO,読取日,事業所CD,事業所名,車輌CD,車輌名,乗務員CD1,乗務員名１,対象乗務員区分\n\
-                   1001,2026/03/01,OFF01,テスト事業所,VH01,テスト車両,DR01,テスト運転者,1\n\
-                   \n\
-                   1002,2026/03/02,OFF01,テスト事業所,VH02,テスト車両2,DR02,テスト運転者2,1\n";
-        let rows = parse_kudguri(csv).unwrap();
-        assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0].unko_no, "1001");
-        assert_eq!(rows[1].unko_no, "1002");
+        test_group!("CSVパーサー");
+        test_case!("空行を含むKUDGURIパース", {
+            let csv = "運行NO,読取日,事業所CD,事業所名,車輌CD,車輌名,乗務員CD1,乗務員名１,対象乗務員区分\n\
+                       1001,2026/03/01,OFF01,テスト事業所,VH01,テスト車両,DR01,テスト運転者,1\n\
+                       \n\
+                       1002,2026/03/02,OFF01,テスト事業所,VH02,テスト車両2,DR02,テスト運転者2,1\n";
+            let rows = parse_kudguri(csv).unwrap();
+            assert_eq!(rows.len(), 2);
+            assert_eq!(rows[0].unko_no, "1001");
+            assert_eq!(rows[1].unko_no, "1002");
+        });
     }
 
     #[test]
     fn test_missing_columns_error_message() {
-        let csv = "運行NO,読取日\ndata1,data2";
-        let err = parse_kudguri(csv).unwrap_err();
-        let msg = err.to_string();
-        assert!(msg.contains("missing required columns"), "got: {msg}");
-        assert!(msg.contains("事業所CD"), "got: {msg}");
-        assert!(msg.contains("乗務員CD1"), "got: {msg}");
-        assert!(msg.contains("対象乗務員区分"), "got: {msg}");
-        // 存在するカラムは含まれない
-        assert!(!msg.contains("運行NO"), "got: {msg}");
-        assert!(!msg.contains("読取日"), "got: {msg}");
+        test_group!("CSVパーサー");
+        test_case!("必須カラム不足のエラーメッセージ", {
+            let csv = "運行NO,読取日\ndata1,data2";
+            let err = parse_kudguri(csv).unwrap_err();
+            let msg = err.to_string();
+            assert!(msg.contains("missing required columns"), "got: {msg}");
+            assert!(msg.contains("事業所CD"), "got: {msg}");
+            assert!(msg.contains("乗務員CD1"), "got: {msg}");
+            assert!(msg.contains("対象乗務員区分"), "got: {msg}");
+            // 存在するカラムは含まれない
+            assert!(!msg.contains("運行NO"), "got: {msg}");
+            assert!(!msg.contains("読取日"), "got: {msg}");
+        });
     }
 }

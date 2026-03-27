@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[macro_use]
+mod test_macros;
+
 pub mod auth;
 pub mod compare;
 pub mod csv_parser;

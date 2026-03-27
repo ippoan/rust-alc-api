@@ -164,50 +164,62 @@ mod tests {
 
     #[test]
     fn test_parse_kudgivt_sample() {
-        let csv = "運行NO,読取日,事業所CD,事業所名,車輌CD,車輌名,乗務員CD1,乗務員名１,対象乗務員区分,開始日時,イベントCD,イベント名,開始走行距離,終了走行距離,区間時間,区間距離,開始市町村CD,開始市町村名,終了市町村CD,終了市町村名,開始場所CD,開始場所名,終了場所CD,終了場所名\n\
+        test_group!("CSVパーサー");
+        test_case!("KUDGIVTサンプルパース", {
+            let csv = "運行NO,読取日,事業所CD,事業所名,車輌CD,車輌名,乗務員CD1,乗務員名１,対象乗務員区分,開始日時,イベントCD,イベント名,開始走行距離,終了走行距離,区間時間,区間距離,開始市町村CD,開始市町村名,終了市町村CD,終了市町村名,開始場所CD,開始場所名,終了場所CD,終了場所名\n\
 2602241025060000000272,2026/02/27 00:00:00,1,本社,272,帯広100け272,2,梅津　政弘,1,2026/02/24 14:40:56,302,休息,248.9,250.1,1123,1.2,1203,小樽市築港,1203,小樽市築港,,,,";
 
-        let rows = parse_kudgivt(csv).unwrap();
-        assert_eq!(rows.len(), 1);
-        let row = &rows[0];
-        assert_eq!(row.unko_no, "2602241025060000000272");
-        assert_eq!(row.event_cd, "302");
-        assert_eq!(row.event_name, "休息");
-        assert_eq!(row.duration_minutes, Some(1123));
-        assert!((row.section_distance.unwrap() - 1.2).abs() < 0.01);
-        assert_eq!(row.driver_cd, "2");
+            let rows = parse_kudgivt(csv).unwrap();
+            assert_eq!(rows.len(), 1);
+            let row = &rows[0];
+            assert_eq!(row.unko_no, "2602241025060000000272");
+            assert_eq!(row.event_cd, "302");
+            assert_eq!(row.event_name, "休息");
+            assert_eq!(row.duration_minutes, Some(1123));
+            assert!((row.section_distance.unwrap() - 1.2).abs() < 0.01);
+            assert_eq!(row.driver_cd, "2");
+        });
     }
 
     #[test]
     fn test_parse_kudgivt_empty_lines() {
-        let csv = "運行NO,読取日,乗務員CD1,乗務員名１,対象乗務員区分,開始日時,イベントCD,イベント名\n\
-                   1001,2026/03/01,DR01,テスト運転者,1,2026/03/01 08:00:00,100,出庫\n\
-                   \n\
-                   1002,2026/03/01,DR02,テスト運転者2,1,2026/03/01 09:00:00,200,運転\n";
-        let rows = parse_kudgivt(csv).unwrap();
-        assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0].unko_no, "1001");
-        assert_eq!(rows[1].unko_no, "1002");
+        test_group!("CSVパーサー");
+        test_case!("空行を含むKUDGIVTパース", {
+            let csv = "運行NO,読取日,乗務員CD1,乗務員名１,対象乗務員区分,開始日時,イベントCD,イベント名\n\
+                       1001,2026/03/01,DR01,テスト運転者,1,2026/03/01 08:00:00,100,出庫\n\
+                       \n\
+                       1002,2026/03/01,DR02,テスト運転者2,1,2026/03/01 09:00:00,200,運転\n";
+            let rows = parse_kudgivt(csv).unwrap();
+            assert_eq!(rows.len(), 2);
+            assert_eq!(rows[0].unko_no, "1001");
+            assert_eq!(rows[1].unko_no, "1002");
+        });
     }
 
     #[test]
     fn test_parse_kudgivt_invalid_datetime() {
-        let csv = "運行NO,読取日,乗務員CD1,乗務員名１,対象乗務員区分,開始日時,イベントCD,イベント名\n\
-                   1001,2026/03/01,DR01,テスト運転者,1,INVALID_DATE,100,出庫\n\
-                   1002,2026/03/01,DR02,テスト運転者2,1,2026/03/01 09:00:00,200,運転\n";
-        let rows = parse_kudgivt(csv).unwrap();
-        assert_eq!(rows.len(), 1, "invalid datetime row should be skipped");
-        assert_eq!(rows[0].unko_no, "1002");
+        test_group!("CSVパーサー");
+        test_case!("不正な日時の行をスキップ", {
+            let csv = "運行NO,読取日,乗務員CD1,乗務員名１,対象乗務員区分,開始日時,イベントCD,イベント名\n\
+                       1001,2026/03/01,DR01,テスト運転者,1,INVALID_DATE,100,出庫\n\
+                       1002,2026/03/01,DR02,テスト運転者2,1,2026/03/01 09:00:00,200,運転\n";
+            let rows = parse_kudgivt(csv).unwrap();
+            assert_eq!(rows.len(), 1, "invalid datetime row should be skipped");
+            assert_eq!(rows[0].unko_no, "1002");
+        });
     }
 
     #[test]
     fn test_missing_columns_error_message() {
-        let csv = "運行NO,読取日\ndata1,data2";
-        let err = parse_kudgivt(csv).unwrap_err();
-        let msg = err.to_string();
-        assert!(msg.contains("missing required columns"), "got: {msg}");
-        assert!(msg.contains("乗務員CD1"), "got: {msg}");
-        assert!(msg.contains("イベントCD"), "got: {msg}");
-        assert!(!msg.contains("運行NO"), "got: {msg}");
+        test_group!("CSVパーサー");
+        test_case!("必須カラム不足のエラーメッセージ", {
+            let csv = "運行NO,読取日\ndata1,data2";
+            let err = parse_kudgivt(csv).unwrap_err();
+            let msg = err.to_string();
+            assert!(msg.contains("missing required columns"), "got: {msg}");
+            assert!(msg.contains("乗務員CD1"), "got: {msg}");
+            assert!(msg.contains("イベントCD"), "got: {msg}");
+            assert!(!msg.contains("運行NO"), "got: {msg}");
+        });
     }
 }
