@@ -76,7 +76,9 @@ jobs:
 
       - name: Run integration tests + coverage
         run: |
-          RUST_TEST_THREADS=1 cargo llvm-cov --text -- --test-threads=1 > /tmp/llvm-cov-output.txt 2>&1 || { echo "cargo llvm-cov failed:"; tail -50 /tmp/llvm-cov-output.txt; exit 1; }
+          RUST_TEST_THREADS=1 cargo llvm-cov --text --tests -- --test-threads=1 > /tmp/llvm-cov-output.txt 2>/tmp/llvm-cov-stderr.txt || { echo "cargo llvm-cov failed:"; cat /tmp/llvm-cov-stderr.txt; exit 1; }
+          echo "=== Test results ==="
+          grep "test result:" /tmp/llvm-cov-stderr.txt || true
 
       - name: Coverage regression check (all 100% files)
         run: bash scripts/check_coverage_100.sh --use-cache /tmp/llvm-cov-output.txt
