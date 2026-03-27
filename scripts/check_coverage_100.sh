@@ -1,0 +1,133 @@
+#!/bin/bash
+# coverage_100.toml に登録されたファイルが 100% カバレッジを維持しているか検証する
+#
+# Usage:
+#   bash scripts/check_coverage_100.sh              # 全ファイル (unit + integration)
+#   bash scripts/check_coverage_100.sh --unit-only   # unit タイプのファイルのみ
+#
+# 前提: cargo-llvm-cov がインストール済み
+# integration モードでは TEST_DATABASE_URL が設定済みであること
+#
+# NOTE: --text 出力ベースで判定 (既存の /coverage-check スキルと一貫)
+#       --json は閉じ括弧等を余分にカウントするため結果が異なる
+
+set -euo pipefail
+
+UNIT_ONLY=false
+[[ "${1:-}" == "--unit-only" ]] && UNIT_ONLY=true
+
+CONFIG="coverage_100.toml"
+if [[ ! -f "$CONFIG" ]]; then
+  echo "ERROR: $CONFIG not found"
+  exit 1
+fi
+
+# --- Parse coverage_100.toml ---
+declare -a PATHS=()
+declare -A FILE_TYPES=()
+
+current_path=""
+while IFS= read -r line; do
+  if [[ "$line" =~ ^path\ =\ \"(.+)\" ]]; then
+    current_path="${BASH_REMATCH[1]}"
+  elif [[ "$line" =~ ^type\ =\ \"(.+)\" && -n "$current_path" ]]; then
+    PATHS+=("$current_path")
+    FILE_TYPES["$current_path"]="${BASH_REMATCH[1]}"
+    current_path=""
+  fi
+done < "$CONFIG"
+
+echo "=== Coverage 100% Check ==="
+echo "Mode: $([ "$UNIT_ONLY" = true ] && echo 'unit-only' || echo 'full')"
+echo "Registered files: ${#PATHS[@]}"
+echo ""
+
+# --- Run cargo llvm-cov --text ---
+CACHE_DIR="/tmp/llvm-cov-cache"
+mkdir -p "$CACHE_DIR"
+PROJECT_HASH=$(echo "$PWD" | md5sum | cut -c1-8)
+CACHE_FILE="$CACHE_DIR/text-$PROJECT_HASH.txt"
+
+echo "Running cargo llvm-cov --text..."
+if [ "$UNIT_ONLY" = true ]; then
+  cargo llvm-cov --lib --text > "$CACHE_FILE" 2>&1
+else
+  [[ -f .test-config ]] && source .test-config
+  RUST_TEST_THREADS=1 cargo llvm-cov --text > "$CACHE_FILE" 2>&1
+fi
+
+# --- --text 出力から全ファイルの Lines/Miss を awk で集計 ---
+# 結果を一時ファイルに出力: "ファイル名 total miss"
+SUMMARY_FILE=$(mktemp)
+awk '
+/^\/home.*\/src\/.*\.rs:$/ {
+    if (file != "") {
+        total = covered + uncovered
+        printf "%s %d %d\n", file, total, uncovered
+    }
+    file = $0; sub(/:$/, "", file)
+    covered = 0; uncovered = 0; next
+}
+/^[[:space:]]*[0-9]+\|[[:space:]]*0\|/ { uncovered++; next }
+/^[[:space:]]*[0-9]+\|[[:space:]]*[1-9][0-9]*\|/ { covered++; next }
+END {
+    if (file != "") {
+        total = covered + uncovered
+        printf "%s %d %d\n", file, total, uncovered
+    }
+}
+' "$CACHE_FILE" > "$SUMMARY_FILE"
+
+# --- Check each file ---
+FAILED=0
+CHECKED=0
+SKIPPED=0
+
+for filepath in "${PATHS[@]}"; do
+  ftype="${FILE_TYPES[$filepath]}"
+
+  # unit-only モードでは unit タイプのみチェック
+  if [ "$UNIT_ONLY" = true ] && [ "$ftype" != "unit" ]; then
+    SKIPPED=$((SKIPPED + 1))
+    continue
+  fi
+
+  # サマリから該当ファイルを検索 (パス末尾一致)
+  MATCH=$(grep "$filepath" "$SUMMARY_FILE" || true)
+
+  if [ -z "$MATCH" ]; then
+    echo "WARN: $filepath — not found in coverage data"
+    continue
+  fi
+
+  TOTAL=$(echo "$MATCH" | awk '{print $2}')
+  MISS=$(echo "$MATCH" | awk '{print $3}')
+  CHECKED=$((CHECKED + 1))
+
+  if [ "$TOTAL" -eq 0 ]; then
+    echo "WARN: $filepath — 0 lines (no executable code)"
+    continue
+  fi
+
+  if [ "$MISS" -gt 0 ]; then
+    COVERED=$((TOTAL - MISS))
+    PCT=$(awk "BEGIN {printf \"%.1f\", $COVERED/$TOTAL*100}")
+    echo "FAIL: $filepath — $COVERED/$TOTAL lines ($PCT%, $MISS lines missing)"
+    FAILED=1
+  else
+    echo "  OK: $filepath — $TOTAL/$TOTAL lines (100%)"
+  fi
+done
+
+rm -f "$SUMMARY_FILE"
+
+echo ""
+echo "Checked: $CHECKED, Skipped: $SKIPPED"
+
+if [ "$FAILED" -eq 1 ]; then
+  echo ""
+  echo "FAILED: Coverage regression detected. Fix the files above."
+  exit 1
+fi
+
+echo "All registered files maintain 100% coverage."

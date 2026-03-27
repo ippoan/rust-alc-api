@@ -134,19 +134,20 @@ auth-worker が発行する JWT の `org` クレームは rust-logi の `organiz
 ### テスト実行
 
 ```bash
-# ユニットテストのみ (DB 不要)
-cargo test --lib
+# ローカル開発 (推奨: Makefile 経由)
+make test                     # ユニットテストのみ (DB 不要、高速)
+make test-file F=jwt          # 特定モジュールのみ
+make db-up                    # テスト DB 起動 (セッション中1回)
+make itest-file T=auth_test   # 特定インテグレーションテスト
+make itest                    # 全インテグレーションテスト (DB 起動→テスト→停止)
+make db-down                  # テスト DB 停止
+
+# カバレッジ検証 (100% ファイルのリグレッション検出)
+make cov-check-unit           # unit ファイルのみ (DB 不要)
+make cov-check                # 全 100% ファイル (DB 必要)
 
 # マイグレーション検証 (Docker 必要)
 bash ~/.claude/skills/migrate-test/scripts/migrate_test.sh
-
-# インテグレーションテスト (Docker 必要)
-docker compose up -d test-db
-# DB 起動待ち
-until pg_isready -h localhost -p 54322 -q; do sleep 1; done
-TEST_DATABASE_URL="postgresql://postgres:test@localhost:54322/postgres?options=-c search_path=alc_api" \
-  cargo test --test '*' -- --test-threads=1
-docker compose down
 
 # 全テスト一括 (fmt + clippy + unit + migration + integration + frontend)
 ./test_and_deploy.sh
@@ -158,6 +159,14 @@ docker compose down
 ./test_and_deploy.sh --skip-integration   # インテグレーションテストをスキップ
 ./test_and_deploy.sh --skip-frontend      # フロントエンドテストをスキップ
 ```
+
+### CI/CD
+
+- **GitHub Actions**: `.github/workflows/ci.yml` (push/PR to main)
+  - `check`: fmt + clippy
+  - `unit-tests`: `cargo test --lib` + 100% カバレッジ検証 (unit ファイル)
+  - `integration-tests`: PostgreSQL サービスコンテナ + 全テスト + 100% カバレッジ検証
+- **100% ファイル登録簿**: `coverage_100.toml` — CI でリグレッション検出
 
 ### カバレッジ
 
@@ -373,14 +382,17 @@ Google OAuth 以外の端末登録フローを3種類サポート。
 ## テスト
 
 - テストインフラ: `docker-compose.yml` (PostgreSQL 16, port 54322) + `tests/common/mod.rs` ヘルパー
-- 実行: `source .test-config && RUST_TEST_THREADS=1 cargo test`
+- ローカル実行: `make test` (ユニットのみ、DB不要) / `make itest` (全テスト、DB必要)
 - カバレッジ: `/coverage-check` スキル使用 (`--full` で サマリ + 未カバー行を1回で取得)
-- 現在のカバレッジ: **87.52%** (TOTAL 18009行, Miss 2247行)
-- 100% 達成済み (26ファイル): jwt, kudgivt, kudguri, csv_parser/mod, db/models, middleware/auth, daily_health, driver_info, dtako_csv_proxy, dtako_daily_hours, dtako_drivers, dtako_event_classifications, dtako_operations, dtako_upload, dtako_vehicles, dtako_work_times, health, health_baselines, mod, nfc_tags, dtako_upload
+- 100% 達成済みファイル: `coverage_100.toml` で管理 (20ファイル、--text ベース)
+- カバレッジリグレッション検証: `bash scripts/check_coverage_100.sh` (`--unit-only` で DB 不要モード)
+- CI/CD: `.github/workflows/ci.yml` — push/PR to main で自動実行
 - 並列テストで env var 競合あり → `RUST_TEST_THREADS=1` で全通過
 - カバレッジ計画: `plans/coverage_100.md`
 
-### 100% 未達成ファイル一覧
+### 100% 未達成ファイル一覧 (2026-03-27 実測)
+
+最新データは `/coverage-check --summary` で取得可能。
 
 | ファイル | Lines | Miss | Cover | 備考 |
 |---------|-------|------|-------|------|
