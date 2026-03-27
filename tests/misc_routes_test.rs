@@ -1861,11 +1861,10 @@ async fn test_guidance_records_filter_by_guidance_type() {
 // ============================================================
 
 #[tokio::test]
-#[ignore] // carrying_item_vehicle_conditions テーブルのマイグレーション未作成
 async fn test_carrying_items_with_vehicle_conditions() {
     test_group!("携行品目");
     test_case!(
-        "vehicle_conditions付きで携行品目を作成・取得できる",
+        "vehicle_conditions付きで携行品目を作成・更新・取得できる",
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
@@ -1882,14 +1881,14 @@ async fn test_carrying_items_with_vehicle_conditions() {
                     "item_name": "輪止め",
                     "is_required": true,
                     "vehicle_conditions": [
-                        { "category": "普通", "value": "4t" },
-                        { "category": "大型", "value": "10t" }
+                        { "category": "car_kind", "value": "普通" },
+                        { "category": "use", "value": "貨物" }
                     ]
                 }))
                 .send()
                 .await
                 .unwrap();
-            assert!(res.status() == 200 || res.status() == 201);
+            assert_eq!(res.status().as_u16(), 201);
             let item: Value = res.json().await.unwrap();
             let item_id = item["id"].as_str().unwrap();
             assert_eq!(item["item_name"], "輪止め");
@@ -1897,12 +1896,6 @@ async fn test_carrying_items_with_vehicle_conditions() {
             // vehicle_conditions がネストされている
             let conditions = item["vehicle_conditions"].as_array().unwrap();
             assert_eq!(conditions.len(), 2);
-            let categories: Vec<&str> = conditions
-                .iter()
-                .map(|c| c["category"].as_str().unwrap())
-                .collect();
-            assert!(categories.contains(&"普通"));
-            assert!(categories.contains(&"大型"));
 
             // 一覧取得でもネストされている
             let res = client
@@ -1920,6 +1913,26 @@ async fn test_carrying_items_with_vehicle_conditions() {
             let list_conditions = target["vehicle_conditions"].as_array().unwrap();
             assert_eq!(list_conditions.len(), 2);
 
+            // vehicle_conditions 付きで更新 (全置換)
+            let res = client
+                .put(format!("{base_url}/api/carrying-items/{item_id}"))
+                .header("Authorization", &auth)
+                .json(&serde_json::json!({
+                    "item_name": "輪止め改",
+                    "vehicle_conditions": [
+                        { "category": "car_shape", "value": "バン" }
+                    ]
+                }))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 200);
+            let updated: Value = res.json().await.unwrap();
+            assert_eq!(updated["item_name"], "輪止め改");
+            let updated_conds = updated["vehicle_conditions"].as_array().unwrap();
+            assert_eq!(updated_conds.len(), 1);
+            assert_eq!(updated_conds[0]["category"], "car_shape");
+
             // クリーンアップ
             let res = client
                 .delete(format!("{base_url}/api/carrying-items/{item_id}"))
@@ -1928,6 +1941,16 @@ async fn test_carrying_items_with_vehicle_conditions() {
                 .await
                 .unwrap();
             assert_eq!(res.status(), 204);
+
+            // 存在しない ID を DELETE → 404
+            let fake_id = uuid::Uuid::new_v4();
+            let res = client
+                .delete(format!("{base_url}/api/carrying-items/{fake_id}"))
+                .header("Authorization", &auth)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 404);
         }
     );
 }

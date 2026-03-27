@@ -114,6 +114,11 @@ type = "integration"
 test_file = "tests/auth_test.rs"
 
 [[files]]
+path = "src/routes/carrying_items.rs"
+type = "integration"
+test_file = "tests/misc_routes_test.rs"
+
+[[files]]
 path = "src/routes/nfc_tags.rs"
 type = "integration"
 test_file = "tests/coverage_100_test.rs"
