@@ -210,3 +210,13 @@ test_file = "tests/coverage/main.rs"
 [[files]]
 path = "src/csv_parser/work_segments.rs"
 type = "unit"
+
+[[files]]
+path = "src/routes/upload.rs"
+type = "integration"
+test_file = "tests/coverage/main.rs"
+
+[[files]]
+path = "src/routes/guidance_records.rs"
+type = "integration"
+test_file = "tests/coverage/main.rs"
