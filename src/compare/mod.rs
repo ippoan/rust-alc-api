@@ -300,11 +300,13 @@ pub fn detect_year_month(drivers: &[CsvDriverData]) -> (i32, u32) {
             if day.is_holiday {
                 continue;
             }
-            if let Some(m_pos) = day.date.find('月') {
-                if let Ok(m) = day.date[..m_pos].parse::<u32>() {
-                    // 年はCSVヘッダーから取れないので2026固定（要改善）
-                    return (2026, m);
-                }
+            // 年はCSVヘッダーから取れないので2026固定（要改善）
+            let month = day
+                .date
+                .find('月')
+                .and_then(|pos| day.date[..pos].parse::<u32>().ok());
+            if let Some(m) = month {
+                return (2026, m);
             }
         }
     }
@@ -632,10 +634,8 @@ pub fn compare_drivers(
     };
 
     for d1 in drivers1 {
-        if let Some(f) = driver_filter {
-            if d1.driver_cd != f {
-                continue;
-            }
+        if driver_filter.is_some_and(|f| d1.driver_cd != f) {
+            continue;
         }
         let d2 = drivers2.iter().find(|d| d.driver_cd == d1.driver_cd);
         let Some(d2) = d2 else {
@@ -803,15 +803,18 @@ pub fn group_operations_into_work_days(rows: &[KudguriRow]) -> HashMap<String, N
             }
 
             unko_work_date.insert(row.unko_no.clone(), current_work_date.unwrap());
-            last_end = Some(match last_end {
-                Some(prev) if ret > prev => ret,
-                Some(prev) => prev,
-                None => ret,
-            });
+            last_end = Some(last_end.map_or(ret, |prev| ret.max(prev)));
         }
     }
 
     unko_work_date
+}
+
+/// 日時文字列を2種類のフォーマット (%H / %k) で試行パースする
+fn parse_datetime_lenient(s: &str) -> Option<NaiveDateTime> {
+    NaiveDateTime::parse_from_str(s, "%Y/%m/%d %H:%M:%S")
+        .ok()
+        .or_else(|| NaiveDateTime::parse_from_str(s, "%Y/%m/%d %k:%M:%S").ok())
 }
 
 /// KUDGFRY CSVテキストからフェリー乗船期間をパースする（IO分離済み）
@@ -824,16 +827,8 @@ pub fn parse_ferry_periods_from_text(text: &str) -> Vec<(String, NaiveDateTime, 
         }
         let unko_no = cols[0].trim().to_string();
         if let (Some(s), Some(e)) = (
-            NaiveDateTime::parse_from_str(cols[10].trim(), "%Y/%m/%d %H:%M:%S")
-                .ok()
-                .or_else(|| {
-                    NaiveDateTime::parse_from_str(cols[10].trim(), "%Y/%m/%d %k:%M:%S").ok()
-                }),
-            NaiveDateTime::parse_from_str(cols[11].trim(), "%Y/%m/%d %H:%M:%S")
-                .ok()
-                .or_else(|| {
-                    NaiveDateTime::parse_from_str(cols[11].trim(), "%Y/%m/%d %k:%M:%S").ok()
-                }),
+            parse_datetime_lenient(cols[10].trim()),
+            parse_datetime_lenient(cols[11].trim()),
         ) {
             periods.push((unko_no, s, e));
         }
@@ -1067,15 +1062,15 @@ impl FerryInfo {
                 .or_default()
                 .push((*s, *e));
             // 対応する301イベントをマッチ
-            if let Some(events) = kudgivt_by_unko.get(unko_no) {
-                let matching_301 = events
+            let matching_301 = kudgivt_by_unko.get(unko_no).and_then(|events| {
+                events
                     .iter()
                     .filter(|ev| ev.event_cd == "301" && ev.duration_minutes.unwrap_or(0) > 0)
-                    .min_by_key(|ev| (ev.start_at - *s).num_seconds().abs());
-                if let Some(evt) = matching_301 {
-                    let dur = evt.duration_minutes.unwrap_or(0);
-                    *ferry_break_dur.entry(unko_no.clone()).or_insert(0) += dur;
-                }
+                    .min_by_key(|ev| (ev.start_at - *s).num_seconds().abs())
+            });
+            if let Some(evt) = matching_301 {
+                let dur = evt.duration_minutes.unwrap_or(0);
+                *ferry_break_dur.entry(unko_no.clone()).or_insert(0) += dur;
             }
         }
 
@@ -1165,36 +1160,27 @@ fn merge_same_day_entries(
             for i in 0..entries.len().saturating_sub(1) {
                 let key_a = entries[i].clone();
                 let key_b = entries[i + 1].clone();
-                let merge_info = {
-                    let agg_a = match day_map.get(&key_a) {
-                        Some(a) => a,
-                        None => continue,
-                    };
-                    let agg_b = match day_map.get(&key_b) {
-                        Some(b) => b,
-                        None => continue,
-                    };
-                    let different_ops = !agg_a.unko_nos.iter().any(|u| agg_b.unko_nos.contains(u));
-                    let gap_info = match (
-                        agg_a.segments.iter().map(|s| s.end_at).max(),
-                        agg_b.segments.iter().map(|s| s.start_at).min(),
-                    ) {
-                        (Some(pe), Some(ns)) => {
-                            let gap = (trunc_min(ns) - trunc_min(pe)).num_minutes();
-                            if (0..180).contains(&gap) {
-                                Some(gap as i32)
-                            } else {
-                                None
-                            }
-                        }
-                        _ => None,
-                    };
-                    if different_ops {
-                        gap_info
-                    } else {
-                        None
-                    }
+                let Some(agg_a) = day_map.get(&key_a) else {
+                    continue;
                 };
+                let Some(agg_b) = day_map.get(&key_b) else {
+                    continue;
+                };
+                let different_ops = !agg_a.unko_nos.iter().any(|u| agg_b.unko_nos.contains(u));
+                let merge_info = different_ops
+                    .then(|| {
+                        match (
+                            agg_a.segments.iter().map(|s| s.end_at).max(),
+                            agg_b.segments.iter().map(|s| s.start_at).min(),
+                        ) {
+                            (Some(pe), Some(ns)) => {
+                                let gap = (trunc_min(ns) - trunc_min(pe)).num_minutes();
+                                (0..180).contains(&gap).then_some(gap as i32)
+                            }
+                            _ => None,
+                        }
+                    })
+                    .flatten();
                 if let Some(gap_mins) = merge_info {
                     let b_clone = day_map.get(&key_b).unwrap().clone();
                     let agg_a_mut = day_map.get_mut(&key_a).unwrap();
@@ -1330,49 +1316,47 @@ fn process_overlap_chain(
                 let mut ol_work_events: Vec<(NaiveDateTime, NaiveDateTime)> = Vec::new();
 
                 for unko_no in &next_info.unko_nos {
-                    if let Some(events) = kudgivt_by_unko.get(unko_no) {
-                        for evt in events {
-                            let cls = classifications.get(&evt.event_cd);
-                            let dur = evt.duration_minutes.unwrap_or(0);
-                            if dur <= 0 {
-                                continue;
-                            }
-                            let evt_start = trunc_min(evt.start_at);
-                            if evt_start >= window_end {
-                                continue;
-                            }
-                            let evt_end = evt_start + chrono::Duration::minutes(dur as i64);
-                            if evt_end <= info.end {
-                                continue;
-                            }
-                            if evt_start < info.end {
-                                continue;
-                            }
-                            let overlap_start = evt_start.max(next_info.start);
-                            let effective_end = evt_end.min(window_end);
-                            if effective_end <= overlap_start {
-                                continue;
-                            }
-                            let mins = (effective_end - overlap_start).num_minutes() as i32;
-                            if mins <= 0 {
-                                continue;
-                            }
-                            let actual_dur = if mins >= dur { dur } else { mins };
-                            match cls {
-                                Some(EventClass::Drive) => {
+                    let Some(events) = kudgivt_by_unko.get(unko_no) else {
+                        continue;
+                    };
+                    for evt in events {
+                        let cls = classifications.get(&evt.event_cd);
+                        let dur = evt.duration_minutes.unwrap_or(0);
+                        if dur <= 0 {
+                            continue;
+                        }
+                        let evt_start = trunc_min(evt.start_at);
+                        if evt_start >= window_end {
+                            continue;
+                        }
+                        let evt_end = evt_start + chrono::Duration::minutes(dur as i64);
+                        // イベントが現在の日のend以前に開始 → 当日分なのでスキップ
+                        // (evt_end <= info.end は evt_start < info.end の部分集合)
+                        if evt_start < info.end {
+                            continue;
+                        }
+                        let overlap_start = evt_start.max(next_info.start);
+                        let effective_end = evt_end.min(window_end);
+                        if effective_end <= overlap_start {
+                            continue;
+                        }
+                        let mins = (effective_end - overlap_start).num_minutes() as i32;
+                        if mins <= 0 {
+                            continue;
+                        }
+                        let actual_dur = if mins >= dur { dur } else { mins };
+                        match cls {
+                            Some(EventClass::Drive) | Some(EventClass::Cargo) => {
+                                if matches!(cls, Some(EventClass::Drive)) {
                                     ol_drive += actual_dur;
-                                    ol_late_night_dc +=
-                                        calc_late_night_mins(overlap_start, effective_end);
-                                    ol_work_events.push((overlap_start, effective_end));
-                                }
-                                Some(EventClass::Cargo) => {
+                                } else {
                                     ol_cargo += actual_dur;
-                                    ol_late_night_dc +=
-                                        calc_late_night_mins(overlap_start, effective_end);
-                                    ol_work_events.push((overlap_start, effective_end));
                                 }
-                                _ => {}
+                                ol_late_night_dc +=
+                                    calc_late_night_mins(overlap_start, effective_end);
+                                ol_work_events.push((overlap_start, effective_end));
                             }
+                            _ => {}
                         }
                     }
                 }
@@ -1466,30 +1450,29 @@ fn process_overlap_chain(
                     let mut ferry_drive_ded = 0i32;
                     let mut ferry_cargo_ded = 0i32;
                     for unko in &next_info.unko_nos {
-                        if let Some(periods) = ferry_info.ferry_period_map.get(unko) {
-                            if let Some(events) = kudgivt_by_unko.get(unko) {
-                                for &(fs, fe) in periods {
-                                    if fe > next_info.start && fs < window_end {
-                                        let break_ded = ferry_break_overlap(events, fs, fe);
-                                        if break_ded > 0 {
-                                            ferry_ded += break_ded;
-                                        } else {
-                                            let f_start = fs.max(next_info.start);
-                                            let f_end = fe.min(window_end);
-                                            let f_mins = (f_end - f_start).num_minutes() as i32;
-                                            if f_mins > 0 {
-                                                ferry_ded += f_mins;
-                                                let (d, c) = ferry_drive_cargo_overlap(
-                                                    events,
-                                                    classifications,
-                                                    fs,
-                                                    fe,
-                                                );
-                                                ferry_drive_ded += d;
-                                                ferry_cargo_ded += c;
-                                            }
-                                        }
-                                    }
+                        let Some(periods) = ferry_info.ferry_period_map.get(unko) else {
+                            continue;
+                        };
+                        let Some(events) = kudgivt_by_unko.get(unko) else {
+                            continue;
+                        };
+                        for &(fs, fe) in periods {
+                            if fe <= next_info.start || fs >= window_end {
+                                continue;
+                            }
+                            let break_ded = ferry_break_overlap(events, fs, fe);
+                            if break_ded > 0 {
+                                ferry_ded += break_ded;
+                            } else {
+                                let f_start = fs.max(next_info.start);
+                                let f_end = fe.min(window_end);
+                                let f_mins = (f_end - f_start).num_minutes() as i32;
+                                if f_mins > 0 {
+                                    ferry_ded += f_mins;
+                                    let (d, c) =
+                                        ferry_drive_cargo_overlap(events, classifications, fs, fe);
+                                    ferry_drive_ded += d;
+                                    ferry_cargo_ded += c;
                                 }
                             }
                         }
@@ -2064,17 +2047,18 @@ fn aggregate_events_by_day<'a>(
             }
         }
         for &(date, st) in day_late_night.keys() {
-            if let Some(agg) = day_map.get_mut(&(driver_cd.clone(), date, st)) {
-                let ot_night =
-                    if let Some(events) = day_work_events.get(&(driver_cd.clone(), date, st)) {
-                        let mut sorted = events.clone();
-                        sorted.sort_by_key(|&(s, _)| s);
-                        calc_ot_late_night_from_events(&sorted)
-                    } else {
-                        0
-                    };
-                agg.ot_late_night_minutes = ot_night;
-            }
+            let Some(agg) = day_map.get_mut(&(driver_cd.clone(), date, st)) else {
+                continue;
+            };
+            let ot_night = day_work_events
+                .get(&(driver_cd.clone(), date, st))
+                .map(|events| {
+                    let mut sorted = events.clone();
+                    sorted.sort_by_key(|&(s, _)| s);
+                    calc_ot_late_night_from_events(&sorted)
+                })
+                .unwrap_or(0);
+            agg.ot_late_night_minutes = ot_night;
         }
         for (date, secs) in &calendar_day_secs {
             let mins = ((*secs + 30) / 60) as i32;
@@ -2260,16 +2244,10 @@ fn build_csv_driver_data(
                     let overtime = (total_ot - ot_ln).max(0);
 
                     let wb = workday_boundaries.get(&(driver_cd.clone(), current_date, *_st));
-                    let start_time = wb
-                        .map(|(wd_start, _)| fmt_trunc_time(*wd_start))
-                        .or_else(|| {
-                            agg.segments
-                                .iter()
-                                .map(|s| s.start_at)
-                                .min()
-                                .map(fmt_trunc_time)
-                        })
-                        .unwrap_or_default();
+                    let start_dt = wb
+                        .map(|(wd_start, _)| *wd_start)
+                        .or_else(|| agg.segments.iter().map(|s| s.start_at).min());
+                    let start_time = start_dt.map(fmt_trunc_time).unwrap_or_default();
                     let seg_max_end = agg.segments.iter().map(|s| s.end_at).max();
                     let end_time = match (wb, seg_max_end) {
                         (Some((wd_start, wd_end)), Some(seg_end))
@@ -2279,8 +2257,9 @@ fn build_csv_driver_data(
                             fmt_trunc_time(*wd_end)
                         }
                         (_, Some(seg_end)) => fmt_trunc_time(seg_end),
-                        (Some((_, wd_end)), None) => fmt_trunc_time(*wd_end),
-                        _ => String::new(),
+                        _ => wb
+                            .map(|(_, wd_end)| fmt_trunc_time(*wd_end))
+                            .unwrap_or_default(),
                     };
 
                     let standard_late_night = (agg.late_night_minutes - ot_ln).max(0);
