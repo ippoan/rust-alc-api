@@ -2727,3 +2727,408 @@ async fn test_restraint_report_pdf_empty_name_driver_skipped() {
         assert!(res.status() == 200 || res.status() == 404);
     });
 }
+
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_restraint_report_pdf_db_error() {
+    test_group!("dtako_restraint_report_pdf カバレッジ");
+    test_case!("employees RENAME → PDF endpoint 500", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
+        let state = crate::common::setup_app_state().await;
+        let base_url = crate::common::spawn_test_server(state.clone()).await;
+        let tenant_id = crate::common::create_test_tenant(&state.pool, "PdfDbErr").await;
+        let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+        let auth = format!("Bearer {jwt}");
+        let client = reqwest::Client::new();
+
+        // RENAME employees to break the query
+        sqlx::query("ALTER TABLE alc_api.employees RENAME TO employees_pdf_bak")
+            .execute(&state.pool)
+            .await
+            .unwrap();
+
+        let res = client
+            .get(format!(
+                "{base_url}/api/restraint-report/pdf?year=2026&month=3"
+            ))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 500);
+
+        // Restore
+        sqlx::query("ALTER TABLE alc_api.employees_pdf_bak RENAME TO employees")
+            .execute(&state.pool)
+            .await
+            .unwrap();
+    });
+}
+
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_restraint_report_pdf_stream_db_error() {
+    test_group!("dtako_restraint_report_pdf カバレッジ");
+    test_case!("employees RENAME → pdf-stream SSE error event", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
+        let state = crate::common::setup_app_state().await;
+        let base_url = crate::common::spawn_test_server(state.clone()).await;
+        let tenant_id = crate::common::create_test_tenant(&state.pool, "PdfStrErr").await;
+        let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+        let auth = format!("Bearer {jwt}");
+        let client = reqwest::Client::new();
+
+        // RENAME employees to break the query
+        sqlx::query("ALTER TABLE alc_api.employees RENAME TO employees_pdf_bak")
+            .execute(&state.pool)
+            .await
+            .unwrap();
+
+        let res = client
+            .get(format!(
+                "{base_url}/api/restraint-report/pdf-stream?year=2026&month=3"
+            ))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200); // SSE always returns 200
+        let body = res.text().await.unwrap();
+        assert!(
+            body.contains("\"error\""),
+            "SSE body should contain an error event, got: {body}"
+        );
+
+        // Restore
+        sqlx::query("ALTER TABLE alc_api.employees_pdf_bak RENAME TO employees")
+            .execute(&state.pool)
+            .await
+            .unwrap();
+    });
+}
+
+// ====== guidance_records エラーパス カバレッジ ======
+
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_guidance_records_list_db_error() {
+    test_group!("guidance_records カバレッジ 100% 補完");
+    test_case!("list DB エラー → 500", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
+        let state = crate::common::setup_app_state().await;
+        let base_url = crate::common::spawn_test_server(state.clone()).await;
+        let tenant_id = crate::common::create_test_tenant(&state.pool, "GRLErr").await;
+        let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+
+        sqlx::query("ALTER TABLE alc_api.guidance_records RENAME TO guidance_records_bak")
+            .execute(&state.pool)
+            .await
+            .unwrap();
+
+        let client = reqwest::Client::new();
+        let res = client
+            .get(format!("{base_url}/api/guidance-records"))
+            .header("Authorization", format!("Bearer {jwt}"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 500);
+
+        sqlx::query("ALTER TABLE alc_api.guidance_records_bak RENAME TO guidance_records")
+            .execute(&state.pool)
+            .await
+            .unwrap();
+    });
+}
+
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_guidance_records_create_db_error() {
+    test_group!("guidance_records カバレッジ 100% 補完");
+    test_case!("create DB エラー → 500", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
+        let state = crate::common::setup_app_state().await;
+        let base_url = crate::common::spawn_test_server(state.clone()).await;
+        let tenant_id = crate::common::create_test_tenant(&state.pool, "GRCErr").await;
+        let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+        let auth = format!("Bearer {jwt}");
+        let client = reqwest::Client::new();
+
+        // 従業員作成 (テーブル RENAME 前に実行)
+        let emp =
+            crate::common::create_test_employee(&client, &base_url, &auth, "指導Err太郎", "GRE01")
+                .await;
+        let emp_id = emp["id"].as_str().unwrap();
+
+        sqlx::query("ALTER TABLE alc_api.guidance_records RENAME TO guidance_records_bak")
+            .execute(&state.pool)
+            .await
+            .unwrap();
+
+        let res = client
+            .post(format!("{base_url}/api/guidance-records"))
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({
+                "employee_id": emp_id,
+                "title": "エラーテスト",
+                "guidance_type": "general"
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 500);
+
+        sqlx::query("ALTER TABLE alc_api.guidance_records_bak RENAME TO guidance_records")
+            .execute(&state.pool)
+            .await
+            .unwrap();
+    });
+}
+
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_guidance_records_upload_storage_error() {
+    test_group!("guidance_records カバレッジ 100% 補完");
+    test_case!("upload attachment ストレージエラー → 500", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
+
+        // fail_upload=true の MockStorage で AppState を組み立て
+        let mock = crate::common::mock_storage::MockStorage::new("test-bucket");
+        mock.fail_upload
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        let storage: std::sync::Arc<dyn rust_alc_api::storage::StorageBackend> =
+            std::sync::Arc::new(mock);
+
+        let state = crate::common::setup_app_state().await;
+        let state = rust_alc_api::AppState { storage, ..state };
+
+        let base_url = crate::common::spawn_test_server(state.clone()).await;
+        let tenant_id = crate::common::create_test_tenant(&state.pool, "GRUpErr").await;
+        let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+        let auth = format!("Bearer {jwt}");
+        let client = reqwest::Client::new();
+
+        // 従業員 + レコード作成
+        let emp =
+            crate::common::create_test_employee(&client, &base_url, &auth, "指導Up太郎", "GRU01")
+                .await;
+        let emp_id = emp["id"].as_str().unwrap();
+        let rec = client
+            .post(format!("{base_url}/api/guidance-records"))
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({
+                "employee_id": emp_id,
+                "title": "ストレージエラーテスト"
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(rec.status(), 201);
+        let rec: serde_json::Value = rec.json().await.unwrap();
+        let rec_id = rec["id"].as_str().unwrap();
+
+        // multipart upload → storage error
+        let file_part = reqwest::multipart::Part::bytes(b"test data".to_vec())
+            .file_name("fail.txt")
+            .mime_str("text/plain")
+            .unwrap();
+        let form = reqwest::multipart::Form::new().part("file", file_part);
+        let res = client
+            .post(format!(
+                "{base_url}/api/guidance-records/{rec_id}/attachments"
+            ))
+            .header("Authorization", &auth)
+            .multipart(form)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 500);
+    });
+}
+
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_guidance_records_attachment_db_insert_error() {
+    test_group!("guidance_records カバレッジ 100% 補完");
+    test_case!("attachment DB insert エラー → 500", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
+        let state = crate::common::setup_app_state().await;
+        let base_url = crate::common::spawn_test_server(state.clone()).await;
+        let tenant_id = crate::common::create_test_tenant(&state.pool, "GRAtErr").await;
+        let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+        let auth = format!("Bearer {jwt}");
+        let client = reqwest::Client::new();
+
+        // 従業員 + レコード作成
+        let emp =
+            crate::common::create_test_employee(&client, &base_url, &auth, "指導At太郎", "GRA01")
+                .await;
+        let emp_id = emp["id"].as_str().unwrap();
+        let rec = client
+            .post(format!("{base_url}/api/guidance-records"))
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({
+                "employee_id": emp_id,
+                "title": "DB添付エラーテスト"
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(rec.status(), 201);
+        let rec: serde_json::Value = rec.json().await.unwrap();
+        let rec_id = rec["id"].as_str().unwrap();
+
+        // RENAME attachments table
+        sqlx::query(
+            "ALTER TABLE alc_api.guidance_record_attachments RENAME TO guidance_record_attachments_bak",
+        )
+        .execute(&state.pool)
+        .await
+        .unwrap();
+
+        let file_part = reqwest::multipart::Part::bytes(b"test data".to_vec())
+            .file_name("fail-db.txt")
+            .mime_str("text/plain")
+            .unwrap();
+        let form = reqwest::multipart::Form::new().part("file", file_part);
+        let res = client
+            .post(format!(
+                "{base_url}/api/guidance-records/{rec_id}/attachments"
+            ))
+            .header("Authorization", &auth)
+            .multipart(form)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 500);
+
+        sqlx::query(
+            "ALTER TABLE alc_api.guidance_record_attachments_bak RENAME TO guidance_record_attachments",
+        )
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    });
+}
+
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_guidance_records_download_bad_storage_url() {
+    test_group!("guidance_records カバレッジ 100% 補完");
+    test_case!("download attachment extract_key None → 500", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
+        let state = crate::common::setup_app_state().await;
+        let base_url = crate::common::spawn_test_server(state.clone()).await;
+        let tenant_id = crate::common::create_test_tenant(&state.pool, "GRBUrl").await;
+        let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+        let auth = format!("Bearer {jwt}");
+        let client = reqwest::Client::new();
+
+        // 従業員 + レコード作成
+        let emp =
+            crate::common::create_test_employee(&client, &base_url, &auth, "指導Dl太郎", "GRD01")
+                .await;
+        let emp_id = emp["id"].as_str().unwrap();
+        let rec = client
+            .post(format!("{base_url}/api/guidance-records"))
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({
+                "employee_id": emp_id,
+                "title": "ダウンロードエラーテスト"
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(rec.status(), 201);
+        let rec: serde_json::Value = rec.json().await.unwrap();
+        let rec_id = rec["id"].as_str().unwrap();
+
+        // Insert attachment with bad storage_url directly into DB
+        let att_id = uuid::Uuid::new_v4();
+        let rec_uuid: uuid::Uuid = rec_id.parse().unwrap();
+        sqlx::query(
+            "INSERT INTO alc_api.guidance_record_attachments (id, record_id, file_name, file_type, file_size, storage_url, created_at) \
+             VALUES ($1, $2, 'bad.txt', 'text/plain', 10, 'http://totally-wrong-url/no-match', NOW())",
+        )
+        .bind(att_id)
+        .bind(rec_uuid)
+        .execute(&state.pool)
+        .await
+        .unwrap();
+
+        let res = client
+            .get(format!(
+                "{base_url}/api/guidance-records/{rec_id}/attachments/{att_id}"
+            ))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 500);
+    });
+}
+
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_guidance_records_download_storage_error() {
+    test_group!("guidance_records カバレッジ 100% 補完");
+    test_case!("download attachment ストレージエラー → 500", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
+        let state = crate::common::setup_app_state().await;
+        let base_url = crate::common::spawn_test_server(state.clone()).await;
+        let tenant_id = crate::common::create_test_tenant(&state.pool, "GRDlErr").await;
+        let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+        let auth = format!("Bearer {jwt}");
+        let client = reqwest::Client::new();
+
+        // 従業員 + レコード作成
+        let emp =
+            crate::common::create_test_employee(&client, &base_url, &auth, "指導St太郎", "GRS01")
+                .await;
+        let emp_id = emp["id"].as_str().unwrap();
+        let rec = client
+            .post(format!("{base_url}/api/guidance-records"))
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({
+                "employee_id": emp_id,
+                "title": "ストレージDLエラーテスト"
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(rec.status(), 201);
+        let rec: serde_json::Value = rec.json().await.unwrap();
+        let rec_id = rec["id"].as_str().unwrap();
+
+        // Insert attachment with valid mock storage URL prefix but key not in mock storage
+        let att_id = uuid::Uuid::new_v4();
+        let rec_uuid: uuid::Uuid = rec_id.parse().unwrap();
+        sqlx::query(
+            "INSERT INTO alc_api.guidance_record_attachments (id, record_id, file_name, file_type, file_size, storage_url, created_at) \
+             VALUES ($1, $2, 'ghost.txt', 'text/plain', 10, 'https://mock-storage/test-bucket/nonexistent/key', NOW())",
+        )
+        .bind(att_id)
+        .bind(rec_uuid)
+        .execute(&state.pool)
+        .await
+        .unwrap();
+
+        let res = client
+            .get(format!(
+                "{base_url}/api/guidance-records/{rec_id}/attachments/{att_id}"
+            ))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 500);
+    });
+}

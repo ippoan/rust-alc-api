@@ -39,13 +39,6 @@ pub fn determine_workdays(
     let mut workdays = Vec::new();
     let mut current_start = first_start;
     let mut split_rests: Vec<i32> = Vec::new(); // 分割特例用: 180分以上の休息を蓄積
-    tracing::debug!(
-        "determine_workdays: first_start={}, last_end={}, rest_events={}",
-        first_start,
-        last_end,
-        rest_events.len()
-    );
-
     for &(rest_start, rest_duration) in rest_events {
         let rest_end = rest_start + chrono::Duration::minutes(rest_duration as i64);
 
@@ -106,47 +99,28 @@ pub fn determine_workdays(
         }
 
         // 分割特例: 180分以上の休息を蓄積してチェック
-        if rest_duration >= REST_SPLIT_MIN {
-            split_rests.push(rest_duration);
-            let total: i32 = split_rests.iter().sum();
-            let threshold = match split_rests.len() {
-                2 => REST_SPLIT_2_TOTAL,
-                n if n >= 3 => REST_SPLIT_3_TOTAL,
-                _ => i32::MAX, // 1回だけでは分割特例不成立
-            };
-            if total >= threshold {
-                workdays.push(Workday {
-                    start: current_start,
-                    end: rest_start,
-                    date: current_start.date(),
-                });
-                current_start = rest_end;
-                split_rests.clear();
-                continue;
-            }
+        if rest_duration < REST_SPLIT_MIN {
+            continue;
+        }
+        split_rests.push(rest_duration);
+        let total: i32 = split_rests.iter().sum();
+        let threshold = match split_rests.len() {
+            2 => REST_SPLIT_2_TOTAL,
+            n if n >= 3 => REST_SPLIT_3_TOTAL,
+            _ => i32::MAX, // 1回だけでは分割特例不成立
+        };
+        if total >= threshold {
+            workdays.push(Workday {
+                start: current_start,
+                end: rest_start,
+                date: current_start.date(),
+            });
+            current_start = rest_end;
+            split_rests.clear();
         }
     }
 
     // 最後の勤務日（24hルールで複数日に分割される可能性あり）
-    tracing::debug!(
-        "determine_workdays: after loop, current_start={}, last_end={}, workdays_so_far={}",
-        current_start,
-        last_end,
-        workdays.len()
-    );
-    for (i, wd) in workdays.iter().enumerate() {
-        if wd.date >= chrono::NaiveDate::from_ymd_opt(2026, 2, 17).unwrap()
-            && wd.date <= chrono::NaiveDate::from_ymd_opt(2026, 2, 20).unwrap()
-        {
-            tracing::debug!(
-                "  workday[{}]: date={}, start={}, end={}",
-                i,
-                wd.date,
-                wd.start,
-                wd.end
-            );
-        }
-    }
     while current_start < last_end {
         let max_end = current_start + chrono::Duration::minutes(MAX_WORK_HOURS);
         if last_end > max_end {
@@ -906,6 +880,57 @@ mod tests {
             let result = split_segments_at_24h_with_workdays(segments, &boundaries);
             assert_eq!(result.len(), 2);
             assert_eq!(result[0].end, dt(2026, 2, 25, 20, 0));
+        });
+    }
+
+    /// 分割特例: 1回だけ 180分以上の休息で total < threshold (i32::MAX) → 閉じ括弧カバー
+    #[test]
+    fn test_determine_workdays_single_split_rest_below_threshold() {
+        test_group!("CSVパーサー");
+        test_case!("分割特例: 1回180分のみでは不成立", {
+            // 1回だけ 200分 (>= 180) の休息 → split_rests = [200], len=1, threshold=i32::MAX
+            // total < threshold なので if ブロック不成立
+            let rest_events = vec![(dt(2026, 2, 20, 14, 0), 200)];
+            let first_start = dt(2026, 2, 20, 8, 0);
+            let last_end = dt(2026, 2, 20, 22, 0);
+            let workdays = determine_workdays(&rest_events, first_start, last_end, false);
+            assert_eq!(workdays.len(), 1);
+        });
+    }
+
+    /// 短い休息 (< 180分) は分割特例の対象外 → continue カバー
+    #[test]
+    fn test_determine_workdays_short_rest_skipped() {
+        test_group!("CSVパーサー");
+        test_case!("短い休息は分割特例をスキップ", {
+            // 60分の休息 (< 180) → 分割特例スキップ (continue)
+            let rest_events = vec![(dt(2026, 2, 20, 14, 0), 60)];
+            let first_start = dt(2026, 2, 20, 8, 0);
+            let last_end = dt(2026, 2, 20, 20, 0);
+            let workdays = determine_workdays(&rest_events, first_start, last_end, false);
+            assert_eq!(workdays.len(), 1);
+        });
+    }
+
+    /// boundary ループ内の continue (行389): 重複 boundary でカバー
+    #[test]
+    fn test_split_segments_duplicate_boundary_continue() {
+        test_group!("CSVパーサー");
+        test_case!("重複boundary で continue をカバー", {
+            let segments = vec![WorkSegment {
+                start: dt(2026, 2, 25, 8, 0),
+                end: dt(2026, 2, 26, 12, 0), // 28h
+                labor_minutes: 600,
+                drive_minutes: 400,
+                cargo_minutes: 200,
+            }];
+            // 同じ boundary を2回渡す → 2回目で *boundary <= cur_start → continue
+            let boundaries = vec![
+                dt(2026, 2, 25, 20, 0),
+                dt(2026, 2, 25, 20, 0), // duplicate → continue at line 389
+            ];
+            let result = split_segments_at_24h_with_workdays(segments, &boundaries);
+            assert_eq!(result.len(), 2); // 08:00-20:00, 20:00-12:00
         });
     }
 }

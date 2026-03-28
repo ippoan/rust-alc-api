@@ -199,18 +199,12 @@ async fn get_restraint_report_pdf(
         reports.push(report);
     }
 
-    let pdf_bytes =
-        generate_pdf(&reports, &driver_cds, filter.year, filter.month).map_err(|e| {
-            tracing::error!("PDF generation error: {e}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "PDF生成に失敗しました".to_string(),
-            )
-        })?;
+    let pdf_bytes = generate_pdf(&reports, &driver_cds, filter.year, filter.month)
+        .expect("static font; generate_pdf is infallible");
 
     let filename = format!("restraint_report_{}_{:02}.pdf", filter.year, filter.month);
 
-    Response::builder()
+    Ok(Response::builder()
         .status(200)
         .header(header::CONTENT_TYPE, "application/pdf")
         .header(
@@ -218,13 +212,7 @@ async fn get_restraint_report_pdf(
             format!("attachment; filename=\"{filename}\""),
         )
         .body(Body::from(pdf_bytes))
-        .map_err(|e| {
-            tracing::error!("response build error: {e}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "internal error".to_string(),
-            )
-        })
+        .expect("valid response builder"))
 }
 
 async fn get_restraint_report_pdf_stream(
