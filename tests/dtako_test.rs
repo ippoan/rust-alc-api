@@ -5971,6 +5971,7 @@ async fn test_restraint_report_compare_csv_with_driver_filter() {
     });
 }
 
+#[cfg_attr(not(coverage), ignore)]
 #[tokio::test]
 async fn test_restraint_report_last_day_drive_avg_and_weekly_subtotal() {
     test_group!("拘束時間レポート: エッジケース");
@@ -5984,28 +5985,41 @@ async fn test_restraint_report_last_day_drive_avg_and_weekly_subtotal() {
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
 
-            // ZIP アップロード → データあり
-            let zip_bytes = common::create_test_dtako_zip();
-            let file_part = reqwest::multipart::Part::bytes(zip_bytes)
-                .file_name("test.zip")
-                .mime_str("application/zip")
-                .unwrap();
-            let form = reqwest::multipart::Form::new().part("file", file_part);
-            client
-                .post(format!("{base_url}/api/upload"))
-                .header("Authorization", &auth)
-                .multipart(form)
-                .send()
+            // employee 作成
+            let emp =
+                common::create_test_employee(&client, &base_url, &auth, "テスト運転者LD", "LD01")
+                    .await;
+            let emp_id: uuid::Uuid = emp["id"].as_str().unwrap().parse().unwrap();
+
+            // 平日 (2026-03-02=月, 03=火) に直接 DB INSERT
+            let mut conn = state.pool.acquire().await.unwrap();
+            sqlx::query(&format!(
+                "SELECT set_config('app.current_tenant_id', '{}', false)",
+                tenant_id
+            ))
+            .execute(&mut *conn)
+            .await
+            .unwrap();
+
+            for (day, drive, cargo) in [(2, 300, 60), (3, 240, 30)] {
+                sqlx::query(
+                    "INSERT INTO alc_api.dtako_daily_work_hours \
+                     (date, driver_id, start_time, total_work_minutes, total_drive_minutes, \
+                      cargo_minutes, break_minutes, tenant_id) \
+                     VALUES ($1, $2, '08:00', $3, $4, $5, 60, $6)",
+                )
+                .bind(chrono::NaiveDate::from_ymd_opt(2026, 3, day).unwrap())
+                .bind(emp_id)
+                .bind(drive + cargo + 60) // total_work
+                .bind(drive)
+                .bind(cargo)
+                .bind(tenant_id)
+                .execute(&mut *conn)
                 .await
                 .unwrap();
+            }
 
-            // employee 作成 (driver_cd = "DR01" matching ZIP)
-            let emp =
-                common::create_test_employee(&client, &base_url, &auth, "テスト運転者", "DR01")
-                    .await;
-            let emp_id = emp["id"].as_str().unwrap();
-
-            // 3月レポート取得 — データが3/1にある → 最終稼働日は3/1, i+1=3/2は休日 → next_main_drive=0
+            // 3月レポート取得
             let res = client
                 .get(format!(
                     "{base_url}/api/restraint-report?driver_id={emp_id}&year=2026&month=3"
@@ -6017,26 +6031,20 @@ async fn test_restraint_report_last_day_drive_avg_and_weekly_subtotal() {
             assert_eq!(res.status(), 200);
             let body: Value = res.json().await.unwrap();
 
-            // days[0] (3/1) は日曜日なので is_holiday=true
-            // テストデータは3/1にあるが休日扱い。3/2(月)が最初の平日
             let days = body["days"].as_array().unwrap();
-            // 稼働データがある日を探す (drive_minutes > 0)
-            let work_day = days
-                .iter()
-                .find(|d| d["drive_minutes"].as_i64().unwrap_or(0) > 0);
-            // データがあれば drive_avg_after が設定されているはず
-            if let Some(wd) = work_day {
-                assert!(
-                    wd["drive_avg_after"].is_number() || wd["drive_avg_after"].is_null(),
-                    "drive_avg_after should be present"
-                );
-            }
+            // 3/2(月) は稼働日
+            let day2 = &days[1]; // index 1 = 3/2
+            assert!(!day2["is_holiday"].as_bool().unwrap());
+            assert!(day2["drive_minutes"].as_i64().unwrap() > 0);
 
-            // 最終日 (3/31) は非稼働日のはず
-            let last_day = days.last().unwrap();
-            assert_eq!(last_day["date"].as_str().unwrap(), "2026-03-31");
+            // drive_avg_after が設定されている (最終稼働日は3/3, i+1>=len → 0)
+            let day3 = &days[2]; // index 2 = 3/3
+            assert!(
+                day3["drive_avg_after"].is_number(),
+                "last work day should have drive_avg_after"
+            );
 
-            // weekly_subtotals が生成されていること (final weekly subtotal)
+            // weekly_subtotals が生成されていること
             let weekly = body["weekly_subtotals"].as_array().unwrap();
             assert!(
                 !weekly.is_empty(),
