@@ -6002,15 +6002,42 @@ async fn test_restraint_report_last_day_drive_avg_and_weekly_subtotal() {
             .unwrap();
 
             for (day, drive, cargo) in [(2, 300, 60), (3, 240, 30)] {
+                let work_date = chrono::NaiveDate::from_ymd_opt(2026, 3, day).unwrap();
+                // segments が必要 (day_groups の元データ)
+                sqlx::query(
+                    "INSERT INTO alc_api.dtako_daily_work_segments \
+                     (work_date, driver_id, unko_no, segment_index, start_at, end_at, \
+                      work_minutes, drive_minutes, cargo_minutes, tenant_id) \
+                     VALUES ($1, $2, '1001', 0, $3, $4, $5, $6, $7, $8)",
+                )
+                .bind(work_date)
+                .bind(emp_id)
+                .bind(
+                    chrono::DateTime::parse_from_rfc3339(&format!("2026-03-{day:02}T08:00:00Z"))
+                        .unwrap(),
+                )
+                .bind(
+                    chrono::DateTime::parse_from_rfc3339(&format!("2026-03-{day:02}T15:00:00Z"))
+                        .unwrap(),
+                )
+                .bind(drive + cargo + 60)
+                .bind(drive)
+                .bind(cargo)
+                .bind(tenant_id)
+                .execute(&mut *conn)
+                .await
+                .unwrap();
+
+                // daily_work_hours も必要
                 sqlx::query(
                     "INSERT INTO alc_api.dtako_daily_work_hours \
                      (work_date, driver_id, start_time, total_work_minutes, total_drive_minutes, \
                       drive_minutes, cargo_minutes, tenant_id) \
                      VALUES ($1, $2, '08:00', $3, $4, $5, $6, $7)",
                 )
-                .bind(chrono::NaiveDate::from_ymd_opt(2026, 3, day).unwrap())
+                .bind(work_date)
                 .bind(emp_id)
-                .bind(drive + cargo + 60) // total_work
+                .bind(drive + cargo + 60)
                 .bind(drive)
                 .bind(drive)
                 .bind(cargo)
