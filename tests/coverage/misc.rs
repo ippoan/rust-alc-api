@@ -1540,6 +1540,8 @@ async fn test_measurements_list_db_error() {
 async fn test_measurements_video_proxy() {
     test_group!("measurements カバレッジ");
     test_case!("get_video プロキシ (正常 + not found)", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
         let tenant_id = crate::common::create_test_tenant(&state.pool, "MVid").await;
