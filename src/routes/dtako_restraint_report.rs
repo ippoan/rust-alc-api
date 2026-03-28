@@ -362,15 +362,14 @@ pub async fn build_report_with_name_conn(
     while current_date <= month_end {
         // Check if this is a week boundary (Sunday)
         if current_date.weekday() == chrono::Weekday::Sun && current_date > month_start {
-            if week_restraint > 0 {
-                weekly_subtotals.push(WeeklySubtotal {
-                    week_end_date: current_date - chrono::Duration::days(1),
-                    drive_minutes: week_drive,
-                    cargo_minutes: week_cargo,
-                    break_minutes: week_break,
-                    restraint_minutes: week_restraint,
-                });
-            }
+            push_weekly_if_needed(
+                &mut weekly_subtotals,
+                current_date - chrono::Duration::days(1),
+                week_drive,
+                week_cargo,
+                week_break,
+                week_restraint,
+            );
             week_drive = 0;
             week_cargo = 0;
             week_break = 0;
@@ -551,11 +550,7 @@ pub async fn build_report_with_name_conn(
             continue;
         }
         let current_main_drive = days[i].drive_minutes;
-        let next_main_drive = if i + 1 < days.len() {
-            days[i + 1].drive_minutes // 休日なら0
-        } else {
-            0
-        };
+        let next_main_drive = days.get(i + 1).map_or(0, |d| d.drive_minutes); // 休日なら0, 月末なら0
         days[i].drive_avg_after = Some((current_main_drive + next_main_drive) / 2);
     }
 
@@ -600,6 +595,25 @@ pub async fn build_report_with_name_conn(
         weekly_subtotals,
         monthly_total,
     })
+}
+
+fn push_weekly_if_needed(
+    subtotals: &mut Vec<WeeklySubtotal>,
+    week_end_date: NaiveDate,
+    drive: i32,
+    cargo: i32,
+    brk: i32,
+    restraint: i32,
+) {
+    if restraint > 0 {
+        subtotals.push(WeeklySubtotal {
+            week_end_date,
+            drive_minutes: drive,
+            cargo_minutes: cargo,
+            break_minutes: brk,
+            restraint_minutes: restraint,
+        });
+    }
 }
 
 fn internal_err(e: impl std::fmt::Display) -> (StatusCode, String) {
@@ -718,10 +732,12 @@ async fn compare_csv(
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("multipart error: {e}")))?
     {
-        if let Ok(data) = field.bytes().await {
-            csv_bytes = data.to_vec();
-            break;
-        }
+        let data = field
+            .bytes()
+            .await
+            .map_err(|e| (StatusCode::BAD_REQUEST, format!("field read error: {e}")))?;
+        csv_bytes = data.to_vec();
+        break;
     }
 
     if csv_bytes.is_empty() {
