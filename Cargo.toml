@@ -40,4 +40,5 @@ tokio-stream = "0.1"
 printpdf = "0.8"
 
 [dev-dependencies]
+libc = "0.2"
 wiremock = "0.6"

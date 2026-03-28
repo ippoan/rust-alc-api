@@ -62,6 +62,8 @@ async fn insert_sso_config(
 async fn test_my_orgs_tenant_not_found() {
     test_group!("auth カバレッジ");
     test_case!("存在しないテナントで my_orgs → 空配列", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
 
@@ -94,6 +96,8 @@ async fn test_my_orgs_tenant_not_found() {
 async fn test_google_callback_exchange_failure() {
     test_group!("auth カバレッジ");
     test_case!("有効 state + 無効 code で 502", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let _env = common::ENV_LOCK.lock().unwrap();
         std::env::set_var("OAUTH_STATE_SECRET", "test-oauth-state-secret");
         std::env::set_var("API_ORIGIN", "http://localhost:9999");
@@ -139,6 +143,8 @@ async fn test_lineworks_redirect_happy_path() {
     test_case!(
         "SSO config 存在 → LINE WORKS authorize URL にリダイレクト",
         {
+            let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+            let _flock = crate::common::db_rename_flock();
             let _env = common::ENV_LOCK.lock().unwrap();
             std::env::set_var("OAUTH_STATE_SECRET", "test-oauth-state-secret-lw");
 
@@ -184,6 +190,8 @@ async fn test_lineworks_callback_happy_path() {
     test_case!(
         "wiremock で LINE WORKS API をモック → 307 リダイレクト",
         {
+            let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+            let _flock = crate::common::db_rename_flock();
             let _env = common::ENV_LOCK.lock().unwrap();
             let mock_server = MockServer::start().await;
 
@@ -297,6 +305,8 @@ async fn test_lineworks_callback_happy_path() {
 async fn test_woff_config_happy_path() {
     test_group!("auth カバレッジ");
     test_case!("SSO config + woff_id あり → woffId を返す", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
 
@@ -334,6 +344,8 @@ async fn test_woff_config_happy_path() {
 async fn test_woff_config_no_woff_id() {
     test_group!("auth カバレッジ");
     test_case!("SSO config あるが woff_id なし → 404", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
 
@@ -362,6 +374,8 @@ async fn test_woff_config_no_woff_id() {
 async fn test_woff_auth_happy_path() {
     test_group!("auth カバレッジ");
     test_case!("wiremock で profile API をモック → 200 + token", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let _env = common::ENV_LOCK.lock().unwrap();
         let mock_server = MockServer::start().await;
 
@@ -432,6 +446,8 @@ async fn test_woff_auth_happy_path() {
 async fn test_lineworks_redirect_no_oauth_secret() {
     test_group!("auth カバレッジ");
     test_case!("OAUTH_STATE_SECRET 未設定で 500", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let _env = common::ENV_LOCK.lock().unwrap();
         std::env::remove_var("OAUTH_STATE_SECRET");
 
@@ -472,6 +488,8 @@ async fn test_lineworks_redirect_no_oauth_secret() {
 async fn test_lineworks_callback_sso_lookup_error() {
     test_group!("auth カバレッジ");
     test_case!("callback SSO lookup → 存在しない org → 500", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let _env = common::ENV_LOCK.lock().unwrap();
         std::env::set_var("OAUTH_STATE_SECRET", "test-oauth-state-secret-dberr2");
         std::env::set_var("API_ORIGIN", "http://localhost:9999");
@@ -517,6 +535,8 @@ async fn test_lineworks_callback_sso_lookup_error() {
 async fn test_lineworks_callback_decrypt_error() {
     test_group!("auth カバレッジ");
     test_case!("callback 不正な暗号化シークレット → 500", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let _env = common::ENV_LOCK.lock().unwrap();
         std::env::set_var("OAUTH_STATE_SECRET", "test-oauth-state-secret-decrypt");
         std::env::set_var("API_ORIGIN", "http://localhost:9999");
@@ -573,6 +593,8 @@ async fn test_lineworks_callback_decrypt_error() {
 async fn test_lineworks_callback_token_exchange_error() {
     test_group!("auth カバレッジ");
     test_case!("callback token exchange 失敗 → 502", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let _env = common::ENV_LOCK.lock().unwrap();
         let mock_server = MockServer::start().await;
 
@@ -633,6 +655,8 @@ async fn test_lineworks_callback_token_exchange_error() {
 async fn test_lineworks_callback_profile_error() {
     test_group!("auth カバレッジ");
     test_case!("callback user profile 取得失敗 → 502", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let _env = common::ENV_LOCK.lock().unwrap();
         let mock_server = MockServer::start().await;
 
@@ -713,6 +737,8 @@ async fn test_lineworks_callback_profile_error() {
 async fn test_woff_auth_profile_error() {
     test_group!("auth カバレッジ");
     test_case!("woff_auth profile 取得失敗 → 401", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let _env = common::ENV_LOCK.lock().unwrap();
         let mock_server = MockServer::start().await;
 
@@ -764,6 +790,8 @@ async fn test_woff_auth_existing_user() {
     test_case!(
         "woff_auth 2回呼び → 2回目は既存ユーザー検出",
         {
+            let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+            let _flock = crate::common::db_rename_flock();
             let _env = common::ENV_LOCK.lock().unwrap();
             let mock_server = MockServer::start().await;
 
@@ -853,6 +881,8 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = alc_api
 async fn test_sso_query_error_lineworks_redirect() {
     test_group!("auth カバレッジ");
     test_case!("resolve_sso_config DROP → lineworks redirect 500", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let _env = common::ENV_LOCK.lock().unwrap();
         std::env::set_var("OAUTH_STATE_SECRET", "test-oauth-state-secret-drop1");
 
@@ -893,6 +923,8 @@ async fn test_sso_query_error_lineworks_redirect() {
 async fn test_sso_query_error_woff_config() {
     test_group!("auth カバレッジ");
     test_case!("resolve_sso_config DROP → woff-config 500", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let _env = common::ENV_LOCK.lock().unwrap();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
@@ -923,6 +955,8 @@ async fn test_sso_query_error_woff_config() {
 async fn test_sso_query_error_woff_auth() {
     test_group!("auth カバレッジ");
     test_case!("resolve_sso_config DROP → woff auth 500", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let _env = common::ENV_LOCK.lock().unwrap();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
@@ -961,6 +995,8 @@ async fn test_sso_query_error_woff_auth() {
 async fn test_upsert_lineworks_user_insert_error() {
     test_group!("auth カバレッジ");
     test_case!("user INSERT 失敗 → 500", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let _env = common::ENV_LOCK.lock().unwrap();
         let mock_server = MockServer::start().await;
 

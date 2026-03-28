@@ -127,3 +127,18 @@ test_file = "tests/coverage/main.rs"
 path = "src/routes/nfc_tags.rs"
 type = "integration"
 test_file = "tests/coverage_100_test.rs"
+
+[[files]]
+path = "src/routes/car_inspection_files.rs"
+type = "integration"
+test_file = "tests/carins_test.rs"
+
+[[files]]
+path = "src/routes/timecard.rs"
+type = "integration"
+test_file = "tests/coverage/main.rs"
+
+[[files]]
+path = "src/routes/tenant_users.rs"
+type = "integration"
+test_file = "tests/coverage/main.rs"

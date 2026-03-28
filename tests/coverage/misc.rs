@@ -34,6 +34,7 @@ async fn test_auth_jwt_fail_fallback_to_tenant_id() {
         "不正 JWT + 有効な X-Tenant-ID でフォールバック成功する",
         {
             let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+            let _flock = crate::common::db_rename_flock();
             let state = crate::common::setup_app_state().await;
             let base_url = crate::common::spawn_test_server(state.clone()).await;
             let tenant_id = crate::common::create_test_tenant(&state.pool, "AuthFB").await;
@@ -57,6 +58,7 @@ async fn test_nfc_tag_register_db_error() {
     test_group!("カバレッジ 100% 補完");
     test_case!("NFC タグ登録で DB エラー時に 500 を返す", {
         let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
         let tenant_id = crate::common::create_test_tenant(&state.pool, "NFCErr").await;
@@ -110,6 +112,7 @@ async fn test_health_baseline_upsert_db_error() {
         "健康基準値 upsert で DB エラー時に 500 を返す",
         {
             let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+            let _flock = crate::common::db_rename_flock();
             let state = crate::common::setup_app_state().await;
             let base_url = crate::common::spawn_test_server(state.clone()).await;
             let tenant_id = crate::common::create_test_tenant(&state.pool, "HBErr").await;
@@ -166,6 +169,7 @@ async fn test_carrying_items_empty_tenant() {
         "carrying_items が空のテナントで一覧取得 → 空配列",
         {
             let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+            let _flock = crate::common::db_rename_flock();
             let state = crate::common::setup_app_state().await;
             let base_url = crate::common::spawn_test_server(state.clone()).await;
             let tenant_id = crate::common::create_test_tenant(&state.pool, "CarryEmpty").await;

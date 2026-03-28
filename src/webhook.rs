@@ -41,7 +41,7 @@ pub async fn fire_event(
 }
 
 /// Webhook を配信 (リトライ付き)
-async fn deliver_webhook(
+pub async fn deliver_webhook(
     pool: &PgPool,
     config: &crate::db::models::WebhookConfig,
     event_type: &str,

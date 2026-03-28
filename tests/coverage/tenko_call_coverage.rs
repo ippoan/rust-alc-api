@@ -38,6 +38,7 @@ async fn test_tenko_call_register_trigger_error() {
     test_group!("tenko_call カバレッジ");
     test_case!("register: driver upsert trigger 失敗 → 500", {
         let _lock = common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
         let tenant_id = common::create_test_tenant(&state.pool, "TkRegTrig").await;
@@ -130,6 +131,7 @@ async fn test_tenko_call_tenko_trigger_error() {
     test_group!("tenko_call カバレッジ");
     test_case!("tenko: log insert trigger 失敗 → 500", {
         let _lock = common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
         let tenant_id = common::create_test_tenant(&state.pool, "TkTenkoTrig").await;
@@ -212,6 +214,7 @@ async fn test_tenko_call_register_master_lookup_rename() {
     test_group!("tenko_call カバレッジ");
     test_case!("register: master lookup RENAME → 500", {
         let _lock = common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
 
@@ -250,6 +253,7 @@ async fn test_tenko_call_register_set_tenant_error() {
     test_group!("tenko_call カバレッジ");
     test_case!("register: set_tenant DROP → 500", {
         let _lock = common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
         let tenant_id = common::create_test_tenant(&state.pool, "TkSetTenErr").await;
@@ -302,6 +306,7 @@ async fn test_tenko_call_tenko_driver_lookup_rename() {
     test_group!("tenko_call カバレッジ");
     test_case!("tenko: driver lookup RENAME → 500", {
         let _lock = common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
 
@@ -341,6 +346,7 @@ async fn test_tenko_call_tenko_set_tenant_error() {
     test_group!("tenko_call カバレッジ");
     test_case!("tenko: set_tenant RENAME → 500", {
         let _lock = common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
         let tenant_id = common::create_test_tenant(&state.pool, "TkTkSetTenErr").await;
@@ -412,6 +418,7 @@ async fn test_tenko_call_register_commit_error() {
     test_group!("tenko_call カバレッジ");
     test_case!("register: deferred trigger → commit 失敗 → 500", {
         let _lock = common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
         let tenant_id = common::create_test_tenant(&state.pool, "TkCommitErr").await;
@@ -475,6 +482,7 @@ async fn test_tenko_call_tenko_commit_error() {
     test_group!("tenko_call カバレッジ");
     test_case!("tenko: deferred trigger → commit 失敗 → 500", {
         let _lock = common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
         let tenant_id = common::create_test_tenant(&state.pool, "TkTkCommitErr").await;

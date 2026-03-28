@@ -69,6 +69,8 @@ fn create_test_rs256_jwt(client_id: &str) -> String {
 async fn test_google_verify_real_path() {
     test_group!("google auth カバレッジ");
     test_case!("RS256 JWT + JWKS モック → verify 成功", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let _env = crate::common::ENV_LOCK.lock().unwrap();
         let jwks_server = MockServer::start().await;
 
@@ -102,6 +104,8 @@ async fn test_google_verify_real_path() {
 async fn test_google_verify_jwks_cache_hit() {
     test_group!("google auth カバレッジ");
     test_case!("2回目の verify → JWKS キャッシュヒット", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let _env = crate::common::ENV_LOCK.lock().unwrap();
         let jwks_server = MockServer::start().await;
 
@@ -137,6 +141,8 @@ async fn test_google_verify_jwks_cache_hit() {
 async fn test_google_verify_jwks_cache_expired() {
     test_group!("google auth カバレッジ");
     test_case!("JWKS キャッシュ期限切れ → 再取得", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let _env = crate::common::ENV_LOCK.lock().unwrap();
         let jwks_server = MockServer::start().await;
 
@@ -174,6 +180,8 @@ async fn test_google_verify_jwks_cache_expired() {
 async fn test_google_verify_invalid_token() {
     test_group!("google auth カバレッジ");
     test_case!("不正なトークン → InvalidToken", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let verifier = GoogleTokenVerifier::new("cid".to_string(), "secret".to_string());
         let err = verifier.verify("not-a-jwt").await.unwrap_err();
         assert_eq!(err.to_string(), "invalid token");
@@ -191,6 +199,8 @@ async fn test_google_verify_no_kid() {
     test_case!("kid なし JWT → InvalidToken", {
         use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let header = Header::new(Algorithm::RS256); // kid なし
         let claims = json!({ "sub": "x", "exp": 9999999999u64 });
         let key = EncodingKey::from_rsa_pem(TEST_RSA_PRIVATE_KEY.as_bytes()).unwrap();
@@ -211,6 +221,8 @@ async fn test_google_verify_no_kid() {
 async fn test_google_verify_jwks_fetch_failed() {
     test_group!("google auth カバレッジ");
     test_case!("JWKS サーバーダウン → JwksFetchFailed", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let _env = crate::common::ENV_LOCK.lock().unwrap();
         // 存在しないサーバーを指定
         std::env::set_var("GOOGLE_JWKS_URL", "http://127.0.0.1:19998/certs");
@@ -235,6 +247,8 @@ async fn test_google_verify_jwks_fetch_failed() {
 async fn test_google_verify_jwks_parse_failed() {
     test_group!("google auth カバレッジ");
     test_case!("JWKS 不正 JSON → JwksFetchFailed", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let _env = crate::common::ENV_LOCK.lock().unwrap();
         let jwks_server = MockServer::start().await;
 
@@ -265,6 +279,8 @@ async fn test_google_verify_jwks_parse_failed() {
 async fn test_google_verify_key_not_found() {
     test_group!("google auth カバレッジ");
     test_case!("JWKS に一致する kid なし → KeyNotFound", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let _env = crate::common::ENV_LOCK.lock().unwrap();
         let jwks_server = MockServer::start().await;
 
@@ -298,6 +314,8 @@ async fn test_google_verify_key_not_found() {
 async fn test_google_verify_email_not_verified() {
     test_group!("google auth カバレッジ");
     test_case!("email_verified=false → EmailNotVerified", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let _env = crate::common::ENV_LOCK.lock().unwrap();
         let jwks_server = MockServer::start().await;
 
@@ -345,6 +363,8 @@ async fn test_google_verify_email_not_verified() {
 async fn test_google_exchange_code_real_success() {
     test_group!("google auth カバレッジ");
     test_case!("code exchange → token → verify 成功", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let _env = crate::common::ENV_LOCK.lock().unwrap();
         let jwks_server = MockServer::start().await;
         let token_server = MockServer::start().await;
@@ -388,6 +408,8 @@ async fn test_google_exchange_code_real_success() {
 async fn test_google_exchange_code_connection_error() {
     test_group!("google auth カバレッジ");
     test_case!("token endpoint 接続不可 → TokenExchangeFailed", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let _env = crate::common::ENV_LOCK.lock().unwrap();
         std::env::set_var("GOOGLE_TOKEN_URL", "http://127.0.0.1:19997/token");
 
@@ -411,6 +433,8 @@ async fn test_google_exchange_code_connection_error() {
 async fn test_google_exchange_code_error_response() {
     test_group!("google auth カバレッジ");
     test_case!("token endpoint 400 → TokenExchangeFailed", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let _env = crate::common::ENV_LOCK.lock().unwrap();
         let token_server = MockServer::start().await;
 
@@ -441,6 +465,8 @@ async fn test_google_exchange_code_error_response() {
 async fn test_google_exchange_code_invalid_json() {
     test_group!("google auth カバレッジ");
     test_case!("token endpoint 不正 JSON → TokenExchangeFailed", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let _env = crate::common::ENV_LOCK.lock().unwrap();
         let token_server = MockServer::start().await;
 
@@ -471,6 +497,8 @@ async fn test_google_exchange_code_invalid_json() {
 async fn test_google_verify_signature_mismatch() {
     test_group!("google auth カバレッジ");
     test_case!("署名不一致 JWT → InvalidToken", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let _env = crate::common::ENV_LOCK.lock().unwrap();
         let jwks_server = MockServer::start().await;
 

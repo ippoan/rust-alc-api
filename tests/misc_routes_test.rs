@@ -2642,7 +2642,7 @@ async fn test_nfc_tags_upsert() {
 // ============================================================
 
 #[tokio::test]
-async fn test_event_classifications_after_upload_and_update() {
+async fn tenko_completed_classifications_after_upload_and_update() {
     test_group!("イベント分類");
     test_case!(
         "アップロード後にイベント分類を取得・更新できる",
@@ -2820,4 +2820,462 @@ async fn test_dtako_csv_proxy_kudgivt() {
             assert!(body["headers"].as_array().unwrap().len() > 0);
         }
     );
+}
+
+// ============================================================
+// Webhook — deliver_webhook error paths (connection error + retries)
+// ============================================================
+
+#[tokio::test]
+#[cfg_attr(not(coverage), ignore)]
+async fn test_webhook_deliver_connection_error() {
+    test_group!("Webhook配信");
+    test_case!(
+        "接続エラー時にリトライしてdeliveries記録する",
+        {
+            use chrono::Utc;
+            use rust_alc_api::db::models::WebhookConfig;
+
+            let state = common::setup_app_state().await;
+            let tenant_id = common::create_test_tenant(&state.pool, "WhConnErr").await;
+
+            // set tenant for inserts
+            let mut conn = state.pool.acquire().await.unwrap();
+            rust_alc_api::db::tenant::set_current_tenant(&mut conn, &tenant_id.to_string())
+                .await
+                .unwrap();
+
+            // Insert webhook_config pointing to unreachable address
+            let config_id = uuid::Uuid::new_v4();
+            sqlx::query(
+            r#"INSERT INTO webhook_configs (id, tenant_id, event_type, url, secret, enabled)
+               VALUES ($1, $2, 'tenko_completed', 'http://127.0.0.1:1/webhook', 'test-secret', TRUE)"#,
+        )
+        .bind(config_id)
+        .bind(tenant_id)
+        .execute(&mut *conn)
+        .await
+        .unwrap();
+            drop(conn);
+
+            let config = WebhookConfig {
+                id: config_id,
+                tenant_id,
+                event_type: "tenko_completed".to_string(),
+                url: "http://127.0.0.1:1/webhook".to_string(),
+                secret: Some("test-secret".to_string()),
+                enabled: true,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            };
+
+            let payload = serde_json::json!({"test": "data"});
+
+            // deliver_webhook should retry 3 times and return Ok(()) even on failure
+            let result = rust_alc_api::webhook::deliver_webhook(
+                &state.pool,
+                &config,
+                "tenko_completed",
+                &payload,
+            )
+            .await;
+            assert!(result.is_ok());
+
+            // Check that delivery logs were recorded (3 attempts, all failed)
+            let mut conn = state.pool.acquire().await.unwrap();
+            rust_alc_api::db::tenant::set_current_tenant(&mut conn, &tenant_id.to_string())
+                .await
+                .unwrap();
+            let count: (i64,) =
+                sqlx::query_as("SELECT COUNT(*) FROM webhook_deliveries WHERE config_id = $1")
+                    .bind(config_id)
+                    .fetch_one(&mut *conn)
+                    .await
+                    .unwrap();
+            assert_eq!(count.0, 3, "Expected 3 delivery attempts");
+        }
+    );
+}
+
+#[tokio::test]
+#[cfg_attr(not(coverage), ignore)]
+async fn test_webhook_fire_event_delivery_error_logged() {
+    test_group!("Webhook配信");
+    test_case!("fire_event でエラー時にログ記録される", {
+        let state = common::setup_app_state().await;
+        let tenant_id = common::create_test_tenant(&state.pool, "WhFireErr").await;
+
+        // set tenant for inserts
+        let mut conn = state.pool.acquire().await.unwrap();
+        rust_alc_api::db::tenant::set_current_tenant(&mut conn, &tenant_id.to_string())
+            .await
+            .unwrap();
+
+        // Insert webhook_config pointing to unreachable address
+        let config_id = uuid::Uuid::new_v4();
+        sqlx::query(
+            r#"INSERT INTO webhook_configs (id, tenant_id, event_type, url, secret, enabled)
+               VALUES ($1, $2, 'tenko_overdue', 'http://127.0.0.1:1/hook', NULL, TRUE)"#,
+        )
+        .bind(config_id)
+        .bind(tenant_id)
+        .execute(&mut *conn)
+        .await
+        .unwrap();
+        drop(conn);
+
+        let payload = serde_json::json!({"key": "value"});
+
+        // fire_event spawns deliver_webhook in background; itself returns Ok
+        let result =
+            rust_alc_api::webhook::fire_event(&state.pool, tenant_id, "tenko_overdue", payload)
+                .await;
+        assert!(result.is_ok());
+
+        // Wait for background task to complete (retries with delays 1+5+25 = 31s max,
+        // but connection errors are instant, so a short wait suffices)
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+
+        // Verify delivery attempts were logged
+        let mut conn = state.pool.acquire().await.unwrap();
+        rust_alc_api::db::tenant::set_current_tenant(&mut conn, &tenant_id.to_string())
+            .await
+            .unwrap();
+        let count: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM webhook_deliveries WHERE config_id = $1")
+                .bind(config_id)
+                .fetch_one(&mut *conn)
+                .await
+                .unwrap();
+        // Should have at least 1 attempt (background task may still be running)
+        assert!(
+            count.0 >= 1,
+            "Expected at least 1 delivery attempt, got {}",
+            count.0
+        );
+    });
+}
+
+// ============================================================
+// Timecard: edge cases & error paths
+// ============================================================
+
+#[tokio::test]
+async fn test_timecard_create_card_conflict() {
+    test_group!("タイムカード");
+    test_case!("重複カードIDで409を返す", {
+        let state = common::setup_app_state().await;
+        let base_url = common::spawn_test_server(state.clone()).await;
+        let tenant_id = common::create_test_tenant(&state.pool, "TC Conflict").await;
+        let jwt = common::create_test_jwt(tenant_id, "admin");
+        let auth = format!("Bearer {jwt}");
+        let client = reqwest::Client::new();
+
+        let emp =
+            common::create_test_employee(&client, &base_url, &auth, "ConflictEmp", "CF01").await;
+        let emp_id = emp["id"].as_str().unwrap();
+
+        // First card
+        let res = client
+            .post(format!("{base_url}/api/timecard/cards"))
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({
+                "employee_id": emp_id,
+                "card_id": "DUP-CARD-001"
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 201);
+
+        // Duplicate card_id + same tenant → 409
+        let res = client
+            .post(format!("{base_url}/api/timecard/cards"))
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({
+                "employee_id": emp_id,
+                "card_id": "DUP-CARD-001"
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 409);
+    });
+}
+
+#[tokio::test]
+async fn test_timecard_list_cards_with_employee_filter() {
+    test_group!("タイムカード");
+    test_case!("employee_idフィルター付きカード一覧", {
+        let state = common::setup_app_state().await;
+        let base_url = common::spawn_test_server(state.clone()).await;
+        let tenant_id = common::create_test_tenant(&state.pool, "TC Filter").await;
+        let jwt = common::create_test_jwt(tenant_id, "admin");
+        let auth = format!("Bearer {jwt}");
+        let client = reqwest::Client::new();
+
+        let emp1 =
+            common::create_test_employee(&client, &base_url, &auth, "FilterEmp1", "FE01").await;
+        let emp1_id = emp1["id"].as_str().unwrap();
+        let emp2 =
+            common::create_test_employee(&client, &base_url, &auth, "FilterEmp2", "FE02").await;
+        let emp2_id = emp2["id"].as_str().unwrap();
+
+        // Create cards for both employees
+        client
+            .post(format!("{base_url}/api/timecard/cards"))
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({ "employee_id": emp1_id, "card_id": "FCARD-1" }))
+            .send()
+            .await
+            .unwrap();
+        client
+            .post(format!("{base_url}/api/timecard/cards"))
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({ "employee_id": emp2_id, "card_id": "FCARD-2" }))
+            .send()
+            .await
+            .unwrap();
+
+        // Filter by emp1
+        let res = client
+            .get(format!(
+                "{base_url}/api/timecard/cards?employee_id={emp1_id}"
+            ))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200);
+        let cards: Vec<Value> = res.json().await.unwrap();
+        assert_eq!(cards.len(), 1);
+        assert_eq!(cards[0]["card_id"], "FCARD-1");
+    });
+}
+
+#[tokio::test]
+async fn test_timecard_delete_card_not_found() {
+    test_group!("タイムカード");
+    test_case!("存在しないカード削除で404", {
+        let state = common::setup_app_state().await;
+        let base_url = common::spawn_test_server(state.clone()).await;
+        let tenant_id = common::create_test_tenant(&state.pool, "TC DelNF").await;
+        let jwt = common::create_test_jwt(tenant_id, "admin");
+        let client = reqwest::Client::new();
+
+        let fake_id = uuid::Uuid::new_v4();
+        let res = client
+            .delete(format!("{base_url}/api/timecard/cards/{fake_id}"))
+            .header("Authorization", format!("Bearer {jwt}"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 404);
+    });
+}
+
+// Timecard DB error tests moved to tests/coverage/timecard_coverage.rs (trigger pattern)
+
+// ============================================================
+// Communication Items — get by ID, update/delete 404, DB errors
+// ============================================================
+
+#[tokio::test]
+async fn test_communication_items_get_by_id() {
+    test_group!("連絡事項");
+    test_case!("IDで連絡事項を取得", {
+        let _db = common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = common::db_rename_flock();
+        let state = common::setup_app_state().await;
+        let base_url = common::spawn_test_server(state.clone()).await;
+        let tenant_id = common::create_test_tenant(&state.pool, "CommGetId").await;
+        let jwt = common::create_test_jwt(tenant_id, "admin");
+        let auth = format!("Bearer {jwt}");
+        let client = reqwest::Client::new();
+
+        // Create
+        let res = client
+            .post(format!("{base_url}/api/communication-items"))
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({
+                "title": "ID取得テスト",
+                "content": "テスト内容",
+                "priority": "normal"
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 201);
+        let item: Value = res.json().await.unwrap();
+        let item_id = item["id"].as_str().unwrap();
+
+        // GET by ID
+        let res = client
+            .get(format!("{base_url}/api/communication-items/{item_id}"))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200);
+        let fetched: Value = res.json().await.unwrap();
+        assert_eq!(fetched["title"], "ID取得テスト");
+        assert_eq!(fetched["id"], item_id);
+    });
+}
+
+#[tokio::test]
+async fn test_communication_items_get_by_id_not_found() {
+    test_group!("連絡事項");
+    test_case!("存在しないIDで404", {
+        let _db = common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = common::db_rename_flock();
+        let state = common::setup_app_state().await;
+        let base_url = common::spawn_test_server(state.clone()).await;
+        let tenant_id = common::create_test_tenant(&state.pool, "CommNF").await;
+        let jwt = common::create_test_jwt(tenant_id, "admin");
+        let auth = format!("Bearer {jwt}");
+        let client = reqwest::Client::new();
+
+        let fake_id = uuid::Uuid::new_v4();
+        let res = client
+            .get(format!("{base_url}/api/communication-items/{fake_id}"))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 404);
+    });
+}
+
+#[tokio::test]
+async fn test_communication_items_update_not_found() {
+    test_group!("連絡事項");
+    test_case!("存在しないIDをupdateで404", {
+        let _db = common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = common::db_rename_flock();
+        let state = common::setup_app_state().await;
+        let base_url = common::spawn_test_server(state.clone()).await;
+        let tenant_id = common::create_test_tenant(&state.pool, "CommUpdNF").await;
+        let jwt = common::create_test_jwt(tenant_id, "admin");
+        let auth = format!("Bearer {jwt}");
+        let client = reqwest::Client::new();
+
+        let fake_id = uuid::Uuid::new_v4();
+        let res = client
+            .put(format!("{base_url}/api/communication-items/{fake_id}"))
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({ "title": "更新テスト" }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 404);
+    });
+}
+
+#[tokio::test]
+async fn test_communication_items_delete_not_found() {
+    test_group!("連絡事項");
+    test_case!("存在しないIDをdeleteで404", {
+        let _db = common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = common::db_rename_flock();
+        let state = common::setup_app_state().await;
+        let base_url = common::spawn_test_server(state.clone()).await;
+        let tenant_id = common::create_test_tenant(&state.pool, "CommDelNF").await;
+        let jwt = common::create_test_jwt(tenant_id, "admin");
+        let auth = format!("Bearer {jwt}");
+        let client = reqwest::Client::new();
+
+        let fake_id = uuid::Uuid::new_v4();
+        let res = client
+            .delete(format!("{base_url}/api/communication-items/{fake_id}"))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 404);
+    });
+}
+
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_communication_items_list_db_error() {
+    test_group!("communication_items DB エラー");
+    test_case!("list + active: RENAME → 500", {
+        let _db = common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = common::db_rename_flock();
+        let state = common::setup_app_state().await;
+        let base_url = common::spawn_test_server(state.clone()).await;
+        let tenant_id = common::create_test_tenant(&state.pool, "CommListErr").await;
+        let jwt = common::create_test_jwt(tenant_id, "admin");
+        let auth = format!("Bearer {jwt}");
+        let client = reqwest::Client::new();
+
+        sqlx::query("ALTER TABLE alc_api.communication_items RENAME TO communication_items_bak")
+            .execute(&state.pool)
+            .await
+            .unwrap();
+
+        let res = client
+            .get(format!("{base_url}/api/communication-items"))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 500, "list should fail");
+
+        let res = client
+            .get(format!("{base_url}/api/communication-items/active"))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 500, "active should fail");
+
+        sqlx::query("ALTER TABLE alc_api.communication_items_bak RENAME TO communication_items")
+            .execute(&state.pool)
+            .await
+            .unwrap();
+    });
+}
+
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_communication_items_create_db_error() {
+    test_group!("communication_items DB エラー");
+    test_case!("create: trigger → 500", {
+        let _db = common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = common::db_rename_flock();
+        let state = common::setup_app_state().await;
+        let base_url = common::spawn_test_server(state.clone()).await;
+        let tenant_id = common::create_test_tenant(&state.pool, "CommCreateErr").await;
+        let jwt = common::create_test_jwt(tenant_id, "admin");
+        let auth = format!("Bearer {jwt}");
+        let client = reqwest::Client::new();
+
+        sqlx::query(
+            r#"CREATE OR REPLACE FUNCTION alc_api.fail_comm_insert() RETURNS trigger AS $$
+            BEGIN RAISE EXCEPTION 'test: communication_items insert blocked'; END;
+            $$ LANGUAGE plpgsql"#,
+        )
+        .execute(&state.pool)
+        .await
+        .unwrap();
+        sqlx::query("CREATE OR REPLACE TRIGGER fail_comm_insert BEFORE INSERT ON alc_api.communication_items FOR EACH ROW EXECUTE FUNCTION alc_api.fail_comm_insert()")
+            .execute(&state.pool).await.unwrap();
+
+        let res = client.post(format!("{base_url}/api/communication-items"))
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({"title": "trigger test", "content": "should fail", "priority": "normal"}))
+            .send().await.unwrap();
+        assert_eq!(res.status(), 500);
+
+        sqlx::query("DROP TRIGGER fail_comm_insert ON alc_api.communication_items")
+            .execute(&state.pool)
+            .await
+            .unwrap();
+        sqlx::query("DROP FUNCTION alc_api.fail_comm_insert")
+            .execute(&state.pool)
+            .await
+            .unwrap();
+    });
 }

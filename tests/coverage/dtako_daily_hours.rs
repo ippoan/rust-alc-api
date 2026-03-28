@@ -5,6 +5,8 @@
 async fn test_daily_segments() {
     test_group!("日別セグメント (カバレッジ)");
     test_case!("セグメント一覧を取得できる", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
         let tenant_id = crate::common::create_test_tenant(&state.pool, "DtakoSeg").await;

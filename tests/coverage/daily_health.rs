@@ -6,6 +6,7 @@ async fn test_daily_health_db_error() {
     test_group!("カバレッジ 100% 補完");
     test_case!("daily-health-status で DB エラー時に 500 を返す", {
         let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
         let tenant_id = crate::common::create_test_tenant(&state.pool, "DHErr").await;
@@ -40,6 +41,7 @@ async fn test_daily_health_safety_judgment_counts() {
     test_group!("カバレッジ 100% 補完");
     test_case!("safety_judgment の pass/fail カウントが正しい", {
         let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
         let tenant_id = crate::common::create_test_tenant(&state.pool, "DHJudge").await;

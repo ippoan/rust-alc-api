@@ -1063,8 +1063,9 @@ async fn test_dtako_get_operation_by_unko_no() {
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
+        let unko_no = 7001;
         // Upload ZIP first
-        let zip_bytes = common::create_test_dtako_zip();
+        let zip_bytes = common::create_test_dtako_zip_with_unko_no(unko_no);
         let file_part = reqwest::multipart::Part::bytes(zip_bytes)
             .file_name("test.zip")
             .mime_str("application/zip")
@@ -1082,7 +1083,7 @@ async fn test_dtako_get_operation_by_unko_no() {
 
         // GET operation by unko_no
         let res = client
-            .get(format!("{base_url}/api/operations/1001"))
+            .get(format!("{base_url}/api/operations/{unko_no}"))
             .header("Authorization", format!("Bearer {jwt}"))
             .send()
             .await
@@ -1093,7 +1094,7 @@ async fn test_dtako_get_operation_by_unko_no() {
             body.as_array().unwrap().len() >= 1,
             "should have at least one operation"
         );
-        assert_eq!(body[0]["unko_no"], "1001");
+        assert_eq!(body[0]["unko_no"], unko_no.to_string());
     });
 }
 
@@ -1127,8 +1128,9 @@ async fn test_dtako_delete_operation_by_unko_no() {
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
+        let unko_no = 7002;
         // Upload ZIP first
-        let zip_bytes = common::create_test_dtako_zip();
+        let zip_bytes = common::create_test_dtako_zip_with_unko_no(unko_no);
         let file_part = reqwest::multipart::Part::bytes(zip_bytes)
             .file_name("test.zip")
             .mime_str("application/zip")
@@ -1146,7 +1148,7 @@ async fn test_dtako_delete_operation_by_unko_no() {
 
         // Verify operation exists
         let res = client
-            .get(format!("{base_url}/api/operations/1001"))
+            .get(format!("{base_url}/api/operations/{unko_no}"))
             .header("Authorization", format!("Bearer {jwt}"))
             .send()
             .await
@@ -1155,7 +1157,7 @@ async fn test_dtako_delete_operation_by_unko_no() {
 
         // DELETE operation
         let res = client
-            .delete(format!("{base_url}/api/operations/1001"))
+            .delete(format!("{base_url}/api/operations/{unko_no}"))
             .header("Authorization", format!("Bearer {jwt}"))
             .send()
             .await
@@ -1164,7 +1166,7 @@ async fn test_dtako_delete_operation_by_unko_no() {
 
         // Verify operation is gone
         let res = client
-            .get(format!("{base_url}/api/operations/1001"))
+            .get(format!("{base_url}/api/operations/{unko_no}"))
             .header("Authorization", format!("Bearer {jwt}"))
             .send()
             .await
@@ -4932,6 +4934,7 @@ async fn test_split_csv_no_kudgivt_in_zip() {
     test_group!("残りエラー注入テスト");
     test_case!("KUDGIVT無しZIPでsplit-csvが成功する", {
         let _db = common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
         let tenant_id = common::create_test_tenant(&state.pool, "SplitNoKGVT").await;
@@ -5418,6 +5421,7 @@ async fn test_split_csv_with_kudgivt_zip() {
     test_group!("未カバー行テスト");
     test_case!("KUDGIVT入りZIPでsplit-csvが成功する", {
         let _db = common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
         let tenant_id = common::create_test_tenant(&state.pool, "SplitKGVT").await;
@@ -5519,6 +5523,7 @@ async fn test_split_csv_with_non_csv_file_in_zip() {
     test_group!("未カバー行テスト");
     test_case!("ZIP内の非CSVファイルをスキップする", {
         let _db = common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = common::db_rename_flock();
         use std::io::Write;
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
@@ -5585,6 +5590,7 @@ async fn test_upload_split_csv_from_r2_error_via_trigger() {
         {
             // trigger はグローバルに影響するため DB_RENAME_LOCK で直列化
             let _db = common::DB_RENAME_LOCK.lock().unwrap();
+            let _flock = common::db_rename_flock();
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
             let tenant_id = common::create_test_tenant(&state.pool, "SplitTrig").await;

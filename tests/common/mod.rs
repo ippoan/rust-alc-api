@@ -20,8 +20,34 @@ pub const TEST_JWT_SECRET: &str = "test-jwt-secret-for-integration-tests-2026";
 pub static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// ALTER TABLE RENAME を使うテスト同士の直列化用ロック
-/// (RENAME はスキーマ変更なので並列実行すると他テストが壊れる)
+/// プロセス内 Mutex + ファイルロック (flock) でバイナリ間も直列化
 pub static DB_RENAME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// ファイルロック (flock) でバイナリ間の直列化 (RENAME/trigger テスト用)
+/// DB_RENAME_LOCK (プロセス内) と併用する。drop で自動解放。
+pub struct FileLockGuard(std::fs::File);
+
+impl Drop for FileLockGuard {
+    fn drop(&mut self) {
+        use std::os::unix::io::AsRawFd;
+        unsafe {
+            libc::flock(self.0.as_raw_fd(), libc::LOCK_UN);
+        }
+    }
+}
+
+pub fn db_rename_flock() -> FileLockGuard {
+    use std::os::unix::io::AsRawFd;
+    let path = format!("{}/target/.db-rename.lock", env!("CARGO_MANIFEST_DIR"));
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .open(&path)
+        .expect("Failed to open lock file");
+    let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) };
+    assert_eq!(rc, 0, "flock failed");
+    FileLockGuard(file)
+}
 
 /// email_domain='example.com' を使う Google login テストの直列化用ロック
 /// (複数テナントが同じ email_domain を持つと google login ハンドラが混乱する)
@@ -227,14 +253,23 @@ pub fn create_test_jwt(tenant_id: Uuid, role: &str) -> String {
 
 /// dtako テスト用の最小 ZIP (KUDGURI.csv + KUDGIVT.csv) を生成
 pub fn create_test_dtako_zip() -> Vec<u8> {
+    create_test_dtako_zip_with_unko_no(1001)
+}
+
+/// dtako テスト用の最小 ZIP (unko_no 指定版)
+pub fn create_test_dtako_zip_with_unko_no(unko_no: u32) -> Vec<u8> {
     use std::io::Write;
 
-    let kudguri_csv =
+    let kudguri_csv = format!(
         "運行NO,読取日,事業所CD,事業所名,車輌CD,車輌名,乗務員CD1,乗務員名１,対象乗務員区分\n\
-                       1001,2026/03/01,OFF01,テスト事業所,VH01,テスト車両,DR01,テスト運転者,1\n";
-    let kudgivt_csv =
+                       {unko_no},2026/03/01,OFF01,テスト事業所,VH01,テスト車両,DR01,テスト運転者,1\n"
+    );
+    let kudgivt_csv = format!(
         "運行NO,読取日,乗務員CD1,乗務員名１,対象乗務員区分,開始日時,イベントCD,イベント名\n\
-                       1001,2026/03/01,DR01,テスト運転者,1,2026/03/01 08:00:00,100,出庫\n";
+                       {unko_no},2026/03/01,DR01,テスト運転者,1,2026/03/01 08:00:00,100,出庫\n"
+    );
+    let kudguri_csv = kudguri_csv.as_str();
+    let kudgivt_csv = kudgivt_csv.as_str();
 
     // Shift-JIS にエンコード
     let (kudguri_bytes, _, _) = encoding_rs::SHIFT_JIS.encode(kudguri_csv);

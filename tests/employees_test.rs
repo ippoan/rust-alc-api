@@ -957,3 +957,38 @@ async fn test_update_face_photo_only_no_status_change() {
         }
     );
 }
+
+// ============================================================
+// DB error paths & CONFLICT
+// ============================================================
+
+// create_employee_db_error → tests/coverage/employees_coverage.rs (trigger pattern)
+
+#[tokio::test]
+async fn test_update_employee_code_conflict() {
+    test_group!("DBエラー");
+    test_case!("重複コードで更新すると409", {
+        let state = common::setup_app_state().await;
+        let base_url = common::spawn_test_server(state.clone()).await;
+        let tenant_id = common::create_test_tenant(&state.pool, "CodeConflict").await;
+        let jwt = common::create_test_jwt(tenant_id, "admin");
+        let auth = format!("Bearer {jwt}");
+        let client = reqwest::Client::new();
+
+        let emp1 = common::create_test_employee(&client, &base_url, &auth, "Emp1", "CODE-A").await;
+        let _emp2 = common::create_test_employee(&client, &base_url, &auth, "Emp2", "CODE-B").await;
+        let id1 = emp1["id"].as_str().unwrap();
+
+        // Update emp1's code to CODE-B → conflict
+        let res = client
+            .put(format!("{base_url}/api/employees/{id1}"))
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({ "name": "Emp1", "code": "CODE-B" }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 409);
+    });
+}
+
+// DB error tests → tests/coverage/employees_coverage.rs (trigger pattern)

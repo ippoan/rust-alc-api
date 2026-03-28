@@ -54,6 +54,8 @@ async fn csv_proxy_setup_and_get(
 async fn test_ferry() {
     test_group!("デタコCSVプロキシ (カバレッジ)");
     test_case!("ferry CSVをJSON形式で取得できる", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let status = csv_proxy_setup_and_get("ferry", "KUDGFRY.csv", "CsvFerry").await;
         assert_eq!(status, 200);
     });
@@ -64,6 +66,8 @@ async fn test_ferry() {
 async fn test_tolls() {
     test_group!("デタコCSVプロキシ (カバレッジ)");
     test_case!("tolls CSVをJSON形式で取得できる", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let status = csv_proxy_setup_and_get("tolls", "KUDGSIR.csv", "CsvTolls").await;
         assert_eq!(status, 200);
     });
@@ -74,6 +78,8 @@ async fn test_tolls() {
 async fn test_speed() {
     test_group!("デタコCSVプロキシ (カバレッジ)");
     test_case!("speed CSVをJSON形式で取得できる", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let status = csv_proxy_setup_and_get("speed", "SOKUDODATA.csv", "CsvSpeed").await;
         assert_eq!(status, 200);
     });
@@ -84,6 +90,8 @@ async fn test_speed() {
 async fn test_invalid_type() {
     test_group!("デタコCSVプロキシ (カバレッジ)");
     test_case!("不正なCSVタイプで400を返す", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
         let tenant_id = crate::common::create_test_tenant(&state.pool, "CsvBad").await;
@@ -104,6 +112,8 @@ async fn test_invalid_type() {
 async fn test_not_found() {
     test_group!("デタコCSVプロキシ (カバレッジ)");
     test_case!("存在しないCSVで404を返す", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
         let tenant_id = crate::common::create_test_tenant(&state.pool, "CsvNF").await;
@@ -143,6 +153,8 @@ async fn test_no_operation_record() {
     test_case!(
         "操作レコードなしでフォールバックキーを使う",
         {
+            let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+            let _flock = crate::common::db_rename_flock();
             let state = crate::common::setup_app_state().await;
             let base_url = crate::common::spawn_test_server(state.clone()).await;
             let tenant_id = crate::common::create_test_tenant(&state.pool, "CsvNoOp").await;

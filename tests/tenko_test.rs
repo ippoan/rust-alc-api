@@ -3254,3 +3254,348 @@ async fn test_check_overdue_with_overdue_schedule() {
         }
     );
 }
+
+// ============================================================
+// Equipment Failures — DB error (trigger)
+// ============================================================
+
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_equipment_failure_create_db_error() {
+    test_group!("equipment_failures DB エラー");
+    test_case!("create_failure: trigger → 500", {
+        let _db = common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = common::db_rename_flock();
+        let state = common::setup_app_state().await;
+        let base_url = common::spawn_test_server(state.clone()).await;
+        let tenant_id = common::create_test_tenant(&state.pool, "EqFailErr").await;
+        let jwt = common::create_test_jwt(tenant_id, "admin");
+        let auth = format!("Bearer {jwt}");
+        let client = reqwest::Client::new();
+
+        // Create trigger to block INSERT
+        sqlx::query(
+            r#"CREATE OR REPLACE FUNCTION alc_api.fail_eq_insert() RETURNS trigger AS $$
+               BEGIN RAISE EXCEPTION 'test: equipment_failures insert blocked'; END;
+               $$ LANGUAGE plpgsql"#,
+        )
+        .execute(&state.pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "CREATE OR REPLACE TRIGGER fail_eq_insert BEFORE INSERT ON alc_api.equipment_failures \
+             FOR EACH ROW EXECUTE FUNCTION alc_api.fail_eq_insert()",
+        )
+        .execute(&state.pool)
+        .await
+        .unwrap();
+
+        let res = client
+            .post(format!("{base_url}/api/tenko/equipment-failures"))
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({
+                "failure_type": "manual_report",
+                "description": "trigger test"
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 500, "equipment_failures INSERT should fail");
+
+        // Cleanup
+        sqlx::query("DROP TRIGGER fail_eq_insert ON alc_api.equipment_failures")
+            .execute(&state.pool)
+            .await
+            .unwrap();
+        sqlx::query("DROP FUNCTION alc_api.fail_eq_insert")
+            .execute(&state.pool)
+            .await
+            .unwrap();
+    });
+}
+
+// ============================================================
+// Equipment Failures — list DB error (RENAME)
+// ============================================================
+
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_equipment_failure_list_db_error() {
+    test_group!("equipment_failures DB エラー");
+    test_case!("list_failures: RENAME → 500", {
+        let _db = common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = common::db_rename_flock();
+        let state = common::setup_app_state().await;
+        let base_url = common::spawn_test_server(state.clone()).await;
+        let tenant_id = common::create_test_tenant(&state.pool, "EqListErr").await;
+        let jwt = common::create_test_jwt(tenant_id, "admin");
+        let auth = format!("Bearer {jwt}");
+        let client = reqwest::Client::new();
+
+        sqlx::query("ALTER TABLE alc_api.equipment_failures RENAME TO equipment_failures_bak")
+            .execute(&state.pool)
+            .await
+            .unwrap();
+
+        let res = client
+            .get(format!("{base_url}/api/tenko/equipment-failures"))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 500);
+
+        sqlx::query("ALTER TABLE alc_api.equipment_failures_bak RENAME TO equipment_failures")
+            .execute(&state.pool)
+            .await
+            .unwrap();
+    });
+}
+
+// ============================================================
+// Tenko Schedules — DB errors (trigger + RENAME)
+// ============================================================
+
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_tenko_schedule_create_db_error() {
+    test_group!("tenko_schedules DB エラー");
+    test_case!("create_schedule: trigger → 500", {
+        let _db = common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = common::db_rename_flock();
+        let state = common::setup_app_state().await;
+        let base_url = common::spawn_test_server(state.clone()).await;
+        let tenant_id = common::create_test_tenant(&state.pool, "SchedCreateErr").await;
+        let jwt = common::create_test_jwt(tenant_id, "admin");
+        let auth = format!("Bearer {jwt}");
+        let client = reqwest::Client::new();
+
+        // Create employee for schedule
+        let emp =
+            common::create_test_employee(&client, &base_url, &auth, "SchedErrEmp", "SE001").await;
+        let emp_id = emp["id"].as_str().unwrap();
+
+        // Create trigger to block INSERT
+        sqlx::query(
+            r#"CREATE OR REPLACE FUNCTION alc_api.fail_sched_insert() RETURNS trigger AS $$
+               BEGIN RAISE EXCEPTION 'test: tenko_schedules insert blocked'; END;
+               $$ LANGUAGE plpgsql"#,
+        )
+        .execute(&state.pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "CREATE OR REPLACE TRIGGER fail_sched_insert BEFORE INSERT ON alc_api.tenko_schedules \
+             FOR EACH ROW EXECUTE FUNCTION alc_api.fail_sched_insert()",
+        )
+        .execute(&state.pool)
+        .await
+        .unwrap();
+
+        let res = client
+            .post(format!("{base_url}/api/tenko/schedules"))
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({
+                "employee_id": emp_id,
+                "tenko_type": "pre_operation",
+                "responsible_manager_name": "テスト管理者",
+                "scheduled_at": "2099-01-01T09:00:00Z",
+                "instruction": "テスト指示"
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 500, "schedule INSERT should fail");
+
+        // Cleanup
+        sqlx::query("DROP TRIGGER fail_sched_insert ON alc_api.tenko_schedules")
+            .execute(&state.pool)
+            .await
+            .unwrap();
+        sqlx::query("DROP FUNCTION alc_api.fail_sched_insert")
+            .execute(&state.pool)
+            .await
+            .unwrap();
+    });
+}
+
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_tenko_schedule_list_db_error() {
+    test_group!("tenko_schedules DB エラー");
+    test_case!("list_schedules: RENAME → 500", {
+        let _db = common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = common::db_rename_flock();
+        let state = common::setup_app_state().await;
+        let base_url = common::spawn_test_server(state.clone()).await;
+        let tenant_id = common::create_test_tenant(&state.pool, "SchedListErr").await;
+        let jwt = common::create_test_jwt(tenant_id, "admin");
+        let auth = format!("Bearer {jwt}");
+        let client = reqwest::Client::new();
+
+        sqlx::query("ALTER TABLE alc_api.tenko_schedules RENAME TO tenko_schedules_bak")
+            .execute(&state.pool)
+            .await
+            .unwrap();
+
+        let res = client
+            .get(format!("{base_url}/api/tenko/schedules"))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 500);
+
+        sqlx::query("ALTER TABLE alc_api.tenko_schedules_bak RENAME TO tenko_schedules")
+            .execute(&state.pool)
+            .await
+            .unwrap();
+    });
+}
+
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_tenko_schedule_update_db_error() {
+    test_group!("tenko_schedules DB エラー");
+    test_case!("update_schedule: trigger → 500", {
+        let _db = common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = common::db_rename_flock();
+        let state = common::setup_app_state().await;
+        let base_url = common::spawn_test_server(state.clone()).await;
+        let tenant_id = common::create_test_tenant(&state.pool, "SchedUpdErr").await;
+        let jwt = common::create_test_jwt(tenant_id, "admin");
+        let auth = format!("Bearer {jwt}");
+        let client = reqwest::Client::new();
+
+        // Create employee + schedule first
+        let emp =
+            common::create_test_employee(&client, &base_url, &auth, "SchedUpdEmp", "SU001").await;
+        let emp_id = emp["id"].as_str().unwrap();
+        let res = client
+            .post(format!("{base_url}/api/tenko/schedules"))
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({
+                "employee_id": emp_id,
+                "tenko_type": "pre_operation",
+                "responsible_manager_name": "テスト管理者",
+                "scheduled_at": "2099-01-01T09:00:00Z",
+                "instruction": "テスト指示"
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 201);
+        let body: serde_json::Value = res.json().await.unwrap();
+        let sid = body["id"].as_str().unwrap();
+
+        // Create trigger to block UPDATE
+        sqlx::query(
+            r#"CREATE OR REPLACE FUNCTION alc_api.fail_sched_update() RETURNS trigger AS $$
+               BEGIN RAISE EXCEPTION 'test: tenko_schedules update blocked'; END;
+               $$ LANGUAGE plpgsql"#,
+        )
+        .execute(&state.pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "CREATE OR REPLACE TRIGGER fail_sched_update BEFORE UPDATE ON alc_api.tenko_schedules \
+             FOR EACH ROW EXECUTE FUNCTION alc_api.fail_sched_update()",
+        )
+        .execute(&state.pool)
+        .await
+        .unwrap();
+
+        let res = client
+            .put(format!("{base_url}/api/tenko/schedules/{sid}"))
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({
+                "responsible_manager_name": "更新テスト"
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 500, "schedule UPDATE should fail");
+
+        // Cleanup
+        sqlx::query("DROP TRIGGER fail_sched_update ON alc_api.tenko_schedules")
+            .execute(&state.pool)
+            .await
+            .unwrap();
+        sqlx::query("DROP FUNCTION alc_api.fail_sched_update")
+            .execute(&state.pool)
+            .await
+            .unwrap();
+    });
+}
+
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_tenko_schedule_delete_db_error() {
+    test_group!("tenko_schedules DB エラー");
+    test_case!("delete_schedule: trigger → 500", {
+        let _db = common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = common::db_rename_flock();
+        let state = common::setup_app_state().await;
+        let base_url = common::spawn_test_server(state.clone()).await;
+        let tenant_id = common::create_test_tenant(&state.pool, "SchedDelErr").await;
+        let jwt = common::create_test_jwt(tenant_id, "admin");
+        let auth = format!("Bearer {jwt}");
+        let client = reqwest::Client::new();
+
+        // Create employee + schedule first
+        let emp =
+            common::create_test_employee(&client, &base_url, &auth, "SchedDelEmp", "SD001").await;
+        let emp_id = emp["id"].as_str().unwrap();
+        let res = client
+            .post(format!("{base_url}/api/tenko/schedules"))
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({
+                "employee_id": emp_id,
+                "tenko_type": "pre_operation",
+                "responsible_manager_name": "テスト管理者",
+                "scheduled_at": "2099-01-01T09:00:00Z",
+                "instruction": "テスト指示"
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 201);
+        let body: serde_json::Value = res.json().await.unwrap();
+        let sid = body["id"].as_str().unwrap();
+
+        // Create trigger to block DELETE
+        sqlx::query(
+            r#"CREATE OR REPLACE FUNCTION alc_api.fail_sched_delete() RETURNS trigger AS $$
+               BEGIN RAISE EXCEPTION 'test: tenko_schedules delete blocked'; END;
+               $$ LANGUAGE plpgsql"#,
+        )
+        .execute(&state.pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "CREATE OR REPLACE TRIGGER fail_sched_delete BEFORE DELETE ON alc_api.tenko_schedules \
+             FOR EACH ROW EXECUTE FUNCTION alc_api.fail_sched_delete()",
+        )
+        .execute(&state.pool)
+        .await
+        .unwrap();
+
+        let res = client
+            .delete(format!("{base_url}/api/tenko/schedules/{sid}"))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 500, "schedule DELETE should fail");
+
+        // Cleanup
+        sqlx::query("DROP TRIGGER fail_sched_delete ON alc_api.tenko_schedules")
+            .execute(&state.pool)
+            .await
+            .unwrap();
+        sqlx::query("DROP FUNCTION alc_api.fail_sched_delete")
+            .execute(&state.pool)
+            .await
+            .unwrap();
+    });
+}

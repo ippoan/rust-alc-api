@@ -671,3 +671,145 @@ async fn test_sso_forbidden_for_viewer() {
         assert_eq!(res.status(), 403);
     });
 }
+
+// ============================================================
+// Tenant Users: viewer FORBIDDEN tests
+// ============================================================
+
+#[tokio::test]
+async fn test_tenant_users_viewer_forbidden_all() {
+    test_group!("テナントユーザー");
+    test_case!("viewerロールで招待・削除系が403", {
+        let (state, base_url, tenant_id, _jwt, client) = setup_admin().await;
+
+        let (viewer_id, _) =
+            common::create_test_user_in_db(&state.pool, tenant_id, "tu-viewer@test.com", "viewer")
+                .await;
+        let viewer_jwt =
+            common::create_test_jwt_for_user(viewer_id, tenant_id, "tu-viewer@test.com", "viewer");
+
+        // list_invitations → 403
+        let res = client
+            .get(format!("{base_url}/api/admin/users/invitations"))
+            .header("Authorization", format!("Bearer {viewer_jwt}"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 403);
+
+        // create_invitation → 403
+        let res = client
+            .post(format!("{base_url}/api/admin/users/invite"))
+            .header("Authorization", format!("Bearer {viewer_jwt}"))
+            .json(&serde_json::json!({ "email": "x@x.com" }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 403);
+
+        // delete_invitation → 403
+        let res = client
+            .delete(format!(
+                "{base_url}/api/admin/users/invite/{}",
+                uuid::Uuid::new_v4()
+            ))
+            .header("Authorization", format!("Bearer {viewer_jwt}"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 403);
+
+        // delete_user → 403
+        let res = client
+            .delete(format!(
+                "{base_url}/api/admin/users/{}",
+                uuid::Uuid::new_v4()
+            ))
+            .header("Authorization", format!("Bearer {viewer_jwt}"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 403);
+    });
+}
+
+#[tokio::test]
+async fn test_invite_user_invalid_role() {
+    test_group!("テナントユーザー");
+    test_case!("無効なロールで招待すると400", {
+        let (_state, base_url, _tenant_id, jwt, client) = setup_admin().await;
+
+        let res = client
+            .post(format!("{base_url}/api/admin/users/invite"))
+            .header("Authorization", format!("Bearer {jwt}"))
+            .json(&serde_json::json!({ "email": "bad@role.com", "role": "superadmin" }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 400);
+    });
+}
+
+#[tokio::test]
+async fn test_delete_user_self_delete() {
+    test_group!("テナントユーザー");
+    test_case!("自分自身の削除は400", {
+        let (state, base_url, tenant_id, _jwt, client) = setup_admin().await;
+
+        let (self_id, _) =
+            common::create_test_user_in_db(&state.pool, tenant_id, "selfdelete@test.com", "admin")
+                .await;
+        let self_jwt =
+            common::create_test_jwt_for_user(self_id, tenant_id, "selfdelete@test.com", "admin");
+
+        let res = client
+            .delete(format!("{base_url}/api/admin/users/{self_id}"))
+            .header("Authorization", format!("Bearer {self_jwt}"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 400);
+    });
+}
+
+// tenant_users / bot_admin DB error tests → tests/coverage/admin_coverage.rs (RENAME/trigger pattern)
+
+#[tokio::test]
+#[cfg_attr(not(coverage), ignore)]
+async fn test_bot_upsert_encrypt_error_no_key() {
+    test_group!("Bot管理");
+    test_case!("暗号化キーなしでupsertが500", {
+        let _guard = common::ENV_LOCK.lock().unwrap();
+
+        // Remove encryption key env vars
+        std::env::remove_var("SSO_ENCRYPTION_KEY");
+        std::env::remove_var("JWT_SECRET");
+
+        let state = common::setup_app_state().await;
+        let base_url = common::spawn_test_server(state.clone()).await;
+        let tenant_id = common::create_test_tenant(&state.pool, "BotNoKey").await;
+        let (user_id, _) =
+            common::create_test_user_in_db(&state.pool, tenant_id, "botnokey@test.com", "admin")
+                .await;
+        let jwt =
+            common::create_test_jwt_for_user(user_id, tenant_id, "botnokey@test.com", "admin");
+        let client = reqwest::Client::new();
+
+        let res = client
+            .post(format!("{base_url}/api/admin/bot/configs"))
+            .header("Authorization", format!("Bearer {jwt}"))
+            .json(&serde_json::json!({
+                "name": "NoKey", "client_id": "X", "client_secret": "secret",
+                "service_account": "X", "private_key": "pk", "bot_id": "X"
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 500);
+
+        // Restore
+        std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
+    });
+}
+
+// SSO/Bot DB error + encrypt tests → tests/coverage/sso_coverage.rs, tests/coverage/admin_coverage.rs

@@ -14,6 +14,8 @@ use crate::common;
 async fn test_get_scrape_history_empty() {
     test_group!("dtako_scraper カバレッジ");
     test_case!("履歴が空 → 空配列を返す", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
         let tenant_id = common::create_test_tenant(&state.pool, "Scraper Hist").await;
@@ -38,6 +40,8 @@ async fn test_get_scrape_history_empty() {
 async fn test_get_scrape_history_with_data() {
     test_group!("dtako_scraper カバレッジ");
     test_case!("履歴あり → limit/offset 対応", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
         let tenant_id = common::create_test_tenant(&state.pool, "Scraper Hist2").await;
@@ -78,6 +82,8 @@ async fn test_get_scrape_history_with_data() {
 async fn test_trigger_scrape_connection_error() {
     test_group!("dtako_scraper カバレッジ");
     test_case!("scraper 接続不可 → 502", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url =
             common::spawn_test_server_with_scraper(state.clone(), "http://127.0.0.1:19999").await;
@@ -106,6 +112,8 @@ async fn test_trigger_scrape_connection_error() {
 async fn test_trigger_scrape_scraper_error_response() {
     test_group!("dtako_scraper カバレッジ");
     test_case!("scraper 500 レスポンス → 502", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let mock_server = MockServer::start().await;
 
         Mock::given(method("POST"))
@@ -147,6 +155,8 @@ async fn test_trigger_scrape_scraper_error_response() {
 async fn test_trigger_scrape_sse_happy_path() {
     test_group!("dtako_scraper カバレッジ");
     test_case!("scraper SSE レスポンスをプロキシ + DB 保存", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let mock_server = MockServer::start().await;
 
         // SSE レスポンスを返すモック
@@ -223,6 +233,8 @@ async fn test_trigger_scrape_default_date() {
     test_case!(
         "start_date なし → デフォルト昨日 + skip_upload",
         {
+            let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+            let _flock = crate::common::db_rename_flock();
             let mock_server = MockServer::start().await;
 
             let sse_body =
@@ -270,6 +282,8 @@ async fn test_trigger_scrape_invalid_date() {
     test_case!(
         "不正な start_date → パース失敗 → 今日にフォールバック",
         {
+            let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+            let _flock = crate::common::db_rename_flock();
             let mock_server = MockServer::start().await;
 
             let sse_body = "data:{\"event\":\"done\"}\n\n";
@@ -316,6 +330,8 @@ async fn test_trigger_scrape_with_id_token() {
     test_case!(
         "メタデータサーバーから ID トークン取得 → Bearer 付与",
         {
+            let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+            let _flock = crate::common::db_rename_flock();
             let metadata_server = MockServer::start().await;
             let scraper_server = MockServer::start().await;
 
@@ -373,6 +389,8 @@ async fn test_trigger_scrape_metadata_error() {
     test_case!(
         "メタデータサーバー 403 → トークンなしで続行",
         {
+            let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+            let _flock = crate::common::db_rename_flock();
             let metadata_server = MockServer::start().await;
             let scraper_server = MockServer::start().await;
 
@@ -428,6 +446,8 @@ async fn test_trigger_scrape_sse_edge_cases() {
     test_case!(
         "SSE: 空データ行 + non-data 行 + comp_id なし result",
         {
+            let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+            let _flock = crate::common::db_rename_flock();
             let mock_server = MockServer::start().await;
 
             let sse_body = [
@@ -486,6 +506,8 @@ async fn test_get_scrape_history_db_error() {
     test_case!(
         "dtako_scrape_history テーブル RENAME → DB エラー → 500",
         {
+            let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+            let _flock = crate::common::db_rename_flock();
             let state = common::setup_app_state().await;
             let tenant_id = common::create_test_tenant(&state.pool, "Scraper DB Err").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
@@ -516,6 +538,8 @@ async fn test_get_scrape_history_db_error() {
 async fn test_trigger_scrape_client_disconnect() {
     test_group!("dtako_scraper カバレッジ");
     test_case!("SSE ストリーム中にクライアント切断", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let mock_server = MockServer::start().await;
 
         // 大量のイベントを返すモック
@@ -570,6 +594,8 @@ async fn test_trigger_scrape_stream_error() {
     test_group!("dtako_scraper カバレッジ");
     test_case!("不正な chunked encoding → bytes_stream Err", {
         // 生 TCP サーバーで不正な chunked レスポンスを返す
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
 

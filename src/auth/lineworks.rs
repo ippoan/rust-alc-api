@@ -307,7 +307,7 @@ mod tests {
     fn test_decrypt_secret_roundtrip() {
         test_group!("LINE WORKS OAuth");
         test_case!("秘密鍵の暗号化・復号ラウンドトリップ", {
-            use ring::aead::{self, Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
+            use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
             use ring::rand::{SecureRandom, SystemRandom};
 
             let key_material = "test-encryption-key-for-roundtrip";
@@ -340,7 +340,7 @@ mod tests {
     fn test_decrypt_secret_wrong_key() {
         test_group!("LINE WORKS OAuth");
         test_case!("不正なキーで復号失敗", {
-            use ring::aead::{self, Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
+            use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
             use ring::rand::{SecureRandom, SystemRandom};
 
             let key_material = "correct-key";
@@ -380,6 +380,37 @@ mod tests {
         test_case!("短すぎる暗号文で復号失敗", {
             let short = base64::engine::general_purpose::STANDARD.encode(b"short");
             assert!(decrypt_secret(&short, "key").is_err());
+        });
+    }
+
+    #[test]
+    fn test_token_response_expires_in_as_i64() {
+        test_group!("LINE WORKS OAuth");
+        test_case!("TokenResponse: expires_in が数値の場合", {
+            let json = r#"{"access_token":"at","token_type":"Bearer","expires_in":3600}"#;
+            let resp: TokenResponse = serde_json::from_str(json).unwrap();
+            assert_eq!(resp.expires_in, 3600);
+            assert_eq!(resp.access_token, "at");
+        });
+    }
+
+    #[test]
+    fn test_token_response_expires_in_as_string() {
+        test_group!("LINE WORKS OAuth");
+        test_case!("TokenResponse: expires_in が文字列の場合", {
+            let json = r#"{"access_token":"at","token_type":"Bearer","expires_in":"7200"}"#;
+            let resp: TokenResponse = serde_json::from_str(json).unwrap();
+            assert_eq!(resp.expires_in, 7200);
+        });
+    }
+
+    #[test]
+    fn test_token_response_expires_in_invalid_string() {
+        test_group!("LINE WORKS OAuth");
+        test_case!("TokenResponse: expires_in が不正文字列の場合", {
+            let json = r#"{"access_token":"at","token_type":"Bearer","expires_in":"not-a-number"}"#;
+            let result = serde_json::from_str::<TokenResponse>(json);
+            assert!(result.is_err());
         });
     }
 }

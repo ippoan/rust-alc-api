@@ -357,6 +357,95 @@ async fn test_download_file() {
 }
 
 // ============================================================
+// car_inspection / car_inspection_files: DB エラー (table RENAME)
+// ============================================================
+
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_car_inspections_db_error() {
+    test_group!("車検証 DB エラー");
+    test_case!(
+        "car_inspection RENAME → 全エンドポイントが 500 を返す",
+        {
+            let _db = common::DB_RENAME_LOCK.lock().unwrap();
+            let _flock = common::db_rename_flock();
+            let state = common::setup_app_state().await;
+            let base_url = common::spawn_test_server(state.clone()).await;
+            let tenant_id = common::create_test_tenant(&state.pool, "CarInsDbErr").await;
+            let jwt = common::create_test_jwt(tenant_id, "admin");
+            let auth = format!("Bearer {jwt}");
+            let client = reqwest::Client::new();
+
+            // RENAME car_inspection to break all queries
+            sqlx::query("ALTER TABLE alc_api.car_inspection RENAME TO car_inspection_bak")
+                .execute(&state.pool)
+                .await
+                .unwrap();
+
+            // car-inspections/current → 500
+            let res = client
+                .get(format!("{base_url}/api/car-inspections/current"))
+                .header("Authorization", &auth)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 500, "current should 500");
+
+            // car-inspections/{id} → 500
+            let res = client
+                .get(format!("{base_url}/api/car-inspections/1"))
+                .header("Authorization", &auth)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 500, "get_by_id should 500");
+
+            // car-inspections/vehicle-categories → 500
+            let res = client
+                .get(format!("{base_url}/api/car-inspections/vehicle-categories"))
+                .header("Authorization", &auth)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 500, "vehicle-categories should 500");
+
+            // car-inspections/expired → 500
+            let res = client
+                .get(format!("{base_url}/api/car-inspections/expired"))
+                .header("Authorization", &auth)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 500, "expired should 500");
+
+            // car-inspections/renew → 500
+            let res = client
+                .get(format!("{base_url}/api/car-inspections/renew"))
+                .header("Authorization", &auth)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 500, "renew should 500");
+
+            // car-inspection-files/current → 500 (joins car_inspection)
+            let res = client
+                .get(format!("{base_url}/api/car-inspection-files/current"))
+                .header("Authorization", &auth)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 500, "car-inspection-files should 500");
+
+            // Restore
+            sqlx::query("ALTER TABLE alc_api.car_inspection_bak RENAME TO car_inspection")
+                .execute(&state.pool)
+                .await
+                .unwrap();
+        }
+    );
+}
+
+// ============================================================
 // upload: multipart
 // ============================================================
 
