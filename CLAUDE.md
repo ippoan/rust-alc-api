@@ -458,6 +458,7 @@ Google OAuth 以外の端末登録フローを3種類サポート。
 ### 単一テスト CI (`single-test.yml`)
 
 `fix/test_xxx` ブランチを push すると、`test_xxx` だけ `cargo llvm-cov` で実行される。
+**トリガーは `fix/test_*` のみ** — `fix/` 全般ではない（二重 CI 防止）。
 
 ```bash
 # 例: test_communication_items_crud だけ CI で実行
@@ -465,6 +466,7 @@ git push origin fix/test_communication_items_crud
 ```
 
 カバレッジ修正のイテレーションに使用する。全テスト実行は main CI (`ci.yml`) に任せる。
+`fix/` だが `fix/test_` 以外のブランチ（例: `fix/dead_code`）は CI (`ci.yml`) の PR トリガーのみ。
 
 ### ローカルテスト不要のワークフロー
 
