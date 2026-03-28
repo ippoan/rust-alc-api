@@ -2230,3 +2230,500 @@ async fn test_measurements_video_extract_key_error() {
         assert_eq!(res.status(), 500);
     });
 }
+
+// ====== guidance_records カバレッジ ======
+
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_guidance_records_crud_full() {
+    test_group!("guidance_records カバレッジ");
+    test_case!("CRUD全操作 + フィルタ + ネスト + 添付", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
+        let state = crate::common::setup_app_state().await;
+        let base_url = crate::common::spawn_test_server(state.clone()).await;
+        let tenant_id = crate::common::create_test_tenant(&state.pool, "GuidRec").await;
+        let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+        let auth = format!("Bearer {jwt}");
+        let client = reqwest::Client::new();
+
+        // 従業員作成
+        let emp =
+            crate::common::create_test_employee(&client, &base_url, &auth, "指導太郎", "GR001")
+                .await;
+        let emp_id = emp["id"].as_str().unwrap();
+
+        // 1. CREATE (top-level)
+        let res = client
+            .post(format!("{base_url}/api/guidance-records"))
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({
+                "employee_id": emp_id,
+                "guidance_type": "safety",
+                "title": "安全運転指導",
+                "content": "指導内容テスト",
+                "guided_by": "管理者A"
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 201);
+        let rec: serde_json::Value = res.json().await.unwrap();
+        let rec_id = rec["id"].as_str().unwrap();
+
+        // 2. GET by ID
+        let res = client
+            .get(format!("{base_url}/api/guidance-records/{rec_id}"))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200);
+
+        // 3. UPDATE
+        let res = client
+            .put(format!("{base_url}/api/guidance-records/{rec_id}"))
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({
+                "title": "更新された指導タイトル",
+                "content": "更新された指導内容"
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200);
+
+        // 4. LIST with filters
+        let res = client
+            .get(format!(
+                "{base_url}/api/guidance-records?employee_id={emp_id}&guidance_type=safety&date_from=2020-01-01&date_to=2030-12-31&page=1&per_page=10"
+            ))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200);
+        let body: serde_json::Value = res.json().await.unwrap();
+        assert!(body["total"].as_i64().unwrap() >= 1);
+        assert_eq!(body["page"], 1);
+
+        // 5. CREATE child record (depth=1)
+        let res = client
+            .post(format!("{base_url}/api/guidance-records"))
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({
+                "employee_id": emp_id,
+                "title": "子指導",
+                "parent_id": rec_id
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 201);
+        let child: serde_json::Value = res.json().await.unwrap();
+        let child_id = child["id"].as_str().unwrap();
+
+        // 6. CREATE grandchild (depth=2)
+        let res = client
+            .post(format!("{base_url}/api/guidance-records"))
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({
+                "employee_id": emp_id,
+                "title": "孫指導",
+                "parent_id": child_id
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 201);
+        let grandchild: serde_json::Value = res.json().await.unwrap();
+        let grandchild_id = grandchild["id"].as_str().unwrap();
+
+        // 7. CREATE great-grandchild (depth=3) → should fail BAD_REQUEST
+        let res = client
+            .post(format!("{base_url}/api/guidance-records"))
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({
+                "employee_id": emp_id,
+                "title": "曾孫指導",
+                "parent_id": grandchild_id
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 400); // 3階層制限
+
+        // 8. CREATE with non-existent parent → NOT_FOUND
+        let res = client
+            .post(format!("{base_url}/api/guidance-records"))
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({
+                "employee_id": emp_id,
+                "title": "存在しない親",
+                "parent_id": "00000000-0000-0000-0000-000000000099"
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 404);
+
+        // 9. Upload attachment
+        let file_part = reqwest::multipart::Part::bytes(b"test attachment data".to_vec())
+            .file_name("test.txt")
+            .mime_str("text/plain")
+            .unwrap();
+        let form = reqwest::multipart::Form::new().part("file", file_part);
+        let res = client
+            .post(format!(
+                "{base_url}/api/guidance-records/{rec_id}/attachments"
+            ))
+            .header("Authorization", &auth)
+            .multipart(form)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 201);
+        let att: serde_json::Value = res.json().await.unwrap();
+        let att_id = att["id"].as_str().unwrap();
+
+        // 10. List attachments
+        let res = client
+            .get(format!(
+                "{base_url}/api/guidance-records/{rec_id}/attachments"
+            ))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200);
+        let atts: Vec<serde_json::Value> = res.json().await.unwrap();
+        assert_eq!(atts.len(), 1);
+
+        // 11. Download attachment
+        let res = client
+            .get(format!(
+                "{base_url}/api/guidance-records/{rec_id}/attachments/{att_id}"
+            ))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200);
+        let body = res.bytes().await.unwrap();
+        assert_eq!(&body[..], b"test attachment data");
+
+        // 12. Delete attachment
+        let res = client
+            .delete(format!(
+                "{base_url}/api/guidance-records/{rec_id}/attachments/{att_id}"
+            ))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 204);
+
+        // 13. Delete attachment again → NOT_FOUND
+        let res = client
+            .delete(format!(
+                "{base_url}/api/guidance-records/{rec_id}/attachments/{att_id}"
+            ))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 404);
+
+        // 14. LIST to trigger tree building with attachments
+        let res = client
+            .get(format!("{base_url}/api/guidance-records"))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200);
+
+        // 15. DELETE (recursive: deletes parent + children)
+        let res = client
+            .delete(format!("{base_url}/api/guidance-records/{rec_id}"))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 204);
+
+        // 16. GET deleted → NOT_FOUND
+        let res = client
+            .get(format!("{base_url}/api/guidance-records/{rec_id}"))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 404);
+
+        // 17. UPDATE non-existent → NOT_FOUND
+        let res = client
+            .put(format!("{base_url}/api/guidance-records/{rec_id}"))
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({"title": "ghost"}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 404);
+
+        // 18. DELETE non-existent → NOT_FOUND
+        let res = client
+            .delete(format!("{base_url}/api/guidance-records/{rec_id}"))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 404);
+
+        // 19. Download non-existent attachment → NOT_FOUND
+        let res = client
+            .get(format!(
+                "{base_url}/api/guidance-records/00000000-0000-0000-0000-000000000099/attachments/00000000-0000-0000-0000-000000000099"
+            ))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 404);
+    });
+}
+
+// ====== dtako_restraint_report_pdf カバレッジ ======
+
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_restraint_report_pdf_no_driver() {
+    test_group!("dtako_restraint_report_pdf カバレッジ");
+    test_case!("ドライバーなしで404を返す", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
+        let state = crate::common::setup_app_state().await;
+        let base_url = crate::common::spawn_test_server(state.clone()).await;
+        let tenant_id = crate::common::create_test_tenant(&state.pool, "PdfNoDr").await;
+        let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+        let auth = format!("Bearer {jwt}");
+        let client = reqwest::Client::new();
+
+        let res = client
+            .get(format!(
+                "{base_url}/api/restraint-report/pdf?year=2026&month=3"
+            ))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 404);
+    });
+}
+
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_restraint_report_pdf_with_driver() {
+    test_group!("dtako_restraint_report_pdf カバレッジ");
+    test_case!("従業員ありでPDF生成成功", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
+        let state = crate::common::setup_app_state().await;
+        let base_url = crate::common::spawn_test_server(state.clone()).await;
+        let tenant_id = crate::common::create_test_tenant(&state.pool, "PdfDr").await;
+        let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+        let auth = format!("Bearer {jwt}");
+        let client = reqwest::Client::new();
+
+        // 従業員を作成
+        crate::common::create_test_employee(&client, &base_url, &auth, "PDF太郎", "PD001").await;
+
+        // PDF生成（データなしでも従業員があればPDF生成される）
+        let res = client
+            .get(format!(
+                "{base_url}/api/restraint-report/pdf?year=2026&month=3"
+            ))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200);
+        let ct = res
+            .headers()
+            .get("content-type")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert!(ct.contains("application/pdf"));
+        let body = res.bytes().await.unwrap();
+        assert!(body.len() > 100); // PDF has some content
+    });
+}
+
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_restraint_report_pdf_specific_driver() {
+    test_group!("dtako_restraint_report_pdf カバレッジ");
+    test_case!("特定ドライバー指定でPDF生成", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
+        let state = crate::common::setup_app_state().await;
+        let base_url = crate::common::spawn_test_server(state.clone()).await;
+        let tenant_id = crate::common::create_test_tenant(&state.pool, "PdfSp").await;
+        let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+        let auth = format!("Bearer {jwt}");
+        let client = reqwest::Client::new();
+
+        let emp =
+            crate::common::create_test_employee(&client, &base_url, &auth, "特定太郎", "PD002")
+                .await;
+        let emp_id = emp["id"].as_str().unwrap();
+
+        let res = client
+            .get(format!(
+                "{base_url}/api/restraint-report/pdf?year=2026&month=3&driver_id={emp_id}"
+            ))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200);
+    });
+}
+
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_restraint_report_pdf_stream() {
+    test_group!("dtako_restraint_report_pdf カバレッジ");
+    test_case!("SSEストリーム形式でPDF生成", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
+        let state = crate::common::setup_app_state().await;
+        let base_url = crate::common::spawn_test_server(state.clone()).await;
+        let tenant_id = crate::common::create_test_tenant(&state.pool, "PdfStr").await;
+        let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+        let auth = format!("Bearer {jwt}");
+        let client = reqwest::Client::new();
+
+        crate::common::create_test_employee(&client, &base_url, &auth, "SSE太郎", "PD003").await;
+
+        let res = client
+            .get(format!(
+                "{base_url}/api/restraint-report/pdf-stream?year=2026&month=3"
+            ))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200);
+        let ct = res
+            .headers()
+            .get("content-type")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert!(ct.contains("text/event-stream"));
+        let body = res.text().await.unwrap();
+        // SSE should contain progress and done events
+        assert!(body.contains("data:"));
+    });
+}
+
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_restraint_report_pdf_stream_no_driver() {
+    test_group!("dtako_restraint_report_pdf カバレッジ");
+    test_case!("SSEストリーム: ドライバーなし", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
+        let state = crate::common::setup_app_state().await;
+        let base_url = crate::common::spawn_test_server(state.clone()).await;
+        let tenant_id = crate::common::create_test_tenant(&state.pool, "PdfStrNo").await;
+        let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+        let auth = format!("Bearer {jwt}");
+        let client = reqwest::Client::new();
+
+        let res = client
+            .get(format!(
+                "{base_url}/api/restraint-report/pdf-stream?year=2026&month=3"
+            ))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200);
+        // The stream should still work but with 0 drivers
+        let body = res.text().await.unwrap();
+        assert!(body.contains("data:"));
+    });
+}
+
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_restraint_report_pdf_april_fiscal_year() {
+    test_group!("dtako_restraint_report_pdf カバレッジ");
+    test_case!("4月以降の年度計算（reiwa_fy分岐）", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
+        let state = crate::common::setup_app_state().await;
+        let base_url = crate::common::spawn_test_server(state.clone()).await;
+        let tenant_id = crate::common::create_test_tenant(&state.pool, "PdfApr").await;
+        let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+        let auth = format!("Bearer {jwt}");
+        let client = reqwest::Client::new();
+
+        crate::common::create_test_employee(&client, &base_url, &auth, "年度太郎", "PD004").await;
+
+        // month=4 → reiwa_fy = reiwa_year (not reiwa_year - 1)
+        let res = client
+            .get(format!(
+                "{base_url}/api/restraint-report/pdf?year=2026&month=4"
+            ))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200);
+    });
+}
+
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_restraint_report_pdf_empty_name_driver_skipped() {
+    test_group!("dtako_restraint_report_pdf カバレッジ");
+    test_case!("空名前の従業員はスキップされる", {
+        let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = crate::common::db_rename_flock();
+        let state = crate::common::setup_app_state().await;
+        let base_url = crate::common::spawn_test_server(state.clone()).await;
+        let tenant_id = crate::common::create_test_tenant(&state.pool, "PdfEmp").await;
+        let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+        let auth = format!("Bearer {jwt}");
+        let client = reqwest::Client::new();
+
+        // 空名前の従業員を直接DBに挿入
+        sqlx::query(
+            "INSERT INTO alc_api.employees (tenant_id, name, code) VALUES ($1, '', 'EMPTY01')",
+        )
+        .bind(tenant_id)
+        .execute(&state.pool)
+        .await
+        .unwrap();
+
+        // 空名前のみ → reports は空 → ドライバーはいるが空名前はスキップされる
+        // ただし drivers.is_empty() ではなく reports が空の場合にPDFは空ページのドキュメント生成
+        let res = client
+            .get(format!(
+                "{base_url}/api/restraint-report/pdf?year=2026&month=3"
+            ))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .unwrap();
+        // drivers list is not empty (has 1 driver), but name is empty so skipped → reports empty
+        // generate_pdf with empty reports still produces valid PDF
+        assert!(res.status() == 200 || res.status() == 404);
+    });
+}

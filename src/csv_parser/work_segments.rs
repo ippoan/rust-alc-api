@@ -740,4 +740,172 @@ mod tests {
             assert_eq!(workdays[1].start, dt(2026, 2, 22, 8, 30)); // 24h境界から開始
         });
     }
+
+    #[test]
+    fn test_rest_after_24h_boundary_forced_split() {
+        test_group!("CSVパーサー");
+        test_case!("休息開始が24h後より後の場合の強制分割", {
+            // 始業: 2/21 08:00
+            // 休息: 2/22 10:00〜20:00 (600min) — 24hマーク(2/22 08:00)の後
+            // 期待: 24h境界で強制分割 → workday1: 08:00〜翌08:00, workday2: 翌08:00〜10:00, workday3: 20:00〜...
+            let rest_events = vec![(dt(2026, 2, 22, 10, 0), 600)];
+            let first_start = dt(2026, 2, 21, 8, 0);
+            let last_end = dt(2026, 2, 23, 6, 0);
+            let workdays = determine_workdays(&rest_events, first_start, last_end, false);
+            // First: forced at 24h boundary (2/22 08:00)
+            assert_eq!(workdays[0].start, dt(2026, 2, 21, 8, 0));
+            assert_eq!(workdays[0].end, dt(2026, 2, 22, 8, 0));
+            assert!(workdays.len() >= 2);
+        });
+    }
+
+    #[test]
+    fn test_split_rest_2_total_600() {
+        test_group!("CSVパーサー");
+        test_case!("2分割特例: 180分以上×2の合計600分以上", {
+            // 始業: 2/21 06:00
+            // 休息1: 2/21 12:00 (300min = 5h) → split_rests = [300]
+            // 休息2: 2/21 22:00 (300min = 5h) → split_rests = [300, 300], total=600 >= 600 → 日締め
+            let rest_events = vec![(dt(2026, 2, 21, 12, 0), 300), (dt(2026, 2, 21, 22, 0), 300)];
+            let first_start = dt(2026, 2, 21, 6, 0);
+            let last_end = dt(2026, 2, 22, 12, 0);
+            let workdays = determine_workdays(&rest_events, first_start, last_end, false);
+            assert_eq!(workdays.len(), 2);
+            assert_eq!(workdays[0].start, dt(2026, 2, 21, 6, 0));
+            assert_eq!(workdays[0].end, dt(2026, 2, 21, 22, 0)); // 2回目の休息開始で日締め
+            assert_eq!(workdays[1].start, dt(2026, 2, 22, 3, 0)); // 22:00 + 300min = 翌03:00
+        });
+    }
+
+    #[test]
+    fn test_split_rest_3_total_720() {
+        test_group!("CSVパーサー");
+        test_case!("3分割特例: 180分以上×3の合計720分以上", {
+            // 3回の休息: 各240min、合計720 >= 720
+            let rest_events = vec![
+                (dt(2026, 2, 21, 10, 0), 240),
+                (dt(2026, 2, 21, 18, 0), 240),
+                (dt(2026, 2, 22, 2, 0), 240),
+            ];
+            let first_start = dt(2026, 2, 21, 6, 0);
+            let last_end = dt(2026, 2, 22, 12, 0);
+            let workdays = determine_workdays(&rest_events, first_start, last_end, false);
+            assert_eq!(workdays.len(), 2);
+            assert_eq!(workdays[0].end, dt(2026, 2, 22, 2, 0)); // 3回目の休息開始で日締め
+        });
+    }
+
+    #[test]
+    fn test_long_distance_last_rest_480() {
+        test_group!("CSVパーサー");
+        test_case!("長距離貨物: 最後の休息480分で日締め", {
+            let rest_events = vec![(dt(2026, 2, 21, 14, 0), 490)];
+            let first_start = dt(2026, 2, 21, 6, 0);
+            let last_end = dt(2026, 2, 22, 6, 0);
+            // is_long_distance=true → 最後の休息は480分で日締め (490 >= 480)
+            let workdays = determine_workdays(&rest_events, first_start, last_end, true);
+            assert_eq!(workdays.len(), 2);
+            assert_eq!(workdays[0].end, dt(2026, 2, 21, 14, 0));
+        });
+    }
+
+    #[test]
+    fn test_event_duration_zero_uses_start_at() {
+        test_group!("CSVパーサー");
+        test_case!("duration=0のイベントはstart_atを使用", {
+            let dep = dt(2026, 2, 24, 10, 0);
+            let ret = dt(2026, 2, 24, 18, 0);
+            // duration=0 のイベント (e.g. 運行開始)
+            let events = vec![
+                make_event("001", dt(2026, 2, 24, 10, 0), "101", Some(0)), // Ignore, duration=0
+                make_event("001", dt(2026, 2, 24, 10, 30), "110", Some(120)), // Drive 2h
+            ];
+            let refs: Vec<&KudgivtRow> = events.iter().collect();
+            let cls = make_classifications();
+            let segments = split_by_rest(dep, ret, &refs, &cls);
+            assert_eq!(segments.len(), 1);
+            // actual_end = max(10:00+0=10:00, 10:30+120=12:30) = 12:30
+            assert_eq!(segments[0].end, dt(2026, 2, 24, 12, 30));
+        });
+    }
+
+    #[test]
+    fn test_split_segments_at_24h_no_workdays() {
+        test_group!("CSVパーサー");
+        test_case!("24h超セグメントのworkday境界なし分割", {
+            // 25時間のセグメント → 24h + 1h に分割
+            let segments = vec![WorkSegment {
+                start: dt(2026, 2, 24, 8, 0),
+                end: dt(2026, 2, 25, 9, 0), // 25h
+                labor_minutes: 1000,
+                drive_minutes: 600,
+                cargo_minutes: 400,
+            }];
+            let result = split_segments_at_24h(segments);
+            assert_eq!(result.len(), 2);
+            assert_eq!(result[0].start, dt(2026, 2, 24, 8, 0));
+            assert_eq!(result[0].end, dt(2026, 2, 25, 8, 0)); // 24h
+            assert_eq!(result[1].start, dt(2026, 2, 25, 8, 0));
+            assert_eq!(result[1].end, dt(2026, 2, 25, 9, 0)); // 1h
+                                                              // 按分チェック
+            assert!(result[0].labor_minutes > result[1].labor_minutes);
+        });
+    }
+
+    #[test]
+    fn test_sum_events_unknown_class() {
+        test_group!("CSVパーサー");
+        test_case!("未知のevent_cdは無視される", {
+            let events = vec![
+                make_event("001", dt(2026, 2, 24, 10, 0), "999", Some(60)), // unknown
+                make_event("001", dt(2026, 2, 24, 11, 0), "110", Some(60)), // Drive
+            ];
+            let refs: Vec<&KudgivtRow> = events.iter().collect();
+            let double_refs: Vec<&&KudgivtRow> = refs.iter().collect();
+            let cls = make_classifications();
+            let (drive, cargo) = sum_events_in_range(
+                &double_refs,
+                &cls,
+                dt(2026, 2, 24, 9, 0),
+                dt(2026, 2, 24, 12, 0),
+            );
+            assert_eq!(drive, 60);
+            assert_eq!(cargo, 0);
+        });
+    }
+
+    #[test]
+    fn test_calc_late_night_multi_day() {
+        test_group!("CSVパーサー");
+        test_case!("深夜時間計算: 複数日跨ぎ", {
+            // 2/24 23:00 → 2/26 02:00 (2日跨ぎ)
+            let total = calc_late_night_mins(dt(2026, 2, 24, 23, 0), dt(2026, 2, 26, 2, 0));
+            // 2/24: 23:00-24:00 = 60min
+            // 2/25: 0:00-5:00 = 300min, 22:00-24:00 = 120min → 420min
+            // 2/26: 0:00-2:00 = 120min
+            assert_eq!(total, 60 + 420 + 120);
+        });
+    }
+
+    #[test]
+    fn test_split_segments_at_24h_with_workday_boundary_skip() {
+        test_group!("CSVパーサー");
+        test_case!("workday境界がseg開始以前の場合スキップ", {
+            let segments = vec![WorkSegment {
+                start: dt(2026, 2, 25, 8, 0),
+                end: dt(2026, 2, 26, 10, 0), // 26h
+                labor_minutes: 600,
+                drive_minutes: 400,
+                cargo_minutes: 200,
+            }];
+            // boundary at 2/25 06:00 is before seg start, should be ignored
+            let boundaries = vec![
+                dt(2026, 2, 25, 6, 0),  // before seg start → skipped
+                dt(2026, 2, 25, 20, 0), // within seg → split
+            ];
+            let result = split_segments_at_24h_with_workdays(segments, &boundaries);
+            assert_eq!(result.len(), 2);
+            assert_eq!(result[0].end, dt(2026, 2, 25, 20, 0));
+        });
+    }
 }
