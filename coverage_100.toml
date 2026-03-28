@@ -182,3 +182,27 @@ test_file = "tests/coverage/main.rs"
 path = "src/routes/tenko_webhooks.rs"
 type = "integration"
 test_file = "tests/coverage/main.rs"
+
+[[files]]
+path = "src/routes/bot_admin.rs"
+type = "integration"
+test_file = "tests/coverage/main.rs"
+
+[[files]]
+path = "src/auth/lineworks.rs"
+type = "both"
+
+[[files]]
+path = "src/routes/carins_files.rs"
+type = "integration"
+test_file = "tests/coverage/main.rs"
+
+[[files]]
+path = "src/routes/measurements.rs"
+type = "integration"
+test_file = "tests/coverage/main.rs"
+
+[[files]]
+path = "src/routes/tenko_records.rs"
+type = "integration"
+test_file = "tests/coverage/main.rs"
