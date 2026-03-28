@@ -1,0 +1,60 @@
+name: Single Test
+
+# Usage: git push origin fix/test_xxx → test_xxx だけ実行 + カバレッジ表示
+# ブランチ名の fix/ 以降がテスト名パターンになる
+
+on:
+  push:
+    branches: ['fix/**']
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Run Test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      TEST_DATABASE_URL: postgresql://postgres:test@localhost:5432/postgres?options=-c search_path=alc_api
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract test name from branch
+        id: extract
+        run: |
+          BRANCH="${GITHUB_REF#refs/heads/}"
+          TEST_NAME="${BRANCH#fix/}"
+          echo "test_name=$TEST_NAME" >> "$GITHUB_OUTPUT"
+          echo "Running test: $TEST_NAME"
+
+      - uses: dtolnay/rust-toolchain@1.92.0
+        with:
+          components: llvm-tools-preview
+      - uses: swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov@0.8.4
+
+      - name: Initialize test database
+        run: psql -f scripts/init_local_db.sql
+        env:
+          PGHOST: localhost
+          PGPORT: "5432"
+          PGUSER: postgres
+          PGPASSWORD: test
+
+      - name: Run test + coverage
+        run: |
+          cargo llvm-cov --text -- ${{ steps.extract.outputs.test_name }} --include-ignored 2>&1 | tail -100
