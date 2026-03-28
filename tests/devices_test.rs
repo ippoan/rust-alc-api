@@ -1972,7 +1972,13 @@ async fn test_claim_registration_unknown_flow_type() {
         .unwrap()
         .contains("無効なフロータイプ"));
 
-    // CHECK制約を復元
+    // 不正行を削除してからCHECK制約を復元
+    sqlx::query(
+        "DELETE FROM alc_api.device_registration_requests WHERE flow_type = 'unknown_flow'",
+    )
+    .execute(&state.pool)
+    .await
+    .unwrap();
     sqlx::query("ALTER TABLE alc_api.device_registration_requests ADD CONSTRAINT device_registration_requests_flow_type_check CHECK (flow_type IN ('qr_temporary', 'qr_permanent', 'url', 'device_owner'))")
         .execute(&state.pool).await.unwrap();
 }
