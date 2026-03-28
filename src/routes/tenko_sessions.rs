@@ -995,32 +995,50 @@ async fn perform_safety_judgment(
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     if let Some(bl) = &baseline {
-        #[rustfmt::skip]
         if let Some(systolic) = session.systolic {
             let diff = systolic - bl.baseline_systolic;
             medical_diffs.systolic_diff = Some(diff);
-            if diff.abs() > bl.systolic_tolerance { failed_items.push("systolic".to_string()); } }
-        #[rustfmt::skip]
+            if diff.abs() > bl.systolic_tolerance {
+                failed_items.push("systolic".to_string());
+            }
+        }
         if let Some(diastolic) = session.diastolic {
             let diff = diastolic - bl.baseline_diastolic;
             medical_diffs.diastolic_diff = Some(diff);
-            if diff.abs() > bl.diastolic_tolerance { failed_items.push("diastolic".to_string()); } }
-        #[rustfmt::skip]
+            if diff.abs() > bl.diastolic_tolerance {
+                failed_items.push("diastolic".to_string());
+            }
+        }
         if let Some(temperature) = session.temperature {
             let diff = temperature - bl.baseline_temperature;
             medical_diffs.temperature_diff = Some(diff);
-            if diff.abs() > bl.temperature_tolerance { failed_items.push("temperature".to_string()); } }
+            if diff.abs() > bl.temperature_tolerance {
+                failed_items.push("temperature".to_string());
+            }
+        }
     } else {
-        #[rustfmt::skip]
-        tracing::warn!("No health baseline for employee {}, defaulting to pass", session.employee_id);
+        tracing::warn!(
+            "No health baseline for employee {}, defaulting to pass",
+            session.employee_id
+        );
     }
 
     // 自己申告チェック
-    #[rustfmt::skip]
-    if let Some(decl) = session.self_declaration.as_ref().and_then(|j| serde_json::from_value::<SelfDeclaration>(j.clone()).ok()) {
-        if decl.illness { failed_items.push("illness".to_string()); }
-        if decl.fatigue { failed_items.push("fatigue".to_string()); }
-        if decl.sleep_deprivation { failed_items.push("sleep_deprivation".to_string()); } }
+    if let Some(decl) = session
+        .self_declaration
+        .as_ref()
+        .and_then(|j| serde_json::from_value::<SelfDeclaration>(j.clone()).ok())
+    {
+        if decl.illness {
+            failed_items.push("illness".to_string());
+        }
+        if decl.fatigue {
+            failed_items.push("fatigue".to_string());
+        }
+        if decl.sleep_deprivation {
+            failed_items.push("sleep_deprivation".to_string());
+        }
+    }
 
     let judgment_status = if failed_items.is_empty() {
         "pass"

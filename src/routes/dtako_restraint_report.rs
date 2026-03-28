@@ -726,19 +726,19 @@ async fn compare_csv(
     let filter_driver_cd = query.driver_cd;
 
     // CSVファイルを受け取る
-    let mut csv_bytes = Vec::new();
-    while let Some(field) = multipart
+    let csv_bytes = if let Some(field) = multipart
         .next_field()
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("multipart error: {e}")))?
     {
-        let data = field
+        field
             .bytes()
             .await
-            .map_err(|e| (StatusCode::BAD_REQUEST, format!("field read error: {e}")))?;
-        csv_bytes = data.to_vec();
-        break;
-    }
+            .map_err(|e| (StatusCode::BAD_REQUEST, format!("field read error: {e}")))?
+            .to_vec()
+    } else {
+        Vec::new()
+    };
 
     if csv_bytes.is_empty() {
         return Err((StatusCode::BAD_REQUEST, "CSVファイルが空です".to_string()));
