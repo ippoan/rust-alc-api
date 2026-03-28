@@ -2710,11 +2710,7 @@ mod tests {
 
             let result = build_day_map(&kudguri, &by_unko, &cls);
             // 休息で分割 → 2エントリ
-            assert!(
-                result.day_map.len() >= 2,
-                "Expected ≥2 entries, got {}",
-                result.day_map.len()
-            );
+            assert!(result.day_map.len() >= 2);
         });
     }
 
@@ -2739,11 +2735,7 @@ mod tests {
             by_unko.insert("U1".into(), refs);
 
             let result = build_day_map(&kudguri, &by_unko, &cls);
-            assert!(
-                result.day_map.len() >= 2,
-                "Expected 24h split, got {} entries",
-                result.day_map.len()
-            );
+            assert!(result.day_map.len() >= 2);
         });
     }
 
@@ -3078,10 +3070,7 @@ mod tests {
             );
             let entry = &day_map[&("D1".into(), d1, t1)];
             // フェリー60分が控除される
-            assert!(
-                entry.total_work_minutes < 400,
-                "ferry deduction should reduce total_work_minutes"
-            );
+            assert!(entry.total_work_minutes < 400);
         });
     }
 
@@ -3472,10 +3461,7 @@ mod tests {
             let result = process_parsed_data(&kudguri, &kudgivt, &ferry, 2026, 2).unwrap();
             assert_eq!(result.len(), 1);
             let working_days: Vec<_> = result[0].days.iter().filter(|d| !d.is_holiday).collect();
-            assert!(
-                working_days.len() >= 2,
-                "Expected ≥2 working days after rest split"
-            );
+            assert!(working_days.len() >= 2);
         });
     }
     #[test]
@@ -3748,10 +3734,7 @@ mod tests {
             let mut by_unko: HashMap<String, Vec<&_>> = HashMap::new();
             by_unko.insert("U1".into(), refs);
             let result = build_day_map(&kudguri, &by_unko, &cls);
-            assert!(
-                result.day_map.len() >= 3,
-                "4-day span should produce ≥3 workdays"
-            );
+            assert!(result.day_map.len() >= 3);
         });
     }
 
@@ -4047,11 +4030,7 @@ mod tests {
                 by_unko.entry(e.unko_no.clone()).or_default().push(*e);
             }
             let result = build_day_map(&kudguri, &by_unko, &cls);
-            assert!(
-                result.day_map.len() >= 3,
-                "multi-op should produce ≥3 entries, got {}",
-                result.day_map.len()
-            );
+            assert!(result.day_map.len() >= 3);
         });
     }
 
@@ -4097,10 +4076,7 @@ mod tests {
                 process_parsed_data(&kudguri, &kudgivt, &FerryInfo::default(), 2026, 2).unwrap();
             // 28日分（2月）あり、稼働日以外はholiday
             let holidays: Vec<_> = result[0].days.iter().filter(|d| d.is_holiday).collect();
-            assert!(
-                holidays.len() >= 20,
-                "Most days should be holidays for 1-day work"
-            );
+            assert!(holidays.len() >= 20);
         });
     }
 
@@ -4805,10 +4781,7 @@ U001,x,x,x,x,x,x,x,x,x,2026/02/01 10:00:00,2026/02/01 11:30:00\n";
             let report = compare_drivers(&csv_data, &sys_data, None);
             // total_diffs should include total row differences
             let driver = &report.drivers[0];
-            assert!(
-                !driver.total_diffs.is_empty(),
-                "total row diffs should be detected"
-            );
+            assert!(!driver.total_diffs.is_empty());
         });
     }
 
@@ -4902,5 +4875,34 @@ U001,x,x,x,x,x,x,x,x,x,2026/02/01 10:00:00,2026/02/01 11:30:00\n";
             let working: Vec<_> = result[0].days.iter().filter(|d| !d.is_holiday).collect();
             assert!(!working.is_empty());
         });
+    }
+
+    // ---- process_zip: ZIP → CsvDriverData (L2089-2130) ----
+    #[test]
+    fn test_process_zip() {
+        use std::io::Write;
+        let kudguri_csv = "運行NO,読取日,運行日,事業所CD,事業所名,車輌CD,車輌名,乗務員CD1,乗務員名１,対象乗務員区分,出社日時,退社日時,出庫日時,帰庫日時,総走行距離,一般道運転時間,高速道運転時間,バイパス運転時間\n\
+            1001,2026/03/01,2026/03/01,OFF01,テスト事業所,VH01,車両A,DR01,運転者A,1,2026/03/01 08:00:00,2026/03/01 18:00:00,2026/03/01 08:30:00,2026/03/01 17:30:00,150.5,300,60,20\n";
+        let kudgivt_csv = "運行NO,読取日,乗務員CD1,乗務員名１,対象乗務員区分,開始日時,終了日時,イベントCD,イベント名,区間時間,区間距離\n\
+            1001,2026/03/01,DR01,運転者A,1,2026/03/01 08:00:00,2026/03/01 08:30:00,100,出庫,30,0\n\
+            1001,2026/03/01,DR01,運転者A,1,2026/03/01 08:30:00,2026/03/01 12:00:00,200,運転,210,75.0\n\
+            1001,2026/03/01,DR01,運転者A,1,2026/03/01 12:00:00,2026/03/01 13:00:00,301,休憩,60,0\n\
+            1001,2026/03/01,DR01,運転者A,1,2026/03/01 13:00:00,2026/03/01 17:30:00,200,運転,270,75.5\n";
+        let (kudguri_bytes, _, _) = encoding_rs::SHIFT_JIS.encode(kudguri_csv);
+        let (kudgivt_bytes, _, _) = encoding_rs::SHIFT_JIS.encode(kudgivt_csv);
+        let mut buf = std::io::Cursor::new(Vec::new());
+        {
+            let mut zip = zip::ZipWriter::new(&mut buf);
+            let options = zip::write::SimpleFileOptions::default();
+            zip.start_file("KUDGURI.csv", options).unwrap();
+            zip.write_all(&kudguri_bytes).unwrap();
+            zip.start_file("KUDGIVT.csv", options).unwrap();
+            zip.write_all(&kudgivt_bytes).unwrap();
+            zip.finish().unwrap();
+        }
+        let result = process_zip(&buf.into_inner(), 2026, 3);
+        assert!(result.is_ok());
+        let drivers = result.unwrap();
+        assert!(!drivers.is_empty());
     }
 }
