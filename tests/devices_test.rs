@@ -3941,7 +3941,7 @@ async fn test_test_fcm_all_no_fcm_configured() {
 // --- fcm_dismiss_test: FCM 未設定 → SERVICE_UNAVAILABLE ---
 #[cfg_attr(not(coverage), ignore)]
 #[tokio::test]
-async fn test_fcm_dismiss_test_no_fcm_configured() {
+async fn test_fcm_dismiss_test_no_fcm_configured_cov() {
     #[cfg(coverage)]
     let _db_lock = common::DB_RENAME_LOCK
         .lock()
