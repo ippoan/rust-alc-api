@@ -6004,13 +6004,14 @@ async fn test_restraint_report_last_day_drive_avg_and_weekly_subtotal() {
             for (day, drive, cargo) in [(2, 300, 60), (3, 240, 30)] {
                 sqlx::query(
                     "INSERT INTO alc_api.dtako_daily_work_hours \
-                     (date, driver_id, start_time, total_work_minutes, total_drive_minutes, \
-                      cargo_minutes, break_minutes, tenant_id) \
-                     VALUES ($1, $2, '08:00', $3, $4, $5, 60, $6)",
+                     (work_date, driver_id, start_time, total_work_minutes, total_drive_minutes, \
+                      drive_minutes, cargo_minutes, tenant_id) \
+                     VALUES ($1, $2, '08:00', $3, $4, $5, $6, $7)",
                 )
                 .bind(chrono::NaiveDate::from_ymd_opt(2026, 3, day).unwrap())
                 .bind(emp_id)
                 .bind(drive + cargo + 60) // total_work
+                .bind(drive)
                 .bind(drive)
                 .bind(cargo)
                 .bind(tenant_id)
