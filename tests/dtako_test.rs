@@ -4931,6 +4931,7 @@ async fn test_load_kudgivt_error_paths() {
 async fn test_split_csv_no_kudgivt_in_zip() {
     test_group!("残りエラー注入テスト");
     test_case!("KUDGIVT無しZIPでsplit-csvが成功する", {
+        let _db = common::DB_RENAME_LOCK.lock().unwrap();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
         let tenant_id = common::create_test_tenant(&state.pool, "SplitNoKGVT").await;
@@ -5416,6 +5417,7 @@ async fn test_ferry_parse_invalid_datetime() {
 async fn test_split_csv_with_kudgivt_zip() {
     test_group!("未カバー行テスト");
     test_case!("KUDGIVT入りZIPでsplit-csvが成功する", {
+        let _db = common::DB_RENAME_LOCK.lock().unwrap();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
         let tenant_id = common::create_test_tenant(&state.pool, "SplitKGVT").await;
@@ -5516,6 +5518,7 @@ async fn test_ferry_short_columns() {
 async fn test_split_csv_with_non_csv_file_in_zip() {
     test_group!("未カバー行テスト");
     test_case!("ZIP内の非CSVファイルをスキップする", {
+        let _db = common::DB_RENAME_LOCK.lock().unwrap();
         use std::io::Write;
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
@@ -5580,8 +5583,8 @@ async fn test_upload_split_csv_from_r2_error_via_trigger() {
     test_case!(
         "トリガーでr2_zipキーを壊してsplit失敗を再現する",
         {
-            // trigger はグローバルに影響するため ENV_LOCK で直列化
-            let _env = common::ENV_LOCK.lock().unwrap();
+            // trigger はグローバルに影響するため DB_RENAME_LOCK で直列化
+            let _db = common::DB_RENAME_LOCK.lock().unwrap();
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
             let tenant_id = common::create_test_tenant(&state.pool, "SplitTrig").await;
