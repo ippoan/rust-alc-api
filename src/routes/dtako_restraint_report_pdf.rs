@@ -18,6 +18,10 @@ use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
 use uuid::Uuid;
 
+#[cfg(debug_assertions)]
+pub static FORCE_PDF_ERROR: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
 #[derive(Debug, sqlx::FromRow)]
 struct Driver {
     id: Uuid,
@@ -347,12 +351,17 @@ async fn get_restraint_report_pdf_stream(
 
 // ===== PDF Generation =====
 
-fn generate_pdf(
+pub(crate) fn generate_pdf(
     reports: &[RestraintReportResponse],
     driver_cds: &[String],
     year: i32,
     month: u32,
 ) -> Result<Vec<u8>, String> {
+    #[cfg(debug_assertions)]
+    if FORCE_PDF_ERROR.load(std::sync::atomic::Ordering::Relaxed) {
+        return Err("forced test error".to_string());
+    }
+
     let mut doc = PdfDocument::new("拘束時間管理表");
     let mut warnings = Vec::new();
 
@@ -1544,4 +1553,170 @@ fn draw_rect_fill(ops: &mut Vec<Op>, x: f32, y: f32, w: f32, h: f32, r: f32, g: 
         },
     });
     ops.push(Op::RestoreGraphicsState);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::routes::dtako_restraint_report::{MonthlyTotal, OperationDetail};
+    use chrono::NaiveDate;
+
+    fn make_workday(date: NaiveDate, drive: i32, remarks: &str) -> RestraintDayRow {
+        RestraintDayRow {
+            date,
+            is_holiday: false,
+            start_time: Some("8:00".to_string()),
+            end_time: Some("17:00".to_string()),
+            operations: vec![OperationDetail {
+                unko_no: "001".to_string(),
+                drive_minutes: drive,
+                cargo_minutes: 30,
+                break_minutes: 60,
+                restraint_minutes: drive + 90,
+            }],
+            drive_minutes: drive,
+            cargo_minutes: 30,
+            break_minutes: 60,
+            restraint_total_minutes: drive + 90,
+            restraint_cumulative_minutes: drive + 90,
+            drive_average_minutes: drive as f64,
+            rest_period_minutes: Some(600),
+            remarks: remarks.to_string(),
+            overlap_drive_minutes: 0,
+            overlap_cargo_minutes: 0,
+            overlap_break_minutes: 0,
+            overlap_restraint_minutes: 0,
+            restraint_main_minutes: drive + 90,
+            drive_avg_before: Some(drive),
+            drive_avg_after: Some(drive),
+            actual_work_minutes: drive + 30,
+            overtime_minutes: 60,
+            late_night_minutes: 30,
+            overtime_late_night_minutes: 15,
+        }
+    }
+
+    fn make_monthly_total(fiscal_cum: i32) -> MonthlyTotal {
+        MonthlyTotal {
+            drive_minutes: 480,
+            cargo_minutes: 120,
+            break_minutes: 240,
+            restraint_minutes: 840,
+            fiscal_year_cumulative_minutes: fiscal_cum,
+            fiscal_year_total_minutes: fiscal_cum + 840,
+            overlap_drive_minutes: 0,
+            overlap_cargo_minutes: 0,
+            overlap_break_minutes: 0,
+            overlap_restraint_minutes: 0,
+            actual_work_minutes: 600,
+            overtime_minutes: 120,
+            late_night_minutes: 60,
+            overtime_late_night_minutes: 30,
+        }
+    }
+
+    fn make_report(days: Vec<RestraintDayRow>, fiscal_cum: i32) -> RestraintReportResponse {
+        RestraintReportResponse {
+            driver_id: Uuid::new_v4(),
+            driver_name: "テスト太郎".to_string(),
+            year: 2026,
+            month: 3,
+            max_restraint_minutes: 16500,
+            days,
+            weekly_subtotals: Vec::new(),
+            monthly_total: make_monthly_total(fiscal_cum),
+        }
+    }
+
+    // L592: drive_avg_after が None の非休日行
+    #[test]
+    fn test_generate_pdf_drive_avg_after_none() {
+        let mut day = make_workday(NaiveDate::from_ymd_opt(2026, 3, 2).unwrap(), 120, "");
+        day.drive_avg_after = None;
+        let report = make_report(vec![day], 0);
+        let result = generate_pdf(&[report], &["CD01".into()], 2026, 3);
+        assert!(result.is_ok());
+    }
+
+    // L688: fiscal_year_cumulative_minutes > 0
+    #[test]
+    fn test_generate_pdf_fiscal_cumulative_nonzero() {
+        let day = make_workday(NaiveDate::from_ymd_opt(2026, 3, 2).unwrap(), 120, "");
+        let report = make_report(vec![day], 5000);
+        let result = generate_pdf(&[report], &["CD02".into()], 2026, 3);
+        assert!(result.is_ok());
+    }
+
+    // L1083-1091: remarks が非空
+    #[test]
+    fn test_generate_pdf_nonempty_remarks() {
+        let day = make_workday(
+            NaiveDate::from_ymd_opt(2026, 3, 2).unwrap(),
+            120,
+            "出発:テスト地点",
+        );
+        let report = make_report(vec![day], 0);
+        let result = generate_pdf(&[report], &["CD03".into()], 2026, 3);
+        assert!(result.is_ok());
+    }
+
+    // L1384: add_text の空テキスト早期リターン
+    #[test]
+    fn test_add_text_empty() {
+        let mut doc = PdfDocument::new("test");
+        let mut warnings = Vec::new();
+        let font = ParsedFont::from_bytes(FONT_DATA, 0, &mut warnings).unwrap();
+        let font_id = doc.add_font(&font);
+        let mut ops = Vec::new();
+        add_text(&mut ops, &doc, &font_id, 0.0, 10.0, 8.0, "");
+        assert!(ops.is_empty());
+    }
+
+    // L1404: add_text_center_in_cell の空テキスト早期リターン
+    #[test]
+    fn test_add_text_center_in_cell_empty() {
+        let mut doc = PdfDocument::new("test");
+        let mut warnings = Vec::new();
+        let font = ParsedFont::from_bytes(FONT_DATA, 0, &mut warnings).unwrap();
+        let font_id = doc.add_font(&font);
+        let mut ops = Vec::new();
+        add_text_center_in_cell(&mut ops, &doc, &font_id, 0.0, 10.0, 10.0, 8.0, "");
+        assert!(ops.is_empty());
+    }
+
+    // L1429: add_text_center_color の空テキスト早期リターン
+    #[test]
+    fn test_add_text_center_color_empty() {
+        let mut doc = PdfDocument::new("test");
+        let mut warnings = Vec::new();
+        let font = ParsedFont::from_bytes(FONT_DATA, 0, &mut warnings).unwrap();
+        let font_id = doc.add_font(&font);
+        let mut ops = Vec::new();
+        add_text_center_color(
+            &mut ops, &doc, &font_id, 0.0, 10.0, 10.0, 8.0, "", 1.0, 0.0, 0.0,
+        );
+        assert!(ops.is_empty());
+    }
+
+    // L1454: add_text_right の空テキスト早期リターン
+    #[test]
+    fn test_add_text_right_empty() {
+        let mut doc = PdfDocument::new("test");
+        let mut warnings = Vec::new();
+        let font = ParsedFont::from_bytes(FONT_DATA, 0, &mut warnings).unwrap();
+        let font_id = doc.add_font(&font);
+        let mut ops = Vec::new();
+        add_text_right(&mut ops, &doc, &font_id, 50.0, 10.0, 8.0, "");
+        assert!(ops.is_empty());
+    }
+
+    // generate_pdf の FORCE_PDF_ERROR テスト (L321-331 SSE error path 用)
+    #[test]
+    fn test_generate_pdf_forced_error() {
+        FORCE_PDF_ERROR.store(true, std::sync::atomic::Ordering::Relaxed);
+        let result = generate_pdf(&[], &[], 2026, 3);
+        FORCE_PDF_ERROR.store(false, std::sync::atomic::Ordering::Relaxed);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("forced test error"));
+    }
 }

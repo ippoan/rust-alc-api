@@ -2809,6 +2809,106 @@ async fn test_restraint_report_pdf_stream_db_error() {
     });
 }
 
+// L290-291: build_report_with_name() Err → SSE stream で warn してスキップ
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_restraint_report_pdf_stream_report_build_error() {
+    test_group!("dtako_restraint_report_pdf カバレッジ");
+    test_case!(
+        "SSEストリーム: build_report_with_name Err → skip driver",
+        {
+            let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+            let _flock = crate::common::db_rename_flock();
+            let state = crate::common::setup_app_state().await;
+            let base_url = crate::common::spawn_test_server(state.clone()).await;
+            let tenant_id = crate::common::create_test_tenant(&state.pool, "PdfSkip").await;
+            let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+            let auth = format!("Bearer {jwt}");
+            let client = reqwest::Client::new();
+
+            // 従業員を作成（名前が非空なのでドライバーリストに含まれる）
+            crate::common::create_test_employee(&client, &base_url, &auth, "スキップ太郎", "PD010")
+                .await;
+
+            // dtako_daily_work_segments を RENAME → build_report_with_name が Err を返す
+            sqlx::query(
+            "ALTER TABLE alc_api.dtako_daily_work_segments RENAME TO dtako_daily_work_segments_bak",
+        )
+        .execute(&state.pool)
+        .await
+        .unwrap();
+
+            let res = client
+                .get(format!(
+                    "{base_url}/api/restraint-report/pdf-stream?year=2026&month=3"
+                ))
+                .header("Authorization", &auth)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 200);
+            let body = res.text().await.unwrap();
+            // ドライバーは見つかるが report build が失敗してスキップされる
+            // reports は空 → PDF は空ページドキュメント生成 → "done" イベント
+            assert!(body.contains("data:"));
+
+            // Restore
+            sqlx::query(
+            "ALTER TABLE alc_api.dtako_daily_work_segments_bak RENAME TO dtako_daily_work_segments",
+        )
+        .execute(&state.pool)
+        .await
+        .unwrap();
+        }
+    );
+}
+
+// L321-331: SSEストリーム PDF生成エラー
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_restraint_report_pdf_stream_generate_pdf_error() {
+    test_group!("dtako_restraint_report_pdf カバレッジ");
+    test_case!(
+        "SSEストリーム: generate_pdf エラー → error イベント",
+        {
+            let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
+            let _flock = crate::common::db_rename_flock();
+            let state = crate::common::setup_app_state().await;
+            let base_url = crate::common::spawn_test_server(state.clone()).await;
+            let tenant_id = crate::common::create_test_tenant(&state.pool, "PdfGenErr").await;
+            let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+            let auth = format!("Bearer {jwt}");
+            let client = reqwest::Client::new();
+
+            crate::common::create_test_employee(&client, &base_url, &auth, "エラー太郎", "PD011")
+                .await;
+
+            // FORCE_PDF_ERROR フラグを立てて generate_pdf を強制失敗
+            rust_alc_api::routes::dtako_restraint_report_pdf::FORCE_PDF_ERROR
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+
+            let res = client
+                .get(format!(
+                    "{base_url}/api/restraint-report/pdf-stream?year=2026&month=3"
+                ))
+                .header("Authorization", &auth)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 200);
+            let body = res.text().await.unwrap();
+            assert!(
+                body.contains("PDF生成エラー"),
+                "SSE body should contain PDF gen error event, got: {body}"
+            );
+
+            // フラグをリセット
+            rust_alc_api::routes::dtako_restraint_report_pdf::FORCE_PDF_ERROR
+                .store(false, std::sync::atomic::Ordering::Relaxed);
+        }
+    );
+}
+
 // ====== guidance_records エラーパス カバレッジ ======
 
 #[cfg_attr(not(coverage), ignore)]
