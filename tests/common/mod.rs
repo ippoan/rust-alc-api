@@ -221,6 +221,88 @@ pub async fn setup_app_state() -> AppState {
     }
 }
 
+/// テスト用 FailingFcmSender (常にエラーを返す)
+pub struct FailingFcmSender;
+
+#[async_trait::async_trait]
+impl rust_alc_api::fcm::FcmSenderTrait for FailingFcmSender {
+    async fn send_data_message(
+        &self,
+        _fcm_token: &str,
+        _data: std::collections::HashMap<String, String>,
+    ) -> Result<(), rust_alc_api::fcm::FcmError> {
+        Err(rust_alc_api::fcm::FcmError::Send("test error".to_string()))
+    }
+}
+
+/// テスト用 AppState を構築 (FCM なし)
+pub async fn setup_app_state_no_fcm() -> AppState {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter("warn")
+        .with_test_writer()
+        .try_init();
+
+    let pool = PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&test_database_url())
+        .await
+        .expect("Failed to connect to test DB");
+
+    sqlx::migrate!("./migrations")
+        .run(&pool)
+        .await
+        .expect("Failed to run migrations");
+
+    let storage: Arc<dyn rust_alc_api::storage::StorageBackend> =
+        Arc::new(MockStorage::new("test-bucket"));
+
+    let dtako_storage: Arc<dyn rust_alc_api::storage::StorageBackend> =
+        Arc::new(MockStorage::new("dtako-bucket"));
+
+    AppState {
+        pool,
+        storage,
+        carins_storage: None,
+        dtako_storage: Some(dtako_storage),
+        fcm: None,
+    }
+}
+
+/// テスト用 AppState を構築 (FailingFcmSender)
+pub async fn setup_app_state_failing_fcm() -> AppState {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter("warn")
+        .with_test_writer()
+        .try_init();
+
+    let pool = PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&test_database_url())
+        .await
+        .expect("Failed to connect to test DB");
+
+    sqlx::migrate!("./migrations")
+        .run(&pool)
+        .await
+        .expect("Failed to run migrations");
+
+    let storage: Arc<dyn rust_alc_api::storage::StorageBackend> =
+        Arc::new(MockStorage::new("test-bucket"));
+
+    let dtako_storage: Arc<dyn rust_alc_api::storage::StorageBackend> =
+        Arc::new(MockStorage::new("dtako-bucket"));
+
+    let failing_fcm: Arc<dyn rust_alc_api::fcm::FcmSenderTrait> = Arc::new(FailingFcmSender);
+
+    AppState {
+        pool,
+        storage,
+        carins_storage: None,
+        dtako_storage: Some(dtako_storage),
+        fcm: Some(failing_fcm),
+    }
+}
+
 /// テスト用テナントを作成し、UUID を返す
 pub async fn create_test_tenant(pool: &sqlx::PgPool, name: &str) -> Uuid {
     let row: (Uuid,) =

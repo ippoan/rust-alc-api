@@ -1099,11 +1099,8 @@ async fn update_call_settings(
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateCallSettingsBody>,
 ) -> Result<StatusCode, StatusCode> {
-    tracing::info!(
-        "update_call_settings: device={id} call_enabled={} always_on={:?}",
-        body.call_enabled,
-        body.always_on
-    );
+    #[rustfmt::skip]
+    tracing::info!("update_call_settings: device={id} call_enabled={} always_on={:?}", body.call_enabled, body.always_on);
     let mut conn = state
         .pool
         .acquire()
@@ -1144,10 +1141,8 @@ async fn update_call_settings(
             .ok()
             .flatten();
 
-            tracing::info!(
-                "FCM settings_changed: device={id} token={:?}",
-                token_row.as_ref().map(|r| r.0.is_some())
-            );
+            #[rustfmt::skip]
+            tracing::info!("FCM settings_changed: device={id} token={:?}", token_row.as_ref().map(|r| r.0.is_some()));
 
             if let Some((Some(token),)) = token_row {
                 let mut data = std::collections::HashMap::new();
@@ -1313,12 +1308,8 @@ async fn update_last_login(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    tracing::info!(
-        "Last login updated for device {}: {} ({})",
-        body.device_id,
-        body.employee_name,
-        body.employee_role.join(",")
-    );
+    #[rustfmt::skip]
+    tracing::info!("Last login updated for device {}: {} ({})", body.device_id, body.employee_name, body.employee_role.join(","));
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1552,10 +1543,8 @@ async fn fcm_dismiss_test(
         }
     }
 
-    tracing::info!(
-        "fcm_dismiss_test: sent dismiss to {sent}/{} devices",
-        tokens.len()
-    );
+    #[rustfmt::skip]
+    tracing::info!("fcm_dismiss_test: sent dismiss to {sent}/{} devices", tokens.len());
     Ok(Json(serde_json::json!({ "sent": sent })))
 }
 
@@ -1623,10 +1612,8 @@ async fn test_fcm_all_exclude(
         }
     }
 
-    tracing::info!(
-        "test_fcm_all_exclude: sent={sent}, errors={errors}, excluded={}",
-        exclude_set.len()
-    );
+    #[rustfmt::skip]
+    tracing::info!("test_fcm_all_exclude: sent={sent}, errors={errors}, excluded={}", exclude_set.len());
     Ok(Json(
         serde_json::json!({ "sent": sent, "errors": errors, "results": results }),
     ))
@@ -1788,10 +1775,8 @@ async fn test_fcm_all(
     }
 
     let skipped = 0; // All active devices with tokens are sent
-    tracing::info!(
-        "FCM test-all: sent={sent}, errors={errors}, total={}",
-        rows.len()
-    );
+    #[rustfmt::skip]
+    tracing::info!("FCM test-all: sent={sent}, errors={errors}, total={}", rows.len());
 
     Ok(Json(TestFcmAllResponse {
         sent,
@@ -1862,14 +1847,8 @@ async fn report_version(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    tracing::info!(
-        "Version reported for device {}: v{}({}), device_owner={}, dev_device={}",
-        body.device_id,
-        body.version_name,
-        body.version_code,
-        body.is_device_owner,
-        body.is_dev_device
-    );
+    #[rustfmt::skip]
+    tracing::info!("Version reported for device {}: v{}({}), device_owner={}, dev_device={}", body.device_id, body.version_name, body.version_code, body.is_device_owner, body.is_dev_device);
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -2000,9 +1979,8 @@ async fn send_update_fcm(
         }
     }
 
-    tracing::info!(
-        "trigger_update: sent={sent}, skipped={skipped}, already_updated={already_updated}, errors={errors}, dev_only={dev_only}"
-    );
+    #[rustfmt::skip]
+    tracing::info!("trigger_update: sent={sent}, skipped={skipped}, already_updated={already_updated}, errors={errors}, dev_only={dev_only}");
 
     Ok(TriggerUpdateResponse {
         sent,

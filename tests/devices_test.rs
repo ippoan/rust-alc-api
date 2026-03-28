@@ -3859,3 +3859,1130 @@ async fn test_generate_unique_code_db_error() {
         .unwrap();
     assert_eq!(res.status(), 500);
 }
+
+// ============================================================
+// カバレッジ専用: FCM 未設定 (fcm: None) テスト
+// ============================================================
+
+// --- fcm_notify_call: FCM 未設定 → SERVICE_UNAVAILABLE ---
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_fcm_notify_call_no_fcm_configured() {
+    #[cfg(coverage)]
+    let _db_lock = common::DB_RENAME_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    #[cfg(coverage)]
+    let _flock_guard = common::db_rename_flock();
+    let state = common::setup_app_state_no_fcm().await;
+    let base_url = common::spawn_test_server(state).await;
+    let client = reqwest::Client::new();
+
+    let res = client
+        .post(format!("{base_url}/api/devices/fcm-notify-call"))
+        .json(&serde_json::json!({ "room_ids": ["room-1"] }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 503);
+}
+
+// --- test_fcm: FCM 未設定 → SERVICE_UNAVAILABLE ---
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_test_fcm_no_fcm_configured() {
+    #[cfg(coverage)]
+    let _db_lock = common::DB_RENAME_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    #[cfg(coverage)]
+    let _flock_guard = common::db_rename_flock();
+    let state = common::setup_app_state_no_fcm().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "FcmNoCfg").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let client = reqwest::Client::new();
+
+    let fake_id = uuid::Uuid::new_v4();
+    let res = client
+        .post(format!("{base_url}/api/devices/{fake_id}/test-fcm"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 503);
+}
+
+// --- test_fcm_all: FCM 未設定 → SERVICE_UNAVAILABLE ---
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_test_fcm_all_no_fcm_configured() {
+    #[cfg(coverage)]
+    let _db_lock = common::DB_RENAME_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    #[cfg(coverage)]
+    let _flock_guard = common::db_rename_flock();
+    let state = common::setup_app_state_no_fcm().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "FcmAllNoCfg").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let client = reqwest::Client::new();
+
+    let res = client
+        .post(format!("{base_url}/api/devices/test-fcm-all"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 503);
+}
+
+// --- fcm_dismiss_test: FCM 未設定 → SERVICE_UNAVAILABLE ---
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_fcm_dismiss_test_no_fcm_configured() {
+    #[cfg(coverage)]
+    let _db_lock = common::DB_RENAME_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    #[cfg(coverage)]
+    let _flock_guard = common::db_rename_flock();
+    let state = common::setup_app_state_no_fcm().await;
+    let base_url = common::spawn_test_server(state).await;
+    let client = reqwest::Client::new();
+
+    let fake_id = uuid::Uuid::new_v4();
+    let res = client
+        .post(format!("{base_url}/api/devices/fcm-dismiss-test"))
+        .json(&serde_json::json!({ "device_id": fake_id }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 503);
+}
+
+// --- test_fcm_all_exclude: FCM 未設定 → SERVICE_UNAVAILABLE ---
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_test_fcm_all_exclude_no_fcm_configured() {
+    #[cfg(coverage)]
+    let _db_lock = common::DB_RENAME_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    #[cfg(coverage)]
+    let _flock_guard = common::db_rename_flock();
+    let state = common::setup_app_state_no_fcm().await;
+    let base_url = common::spawn_test_server(state).await;
+    let client = reqwest::Client::new();
+
+    let res = client
+        .post(format!("{base_url}/api/devices/test-fcm-all-exclude"))
+        .json(&serde_json::json!({ "exclude_device_ids": [] }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 503);
+}
+
+// --- trigger_update (send_update_fcm): FCM 未設定 → SERVICE_UNAVAILABLE ---
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_trigger_update_no_fcm_configured() {
+    #[cfg(coverage)]
+    let _db_lock = common::DB_RENAME_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    #[cfg(coverage)]
+    let _flock_guard = common::db_rename_flock();
+    let state = common::setup_app_state_no_fcm().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "TrigNoFcm").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let client = reqwest::Client::new();
+
+    let res = client
+        .post(format!("{base_url}/api/devices/trigger-update"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .json(&serde_json::json!({ "version_code": 100, "version_name": "2.0" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 503);
+}
+
+// ============================================================
+// カバレッジ専用: FCM 送信失敗 (FailingFcmSender) テスト
+// ============================================================
+
+// --- fcm_notify_call: FCM send 失敗 → errors increment ---
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_fcm_notify_call_send_failure() {
+    #[cfg(coverage)]
+    let _db_lock = common::DB_RENAME_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    #[cfg(coverage)]
+    let _flock_guard = common::db_rename_flock();
+    let state = common::setup_app_state_failing_fcm().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "FcmFail").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    let (device_id, _) = create_device_via_url_flow(&client, &base_url, &auth).await;
+    client
+        .put(format!("{base_url}/api/devices/register-fcm-token"))
+        .json(&serde_json::json!({ "device_id": device_id, "fcm_token": "fail-token" }))
+        .send()
+        .await
+        .unwrap();
+    client
+        .put(format!("{base_url}/api/devices/{device_id}/call-settings"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "call_enabled": true }))
+        .send()
+        .await
+        .unwrap();
+
+    let res = client
+        .post(format!("{base_url}/api/devices/fcm-notify-call"))
+        .json(&serde_json::json!({ "room_ids": ["room-fail"] }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    assert!(body["errors"].as_i64().unwrap() >= 1);
+}
+
+// --- test_fcm: FCM send 失敗 → success=false ---
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_test_fcm_send_failure() {
+    #[cfg(coverage)]
+    let _db_lock = common::DB_RENAME_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    #[cfg(coverage)]
+    let _flock_guard = common::db_rename_flock();
+    let state = common::setup_app_state_failing_fcm().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "FcmTestFail").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    let (device_id, _) = create_device_via_url_flow(&client, &base_url, &auth).await;
+    client
+        .put(format!("{base_url}/api/devices/register-fcm-token"))
+        .json(&serde_json::json!({ "device_id": device_id, "fcm_token": "fail-token-2" }))
+        .send()
+        .await
+        .unwrap();
+
+    let res = client
+        .post(format!("{base_url}/api/devices/{device_id}/test-fcm"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(body["success"], false);
+    assert!(body["error"].as_str().is_some());
+}
+
+// --- test_fcm_all: FCM send 失敗 → errors increment ---
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_test_fcm_all_send_failure() {
+    #[cfg(coverage)]
+    let _db_lock = common::DB_RENAME_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    #[cfg(coverage)]
+    let _flock_guard = common::db_rename_flock();
+    let state = common::setup_app_state_failing_fcm().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "FcmAllFail").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    let (device_id, _) = create_device_via_url_flow(&client, &base_url, &auth).await;
+    client
+        .put(format!("{base_url}/api/devices/register-fcm-token"))
+        .json(&serde_json::json!({ "device_id": device_id, "fcm_token": "fail-all-token" }))
+        .send()
+        .await
+        .unwrap();
+
+    let res = client
+        .post(format!("{base_url}/api/devices/test-fcm-all"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    assert!(body["errors"].as_i64().unwrap() >= 1);
+}
+
+// --- test_fcm_all_exclude: FCM send 失敗 + exclude + continue ---
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_test_fcm_all_exclude_send_failure() {
+    #[cfg(coverage)]
+    let _db_lock = common::DB_RENAME_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    #[cfg(coverage)]
+    let _flock_guard = common::db_rename_flock();
+    let state = common::setup_app_state_failing_fcm().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "FcmExFail").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    // Create two devices: one to exclude, one to send (which will fail)
+    let (device_id1, _) = create_device_via_url_flow(&client, &base_url, &auth).await;
+    client
+        .put(format!("{base_url}/api/devices/register-fcm-token"))
+        .json(&serde_json::json!({ "device_id": device_id1, "fcm_token": "excl-fail-1" }))
+        .send()
+        .await
+        .unwrap();
+    client
+        .put(format!("{base_url}/api/devices/{device_id1}/call-settings"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "call_enabled": true }))
+        .send()
+        .await
+        .unwrap();
+
+    let (device_id2, _) = create_device_via_url_flow(&client, &base_url, &auth).await;
+    client
+        .put(format!("{base_url}/api/devices/register-fcm-token"))
+        .json(&serde_json::json!({ "device_id": device_id2, "fcm_token": "excl-fail-2" }))
+        .send()
+        .await
+        .unwrap();
+    client
+        .put(format!("{base_url}/api/devices/{device_id2}/call-settings"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "call_enabled": true }))
+        .send()
+        .await
+        .unwrap();
+
+    // Exclude device1 → device2 gets sent (fails)
+    let res = client
+        .post(format!("{base_url}/api/devices/test-fcm-all-exclude"))
+        .json(&serde_json::json!({ "exclude_device_ids": [device_id1] }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    // At least some errors from FailingFcmSender
+    assert!(body["errors"].as_i64().unwrap() >= 1);
+}
+
+// --- trigger_update: FCM send 失敗 → errors increment ---
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_trigger_update_send_failure() {
+    #[cfg(coverage)]
+    let _db_lock = common::DB_RENAME_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    #[cfg(coverage)]
+    let _flock_guard = common::db_rename_flock();
+    let state = common::setup_app_state_failing_fcm().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "TrigFail").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    let (device_id, _) = create_device_via_url_flow(&client, &base_url, &auth).await;
+    client
+        .put(format!("{base_url}/api/devices/register-fcm-token"))
+        .json(&serde_json::json!({ "device_id": device_id, "fcm_token": "trig-fail-tok" }))
+        .send()
+        .await
+        .unwrap();
+
+    let res = client
+        .post(format!("{base_url}/api/devices/trigger-update"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "version_code": 999, "version_name": "9.9" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    assert!(body["errors"].as_i64().unwrap() >= 1);
+}
+
+// --- fcm_dismiss_test: FCM token ありで dismiss 送信成功 (MockFcmSender) ---
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_fcm_dismiss_test_with_tokens() {
+    #[cfg(coverage)]
+    let _db_lock = common::DB_RENAME_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    #[cfg(coverage)]
+    let _flock_guard = common::db_rename_flock();
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "DismissTok").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    // Create two devices in same tenant with FCM tokens
+    let (device_id1, _) = create_device_via_url_flow(&client, &base_url, &auth).await;
+    client
+        .put(format!("{base_url}/api/devices/register-fcm-token"))
+        .json(&serde_json::json!({ "device_id": device_id1, "fcm_token": "dismiss-tok-1" }))
+        .send()
+        .await
+        .unwrap();
+
+    let (device_id2, _) = create_device_via_url_flow(&client, &base_url, &auth).await;
+    client
+        .put(format!("{base_url}/api/devices/register-fcm-token"))
+        .json(&serde_json::json!({ "device_id": device_id2, "fcm_token": "dismiss-tok-2" }))
+        .send()
+        .await
+        .unwrap();
+
+    // Dismiss from device1 → sends to device2
+    let res = client
+        .post(format!("{base_url}/api/devices/fcm-dismiss-test"))
+        .json(&serde_json::json!({ "device_id": device_id1 }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    assert!(body["sent"].as_i64().unwrap() >= 1);
+}
+
+// ============================================================
+// カバレッジ専用: claim_registration 内部 DB エラー (trigger)
+// ============================================================
+
+// --- claim URL flow: INSERT devices error ---
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_claim_url_create_device_db_error() {
+    let _db = common::DB_RENAME_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let _flock = common::db_rename_flock();
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "ClmUrlInsErr").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let client = reqwest::Client::new();
+
+    // Create URL token
+    let res = client
+        .post(format!("{base_url}/api/devices/register/create-token"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .json(&serde_json::json!({ "device_name": "err-dev" }))
+        .send()
+        .await
+        .unwrap();
+    let body: Value = res.json().await.unwrap();
+    let code = body["registration_code"].as_str().unwrap().to_string();
+
+    // Install trigger to fail INSERT on devices
+    sqlx::query(
+        r#"CREATE OR REPLACE FUNCTION alc_api.fail_dev_ins_clm_url() RETURNS trigger AS $$
+        BEGIN RAISE EXCEPTION 'test error claim url insert'; END; $$ LANGUAGE plpgsql"#,
+    )
+    .execute(&state.pool)
+    .await
+    .unwrap();
+    sqlx::query("CREATE OR REPLACE TRIGGER fail_dev_ins_clm_url BEFORE INSERT ON alc_api.devices FOR EACH ROW EXECUTE FUNCTION alc_api.fail_dev_ins_clm_url()")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+
+    let res = client
+        .post(format!("{base_url}/api/devices/register/claim"))
+        .json(&serde_json::json!({
+            "registration_code": code,
+            "device_name": "err-dev",
+            "phone_number": "090-0000-0000"
+        }))
+        .send()
+        .await
+        .unwrap();
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(body["success"], false);
+
+    sqlx::query("DROP TRIGGER fail_dev_ins_clm_url ON alc_api.devices")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    sqlx::query("DROP FUNCTION alc_api.fail_dev_ins_clm_url")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+}
+
+// --- claim device_owner flow: INSERT devices error ---
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_claim_device_owner_create_device_db_error() {
+    let _db = common::DB_RENAME_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let _flock = common::db_rename_flock();
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "ClmDOInsErr").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    // Create device_owner token
+    let res = client
+        .post(format!(
+            "{base_url}/api/devices/register/create-device-owner-token"
+        ))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "device_name": "err-do-dev" }))
+        .send()
+        .await
+        .unwrap();
+    let body: Value = res.json().await.unwrap();
+    let code = body["registration_code"].as_str().unwrap().to_string();
+
+    // Install trigger to fail INSERT on devices
+    sqlx::query(
+        r#"CREATE OR REPLACE FUNCTION alc_api.fail_dev_ins_clm_do() RETURNS trigger AS $$
+        BEGIN RAISE EXCEPTION 'test error claim do insert'; END; $$ LANGUAGE plpgsql"#,
+    )
+    .execute(&state.pool)
+    .await
+    .unwrap();
+    sqlx::query("CREATE OR REPLACE TRIGGER fail_dev_ins_clm_do BEFORE INSERT ON alc_api.devices FOR EACH ROW EXECUTE FUNCTION alc_api.fail_dev_ins_clm_do()")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+
+    let res = client
+        .post(format!("{base_url}/api/devices/register/claim"))
+        .json(&serde_json::json!({
+            "registration_code": code,
+            "device_name": "err-do-dev"
+        }))
+        .send()
+        .await
+        .unwrap();
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(body["success"], false);
+
+    sqlx::query("DROP TRIGGER fail_dev_ins_clm_do ON alc_api.devices")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    sqlx::query("DROP FUNCTION alc_api.fail_dev_ins_clm_do")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+}
+
+// --- claim qr_permanent flow: UPDATE device_registration_requests error ---
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_claim_qr_permanent_update_db_error() {
+    let _db = common::DB_RENAME_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let _flock = common::db_rename_flock();
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "ClmPQRUpdErr").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    // Create permanent QR code
+    let res = client
+        .post(format!(
+            "{base_url}/api/devices/register/create-permanent-qr"
+        ))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "device_name": "pqr-err" }))
+        .send()
+        .await
+        .unwrap();
+    let body: Value = res.json().await.unwrap();
+    let code = body["registration_code"].as_str().unwrap().to_string();
+
+    // Install trigger to fail UPDATE on device_registration_requests
+    sqlx::query(
+        r#"CREATE OR REPLACE FUNCTION alc_api.fail_drr_upd_clm_pqr() RETURNS trigger AS $$
+        BEGIN RAISE EXCEPTION 'test error claim pqr update'; END; $$ LANGUAGE plpgsql"#,
+    )
+    .execute(&state.pool)
+    .await
+    .unwrap();
+    sqlx::query("CREATE OR REPLACE TRIGGER fail_drr_upd_clm_pqr BEFORE UPDATE ON alc_api.device_registration_requests FOR EACH ROW EXECUTE FUNCTION alc_api.fail_drr_upd_clm_pqr()")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+
+    let res = client
+        .post(format!("{base_url}/api/devices/register/claim"))
+        .json(&serde_json::json!({
+            "registration_code": code,
+            "phone_number": "080-9999-8888"
+        }))
+        .send()
+        .await
+        .unwrap();
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(body["success"], false);
+
+    sqlx::query("DROP TRIGGER fail_drr_upd_clm_pqr ON alc_api.device_registration_requests")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    sqlx::query("DROP FUNCTION alc_api.fail_drr_upd_clm_pqr")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+}
+
+// ============================================================
+// カバレッジ専用: approve 内部 DB エラー (trigger)
+// ============================================================
+
+// --- approve_device: INSERT devices error ---
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_approve_device_create_device_db_error() {
+    let _db = common::DB_RENAME_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let _flock = common::db_rename_flock();
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let (_tenant_id, jwt) = setup_tenant_with_user(&state).await;
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    // Create permanent QR + claim to get pending request
+    let res = client
+        .post(format!(
+            "{base_url}/api/devices/register/create-permanent-qr"
+        ))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "device_name": "ApproveInsErr" }))
+        .send()
+        .await
+        .unwrap();
+    let body: Value = res.json().await.unwrap();
+    let code = body["registration_code"].as_str().unwrap().to_string();
+
+    client
+        .post(format!("{base_url}/api/devices/register/claim"))
+        .json(&serde_json::json!({ "registration_code": code }))
+        .send()
+        .await
+        .unwrap();
+
+    // Get request ID
+    let res = client
+        .get(format!("{base_url}/api/devices/pending"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .unwrap();
+    let pending: Vec<Value> = res.json().await.unwrap();
+    let req_id = pending
+        .iter()
+        .find(|p| p["registration_code"] == code.as_str())
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // Install trigger to fail INSERT on devices
+    sqlx::query(
+        r#"CREATE OR REPLACE FUNCTION alc_api.fail_dev_ins_appr() RETURNS trigger AS $$
+        BEGIN RAISE EXCEPTION 'test error approve insert'; END; $$ LANGUAGE plpgsql"#,
+    )
+    .execute(&state.pool)
+    .await
+    .unwrap();
+    sqlx::query("CREATE OR REPLACE TRIGGER fail_dev_ins_appr BEFORE INSERT ON alc_api.devices FOR EACH ROW EXECUTE FUNCTION alc_api.fail_dev_ins_appr()")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+
+    let res = client
+        .post(format!("{base_url}/api/devices/approve/{req_id}"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 500);
+
+    sqlx::query("DROP TRIGGER fail_dev_ins_appr ON alc_api.devices")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    sqlx::query("DROP FUNCTION alc_api.fail_dev_ins_appr")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+}
+
+// --- approve_by_code: INSERT devices error ---
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_approve_by_code_create_device_db_error() {
+    let _db = common::DB_RENAME_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let _flock = common::db_rename_flock();
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let (_tenant_id, jwt) = setup_tenant_with_user(&state).await;
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    // Create QR temp request
+    let res = client
+        .post(format!("{base_url}/api/devices/register/request"))
+        .json(&serde_json::json!({ "device_name": "ApprCodeInsErr" }))
+        .send()
+        .await
+        .unwrap();
+    let body: Value = res.json().await.unwrap();
+    let code = body["registration_code"].as_str().unwrap().to_string();
+
+    // Install trigger to fail INSERT on devices
+    sqlx::query(
+        r#"CREATE OR REPLACE FUNCTION alc_api.fail_dev_ins_appr_code() RETURNS trigger AS $$
+        BEGIN RAISE EXCEPTION 'test error approve_by_code insert'; END; $$ LANGUAGE plpgsql"#,
+    )
+    .execute(&state.pool)
+    .await
+    .unwrap();
+    sqlx::query("CREATE OR REPLACE TRIGGER fail_dev_ins_appr_code BEFORE INSERT ON alc_api.devices FOR EACH ROW EXECUTE FUNCTION alc_api.fail_dev_ins_appr_code()")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+
+    let res = client
+        .post(format!("{base_url}/api/devices/approve-by-code/{code}"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 500);
+
+    sqlx::query("DROP TRIGGER fail_dev_ins_appr_code ON alc_api.devices")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    sqlx::query("DROP FUNCTION alc_api.fail_dev_ins_appr_code")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+}
+
+// ============================================================
+// カバレッジ専用: UPDATE エラーパス (trigger)
+// ============================================================
+
+// --- report_watchdog_state UPDATE error (trigger) ---
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_report_watchdog_state_update_error() {
+    let _db = common::DB_RENAME_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let _flock = common::db_rename_flock();
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "WdgUpdErr").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    let (device_id, _) = create_device_via_url_flow(&client, &base_url, &auth).await;
+
+    sqlx::query(
+        r#"CREATE OR REPLACE FUNCTION alc_api.fail_dev_upd_wdg() RETURNS trigger AS $$
+        BEGIN RAISE EXCEPTION 'test error watchdog update'; END; $$ LANGUAGE plpgsql"#,
+    )
+    .execute(&state.pool)
+    .await
+    .unwrap();
+    sqlx::query("CREATE OR REPLACE TRIGGER fail_dev_upd_wdg BEFORE UPDATE ON alc_api.devices FOR EACH ROW EXECUTE FUNCTION alc_api.fail_dev_upd_wdg()")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+
+    let res = client
+        .put(format!("{base_url}/api/devices/report-watchdog"))
+        .json(&serde_json::json!({ "device_id": device_id, "running": true }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 500);
+
+    sqlx::query("DROP TRIGGER fail_dev_upd_wdg ON alc_api.devices")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    sqlx::query("DROP FUNCTION alc_api.fail_dev_upd_wdg")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+}
+
+// --- register_fcm_token UPDATE error (trigger) ---
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_register_fcm_token_update_error() {
+    let _db = common::DB_RENAME_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let _flock = common::db_rename_flock();
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "FcmTokUpdErr").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    let (device_id, _) = create_device_via_url_flow(&client, &base_url, &auth).await;
+
+    sqlx::query(
+        r#"CREATE OR REPLACE FUNCTION alc_api.fail_dev_upd_fcm() RETURNS trigger AS $$
+        BEGIN RAISE EXCEPTION 'test error fcm token update'; END; $$ LANGUAGE plpgsql"#,
+    )
+    .execute(&state.pool)
+    .await
+    .unwrap();
+    sqlx::query("CREATE OR REPLACE TRIGGER fail_dev_upd_fcm BEFORE UPDATE ON alc_api.devices FOR EACH ROW EXECUTE FUNCTION alc_api.fail_dev_upd_fcm()")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+
+    let res = client
+        .put(format!("{base_url}/api/devices/register-fcm-token"))
+        .json(&serde_json::json!({ "device_id": device_id, "fcm_token": "err-tok" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 500);
+
+    sqlx::query("DROP TRIGGER fail_dev_upd_fcm ON alc_api.devices")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    sqlx::query("DROP FUNCTION alc_api.fail_dev_upd_fcm")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+}
+
+// --- update_last_login UPDATE error (trigger) ---
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_update_last_login_update_error() {
+    let _db = common::DB_RENAME_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let _flock = common::db_rename_flock();
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "LastLogUpdErr").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    let (device_id, _) = create_device_via_url_flow(&client, &base_url, &auth).await;
+
+    sqlx::query(
+        r#"CREATE OR REPLACE FUNCTION alc_api.fail_dev_upd_login() RETURNS trigger AS $$
+        BEGIN RAISE EXCEPTION 'test error last login update'; END; $$ LANGUAGE plpgsql"#,
+    )
+    .execute(&state.pool)
+    .await
+    .unwrap();
+    sqlx::query("CREATE OR REPLACE TRIGGER fail_dev_upd_login BEFORE UPDATE ON alc_api.devices FOR EACH ROW EXECUTE FUNCTION alc_api.fail_dev_upd_login()")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+
+    let res = client
+        .put(format!("{base_url}/api/devices/update-last-login"))
+        .json(&serde_json::json!({
+            "device_id": device_id,
+            "employee_id": uuid::Uuid::new_v4(),
+            "employee_name": "ErrEmp",
+            "employee_role": ["driver"]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 500);
+
+    sqlx::query("DROP TRIGGER fail_dev_upd_login ON alc_api.devices")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    sqlx::query("DROP FUNCTION alc_api.fail_dev_upd_login")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+}
+
+// --- report_version UPDATE error (trigger) ---
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_report_version_update_error() {
+    let _db = common::DB_RENAME_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let _flock = common::db_rename_flock();
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "VerUpdErr").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    let (device_id, _) = create_device_via_url_flow(&client, &base_url, &auth).await;
+
+    sqlx::query(
+        r#"CREATE OR REPLACE FUNCTION alc_api.fail_dev_upd_ver() RETURNS trigger AS $$
+        BEGIN RAISE EXCEPTION 'test error version update'; END; $$ LANGUAGE plpgsql"#,
+    )
+    .execute(&state.pool)
+    .await
+    .unwrap();
+    sqlx::query("CREATE OR REPLACE TRIGGER fail_dev_upd_ver BEFORE UPDATE ON alc_api.devices FOR EACH ROW EXECUTE FUNCTION alc_api.fail_dev_upd_ver()")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+
+    let res = client
+        .put(format!("{base_url}/api/devices/report-version"))
+        .json(&serde_json::json!({
+            "device_id": device_id,
+            "version_code": 42,
+            "version_name": "1.2.3"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 500);
+
+    sqlx::query("DROP TRIGGER fail_dev_upd_ver ON alc_api.devices")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    sqlx::query("DROP FUNCTION alc_api.fail_dev_upd_ver")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+}
+
+// --- approve_device: UPDATE request error (trigger) ---
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_approve_device_update_request_db_error() {
+    let _db = common::DB_RENAME_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let _flock = common::db_rename_flock();
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let (_tenant_id, jwt) = setup_tenant_with_user(&state).await;
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    // Create permanent QR + claim
+    let res = client
+        .post(format!(
+            "{base_url}/api/devices/register/create-permanent-qr"
+        ))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "device_name": "ApprUpdReqErr" }))
+        .send()
+        .await
+        .unwrap();
+    let body: Value = res.json().await.unwrap();
+    let code = body["registration_code"].as_str().unwrap().to_string();
+
+    client
+        .post(format!("{base_url}/api/devices/register/claim"))
+        .json(&serde_json::json!({ "registration_code": code }))
+        .send()
+        .await
+        .unwrap();
+
+    // Get request ID
+    let res = client
+        .get(format!("{base_url}/api/devices/pending"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .unwrap();
+    let pending: Vec<Value> = res.json().await.unwrap();
+    let req_id = pending
+        .iter()
+        .find(|p| p["registration_code"] == code.as_str())
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // Install trigger to fail UPDATE on device_registration_requests
+    sqlx::query(
+        r#"CREATE OR REPLACE FUNCTION alc_api.fail_drr_upd_appr() RETURNS trigger AS $$
+        BEGIN RAISE EXCEPTION 'test error approve update request'; END; $$ LANGUAGE plpgsql"#,
+    )
+    .execute(&state.pool)
+    .await
+    .unwrap();
+    sqlx::query("CREATE OR REPLACE TRIGGER fail_drr_upd_appr BEFORE UPDATE ON alc_api.device_registration_requests FOR EACH ROW EXECUTE FUNCTION alc_api.fail_drr_upd_appr()")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+
+    let res = client
+        .post(format!("{base_url}/api/devices/approve/{req_id}"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 500);
+
+    sqlx::query("DROP TRIGGER fail_drr_upd_appr ON alc_api.device_registration_requests")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    sqlx::query("DROP FUNCTION alc_api.fail_drr_upd_appr")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+}
+
+// --- approve_by_code: UPDATE request error (trigger) ---
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_approve_by_code_update_request_db_error() {
+    let _db = common::DB_RENAME_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let _flock = common::db_rename_flock();
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let (_tenant_id, jwt) = setup_tenant_with_user(&state).await;
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    // Create QR temp request
+    let res = client
+        .post(format!("{base_url}/api/devices/register/request"))
+        .json(&serde_json::json!({ "device_name": "ApprCodeUpdErr" }))
+        .send()
+        .await
+        .unwrap();
+    let body: Value = res.json().await.unwrap();
+    let code = body["registration_code"].as_str().unwrap().to_string();
+
+    // Install trigger to fail UPDATE on device_registration_requests
+    sqlx::query(
+        r#"CREATE OR REPLACE FUNCTION alc_api.fail_drr_upd_appr_code() RETURNS trigger AS $$
+        BEGIN RAISE EXCEPTION 'test error approve_by_code update'; END; $$ LANGUAGE plpgsql"#,
+    )
+    .execute(&state.pool)
+    .await
+    .unwrap();
+    sqlx::query("CREATE OR REPLACE TRIGGER fail_drr_upd_appr_code BEFORE UPDATE ON alc_api.device_registration_requests FOR EACH ROW EXECUTE FUNCTION alc_api.fail_drr_upd_appr_code()")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+
+    let res = client
+        .post(format!("{base_url}/api/devices/approve-by-code/{code}"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 500);
+
+    sqlx::query("DROP TRIGGER fail_drr_upd_appr_code ON alc_api.device_registration_requests")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    sqlx::query("DROP FUNCTION alc_api.fail_drr_upd_appr_code")
+        .execute(&state.pool)
+        .await
+        .unwrap();
+}
+
+// --- update_call_settings: FCM send failure (FailingFcmSender + always_on) ---
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_update_call_settings_fcm_send_failure() {
+    #[cfg(coverage)]
+    let _db_lock = common::DB_RENAME_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    #[cfg(coverage)]
+    let _flock_guard = common::db_rename_flock();
+    let state = common::setup_app_state_failing_fcm().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "CallFcmFail").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    let (device_id, _) = create_device_via_url_flow(&client, &base_url, &auth).await;
+
+    // Register FCM token
+    client
+        .put(format!("{base_url}/api/devices/register-fcm-token"))
+        .json(&serde_json::json!({ "device_id": device_id, "fcm_token": "fail-call-tok" }))
+        .send()
+        .await
+        .unwrap();
+
+    // Update with always_on triggers FCM settings_changed which will fail
+    let res = client
+        .put(format!("{base_url}/api/devices/{device_id}/call-settings"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "call_enabled": true,
+            "always_on": true
+        }))
+        .send()
+        .await
+        .unwrap();
+    // FCM failure is logged but does not fail the endpoint
+    assert_eq!(res.status(), 204);
+}
