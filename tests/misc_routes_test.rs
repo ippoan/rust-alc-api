@@ -443,6 +443,8 @@ async fn test_carrying_items_crud() {
 async fn test_communication_items_crud() {
     test_group!("連絡事項");
     test_case!("連絡事項のCRUD操作ができる", {
+        let _db = common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
         let tenant_id = common::create_test_tenant(&state.pool, "Comm CRUD").await;

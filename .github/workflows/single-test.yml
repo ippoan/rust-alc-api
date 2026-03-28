@@ -1,0 +1,93 @@
+name: Single Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_name:
+        description: 'Test name pattern (e.g. test_communication_items_crud)'
+        required: true
+        type: string
+      test_type:
+        description: 'Test type'
+        required: true
+        type: choice
+        options:
+          - integration
+          - unit
+        default: integration
+  push:
+    branches: ['fix/**']
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test-with-db:
+    name: Integration Test
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.test_type == 'integration')
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      TEST_DATABASE_URL: postgresql://postgres:test@localhost:5432/postgres?options=-c search_path=alc_api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.92.0
+        with:
+          components: llvm-tools-preview
+      - uses: swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov@0.8.4
+
+      - name: Initialize test database
+        run: psql -f scripts/init_local_db.sql
+        env:
+          PGHOST: localhost
+          PGPORT: "5432"
+          PGUSER: postgres
+          PGPASSWORD: test
+
+      - name: Run all tests + coverage (branch push)
+        if: github.event_name == 'push'
+        run: |
+          cargo llvm-cov --text > /tmp/llvm-cov-output.txt 2>/tmp/llvm-cov-stderr.txt || { echo "cargo llvm-cov failed:"; tail -30 /tmp/llvm-cov-stderr.txt; exit 1; }
+          echo "=== Test results ==="
+          grep "test result:" /tmp/llvm-cov-stderr.txt || true
+
+      - name: Coverage regression check (branch push)
+        if: github.event_name == 'push'
+        run: bash scripts/check_coverage_100.sh --use-cache /tmp/llvm-cov-output.txt
+
+      - name: Run single test (workflow_dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          cargo llvm-cov --text -- ${{ github.event.inputs.test_name }} --include-ignored 2>&1 | tail -100
+
+  test-unit:
+    name: Unit Test
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.test_type == 'unit'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.92.0
+        with:
+          components: llvm-tools-preview
+      - uses: swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov@0.8.4
+
+      - name: Run single unit test
+        run: |
+          cargo llvm-cov --lib --text -- ${{ github.event.inputs.test_name }} --include-ignored 2>&1 | tail -50
