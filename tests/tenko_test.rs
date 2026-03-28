@@ -3609,3 +3609,508 @@ async fn test_tenko_schedule_delete_db_error() {
             .unwrap();
     });
 }
+
+// ============================================================
+// Tenko Sessions — schedule.employee_id mismatch → 400 (L87)
+// ============================================================
+
+#[tokio::test]
+async fn test_start_session_employee_mismatch() {
+    test_group!("点呼セッション — 従業員不一致");
+    test_case!(
+        "スケジュールの従業員と異なる従業員で開始 → 400",
+        {
+            let state = common::setup_app_state().await;
+            let base_url = common::spawn_test_server(state.clone()).await;
+            let tenant_id = common::create_test_tenant(
+                &state.pool,
+                &format!("EmpMismatch{}", uuid::Uuid::new_v4().simple()),
+            )
+            .await;
+            let jwt = common::create_test_jwt(tenant_id, "admin");
+            let auth = format!("Bearer {jwt}");
+            let client = reqwest::Client::new();
+
+            // Create two employees
+            let emp1 = common::create_test_employee(
+                &client,
+                &base_url,
+                &auth,
+                "EmpA",
+                &format!("EA{}", &uuid::Uuid::new_v4().simple().to_string()[..4]),
+            )
+            .await;
+            let emp1_id = emp1["id"].as_str().unwrap();
+
+            let emp2 = common::create_test_employee(
+                &client,
+                &base_url,
+                &auth,
+                "EmpB",
+                &format!("EB{}", &uuid::Uuid::new_v4().simple().to_string()[..4]),
+            )
+            .await;
+            let emp2_id = emp2["id"].as_str().unwrap();
+
+            // Create schedule for emp1
+            let sid = create_schedule(&client, &base_url, &auth, emp1_id, "pre_operation").await;
+
+            // Try to start session with emp2 using emp1's schedule → 400
+            let res = client
+                .post(format!("{base_url}/api/tenko/sessions/start"))
+                .header("Authorization", &auth)
+                .json(&serde_json::json!({
+                    "employee_id": emp2_id,
+                    "schedule_id": sid
+                }))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 400, "Employee mismatch should return 400");
+        }
+    );
+}
+
+// ============================================================
+// Tenko Sessions — invalid tenko_type → 500 (L202)
+// ============================================================
+
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_submit_alcohol_invalid_tenko_type() {
+    test_group!("点呼セッション — 不正な tenko_type でアルコール送信");
+    test_case!("tenko_type='invalid_type' + identity_verified → 500", {
+        let state = common::setup_app_state().await;
+        let base_url = common::spawn_test_server(state.clone()).await;
+        let tenant_id = common::create_test_tenant(
+            &state.pool,
+            &format!("InvType{}", uuid::Uuid::new_v4().simple()),
+        )
+        .await;
+        let jwt = common::create_test_jwt(tenant_id, "admin");
+        let auth = format!("Bearer {jwt}");
+        let client = reqwest::Client::new();
+
+        let emp = common::create_test_employee(
+            &client,
+            &base_url,
+            &auth,
+            "InvTypeEmp",
+            &format!("IT{}", &uuid::Uuid::new_v4().simple().to_string()[..4]),
+        )
+        .await;
+        let emp_id = emp["id"].as_str().unwrap();
+
+        // Start remote session with custom tenko_type
+        let res = client
+            .post(format!("{base_url}/api/tenko/sessions/start"))
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({
+                "employee_id": emp_id,
+                "tenko_type": "invalid_type"
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 201);
+        let session: Value = res.json().await.unwrap();
+        let session_id = session["id"].as_str().unwrap();
+        // invalid_type is not pre_operation, so initial_status = "identity_verified"
+        assert_eq!(session["status"], "identity_verified");
+
+        // Submit alcohol (pass) → tenko_type is invalid → should hit L202 → 500
+        let res = client
+            .put(format!(
+                "{base_url}/api/tenko/sessions/{session_id}/alcohol"
+            ))
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({
+                "alcohol_result": "pass",
+                "alcohol_value": 0.0
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 500, "Invalid tenko_type should return 500");
+    });
+}
+
+// ============================================================
+// Tenko Sessions — submit_medical wrong status → 400 (L319)
+// ============================================================
+
+#[tokio::test]
+async fn test_submit_medical_wrong_status() {
+    test_group!("点呼セッション — 不正ステータスで医療データ送信");
+    test_case!(
+        "pre_operation + self_declaration_pending で医療データ送信 → 400",
+        {
+            let (base_url, auth, emp_id, client) = setup_tenko().await;
+
+            // Start a pre_operation session → medical_pending
+            let session = start_session_remote(&client, &base_url, &auth, &emp_id).await;
+            let session_id = session["id"].as_str().unwrap();
+            assert_eq!(session["status"], "medical_pending");
+
+            // Submit medical to advance to self_declaration_pending
+            let res = client
+                .put(format!(
+                    "{base_url}/api/tenko/sessions/{session_id}/medical"
+                ))
+                .header("Authorization", &auth)
+                .json(&serde_json::json!({ "temperature": 36.5 }))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 200);
+            let session: Value = res.json().await.unwrap();
+            assert_eq!(session["status"], "self_declaration_pending");
+
+            // Try to submit medical again → status is self_declaration_pending, not medical_pending → 400
+            let res = client
+                .put(format!(
+                    "{base_url}/api/tenko/sessions/{session_id}/medical"
+                ))
+                .header("Authorization", &auth)
+                .json(&serde_json::json!({ "temperature": 37.0 }))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(
+                res.status(),
+                400,
+                "Wrong status for medical should return 400"
+            );
+        }
+    );
+}
+
+// ============================================================
+// Tenko Sessions — submit_report on wrong status → 400 (L446)
+// ============================================================
+
+#[tokio::test]
+async fn test_submit_report_wrong_status() {
+    test_group!("点呼セッション — 不正ステータスで運行報告");
+    test_case!(
+        "post_operation + identity_verified で運行報告 → 400",
+        {
+            let (base_url, auth, emp_id, client) = setup_tenko().await;
+
+            // Create post_operation schedule and start session → identity_verified
+            let sid = create_schedule(&client, &base_url, &auth, &emp_id, "post_operation").await;
+            let session = start_session(&client, &base_url, &auth, &emp_id, &sid).await;
+            let session_id = session["id"].as_str().unwrap();
+            assert_eq!(session["status"], "identity_verified");
+
+            // Try to submit report while in identity_verified (not report_pending) → 400
+            let res = client
+                .put(format!("{base_url}/api/tenko/sessions/{session_id}/report"))
+                .header("Authorization", &auth)
+                .json(&serde_json::json!({
+                    "vehicle_road_status": "OK",
+                    "driver_alternation": "なし"
+                }))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(
+                res.status(),
+                400,
+                "Wrong status for report should return 400"
+            );
+        }
+    );
+}
+
+// ============================================================
+// Tenko Sessions — submit_report on pre_operation → 400 (L446)
+// ============================================================
+
+#[tokio::test]
+async fn test_submit_report_wrong_tenko_type() {
+    test_group!("点呼セッション — pre_operation で運行報告");
+    test_case!("pre_operation セッションで運行報告 → 400", {
+        let (base_url, auth, emp_id, client) = setup_tenko().await;
+
+        // Create pre_operation schedule and start session → medical_pending
+        let sid = create_schedule(&client, &base_url, &auth, &emp_id, "pre_operation").await;
+        let session = start_session(&client, &base_url, &auth, &emp_id, &sid).await;
+        let session_id = session["id"].as_str().unwrap();
+
+        // Try to submit report on a pre_operation session → 400
+        let res = client
+            .put(format!("{base_url}/api/tenko/sessions/{session_id}/report"))
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({
+                "vehicle_road_status": "OK",
+                "driver_alternation": "なし"
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 400, "pre_operation report should return 400");
+    });
+}
+
+// ============================================================
+// Tenko Sessions — submit_alcohol DB error (trigger) (L242-244)
+// ============================================================
+
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_submit_alcohol_db_error() {
+    test_group!("点呼セッション DB エラー");
+    test_case!("submit_alcohol: trigger → 500", {
+        let _db = common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = common::db_rename_flock();
+        let state = common::setup_app_state().await;
+        let base_url = common::spawn_test_server(state.clone()).await;
+        let tenant_id = common::create_test_tenant(
+            &state.pool,
+            &format!("AlcErr{}", uuid::Uuid::new_v4().simple()),
+        )
+        .await;
+        let jwt = common::create_test_jwt(tenant_id, "admin");
+        let auth = format!("Bearer {jwt}");
+        let client = reqwest::Client::new();
+
+        let emp = common::create_test_employee(
+            &client,
+            &base_url,
+            &auth,
+            "AlcErrEmp",
+            &format!("AE{}", &uuid::Uuid::new_v4().simple().to_string()[..4]),
+        )
+        .await;
+        let emp_id = emp["id"].as_str().unwrap();
+
+        // Start a post_operation session → identity_verified
+        let sid = create_schedule(&client, &base_url, &auth, emp_id, "post_operation").await;
+        let session = start_session(&client, &base_url, &auth, emp_id, &sid).await;
+        let session_id = session["id"].as_str().unwrap();
+        assert_eq!(session["status"], "identity_verified");
+
+        // Create trigger to block UPDATE on tenko_sessions
+        sqlx::query(
+            r#"CREATE OR REPLACE FUNCTION alc_api.fail_ts_alc_update() RETURNS trigger AS $$
+               BEGIN RAISE EXCEPTION 'test: tenko_sessions alcohol update blocked'; END;
+               $$ LANGUAGE plpgsql"#,
+        )
+        .execute(&state.pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "CREATE OR REPLACE TRIGGER fail_ts_alc_update BEFORE UPDATE ON alc_api.tenko_sessions \
+             FOR EACH ROW EXECUTE FUNCTION alc_api.fail_ts_alc_update()",
+        )
+        .execute(&state.pool)
+        .await
+        .unwrap();
+
+        let res = client
+            .put(format!(
+                "{base_url}/api/tenko/sessions/{session_id}/alcohol"
+            ))
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({
+                "alcohol_result": "pass",
+                "alcohol_value": 0.0
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 500, "submit_alcohol UPDATE should fail");
+
+        // Cleanup
+        sqlx::query("DROP TRIGGER fail_ts_alc_update ON alc_api.tenko_sessions")
+            .execute(&state.pool)
+            .await
+            .unwrap();
+        sqlx::query("DROP FUNCTION alc_api.fail_ts_alc_update")
+            .execute(&state.pool)
+            .await
+            .unwrap();
+    });
+}
+
+// ============================================================
+// Tenko Sessions — submit_medical DB error (trigger) (L348-350)
+// ============================================================
+
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_submit_medical_db_error() {
+    test_group!("点呼セッション DB エラー");
+    test_case!("submit_medical: trigger → 500", {
+        let _db = common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = common::db_rename_flock();
+        let state = common::setup_app_state().await;
+        let base_url = common::spawn_test_server(state.clone()).await;
+        let tenant_id = common::create_test_tenant(
+            &state.pool,
+            &format!("MedErr{}", uuid::Uuid::new_v4().simple()),
+        )
+        .await;
+        let jwt = common::create_test_jwt(tenant_id, "admin");
+        let auth = format!("Bearer {jwt}");
+        let client = reqwest::Client::new();
+
+        let emp = common::create_test_employee(
+            &client,
+            &base_url,
+            &auth,
+            "MedErrEmp",
+            &format!("ME{}", &uuid::Uuid::new_v4().simple().to_string()[..4]),
+        )
+        .await;
+        let emp_id = emp["id"].as_str().unwrap();
+
+        // Start a pre_operation session → medical_pending
+        let session = start_session_remote(&client, &base_url, &auth, emp_id).await;
+        let session_id = session["id"].as_str().unwrap();
+        assert_eq!(session["status"], "medical_pending");
+
+        // Create trigger to block UPDATE on tenko_sessions
+        sqlx::query(
+            r#"CREATE OR REPLACE FUNCTION alc_api.fail_ts_med_update() RETURNS trigger AS $$
+               BEGIN RAISE EXCEPTION 'test: tenko_sessions medical update blocked'; END;
+               $$ LANGUAGE plpgsql"#,
+        )
+        .execute(&state.pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "CREATE OR REPLACE TRIGGER fail_ts_med_update BEFORE UPDATE ON alc_api.tenko_sessions \
+             FOR EACH ROW EXECUTE FUNCTION alc_api.fail_ts_med_update()",
+        )
+        .execute(&state.pool)
+        .await
+        .unwrap();
+
+        let res = client
+            .put(format!(
+                "{base_url}/api/tenko/sessions/{session_id}/medical"
+            ))
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({ "temperature": 36.5 }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 500, "submit_medical UPDATE should fail");
+
+        // Cleanup
+        sqlx::query("DROP TRIGGER fail_ts_med_update ON alc_api.tenko_sessions")
+            .execute(&state.pool)
+            .await
+            .unwrap();
+        sqlx::query("DROP FUNCTION alc_api.fail_ts_med_update")
+            .execute(&state.pool)
+            .await
+            .unwrap();
+    });
+}
+
+// ============================================================
+// Tenko Sessions — confirm_instruction DB error (trigger) (L402-404)
+// ============================================================
+
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_confirm_instruction_db_error() {
+    test_group!("点呼セッション DB エラー");
+    test_case!("confirm_instruction: trigger → 500", {
+        let _db = common::DB_RENAME_LOCK.lock().unwrap();
+        let _flock = common::db_rename_flock();
+        let state = common::setup_app_state().await;
+        let base_url = common::spawn_test_server(state.clone()).await;
+        let tenant_id = common::create_test_tenant(
+            &state.pool,
+            &format!("InstrErr{}", uuid::Uuid::new_v4().simple()),
+        )
+        .await;
+        let jwt = common::create_test_jwt(tenant_id, "admin");
+        let auth = format!("Bearer {jwt}");
+        let client = reqwest::Client::new();
+
+        let emp = common::create_test_employee(
+            &client,
+            &base_url,
+            &auth,
+            "InstrErrEmp",
+            &format!("IE{}", &uuid::Uuid::new_v4().simple().to_string()[..4]),
+        )
+        .await;
+        let emp_id = emp["id"].as_str().unwrap();
+
+        // Create post_operation schedule (with instruction) and advance to instruction_pending
+        let sid = create_schedule(&client, &base_url, &auth, emp_id, "post_operation").await;
+        let session = start_session(&client, &base_url, &auth, emp_id, &sid).await;
+        let session_id = session["id"].as_str().unwrap();
+        assert_eq!(session["status"], "identity_verified");
+
+        // Alcohol pass → report_pending
+        let res = client
+            .put(format!(
+                "{base_url}/api/tenko/sessions/{session_id}/alcohol"
+            ))
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({ "alcohol_result": "pass", "alcohol_value": 0.0 }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200);
+
+        // Report → instruction_pending (schedule has instruction)
+        let res = client
+            .put(format!("{base_url}/api/tenko/sessions/{session_id}/report"))
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({
+                "vehicle_road_status": "OK",
+                "driver_alternation": "なし"
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200);
+        let session: Value = res.json().await.unwrap();
+        assert_eq!(session["status"], "instruction_pending");
+
+        // Create trigger to block UPDATE on tenko_sessions
+        sqlx::query(
+            r#"CREATE OR REPLACE FUNCTION alc_api.fail_ts_instr_update() RETURNS trigger AS $$
+               BEGIN RAISE EXCEPTION 'test: tenko_sessions instruction update blocked'; END;
+               $$ LANGUAGE plpgsql"#,
+        )
+        .execute(&state.pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "CREATE OR REPLACE TRIGGER fail_ts_instr_update BEFORE UPDATE ON alc_api.tenko_sessions \
+             FOR EACH ROW EXECUTE FUNCTION alc_api.fail_ts_instr_update()",
+        )
+        .execute(&state.pool)
+        .await
+        .unwrap();
+
+        let res = client
+            .put(format!(
+                "{base_url}/api/tenko/sessions/{session_id}/instruction-confirm"
+            ))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 500, "confirm_instruction UPDATE should fail");
+
+        // Cleanup
+        sqlx::query("DROP TRIGGER fail_ts_instr_update ON alc_api.tenko_sessions")
+            .execute(&state.pool)
+            .await
+            .unwrap();
+        sqlx::query("DROP FUNCTION alc_api.fail_ts_instr_update")
+            .execute(&state.pool)
+            .await
+            .unwrap();
+    });
+}
