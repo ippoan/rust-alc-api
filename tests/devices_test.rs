@@ -1746,3 +1746,224 @@ async fn test_test_fcm_all() {
         );
     });
 }
+
+// ============================================================
+// カバレッジ専用テスト
+// ============================================================
+
+// --- L151-153: create_registration_request DB error (pool.close) ---
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_create_registration_request_db_error() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    state.pool.close().await;
+    let client = reqwest::Client::new();
+
+    let res = client
+        .post(format!("{base_url}/api/devices/register/request"))
+        .json(&serde_json::json!({ "device_name": "err" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 500);
+}
+
+// --- L199-201: check_registration_status DB error (pool.close) ---
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_check_registration_status_db_error() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    state.pool.close().await;
+    let client = reqwest::Client::new();
+
+    let res = client
+        .get(format!("{base_url}/api/devices/register/status/ANY"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 500);
+}
+
+// --- L215: expired registration request ---
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_check_registration_status_expired() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let client = reqwest::Client::new();
+
+    // Insert an already-expired registration request directly into DB
+    let code = format!("EXP{}", uuid::Uuid::new_v4().simple());
+    sqlx::query(
+        r#"
+        INSERT INTO device_registration_requests
+            (registration_code, flow_type, device_name, status, expires_at)
+        VALUES ($1, 'qr_temp', 'expired-dev', 'pending', NOW() - INTERVAL '1 hour')
+        "#,
+    )
+    .bind(&code)
+    .execute(&state.pool)
+    .await
+    .unwrap();
+
+    let res = client
+        .get(format!("{base_url}/api/devices/register/status/{code}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(body["status"], "expired");
+}
+
+// --- L220: pending request with no expires_at (qr_permanent) ---
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_check_registration_status_no_expires_at() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let client = reqwest::Client::new();
+
+    // Insert a registration request with no expires_at (like qr_permanent)
+    let code = format!("NXP{}", uuid::Uuid::new_v4().simple());
+    sqlx::query(
+        r#"
+        INSERT INTO device_registration_requests
+            (registration_code, flow_type, device_name, status)
+        VALUES ($1, 'qr_permanent', 'noexpiry-dev', 'pending')
+        "#,
+    )
+    .bind(&code)
+    .execute(&state.pool)
+    .await
+    .unwrap();
+
+    let res = client
+        .get(format!("{base_url}/api/devices/register/status/{code}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(body["status"], "pending");
+}
+
+// --- L260-270,284-286: claim_registration DB lookup error (pool.close) ---
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_claim_registration_db_error() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    state.pool.close().await;
+    let client = reqwest::Client::new();
+
+    let res = client
+        .post(format!("{base_url}/api/devices/register/claim"))
+        .json(&serde_json::json!({
+            "registration_code": "DOESNOTMATTER",
+            "phone_number": "000"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 400);
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(body["success"], false);
+    assert!(body["message"].as_str().unwrap().contains("internal error"));
+}
+
+// --- L287: invalid registration code (ok_or_else) ---
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_claim_registration_invalid_code() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state).await;
+    let client = reqwest::Client::new();
+
+    let res = client
+        .post(format!("{base_url}/api/devices/register/claim"))
+        .json(&serde_json::json!({
+            "registration_code": "NONEXISTENT_CODE_12345"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 400);
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(body["success"], false);
+    assert!(body["message"]
+        .as_str()
+        .unwrap()
+        .contains("無効な登録コード"));
+}
+
+// --- L301: claim on already-used code ---
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_claim_registration_already_used() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(&state.pool, "ClaimUsed").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let auth = format!("Bearer {jwt}");
+    let client = reqwest::Client::new();
+
+    // Create URL token + claim it (first time succeeds)
+    let (_, code) = create_device_via_url_flow(&client, &base_url, &auth).await;
+
+    // Try to claim again with the same code (status is now 'approved')
+    let res = client
+        .post(format!("{base_url}/api/devices/register/claim"))
+        .json(&serde_json::json!({
+            "registration_code": code,
+            "device_name": "Second Try"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 400);
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(body["success"], false);
+    assert!(body["message"].as_str().unwrap().contains("既に使用済み"));
+}
+
+// --- L478: unknown flow_type ---
+#[cfg_attr(not(coverage), ignore)]
+#[tokio::test]
+async fn test_claim_registration_unknown_flow_type() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let client = reqwest::Client::new();
+
+    // Insert a request with an unknown flow_type directly
+    let code = format!("UNK{}", uuid::Uuid::new_v4().simple());
+    sqlx::query(
+        r#"
+        INSERT INTO device_registration_requests
+            (registration_code, flow_type, device_name, status)
+        VALUES ($1, 'unknown_flow', 'unknown-dev', 'pending')
+        "#,
+    )
+    .bind(&code)
+    .execute(&state.pool)
+    .await
+    .unwrap();
+
+    let res = client
+        .post(format!("{base_url}/api/devices/register/claim"))
+        .json(&serde_json::json!({
+            "registration_code": code
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 400);
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(body["success"], false);
+    assert!(body["message"]
+        .as_str()
+        .unwrap()
+        .contains("無効なフロータイプ"));
+}
