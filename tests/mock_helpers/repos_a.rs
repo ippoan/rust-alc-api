@@ -233,7 +233,17 @@ impl BotAdminRepository for MockBotAdminRepository {
         _enabled: bool,
     ) -> Result<BotConfigRow, sqlx::Error> {
         check_fail!(self);
-        todo!("MockBotAdminRepository::update_config")
+        Ok(BotConfigRow {
+            id: _id,
+            provider: _provider.to_string(),
+            name: _name.to_string(),
+            client_id: _client_id.to_string(),
+            service_account: _service_account.to_string(),
+            bot_id: _bot_id.to_string(),
+            enabled: _enabled,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        })
     }
 
     async fn create_config(
@@ -249,7 +259,17 @@ impl BotAdminRepository for MockBotAdminRepository {
         _enabled: bool,
     ) -> Result<BotConfigRow, sqlx::Error> {
         check_fail!(self);
-        todo!("MockBotAdminRepository::create_config")
+        Ok(BotConfigRow {
+            id: Uuid::new_v4(),
+            provider: _provider.to_string(),
+            name: _name.to_string(),
+            client_id: _client_id.to_string(),
+            service_account: _service_account.to_string(),
+            bot_id: _bot_id.to_string(),
+            enabled: _enabled,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        })
     }
 
     async fn delete_config(&self, _tenant_id: Uuid, _id: Uuid) -> Result<(), sqlx::Error> {
@@ -558,12 +578,14 @@ impl CommunicationItemsRepository for MockCommunicationItemsRepository {
 
 pub struct MockDailyHealthRepository {
     pub fail_next: AtomicBool,
+    pub data: std::sync::Mutex<Vec<DailyHealthRow>>,
 }
 
 impl Default for MockDailyHealthRepository {
     fn default() -> Self {
         Self {
             fail_next: AtomicBool::new(false),
+            data: std::sync::Mutex::new(vec![]),
         }
     }
 }
@@ -576,7 +598,7 @@ impl DailyHealthRepository for MockDailyHealthRepository {
         _date: NaiveDate,
     ) -> Result<Vec<DailyHealthRow>, sqlx::Error> {
         check_fail!(self);
-        Ok(vec![])
+        Ok(self.data.lock().unwrap().clone())
     }
 }
 
@@ -1011,12 +1033,14 @@ impl DriverInfoRepository for MockDriverInfoRepository {
 
 pub struct MockDtakoCsvProxyRepository {
     pub fail_next: AtomicBool,
+    pub return_prefix: std::sync::Mutex<Option<String>>,
 }
 
 impl Default for MockDtakoCsvProxyRepository {
     fn default() -> Self {
         Self {
             fail_next: AtomicBool::new(false),
+            return_prefix: std::sync::Mutex::new(None),
         }
     }
 }
@@ -1029,7 +1053,7 @@ impl DtakoCsvProxyRepository for MockDtakoCsvProxyRepository {
         _unko_no: &str,
     ) -> Result<Option<String>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        Ok(self.return_prefix.lock().unwrap().clone())
     }
 }
 

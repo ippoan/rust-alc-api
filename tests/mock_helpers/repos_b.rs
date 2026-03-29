@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use chrono::NaiveDate;
+use chrono::{NaiveDate, Utc};
 use uuid::Uuid;
 
 use rust_alc_api::db::models::*;
@@ -42,12 +42,14 @@ macro_rules! check_fail {
 
 pub struct MockDtakoEventClassificationsRepository {
     pub fail_next: AtomicBool,
+    pub update_result: std::sync::Mutex<Option<DtakoEventClassification>>,
 }
 
 impl Default for MockDtakoEventClassificationsRepository {
     fn default() -> Self {
         Self {
             fail_next: AtomicBool::new(false),
+            update_result: std::sync::Mutex::new(None),
         }
     }
 }
@@ -66,7 +68,7 @@ impl DtakoEventClassificationsRepository for MockDtakoEventClassificationsReposi
         _classification: &str,
     ) -> Result<Option<DtakoEventClassification>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        Ok(self.update_result.lock().unwrap().clone())
     }
 }
 
@@ -772,12 +774,18 @@ impl EmployeeRepository for MockEmployeeRepository {
 
 pub struct MockEquipmentFailuresRepository {
     pub fail_next: AtomicBool,
+    pub get_result: std::sync::Mutex<Option<EquipmentFailure>>,
+    pub resolve_result: std::sync::Mutex<Option<EquipmentFailure>>,
+    pub csv_data: std::sync::Mutex<Vec<EquipmentFailure>>,
 }
 
 impl Default for MockEquipmentFailuresRepository {
     fn default() -> Self {
         Self {
             fail_next: AtomicBool::new(false),
+            get_result: std::sync::Mutex::new(None),
+            resolve_result: std::sync::Mutex::new(None),
+            csv_data: std::sync::Mutex::new(vec![]),
         }
     }
 }
@@ -790,7 +798,20 @@ impl EquipmentFailuresRepository for MockEquipmentFailuresRepository {
         _input: &CreateEquipmentFailure,
     ) -> Result<EquipmentFailure, sqlx::Error> {
         check_fail!(self);
-        todo!("MockEquipmentFailuresRepository::create")
+        Ok(EquipmentFailure {
+            id: Uuid::new_v4(),
+            tenant_id: _tenant_id,
+            failure_type: _input.failure_type.clone(),
+            description: _input.description.clone(),
+            affected_device: _input.affected_device.clone(),
+            detected_at: _input.detected_at.unwrap_or_else(Utc::now),
+            detected_by: _input.detected_by.clone(),
+            resolved_at: None,
+            resolution_notes: None,
+            session_id: _input.session_id,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        })
     }
 
     async fn list(
@@ -813,7 +834,7 @@ impl EquipmentFailuresRepository for MockEquipmentFailuresRepository {
         _id: Uuid,
     ) -> Result<Option<EquipmentFailure>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        Ok(self.get_result.lock().unwrap().clone())
     }
 
     async fn resolve(
@@ -823,7 +844,7 @@ impl EquipmentFailuresRepository for MockEquipmentFailuresRepository {
         _input: &UpdateEquipmentFailure,
     ) -> Result<Option<EquipmentFailure>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        Ok(self.resolve_result.lock().unwrap().clone())
     }
 
     async fn list_for_csv(
@@ -832,7 +853,7 @@ impl EquipmentFailuresRepository for MockEquipmentFailuresRepository {
         _filter: &EquipmentFailureFilter,
     ) -> Result<Vec<EquipmentFailure>, sqlx::Error> {
         check_fail!(self);
-        Ok(vec![])
+        Ok(self.csv_data.lock().unwrap().clone())
     }
 }
 

@@ -20,7 +20,7 @@ struct DailyHealthFilter {
     date: Option<NaiveDate>,
 }
 
-#[derive(Debug, Serialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
 pub struct DailyHealthRow {
     pub employee_id: Uuid,
     pub employee_name: String,

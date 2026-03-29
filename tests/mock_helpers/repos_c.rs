@@ -119,7 +119,15 @@ impl SsoAdminRepository for MockSsoAdminRepository {
         _enabled: bool,
     ) -> Result<SsoConfigRow, sqlx::Error> {
         check_fail!(self);
-        todo!("MockSsoAdminRepository::upsert_config_with_secret")
+        Ok(SsoConfigRow {
+            provider: _provider.to_string(),
+            client_id: _client_id.to_string(),
+            external_org_id: _external_org_id.to_string(),
+            enabled: _enabled,
+            woff_id: _woff_id.map(|s| s.to_string()),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        })
     }
 
     async fn upsert_config_without_secret(
@@ -132,7 +140,15 @@ impl SsoAdminRepository for MockSsoAdminRepository {
         _enabled: bool,
     ) -> Result<SsoConfigRow, sqlx::Error> {
         check_fail!(self);
-        todo!("MockSsoAdminRepository::upsert_config_without_secret")
+        Ok(SsoConfigRow {
+            provider: _provider.to_string(),
+            client_id: _client_id.to_string(),
+            external_org_id: _external_org_id.to_string(),
+            enabled: _enabled,
+            woff_id: _woff_id.map(|s| s.to_string()),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        })
     }
 
     async fn delete_config(&self, _tenant_id: Uuid, _provider: &str) -> Result<(), sqlx::Error> {
