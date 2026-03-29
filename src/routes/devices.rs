@@ -62,6 +62,12 @@ pub fn tenant_router() -> Router<AppState> {
         .route("/devices/trigger-update", post(trigger_update))
 }
 
+/// DB エラーをログ出力して 500 を返すヘルパー
+fn db_err(context: &str, e: sqlx::Error) -> StatusCode {
+    tracing::error!("{context}: {e}");
+    StatusCode::INTERNAL_SERVER_ERROR
+}
+
 // ============================================================
 // 型定義
 // ============================================================
@@ -147,10 +153,7 @@ async fn create_registration_request(
     .bind(&device_name)
     .fetch_one(&state.pool)
     .await
-    .map_err(|e| {
-        tracing::error!("create_registration_request error: {e}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    .map_err(|e| db_err("create_registration_request", e))?;
 
     Ok(Json(CreateRegistrationResponse {
         registration_code: row.0,
@@ -268,6 +271,10 @@ async fn claim_registration(
             }),
         )
     };
+    let claim_db = |ctx: &str, e: sqlx::Error| {
+        tracing::error!("{ctx}: {e}");
+        claim_err("internal error")
+    };
 
     // リクエスト検索
     let req = sqlx::query_as::<_, (Uuid, String, Option<Uuid>, String, Option<String>, Option<String>, bool, bool)>(
@@ -280,10 +287,7 @@ async fn claim_registration(
     .bind(&body.registration_code)
     .fetch_optional(&state.pool)
     .await
-    .map_err(|e| {
-        tracing::error!("claim_registration lookup error: {e}");
-        claim_err("internal error")
-    })?
+    .map_err(|e| claim_db("claim lookup", e))?
     .ok_or_else(|| claim_err("無効な登録コードです"))?;
 
     let (
@@ -311,21 +315,19 @@ async fn claim_registration(
         .unwrap_or_default();
 
     match flow_type.as_str() {
-        "url" => {
-            // URLフロー: 即承認 (管理者がURL作成=承認)
+        "url" | "device_owner" => {
+            // URL / Device Owner フロー: 即承認
             let tenant_id = tenant_id.ok_or_else(|| claim_err("無効なトークンです"))?;
+            let is_do = flow_type == "device_owner";
 
-            let mut tx = state.pool.begin().await.map_err(|e| {
-                tracing::error!("claim tx begin error: {e}");
-                claim_err("internal error")
-            })?;
-
+            let mut tx = state
+                .pool
+                .begin()
+                .await
+                .map_err(|e| claim_db("claim tx begin", e))?;
             set_current_tenant(&mut tx, &tenant_id.to_string())
                 .await
-                .map_err(|e| {
-                    tracing::error!("claim set_tenant error: {e}");
-                    claim_err("internal error")
-                })?;
+                .map_err(|e| claim_db("claim set_tenant", e))?;
 
             // デバイス作成
             let device_id = sqlx::query_as::<_, (Uuid,)>(
@@ -338,14 +340,11 @@ async fn claim_registration(
             .bind(tenant_id)
             .bind(&device_name)
             .bind(&body.phone_number)
-            .bind(is_device_owner)
+            .bind(is_do || is_device_owner)
             .bind(is_dev_device)
             .fetch_one(&mut *tx)
             .await
-            .map_err(|e| {
-                tracing::error!("claim create device error: {e}");
-                claim_err("internal error")
-            })?
+            .map_err(|e| claim_db("claim create device", e))?
             .0;
 
             // リクエスト更新
@@ -362,19 +361,15 @@ async fn claim_registration(
             .bind(req_id)
             .execute(&mut *tx)
             .await
-            .map_err(|e| {
-                tracing::error!("claim update request error: {e}");
-                claim_err("internal error")
-            })?;
+            .map_err(|e| claim_db("claim update request", e))?;
 
-            tx.commit().await.map_err(|e| {
-                tracing::error!("claim tx commit error: {e}");
-                claim_err("internal error")
-            })?;
+            tx.commit()
+                .await
+                .map_err(|e| claim_db("claim tx commit", e))?;
 
             Ok(Json(ClaimRegistrationResponse {
                 success: true,
-                flow_type: "url".into(),
+                flow_type,
                 device_id: Some(device_id),
                 tenant_id: Some(tenant_id),
                 message: None,
@@ -394,10 +389,7 @@ async fn claim_registration(
             .bind(req_id)
             .execute(&state.pool)
             .await
-            .map_err(|e| {
-                tracing::error!("claim update permanent qr error: {e}");
-                claim_err("internal error")
-            })?;
+            .map_err(|e| claim_db("claim update permanent qr", e))?;
 
             Ok(Json(ClaimRegistrationResponse {
                 success: true,
@@ -405,74 +397,6 @@ async fn claim_registration(
                 device_id: None,
                 tenant_id: None,
                 message: Some("管理者の承認待ちです".into()),
-            }))
-        }
-        "device_owner" => {
-            // Device Ownerフロー: 即承認 (URLフローと同様)
-            let tenant_id = tenant_id.ok_or_else(|| claim_err("無効なトークンです"))?;
-
-            let mut tx = state.pool.begin().await.map_err(|e| {
-                tracing::error!("claim tx begin error: {e}");
-                claim_err("internal error")
-            })?;
-
-            set_current_tenant(&mut tx, &tenant_id.to_string())
-                .await
-                .map_err(|e| {
-                    tracing::error!("claim set_tenant error: {e}");
-                    claim_err("internal error")
-                })?;
-
-            // デバイス作成 (is_device_owner=true 固定)
-            let device_id = sqlx::query_as::<_, (Uuid,)>(
-                r#"
-                INSERT INTO devices (tenant_id, device_name, device_type, phone_number, status, approved_at, is_device_owner, is_dev_device)
-                VALUES ($1, $2, 'android', $3, 'active', NOW(), true, $4)
-                RETURNING id
-                "#,
-            )
-            .bind(tenant_id)
-            .bind(&device_name)
-            .bind(&body.phone_number)
-            .bind(is_dev_device)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|e| {
-                tracing::error!("claim create device error: {e}");
-                claim_err("internal error")
-            })?
-            .0;
-
-            // リクエスト更新
-            sqlx::query(
-                r#"
-                UPDATE device_registration_requests
-                SET status = 'approved', device_id = $1, phone_number = $2, device_name = $3
-                WHERE id = $4
-                "#,
-            )
-            .bind(device_id)
-            .bind(&body.phone_number)
-            .bind(&device_name)
-            .bind(req_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| {
-                tracing::error!("claim update request error: {e}");
-                claim_err("internal error")
-            })?;
-
-            tx.commit().await.map_err(|e| {
-                tracing::error!("claim tx commit error: {e}");
-                claim_err("internal error")
-            })?;
-
-            Ok(Json(ClaimRegistrationResponse {
-                success: true,
-                flow_type: "device_owner".into(),
-                device_id: Some(device_id),
-                tenant_id: Some(tenant_id),
-                message: None,
             }))
         }
         _ => Err(claim_err("無効なフロータイプです")),
@@ -1129,31 +1053,29 @@ async fn update_call_settings(
     }
 
     // always_on が変更された場合、FCM で端末に通知して設定を再取得させる
-    if body.always_on.is_some() {
-        if let Some(fcm) = state.fcm.as_ref() {
-            // RLS を回避して fcm_token を取得 (テナントスコープ付き conn ではなく pool を使用)
-            let token_row = sqlx::query_as::<_, (Option<String>,)>(
-                "SELECT fcm_token FROM alc_api.devices WHERE id = $1",
-            )
-            .bind(id)
-            .fetch_optional(&state.pool)
-            .await
-            .ok()
-            .flatten();
+    if let (true, Some(fcm)) = (body.always_on.is_some(), state.fcm.as_ref()) {
+        // RLS を回避して fcm_token を取得 (テナントスコープ付き conn ではなく pool を使用)
+        let token_row = sqlx::query_as::<_, (Option<String>,)>(
+            "SELECT fcm_token FROM alc_api.devices WHERE id = $1",
+        )
+        .bind(id)
+        .fetch_optional(&state.pool)
+        .await
+        .ok()
+        .flatten();
 
-            #[rustfmt::skip]
-            tracing::info!("FCM settings_changed: device={id} token={:?}", token_row.as_ref().map(|r| r.0.is_some()));
+        #[rustfmt::skip]
+        tracing::info!("FCM settings_changed: device={id} token={:?}", token_row.as_ref().map(|r| r.0.is_some()));
 
-            if let Some((Some(token),)) = token_row {
-                let mut data = std::collections::HashMap::new();
-                data.insert("type".to_string(), "settings_changed".to_string());
-                data.insert(
-                    "timestamp".to_string(),
-                    chrono::Utc::now().timestamp_millis().to_string(),
-                );
-                if let Err(e) = fcm.send_data_message(&token, data).await {
-                    tracing::warn!("FCM settings_changed to device {} failed: {e}", id);
-                }
+        if let Some((Some(token),)) = token_row {
+            let mut data = std::collections::HashMap::new();
+            data.insert("type".to_string(), "settings_changed".to_string());
+            data.insert(
+                "timestamp".to_string(),
+                chrono::Utc::now().timestamp_millis().to_string(),
+            );
+            if let Err(e) = fcm.send_data_message(&token, data).await {
+                tracing::warn!("FCM settings_changed to device {} failed: {e}", id);
             }
         }
     }
@@ -1529,10 +1451,7 @@ async fn fcm_dismiss_test(
     .bind(body.device_id)
     .fetch_all(&mut *conn)
     .await
-    .map_err(|e| {
-        tracing::error!("fcm_dismiss_test: tokens query error: {e}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    .map_err(|e| db_err("fcm_dismiss_test tokens query", e))?;
 
     let mut sent = 0usize;
     for (token,) in &tokens {
@@ -1922,25 +1841,24 @@ async fn send_update_fcm(
     let mut results = Vec::new();
 
     for (device_id, device_name, token, current_version) in &rows {
-        if let Some(ref filter) = device_id_filter {
-            if !filter.contains(device_id) {
-                skipped += 1;
-                continue;
-            }
+        if device_id_filter
+            .as_ref()
+            .is_some_and(|f| !f.contains(device_id))
+        {
+            skipped += 1;
+            continue;
         }
 
-        if let Some(target_version) = body.version_code {
-            if let Some(current) = current_version {
-                if *current >= target_version {
-                    already_updated += 1;
-                    results.push(TestFcmAllDeviceResult {
-                        device_id: *device_id,
-                        device_name: device_name.clone(),
-                        success: true,
-                        error: Some("already up-to-date".to_string()),
-                    });
-                    continue;
-                }
+        if let (Some(target_version), Some(current)) = (body.version_code, current_version) {
+            if *current >= target_version {
+                already_updated += 1;
+                results.push(TestFcmAllDeviceResult {
+                    device_id: *device_id,
+                    device_name: device_name.clone(),
+                    success: true,
+                    error: Some("already up-to-date".to_string()),
+                });
+                continue;
             }
         }
 
@@ -2068,9 +1986,7 @@ async fn trigger_update_dev(
                 total_resp.errors += resp.errors;
                 total_resp.results.extend(resp.results);
             }
-            Err(e) => {
-                tracing::error!("trigger_update_dev error for tenant {tid}: {e}");
-            }
+            Err(e) => tracing::error!("trigger_update_dev error for tenant {tid}: {e}"),
         }
     }
 
@@ -2102,10 +2018,7 @@ async fn generate_unique_code(state: &AppState) -> Result<String, StatusCode> {
         .bind(&code_str)
         .fetch_one(&state.pool)
         .await
-        .map_err(|e| {
-            tracing::error!("generate_unique_code error: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?
+        .map_err(|e| db_err("generate_unique_code", e))?
         .0;
 
         if !exists {
