@@ -15,6 +15,7 @@ pub mod dtako_operations;
 pub mod dtako_restraint_report;
 pub mod dtako_restraint_report_pdf;
 pub mod dtako_scraper;
+pub mod dtako_upload;
 pub mod dtako_vehicles;
 pub mod dtako_work_times;
 pub mod employees;
@@ -55,6 +56,7 @@ pub use dtako_restraint_report_pdf::{
     DtakoRestraintReportPdfRepository, PgDtakoRestraintReportPdfRepository,
 };
 pub use dtako_scraper::{DtakoScraperRepository, PgDtakoScraperRepository};
+pub use dtako_upload::{DtakoUploadRepository, PgDtakoUploadRepository};
 pub use dtako_vehicles::{DtakoVehiclesRepository, PgDtakoVehiclesRepository};
 pub use dtako_work_times::{DtakoWorkTimesRepository, PgDtakoWorkTimesRepository};
 pub use employees::{EmployeeRepository, PgEmployeeRepository};

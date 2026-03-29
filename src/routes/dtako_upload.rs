@@ -13,9 +13,18 @@ use crate::csv_parser;
 use crate::csv_parser::kudgivt::{parse_kudgivt, KudgivtRow};
 use crate::csv_parser::kudguri::{parse_kudguri, KudguriRow};
 use crate::csv_parser::work_segments::EventClass;
+use crate::db::repository::dtako_upload::{
+    DtakoUploadRepository, InsertDailyWorkHoursParams, InsertOperationParams, InsertSegmentParams,
+    PgDtakoUploadRepository,
+};
 use crate::middleware::auth::TenantId;
 use crate::AppState;
 use tokio_stream::StreamExt;
+
+/// AppState.pool からリポジトリを生成するヘルパー
+fn repo(state: &AppState) -> PgDtakoUploadRepository {
+    PgDtakoUploadRepository::new(state.pool.clone())
+}
 
 pub fn tenant_router() -> Router<AppState> {
     Router::new()
@@ -48,36 +57,20 @@ async fn upload_zip(
     // Extract ZIP file from multipart
     let (filename, zip_bytes) = extract_file(&mut multipart).await?;
 
-    let mut conn = state.pool.acquire().await.map_err(internal_err)?;
-    crate::db::tenant::set_current_tenant(&mut conn, &tenant_id.to_string())
-        .await
-        .map_err(internal_err)?;
-
     // Create upload history record
     let upload_id = Uuid::new_v4();
-    sqlx::query(
-        r#"INSERT INTO alc_api.dtako_upload_history (id, tenant_id, uploaded_by, filename, status)
-           VALUES ($1, $2, NULL, $3, 'processing')"#,
-    )
-    .bind(upload_id)
-    .bind(tenant_id)
-    .bind(&filename)
-    .execute(&mut *conn)
-    .await
-    .map_err(internal_err)?;
+    let r = repo(&state);
+    r.create_upload_history(tenant_id, upload_id, &filename)
+        .await
+        .map_err(internal_err)?;
 
     // Process ZIP
     match process_zip(&state, tenant_id, upload_id, &filename, &zip_bytes).await {
         Ok(count) => {
             // Mark success
-            sqlx::query(
-                "UPDATE alc_api.dtako_upload_history SET status = 'completed', operations_count = $1 WHERE id = $2",
-            )
-            .bind(count)
-            .bind(upload_id)
-            .execute(&mut *conn)
-            .await
-            .map_err(internal_err)?;
+            r.update_upload_completed(tenant_id, upload_id, count)
+                .await
+                .map_err(internal_err)?;
 
             // CSV split (non-blocking)
             try_split_csv(&state, upload_id).await;
@@ -89,7 +82,9 @@ async fn upload_zip(
             }))
         }
         Err(e) => {
-            mark_upload_failed(&mut conn, upload_id, &e.to_string()).await;
+            if let Err(db_err) = r.mark_upload_failed(upload_id, &e.to_string()).await {
+                tracing::error!("Failed to mark upload as failed: {db_err}");
+            }
             Err((StatusCode::BAD_REQUEST, e.to_string()))
         }
     }
@@ -134,14 +129,9 @@ async fn process_zip(
         .await
         .map_err(|e| anyhow::anyhow!("R2 upload failed: {e}"))?;
 
-    let mut conn = state.pool.acquire().await?;
-    crate::db::tenant::set_current_tenant(&mut conn, &tenant_id.to_string()).await?;
-
     // Update upload_history with R2 key
-    sqlx::query("UPDATE alc_api.dtako_upload_history SET r2_zip_key = $1 WHERE id = $2")
-        .bind(&zip_key)
-        .bind(upload_id)
-        .execute(&mut *conn)
+    let r = repo(state);
+    r.update_upload_r2_key(tenant_id, upload_id, &zip_key)
         .await?;
 
     // 2. Extract ZIP
@@ -173,72 +163,57 @@ async fn process_zip(
     tracing::info!("KUDGIVT parsed: {} rows (tenant={})", kudgivt_rows.len(), tenant_id);
 
     // 4. Upsert masters and insert operations
+    let repo = repo(state);
     let mut operations_count = 0i32;
     for row in &rows {
         // Upsert office
-        let office_id = upsert_office(state, tenant_id, &row.office_cd, &row.office_name).await?;
+        let office_id = repo
+            .upsert_office(tenant_id, &row.office_cd, &row.office_name)
+            .await?;
         // Upsert vehicle
-        let vehicle_id =
-            upsert_vehicle(state, tenant_id, &row.vehicle_cd, &row.vehicle_name).await?;
+        let vehicle_id = repo
+            .upsert_vehicle(tenant_id, &row.vehicle_cd, &row.vehicle_name)
+            .await?;
         // Upsert driver
-        let driver_id = upsert_driver(state, tenant_id, &row.driver_cd, &row.driver_name).await?;
+        let driver_id = repo
+            .upsert_driver(tenant_id, &row.driver_cd, &row.driver_name)
+            .await?;
 
         let r2_key_prefix = format!("{}/unko/{}", tenant_id, row.unko_no);
 
         // Delete existing operation with same (tenant_id, unko_no, crew_role) for re-upload
-        sqlx::query(
-            "DELETE FROM alc_api.dtako_operations WHERE tenant_id = $1 AND unko_no = $2 AND crew_role = $3",
-        )
-        .bind(tenant_id)
-        .bind(&row.unko_no)
-        .bind(row.crew_role)
-        .execute(&mut *conn)
-        .await?;
+        repo.delete_operation(tenant_id, &row.unko_no, row.crew_role)
+            .await?;
 
         // Insert operation
-        sqlx::query(
-            r#"INSERT INTO alc_api.dtako_operations (
-                tenant_id, unko_no, crew_role, reading_date, operation_date,
-                office_id, vehicle_id, driver_id,
-                departure_at, return_at, garage_out_at, garage_in_at,
-                meter_start, meter_end, total_distance,
-                drive_time_general, drive_time_highway, drive_time_bypass,
-                safety_score, economy_score, total_score,
-                raw_data, r2_key_prefix
-            ) VALUES (
-                $1, $2, $3, $4, $5,
-                $6, $7, $8,
-                $9, $10, $11, $12,
-                $13, $14, $15,
-                $16, $17, $18,
-                $19, $20, $21,
-                $22, $23
-            )"#,
+        repo.insert_operation(
+            tenant_id,
+            &InsertOperationParams {
+                tenant_id,
+                unko_no: row.unko_no.clone(),
+                crew_role: row.crew_role,
+                reading_date: row.reading_date,
+                operation_date: row.operation_date,
+                office_id,
+                vehicle_id,
+                driver_id,
+                departure_at: row.departure_at,
+                return_at: row.return_at,
+                garage_out_at: row.garage_out_at,
+                garage_in_at: row.garage_in_at,
+                meter_start: row.meter_start,
+                meter_end: row.meter_end,
+                total_distance: row.total_distance,
+                drive_time_general: row.drive_time_general,
+                drive_time_highway: row.drive_time_highway,
+                drive_time_bypass: row.drive_time_bypass,
+                safety_score: row.safety_score,
+                economy_score: row.economy_score,
+                total_score: row.total_score,
+                raw_data: row.raw_data.clone(),
+                r2_key_prefix,
+            },
         )
-        .bind(tenant_id)
-        .bind(&row.unko_no)
-        .bind(row.crew_role)
-        .bind(row.reading_date)
-        .bind(row.operation_date)
-        .bind(office_id)
-        .bind(vehicle_id)
-        .bind(driver_id)
-        .bind(row.departure_at)
-        .bind(row.return_at)
-        .bind(row.garage_out_at)
-        .bind(row.garage_in_at)
-        .bind(row.meter_start)
-        .bind(row.meter_end)
-        .bind(row.total_distance)
-        .bind(row.drive_time_general)
-        .bind(row.drive_time_highway)
-        .bind(row.drive_time_bypass)
-        .bind(row.safety_score)
-        .bind(row.economy_score)
-        .bind(row.total_score)
-        .bind(&row.raw_data)
-        .bind(&r2_key_prefix)
-        .execute(&mut *conn)
         .await?;
 
         operations_count += 1;
@@ -255,94 +230,6 @@ async fn process_zip(
     tracing::info!("calculate_daily_hours done (tenant={})", tenant_id);
 
     Ok(operations_count)
-}
-
-async fn upsert_office(
-    state: &AppState,
-    tenant_id: Uuid,
-    office_cd: &str,
-    office_name: &str,
-) -> Result<Option<Uuid>, anyhow::Error> {
-    if office_cd.is_empty() {
-        return Ok(None);
-    }
-    let mut conn = state.pool.acquire().await?;
-    crate::db::tenant::set_current_tenant(&mut conn, &tenant_id.to_string()).await?;
-    let rec = sqlx::query_as::<_, (Uuid,)>(
-        r#"INSERT INTO alc_api.dtako_offices (tenant_id, office_cd, office_name)
-           VALUES ($1, $2, $3)
-           ON CONFLICT (tenant_id, office_cd) DO UPDATE SET office_name = EXCLUDED.office_name
-           RETURNING id"#,
-    )
-    .bind(tenant_id)
-    .bind(office_cd)
-    .bind(office_name)
-    .fetch_one(&mut *conn)
-    .await?;
-    Ok(Some(rec.0))
-}
-
-async fn upsert_vehicle(
-    state: &AppState,
-    tenant_id: Uuid,
-    vehicle_cd: &str,
-    vehicle_name: &str,
-) -> Result<Option<Uuid>, anyhow::Error> {
-    if vehicle_cd.is_empty() {
-        return Ok(None);
-    }
-    let mut conn = state.pool.acquire().await?;
-    crate::db::tenant::set_current_tenant(&mut conn, &tenant_id.to_string()).await?;
-    let rec = sqlx::query_as::<_, (Uuid,)>(
-        r#"INSERT INTO alc_api.dtako_vehicles (tenant_id, vehicle_cd, vehicle_name)
-           VALUES ($1, $2, $3)
-           ON CONFLICT (tenant_id, vehicle_cd) DO UPDATE SET vehicle_name = EXCLUDED.vehicle_name
-           RETURNING id"#,
-    )
-    .bind(tenant_id)
-    .bind(vehicle_cd)
-    .bind(vehicle_name)
-    .fetch_one(&mut *conn)
-    .await?;
-    Ok(Some(rec.0))
-}
-
-async fn upsert_driver(
-    state: &AppState,
-    tenant_id: Uuid,
-    driver_cd: &str,
-    driver_name: &str,
-) -> Result<Option<Uuid>, anyhow::Error> {
-    if driver_cd.is_empty() {
-        return Ok(None);
-    }
-    let mut conn = state.pool.acquire().await?;
-    crate::db::tenant::set_current_tenant(&mut conn, &tenant_id.to_string()).await?;
-    // employees テーブルから driver_cd で検索
-    let existing = sqlx::query_as::<_, (Uuid,)>(
-        "SELECT id FROM alc_api.employees WHERE tenant_id = $1 AND driver_cd = $2 AND deleted_at IS NULL",
-    )
-    .bind(tenant_id)
-    .bind(driver_cd)
-    .fetch_optional(&mut *conn)
-    .await?;
-
-    if let Some(rec) = existing {
-        Ok(Some(rec.0))
-    } else {
-        // 新規 employee として作成
-        let rec = sqlx::query_as::<_, (Uuid,)>(
-            r#"INSERT INTO alc_api.employees (tenant_id, driver_cd, name)
-               VALUES ($1, $2, $3)
-               RETURNING id"#,
-        )
-        .bind(tenant_id)
-        .bind(driver_cd)
-        .bind(driver_name)
-        .fetch_one(&mut *conn)
-        .await?;
-        Ok(Some(rec.0))
-    }
 }
 
 // group_operations_into_work_days は crate::compare::group_operations_into_work_days を使用
@@ -434,8 +321,7 @@ async fn calculate_daily_hours(
 ) -> Result<(), anyhow::Error> {
     use std::collections::HashMap;
 
-    let mut conn = state.pool.acquire().await?;
-    crate::db::tenant::set_current_tenant(&mut conn, &tenant_id.to_string()).await?;
+    let repo = repo(state);
 
     // 0. 始業ベースのワークデイグルーピング（unko_no → work_date）
     let unko_work_date = crate::compare::group_operations_into_work_days(rows);
@@ -581,14 +467,9 @@ async fn calculate_daily_hours(
             if let Some(cached) = driver_id_cache.get(driver_cd) {
                 *cached
             } else {
-                let rec = sqlx::query_as::<_, (Uuid,)>(
-                    "SELECT id FROM alc_api.employees WHERE tenant_id = $1 AND driver_cd = $2 AND deleted_at IS NULL",
-                )
-                .bind(tenant_id)
-                .bind(driver_cd)
-                .fetch_optional(&mut *conn)
-                .await?;
-                let id = rec.map(|r| r.0);
+                let id = repo
+                    .get_employee_id_by_driver_cd(tenant_id, driver_cd)
+                    .await?;
                 driver_id_cache.insert(driver_cd.clone(), id);
                 id
             }
@@ -710,24 +591,11 @@ async fn calculate_daily_hours(
         // unko_noベースで古いセグメント・daily_work_hours を削除
         for did in &driver_ids_seen {
             for unko in &all_unko_nos {
-                sqlx::query(
-                    "DELETE FROM alc_api.dtako_daily_work_segments WHERE tenant_id = $1 AND driver_id = $2 AND unko_no = $3",
-                )
-                .bind(tenant_id)
-                .bind(did)
-                .bind(unko)
-                .execute(&mut *conn)
-                .await?;
+                repo.delete_segments_by_unko(tenant_id, *did, unko).await?;
             }
             // unko_nosカラム（配列）に含まれるエントリも削除
-            sqlx::query(
-                "DELETE FROM alc_api.dtako_daily_work_hours WHERE tenant_id = $1 AND driver_id = $2 AND unko_nos && $3",
-            )
-            .bind(tenant_id)
-            .bind(did)
-            .bind(&all_unko_nos)
-            .execute(&mut *conn)
-            .await?;
+            repo.delete_daily_hours_by_unko_nos(tenant_id, *did, &all_unko_nos)
+                .await?;
         }
     }
 
@@ -741,79 +609,56 @@ async fn calculate_daily_hours(
         let rest_minutes = agg.rest_event_minutes;
 
         // Delete existing for re-upload (start_time含めて正確に削除)
-        sqlx::query(
-            "DELETE FROM alc_api.dtako_daily_work_hours WHERE tenant_id = $1 AND driver_id = $2 AND work_date = $3 AND start_time = $4",
-        )
-        .bind(tenant_id)
-        .bind(driver_id)
-        .bind(work_date)
-        .bind(_start_time)
-        .execute(&mut *conn)
-        .await?;
+        repo.delete_daily_hours_exact(tenant_id, driver_id, *work_date, *_start_time)
+            .await?;
 
-        sqlx::query(
-            r#"INSERT INTO alc_api.dtako_daily_work_hours (
-                tenant_id, driver_id, work_date, start_time,
-                total_work_minutes, total_drive_minutes, total_rest_minutes,
-                late_night_minutes, drive_minutes, cargo_minutes,
-                total_distance, operation_count, unko_nos,
-                overlap_drive_minutes, overlap_cargo_minutes,
-                overlap_break_minutes, overlap_restraint_minutes,
-                ot_late_night_minutes
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)"#,
+        repo.insert_daily_work_hours(
+            tenant_id,
+            &InsertDailyWorkHoursParams {
+                tenant_id,
+                driver_id,
+                work_date: *work_date,
+                start_time: *_start_time,
+                total_work_minutes: agg.total_work_minutes,
+                total_drive_minutes: agg.total_labor_minutes,
+                total_rest_minutes: rest_minutes,
+                late_night_minutes: (agg.late_night_minutes - agg.ot_late_night_minutes).max(0),
+                drive_minutes: agg.drive_minutes,
+                cargo_minutes: agg.cargo_minutes,
+                total_distance: agg.total_distance,
+                operation_count: agg.operation_count,
+                unko_nos: agg.unko_nos.clone(),
+                overlap_drive_minutes: agg.overlap_drive_minutes,
+                overlap_cargo_minutes: agg.overlap_cargo_minutes,
+                overlap_break_minutes: agg.overlap_break_minutes,
+                overlap_restraint_minutes: agg.overlap_restraint_minutes,
+                ot_late_night_minutes: agg.ot_late_night_minutes,
+            },
         )
-        .bind(tenant_id)
-        .bind(driver_id)
-        .bind(work_date)
-        .bind(_start_time)
-        .bind(agg.total_work_minutes)
-        .bind(agg.total_labor_minutes)
-        .bind(rest_minutes)
-        .bind((agg.late_night_minutes - agg.ot_late_night_minutes).max(0)) // 法定内深夜 = total深夜 - 時間外深夜
-        .bind(agg.drive_minutes)
-        .bind(agg.cargo_minutes)
-        .bind(agg.total_distance)
-        .bind(agg.operation_count)
-        .bind(&agg.unko_nos)
-        .bind(agg.overlap_drive_minutes)
-        .bind(agg.overlap_cargo_minutes)
-        .bind(agg.overlap_break_minutes)
-        .bind(agg.overlap_restraint_minutes)
-        .bind(agg.ot_late_night_minutes)
-        .execute(&mut *conn)
         .await?;
 
         // Delete and re-insert segments
-        sqlx::query(
-            "DELETE FROM alc_api.dtako_daily_work_segments WHERE tenant_id = $1 AND driver_id = $2 AND work_date = $3",
-        )
-        .bind(tenant_id)
-        .bind(driver_id)
-        .bind(work_date)
-        .execute(&mut *conn)
-        .await?;
+        repo.delete_segments_by_date(tenant_id, driver_id, *work_date)
+            .await?;
 
         for seg in &agg.segments {
-            sqlx::query(
-                r#"INSERT INTO alc_api.dtako_daily_work_segments (
-                    tenant_id, driver_id, work_date, unko_no, segment_index,
-                    start_at, end_at, work_minutes, labor_minutes, late_night_minutes,
-                    drive_minutes, cargo_minutes
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)"#,
+            repo.insert_segment(
+                tenant_id,
+                &InsertSegmentParams {
+                    tenant_id,
+                    driver_id,
+                    work_date: *work_date,
+                    unko_no: seg.unko_no.clone(),
+                    segment_index: seg.segment_index,
+                    start_at: seg.start_at,
+                    end_at: seg.end_at,
+                    work_minutes: seg.work_minutes,
+                    labor_minutes: seg.labor_minutes,
+                    late_night_minutes: seg.late_night_minutes,
+                    drive_minutes: seg.drive_minutes,
+                    cargo_minutes: seg.cargo_minutes,
+                },
             )
-            .bind(tenant_id)
-            .bind(driver_id)
-            .bind(work_date)
-            .bind(&seg.unko_no)
-            .bind(seg.segment_index)
-            .bind(seg.start_at)
-            .bind(seg.end_at)
-            .bind(seg.work_minutes)
-            .bind(seg.labor_minutes)
-            .bind(seg.late_night_minutes)
-            .bind(seg.drive_minutes)
-            .bind(seg.cargo_minutes)
-            .execute(&mut *conn)
             .await?;
         }
 
@@ -840,20 +685,8 @@ async fn load_kudgivt_from_zips(
     month_start: chrono::NaiveDate,
     _month_end: chrono::NaiveDate,
 ) -> Result<Vec<KudgivtRow>, anyhow::Error> {
-    let mut conn = state.pool.acquire().await?;
-    crate::db::tenant::set_current_tenant(&mut conn, &tenant_id.to_string()).await?;
-
     // 該当月のupload_historyからZIPキーを取得
-    let zip_keys: Vec<String> = sqlx::query_scalar(
-        r#"SELECT DISTINCT r2_zip_key FROM alc_api.dtako_upload_history
-           WHERE tenant_id = $1 AND status = 'completed'
-             AND created_at >= ($2::date - interval '60 days')
-           ORDER BY r2_zip_key"#,
-    )
-    .bind(tenant_id)
-    .bind(month_start)
-    .fetch_all(&mut *conn)
-    .await?;
+    let zip_keys = repo(state).fetch_zip_keys(tenant_id, month_start).await?;
 
     let mut all_kudgivt = Vec::new();
 
@@ -906,16 +739,10 @@ async fn load_or_init_classifications(
 ) -> Result<std::collections::HashMap<String, EventClass>, anyhow::Error> {
     use std::collections::HashMap;
 
-    let mut conn = state.pool.acquire().await?;
-    crate::db::tenant::set_current_tenant(&mut conn, &tenant_id.to_string()).await?;
+    let repo = repo(state);
 
     // DBから既存の分類を取得
-    let existing: Vec<(String, String)> = sqlx::query_as(
-        "SELECT event_cd, classification FROM alc_api.dtako_event_classifications WHERE tenant_id = $1",
-    )
-    .bind(tenant_id)
-    .fetch_all(&mut *conn)
-    .await?;
+    let existing = repo.load_event_classifications(tenant_id).await?;
 
     let mut map: HashMap<String, EventClass> = HashMap::new();
     for (cd, cls) in &existing {
@@ -941,19 +768,14 @@ async fn load_or_init_classifications(
         let (cls_str, ec) = default_classification(&row.event_cd);
         map.insert(row.event_cd.clone(), ec);
 
-        if let Err(e) = sqlx::query(
-            r#"INSERT INTO alc_api.dtako_event_classifications (tenant_id, event_cd, event_name, classification)
-               VALUES ($1, $2, $3, $4)
-               ON CONFLICT (tenant_id, event_cd) DO NOTHING"#,
-        )
-        .bind(tenant_id)
-        .bind(&row.event_cd)
-        .bind(&row.event_name)
-        .bind(cls_str)
-        .execute(&mut *conn)
-        .await
+        if let Err(e) = repo
+            .insert_event_classification(tenant_id, &row.event_cd, &row.event_name, cls_str)
+            .await
         {
-            tracing::error!("Failed to insert event classification {}: {e}", row.event_cd);
+            tracing::error!(
+                "Failed to insert event classification {}: {e}",
+                row.event_cd
+            );
         }
     }
 
@@ -981,6 +803,7 @@ pub fn internal_err(e: impl std::fmt::Display) -> (StatusCode, String) {
 }
 
 /// upload 失敗時の status 更新。UPDATE 自体の失敗もログのみで無視。
+/// テストから呼ばれるため pub を維持。内部はリポジトリに委譲。
 pub async fn mark_upload_failed(conn: &mut sqlx::PgConnection, upload_id: Uuid, error_msg: &str) {
     if let Err(db_err) = sqlx::query(
         "UPDATE alc_api.dtako_upload_history SET status = 'failed', error_message = $1 WHERE id = $2",
@@ -1020,19 +843,13 @@ pub(crate) async fn split_csv_from_r2(
     state: &AppState,
     upload_id: Uuid,
 ) -> Result<(), anyhow::Error> {
-    let mut conn = state.pool.acquire().await?;
+    let record = repo(state)
+        .get_upload_tenant_and_key(upload_id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("upload {} not found", upload_id))?;
 
-    let record = sqlx::query_as::<_, (Uuid, String)>(
-        "SELECT tenant_id, r2_zip_key FROM alc_api.dtako_upload_history WHERE id = $1",
-    )
-    .bind(upload_id)
-    .fetch_optional(&mut *conn)
-    .await?
-    .ok_or_else(|| anyhow::anyhow!("upload {} not found", upload_id))?;
-
-    let (tenant_id, r2_zip_key) = record;
-
-    crate::db::tenant::set_current_tenant(&mut conn, &tenant_id.to_string()).await?;
+    let tenant_id = record.tenant_id;
+    let r2_zip_key = record.r2_zip_key;
 
     let dtako_st = state
         .dtako_storage
@@ -1102,25 +919,14 @@ pub(crate) async fn split_csv_from_r2(
 
     // has_kudgivt フラグを更新
     if !kudgivt_unko_nos.is_empty() {
-        for chunk in kudgivt_unko_nos.chunks(100) {
-            let placeholders: Vec<String> = chunk
-                .iter()
-                .enumerate()
-                .map(|(i, _)| format!("${}", i + 2))
-                .collect();
-            let sql = format!(
-                "UPDATE alc_api.dtako_operations SET has_kudgivt = TRUE WHERE tenant_id = $1 AND unko_no IN ({})",
-                placeholders.join(", ")
-            );
-            let mut query = sqlx::query(&sql).bind(tenant_id);
-            for unko_no in chunk {
-                query = query.bind(unko_no);
-            }
-            if let Err(e) = query.execute(&mut *conn).await {
-                tracing::error!("Failed to update has_kudgivt: {e}");
-            }
+        if let Err(e) = repo(state)
+            .update_has_kudgivt(tenant_id, &kudgivt_unko_nos)
+            .await
+        {
+            tracing::error!("Failed to update has_kudgivt: {e}");
+        } else {
+            tracing::info!("has_kudgivt updated: {} operations", kudgivt_unko_nos.len());
         }
-        tracing::info!("has_kudgivt updated: {} operations", kudgivt_unko_nos.len());
     }
 
     #[rustfmt::skip]
@@ -1133,27 +939,19 @@ async fn internal_download(
     State(state): State<AppState>,
     Path(upload_id): Path<Uuid>,
 ) -> Result<Response, (StatusCode, String)> {
-    let mut conn = state.pool.acquire().await.map_err(internal_err)?;
-
-    let record = sqlx::query_as::<_, (Uuid, String, String)>(
-        "SELECT tenant_id, r2_zip_key, filename FROM alc_api.dtako_upload_history WHERE id = $1",
-    )
-    .bind(upload_id)
-    .fetch_optional(&mut *conn)
-    .await
-    .map_err(internal_err)?
-    .ok_or_else(|| {
-        (
-            StatusCode::NOT_FOUND,
-            format!("upload {} not found", upload_id),
-        )
-    })?;
-
-    let (tenant_id, r2_zip_key, filename) = record;
-
-    crate::db::tenant::set_current_tenant(&mut conn, &tenant_id.to_string())
+    let record = repo(&state)
+        .get_upload_history(upload_id)
         .await
-        .map_err(internal_err)?;
+        .map_err(internal_err)?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                format!("upload {} not found", upload_id),
+            )
+        })?;
+
+    let r2_zip_key = record.r2_zip_key;
+    let filename = record.filename;
 
     let zip_bytes = state
         .dtako_storage
@@ -1194,28 +992,22 @@ async fn internal_rerun(
     State(state): State<AppState>,
     Path(upload_id): Path<Uuid>,
 ) -> Result<Json<UploadResponse>, (StatusCode, String)> {
-    let mut conn = state.pool.acquire().await.map_err(internal_err)?;
-
     // upload_history から r2_zip_key を取得
-    let record = sqlx::query_as::<_, (Uuid, String, String)>(
-        "SELECT tenant_id, r2_zip_key, filename FROM alc_api.dtako_upload_history WHERE id = $1",
-    )
-    .bind(upload_id)
-    .fetch_optional(&mut *conn)
-    .await
-    .map_err(internal_err)?
-    .ok_or_else(|| {
-        (
-            StatusCode::NOT_FOUND,
-            format!("upload {} not found", upload_id),
-        )
-    })?;
-
-    let (tenant_id, r2_zip_key, filename) = record;
-
-    crate::db::tenant::set_current_tenant(&mut conn, &tenant_id.to_string())
+    let r = repo(&state);
+    let record = r
+        .get_upload_history(upload_id)
         .await
-        .map_err(internal_err)?;
+        .map_err(internal_err)?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                format!("upload {} not found", upload_id),
+            )
+        })?;
+
+    let tenant_id = record.tenant_id;
+    let r2_zip_key = record.r2_zip_key;
+    let filename = record.filename;
 
     // R2 から ZIP をダウンロード
     let zip_bytes = state
@@ -1236,14 +1028,9 @@ async fn internal_rerun(
 
     match process_zip(&state, tenant_id, upload_id, &filename, &zip_bytes).await {
         Ok(count) => {
-            sqlx::query(
-                "UPDATE alc_api.dtako_upload_history SET status = 'completed', operations_count = $1 WHERE id = $2",
-            )
-            .bind(count)
-            .bind(upload_id)
-            .execute(&mut *conn)
-            .await
-            .map_err(internal_err)?;
+            r.update_upload_completed(tenant_id, upload_id, count)
+                .await
+                .map_err(internal_err)?;
 
             // CSV split (non-blocking)
             try_split_csv(&state, upload_id).await;
@@ -1255,7 +1042,9 @@ async fn internal_rerun(
             }))
         }
         Err(e) => {
-            mark_upload_failed(&mut conn, upload_id, &e.to_string()).await;
+            if let Err(db_err) = r.mark_upload_failed(upload_id, &e.to_string()).await {
+                tracing::error!("Failed to mark upload as failed: {db_err}");
+            }
             Err((StatusCode::BAD_REQUEST, e.to_string()))
         }
     }
@@ -1284,45 +1073,13 @@ pub async fn recalculate_all_core(
         }
     };
 
-    let mut conn = state.pool.acquire().await?;
-    crate::db::tenant::set_current_tenant(&mut conn, &tenant_id.to_string()).await?;
-
     let (month_start, month_end) =
         compute_month_range(year, month).ok_or_else(|| anyhow::anyhow!("invalid year/month"))?;
 
-    #[derive(sqlx::FromRow)]
-    struct OpRow {
-        unko_no: String,
-        reading_date: chrono::NaiveDate,
-        operation_date: Option<chrono::NaiveDate>,
-        departure_at: Option<chrono::DateTime<chrono::Utc>>,
-        return_at: Option<chrono::DateTime<chrono::Utc>>,
-        driver_cd: Option<String>,
-        total_distance: Option<f64>,
-        drive_time_general: Option<i32>,
-        drive_time_highway: Option<i32>,
-        drive_time_bypass: Option<i32>,
-    }
-
     let fetch_end = month_end + chrono::Duration::days(1);
-    let op_rows = sqlx::query_as::<_, OpRow>(
-        r#"SELECT DISTINCT o.unko_no, o.reading_date, o.operation_date,
-                  o.departure_at, o.return_at,
-                  d.driver_cd,
-                  o.total_distance,
-                  o.drive_time_general, o.drive_time_highway, o.drive_time_bypass
-           FROM alc_api.dtako_operations o
-           LEFT JOIN alc_api.employees d ON d.id = o.driver_id AND d.tenant_id = o.tenant_id
-           WHERE o.tenant_id = $1
-             AND (o.operation_date >= $2 AND o.operation_date <= $3
-                  OR o.reading_date >= $2 AND o.reading_date <= $3)
-           ORDER BY o.reading_date, o.unko_no"#,
-    )
-    .bind(tenant_id)
-    .bind(month_start)
-    .bind(fetch_end)
-    .fetch_all(&mut *conn)
-    .await?;
+    let op_rows = repo(state)
+        .fetch_operations_for_recalc(tenant_id, month_start, fetch_end)
+        .await?;
 
     let ops: Vec<KudguriRow> = op_rows
         .iter()
@@ -1464,46 +1221,10 @@ async fn list_pending_uploads(
     tenant: axum::Extension<TenantId>,
 ) -> Result<Json<Vec<serde_json::Value>>, (StatusCode, String)> {
     let tenant_id = tenant.0 .0;
-    let mut conn = state.pool.acquire().await.map_err(internal_err)?;
-    crate::db::tenant::set_current_tenant(&mut conn, &tenant_id.to_string())
+    let items = repo(&state)
+        .list_pending_uploads(tenant_id)
         .await
         .map_err(internal_err)?;
-
-    let rows = sqlx::query_as::<
-        _,
-        (
-            Uuid,
-            Uuid,
-            String,
-            String,
-            Option<String>,
-            chrono::DateTime<chrono::Utc>,
-        ),
-    >(
-        r#"SELECT id, tenant_id, filename, status, error_message, created_at
-           FROM alc_api.dtako_upload_history
-           WHERE status IN ('pending_retry', 'failed')
-           ORDER BY created_at DESC
-           LIMIT 50"#,
-    )
-    .fetch_all(&mut *conn)
-    .await
-    .map_err(internal_err)?;
-
-    let items: Vec<serde_json::Value> = rows
-        .into_iter()
-        .map(|(id, tenant_id, filename, status, error, created_at)| {
-            serde_json::json!({
-                "id": id,
-                "tenant_id": tenant_id,
-                "filename": filename,
-                "status": status,
-                "error_message": error,
-                "created_at": created_at.to_rfc3339(),
-            })
-        })
-        .collect();
-
     Ok(Json(items))
 }
 
@@ -1515,44 +1236,17 @@ struct RecalcDriverFilter {
 }
 
 /// recalculate 共通: ドライバーの operations を KudguriRow として取得
-async fn load_driver_operations(
-    conn: &mut sqlx::PgConnection,
+async fn load_driver_ops_as_kudguri(
+    state: &AppState,
     tenant_id: Uuid,
     driver_id: Uuid,
     driver_cd: &str,
     month_start: chrono::NaiveDate,
     fetch_end: chrono::NaiveDate,
 ) -> Result<Vec<KudguriRow>, anyhow::Error> {
-    #[derive(sqlx::FromRow)]
-    struct OpRow {
-        unko_no: String,
-        reading_date: chrono::NaiveDate,
-        operation_date: Option<chrono::NaiveDate>,
-        departure_at: Option<chrono::DateTime<chrono::Utc>>,
-        return_at: Option<chrono::DateTime<chrono::Utc>>,
-        total_distance: Option<f64>,
-        drive_time_general: Option<i32>,
-        drive_time_highway: Option<i32>,
-        drive_time_bypass: Option<i32>,
-    }
-
-    let op_rows = sqlx::query_as::<_, OpRow>(
-        r#"SELECT DISTINCT o.unko_no, o.reading_date, o.operation_date,
-                  o.departure_at, o.return_at,
-                  o.total_distance,
-                  o.drive_time_general, o.drive_time_highway, o.drive_time_bypass
-           FROM alc_api.dtako_operations o
-           WHERE o.tenant_id = $1 AND o.driver_id = $2
-             AND (o.operation_date >= $3 AND o.operation_date <= $4
-                  OR o.reading_date >= $3 AND o.reading_date <= $4)
-           ORDER BY o.reading_date, o.unko_no"#,
-    )
-    .bind(tenant_id)
-    .bind(driver_id)
-    .bind(month_start)
-    .bind(fetch_end)
-    .fetch_all(&mut *conn)
-    .await?;
+    let op_rows = repo(state)
+        .load_driver_operations(tenant_id, driver_id, month_start, fetch_end)
+        .await?;
 
     Ok(op_rows
         .iter()
@@ -1594,26 +1288,18 @@ pub async fn recalculate_driver_core(
     month: u32,
     progress_tx: Option<tokio::sync::mpsc::Sender<String>>,
 ) -> Result<usize, anyhow::Error> {
-    let mut conn = state.pool.acquire().await?;
-    crate::db::tenant::set_current_tenant(&mut conn, &tenant_id.to_string()).await?;
-
     let (month_start, month_end) =
         compute_month_range(year, month).ok_or_else(|| anyhow::anyhow!("invalid year/month"))?;
 
     // driver_cd を取得
-    let driver_cd: Option<String> = sqlx::query_scalar(
-        "SELECT driver_cd FROM alc_api.employees WHERE id = $1 AND tenant_id = $2",
-    )
-    .bind(driver_id)
-    .bind(tenant_id)
-    .fetch_optional(&mut *conn)
-    .await?;
-
-    let driver_cd = driver_cd.ok_or_else(|| anyhow::anyhow!("ドライバーが見つかりません"))?;
+    let driver_cd = repo(state)
+        .get_driver_cd(tenant_id, driver_id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("ドライバーが見つかりません"))?;
 
     let fetch_end = month_end + chrono::Duration::days(1);
-    let ops = load_driver_operations(
-        &mut conn,
+    let ops = load_driver_ops_as_kudguri(
+        state,
         tenant_id,
         driver_id,
         &driver_cd,
@@ -1705,20 +1391,13 @@ async fn process_single_driver_batch(
     fetch_end: chrono::NaiveDate,
     all_kudgivt: &[KudgivtRow],
 ) -> Result<(), anyhow::Error> {
-    let mut conn = state.pool.acquire().await?;
-    crate::db::tenant::set_current_tenant(&mut conn, &tenant_id.to_string()).await?;
+    let driver_cd = repo(state)
+        .get_driver_cd(tenant_id, driver_id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("driver not found"))?;
 
-    let driver_cd: String = sqlx::query_scalar(
-        "SELECT driver_cd FROM alc_api.employees WHERE id = $1 AND tenant_id = $2",
-    )
-    .bind(driver_id)
-    .bind(tenant_id)
-    .fetch_optional(&mut *conn)
-    .await?
-    .ok_or_else(|| anyhow::anyhow!("driver not found"))?;
-
-    let ops = load_driver_operations(
-        &mut conn,
+    let ops = load_driver_ops_as_kudguri(
+        state,
         tenant_id,
         driver_id,
         &driver_cd,
@@ -1850,47 +1529,10 @@ async fn list_uploads(
     tenant: axum::Extension<TenantId>,
 ) -> Result<Json<Vec<serde_json::Value>>, (StatusCode, String)> {
     let tenant_id = tenant.0 .0;
-    let mut conn = state.pool.acquire().await.map_err(internal_err)?;
-    crate::db::tenant::set_current_tenant(&mut conn, &tenant_id.to_string())
+    let items = repo(&state)
+        .list_uploads(tenant_id)
         .await
         .map_err(internal_err)?;
-
-    let rows = sqlx::query_as::<
-        _,
-        (
-            Uuid,
-            String,
-            String,
-            Option<String>,
-            chrono::DateTime<chrono::Utc>,
-            String,
-        ),
-    >(
-        r#"SELECT id, filename, status, error_message, created_at, r2_zip_key
-           FROM alc_api.dtako_upload_history
-           WHERE tenant_id = $1
-           ORDER BY created_at DESC
-           LIMIT 50"#,
-    )
-    .bind(tenant_id)
-    .fetch_all(&mut *conn)
-    .await
-    .map_err(internal_err)?;
-
-    let items: Vec<serde_json::Value> = rows
-        .into_iter()
-        .map(|(id, filename, status, error, created_at, r2_zip_key)| {
-            serde_json::json!({
-                "id": id,
-                "filename": filename,
-                "status": status,
-                "error": error,
-                "created_at": created_at,
-                "r2_zip_key": r2_zip_key,
-            })
-        })
-        .collect();
-
     Ok(Json(items))
 }
 
@@ -1916,21 +1558,7 @@ pub async fn split_csv_all_core(
     state: &AppState,
     tenant_id: Uuid,
 ) -> Result<(usize, usize), anyhow::Error> {
-    let mut conn = state.pool.acquire().await?;
-    crate::db::tenant::set_current_tenant(&mut conn, &tenant_id.to_string()).await?;
-
-    let uploads: Vec<(Uuid, String)> = sqlx::query_as(
-        r#"SELECT DISTINCT uh.id, uh.filename
-           FROM alc_api.dtako_operations o
-           JOIN alc_api.dtako_upload_history uh ON uh.tenant_id = o.tenant_id
-           WHERE o.tenant_id = $1 AND o.has_kudgivt = FALSE
-             AND uh.status = 'completed'
-             AND uh.r2_zip_key IS NOT NULL
-           ORDER BY uh.filename"#,
-    )
-    .bind(tenant_id)
-    .fetch_all(&mut *conn)
-    .await?;
+    let uploads = repo(state).list_uploads_needing_split(tenant_id).await?;
 
     let mut seen_filenames = std::collections::HashSet::new();
     let uploads: Vec<_> = uploads
