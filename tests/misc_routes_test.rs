@@ -1210,6 +1210,8 @@ async fn test_timecard_csv_with_employee_filter() {
 
 #[tokio::test]
 async fn test_communication_items_create_all_fields_and_list_active() {
+    let _db = common::DB_RENAME_LOCK.lock().unwrap();
+    let _flock = common::db_rename_flock();
     test_group!("連絡事項");
     test_case!(
         "全フィールド指定で作成し有効期限内のみactive一覧に表示される",
