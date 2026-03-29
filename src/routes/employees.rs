@@ -9,7 +9,6 @@ use uuid::Uuid;
 use crate::db::models::{
     CreateEmployee, Employee, FaceDataEntry, UpdateEmployee, UpdateFace, UpdateLicense, UpdateNfcId,
 };
-use crate::db::tenant::set_current_tenant;
 use crate::middleware::auth::TenantId;
 use crate::AppState;
 
@@ -38,35 +37,14 @@ async fn create_employee(
     tenant: axum::Extension<TenantId>,
     Json(body): Json<CreateEmployee>,
 ) -> Result<(StatusCode, Json<Employee>), StatusCode> {
-    let tenant_id = tenant.0 .0;
-
-    let mut conn = state
-        .pool
-        .acquire()
+    let employee = state
+        .employees
+        .create(tenant.0 .0, &body)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string())
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let employee = sqlx::query_as::<_, Employee>(
-        r#"
-        INSERT INTO employees (tenant_id, code, nfc_id, name, role)
-        VALUES ($1, $2, $3, $4, $5)
-        RETURNING *
-        "#,
-    )
-    .bind(tenant_id)
-    .bind(&body.code)
-    .bind(&body.nfc_id)
-    .bind(&body.name)
-    .bind(&body.role)
-    .fetch_one(&mut *conn)
-    .await
-    .map_err(|e| {
-        tracing::error!("create_employee error: {e}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+        .map_err(|e| {
+            tracing::error!("create_employee error: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
     Ok((StatusCode::CREATED, Json(employee)))
 }
@@ -75,24 +53,11 @@ async fn list_employees(
     State(state): State<AppState>,
     tenant: axum::Extension<TenantId>,
 ) -> Result<Json<Vec<Employee>>, StatusCode> {
-    let tenant_id = tenant.0 .0;
-
-    let mut conn = state
-        .pool
-        .acquire()
+    let employees = state
+        .employees
+        .list(tenant.0 .0)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string())
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let employees = sqlx::query_as::<_, Employee>(
-        "SELECT * FROM employees WHERE tenant_id = $1 AND deleted_at IS NULL ORDER BY name",
-    )
-    .bind(tenant_id)
-    .fetch_all(&mut *conn)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(employees))
 }
@@ -102,26 +67,12 @@ async fn get_employee(
     tenant: axum::Extension<TenantId>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Employee>, StatusCode> {
-    let tenant_id = tenant.0 .0;
-
-    let mut conn = state
-        .pool
-        .acquire()
+    let employee = state
+        .employees
+        .get(tenant.0 .0, id)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string())
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let employee = sqlx::query_as::<_, Employee>(
-        "SELECT * FROM employees WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL",
-    )
-    .bind(tenant_id)
-    .bind(id)
-    .fetch_optional(&mut *conn)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-    .ok_or(StatusCode::NOT_FOUND)?;
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
 
     Ok(Json(employee))
 }
@@ -131,26 +82,12 @@ async fn get_employee_by_nfc(
     tenant: axum::Extension<TenantId>,
     Path(nfc_id): Path<String>,
 ) -> Result<Json<Employee>, StatusCode> {
-    let tenant_id = tenant.0 .0;
-
-    let mut conn = state
-        .pool
-        .acquire()
+    let employee = state
+        .employees
+        .get_by_nfc(tenant.0 .0, &nfc_id)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string())
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let employee = sqlx::query_as::<_, Employee>(
-        "SELECT * FROM employees WHERE tenant_id = $1 AND nfc_id = $2 AND deleted_at IS NULL",
-    )
-    .bind(tenant_id)
-    .bind(&nfc_id)
-    .fetch_optional(&mut *conn)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-    .ok_or(StatusCode::NOT_FOUND)?;
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
 
     Ok(Json(employee))
 }
@@ -160,26 +97,12 @@ async fn get_employee_by_code(
     tenant: axum::Extension<TenantId>,
     Path(code): Path<String>,
 ) -> Result<Json<Employee>, StatusCode> {
-    let tenant_id = tenant.0 .0;
-
-    let mut conn = state
-        .pool
-        .acquire()
+    let employee = state
+        .employees
+        .get_by_code(tenant.0 .0, &code)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string())
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let employee = sqlx::query_as::<_, Employee>(
-        "SELECT * FROM employees WHERE tenant_id = $1 AND code = $2 AND deleted_at IS NULL",
-    )
-    .bind(tenant_id)
-    .bind(&code)
-    .fetch_optional(&mut *conn)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-    .ok_or(StatusCode::NOT_FOUND)?;
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
 
     Ok(Json(employee))
 }
@@ -190,39 +113,18 @@ async fn update_employee(
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateEmployee>,
 ) -> Result<Json<Employee>, StatusCode> {
-    let tenant_id = tenant.0 .0;
-
-    let mut conn = state
-        .pool
-        .acquire()
+    let employee = state
+        .employees
+        .update(tenant.0 .0, id, &body)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string())
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let employee = sqlx::query_as::<_, Employee>(
-        r#"
-        UPDATE employees SET name = $1, code = $2, role = COALESCE($5, role), updated_at = NOW()
-        WHERE id = $3 AND tenant_id = $4 AND deleted_at IS NULL
-        RETURNING *
-        "#,
-    )
-    .bind(&body.name)
-    .bind(&body.code)
-    .bind(id)
-    .bind(tenant_id)
-    .bind(&body.role)
-    .fetch_optional(&mut *conn)
-    .await
-    .map_err(|e| {
-        tracing::error!("update_employee error: {e}");
-        if e.to_string().contains("idx_employees_code") {
-            return StatusCode::CONFLICT;
-        }
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?
-    .ok_or(StatusCode::NOT_FOUND)?;
+        .map_err(|e| {
+            tracing::error!("update_employee error: {e}");
+            if e.to_string().contains("idx_employees_code") {
+                return StatusCode::CONFLICT;
+            }
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .ok_or(StatusCode::NOT_FOUND)?;
 
     Ok(Json(employee))
 }
@@ -232,33 +134,12 @@ async fn delete_employee(
     tenant: axum::Extension<TenantId>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, StatusCode> {
-    let tenant_id = tenant.0 .0;
-
-    let mut conn = state
-        .pool
-        .acquire()
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string())
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let result = sqlx::query(
-        r#"
-        UPDATE employees SET deleted_at = NOW(), updated_at = NOW()
-        WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL
-        "#,
-    )
-    .bind(id)
-    .bind(tenant_id)
-    .execute(&mut *conn)
-    .await
-    .map_err(|e| {
+    let deleted = state.employees.delete(tenant.0 .0, id).await.map_err(|e| {
         tracing::error!("delete_employee error: {e}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    if result.rows_affected() == 0 {
+    if !deleted {
         return Err(StatusCode::NOT_FOUND);
     }
 
@@ -271,8 +152,6 @@ async fn update_face(
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateFace>,
 ) -> Result<Json<Employee>, StatusCode> {
-    let tenant_id = tenant.0 .0;
-
     // embedding 長の検証 (Human.js faceres モデルは 1024 次元)
     if let Some(ref emb) = body.face_embedding {
         if emb.len() != 1024 {
@@ -280,40 +159,15 @@ async fn update_face(
         }
     }
 
-    let mut conn = state
-        .pool
-        .acquire()
+    let employee = state
+        .employees
+        .update_face(tenant.0 .0, id, &body)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string())
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let employee = sqlx::query_as::<_, Employee>(
-        r#"
-        UPDATE employees SET
-            face_photo_url = COALESCE($1, face_photo_url),
-            face_embedding = COALESCE($2, face_embedding),
-            face_embedding_at = CASE WHEN $2 IS NOT NULL THEN NOW() ELSE face_embedding_at END,
-            face_model_version = CASE WHEN $2 IS NOT NULL THEN $5 ELSE face_model_version END,
-            face_approval_status = CASE WHEN $2 IS NOT NULL THEN 'pending' ELSE face_approval_status END,
-            updated_at = NOW()
-        WHERE id = $3 AND tenant_id = $4 AND deleted_at IS NULL
-        RETURNING *
-        "#,
-    )
-    .bind(&body.face_photo_url)
-    .bind(&body.face_embedding)
-    .bind(id)
-    .bind(tenant_id)
-    .bind(&body.face_model_version)
-    .fetch_optional(&mut *conn)
-    .await
-    .map_err(|e| {
-        tracing::error!("update_face error: {e}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?
-    .ok_or(StatusCode::NOT_FOUND)?;
+        .map_err(|e| {
+            tracing::error!("update_face error: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .ok_or(StatusCode::NOT_FOUND)?;
 
     Ok(Json(employee))
 }
@@ -322,29 +176,11 @@ async fn list_face_data(
     State(state): State<AppState>,
     tenant: axum::Extension<TenantId>,
 ) -> Result<Json<Vec<FaceDataEntry>>, StatusCode> {
-    let tenant_id = tenant.0 .0;
-
-    let mut conn = state
-        .pool
-        .acquire()
+    let rows = state
+        .employees
+        .list_face_data(tenant.0 .0)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string())
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let rows = sqlx::query_as::<_, FaceDataEntry>(
-        r#"
-        SELECT id, face_embedding, face_embedding_at, face_model_version, face_approval_status
-        FROM employees
-        WHERE tenant_id = $1 AND deleted_at IS NULL AND face_embedding IS NOT NULL
-          AND face_approval_status = 'approved'
-        "#,
-    )
-    .bind(tenant_id)
-    .fetch_all(&mut *conn)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(rows))
 }
@@ -355,38 +191,20 @@ async fn update_license(
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateLicense>,
 ) -> Result<Json<Employee>, StatusCode> {
-    let tenant_id = tenant.0 .0;
-
-    let mut conn = state
-        .pool
-        .acquire()
+    let employee = state
+        .employees
+        .update_license(
+            tenant.0 .0,
+            id,
+            body.license_issue_date,
+            body.license_expiry_date,
+        )
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string())
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let employee = sqlx::query_as::<_, Employee>(
-        r#"
-        UPDATE employees SET
-            license_issue_date = COALESCE($1, license_issue_date),
-            license_expiry_date = COALESCE($2, license_expiry_date),
-            updated_at = NOW()
-        WHERE id = $3 AND tenant_id = $4 AND deleted_at IS NULL
-        RETURNING *
-        "#,
-    )
-    .bind(body.license_issue_date)
-    .bind(body.license_expiry_date)
-    .bind(id)
-    .bind(tenant_id)
-    .fetch_optional(&mut *conn)
-    .await
-    .map_err(|e| {
-        tracing::error!("update_license error: {e}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?
-    .ok_or(StatusCode::NOT_FOUND)?;
+        .map_err(|e| {
+            tracing::error!("update_license error: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .ok_or(StatusCode::NOT_FOUND)?;
 
     Ok(Json(employee))
 }
@@ -397,34 +215,15 @@ async fn update_nfc_id(
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateNfcId>,
 ) -> Result<Json<Employee>, StatusCode> {
-    let tenant_id = tenant.0 .0;
-
-    let mut conn = state
-        .pool
-        .acquire()
+    let employee = state
+        .employees
+        .update_nfc_id(tenant.0 .0, id, &body.nfc_id)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string())
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let employee = sqlx::query_as::<_, Employee>(
-        r#"
-        UPDATE employees SET nfc_id = $1, updated_at = NOW()
-        WHERE id = $2 AND tenant_id = $3
-        RETURNING *
-        "#,
-    )
-    .bind(&body.nfc_id)
-    .bind(id)
-    .bind(tenant_id)
-    .fetch_optional(&mut *conn)
-    .await
-    .map_err(|e| {
-        tracing::error!("update_nfc_id error: {e}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?
-    .ok_or(StatusCode::NOT_FOUND)?;
+        .map_err(|e| {
+            tracing::error!("update_nfc_id error: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .ok_or(StatusCode::NOT_FOUND)?;
 
     Ok(Json(employee))
 }
@@ -434,36 +233,15 @@ async fn approve_face(
     tenant: axum::Extension<TenantId>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Employee>, StatusCode> {
-    let tenant_id = tenant.0 .0;
-
-    let mut conn = state
-        .pool
-        .acquire()
+    let employee = state
+        .employees
+        .approve_face(tenant.0 .0, id)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string())
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let employee = sqlx::query_as::<_, Employee>(
-        r#"
-        UPDATE employees SET
-            face_approval_status = 'approved',
-            face_approved_at = NOW(),
-            updated_at = NOW()
-        WHERE id = $1 AND tenant_id = $2 AND face_approval_status = 'pending' AND deleted_at IS NULL
-        RETURNING *
-        "#,
-    )
-    .bind(id)
-    .bind(tenant_id)
-    .fetch_optional(&mut *conn)
-    .await
-    .map_err(|e| {
-        tracing::error!("approve_face error: {e}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?
-    .ok_or(StatusCode::NOT_FOUND)?;
+        .map_err(|e| {
+            tracing::error!("approve_face error: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .ok_or(StatusCode::NOT_FOUND)?;
 
     Ok(Json(employee))
 }
@@ -473,35 +251,15 @@ async fn reject_face(
     tenant: axum::Extension<TenantId>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Employee>, StatusCode> {
-    let tenant_id = tenant.0 .0;
-
-    let mut conn = state
-        .pool
-        .acquire()
+    let employee = state
+        .employees
+        .reject_face(tenant.0 .0, id)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    set_current_tenant(&mut conn, &tenant_id.to_string())
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let employee = sqlx::query_as::<_, Employee>(
-        r#"
-        UPDATE employees SET
-            face_approval_status = 'rejected',
-            updated_at = NOW()
-        WHERE id = $1 AND tenant_id = $2 AND face_approval_status = 'pending' AND deleted_at IS NULL
-        RETURNING *
-        "#,
-    )
-    .bind(id)
-    .bind(tenant_id)
-    .fetch_optional(&mut *conn)
-    .await
-    .map_err(|e| {
-        tracing::error!("reject_face error: {e}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?
-    .ok_or(StatusCode::NOT_FOUND)?;
+        .map_err(|e| {
+            tracing::error!("reject_face error: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .ok_or(StatusCode::NOT_FOUND)?;
 
     Ok(Json(employee))
 }

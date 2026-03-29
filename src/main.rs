@@ -8,6 +8,7 @@ use tracing_subscriber::EnvFilter;
 
 use rust_alc_api::auth::google::GoogleTokenVerifier;
 use rust_alc_api::auth::jwt::JwtSecret;
+use rust_alc_api::db::repository::PgEmployeeRepository;
 use rust_alc_api::storage::StorageBackend;
 use rust_alc_api::AppState;
 
@@ -112,8 +113,11 @@ async fn main() -> anyhow::Result<()> {
             as Arc<dyn rust_alc_api::fcm::FcmSenderTrait>
     });
 
+    let employees = Arc::new(PgEmployeeRepository::new(pool.clone()));
+
     let state = AppState {
         pool: pool.clone(),
+        employees,
         storage,
         carins_storage,
         dtako_storage,
