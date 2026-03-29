@@ -1,8 +1,10 @@
+pub mod car_inspections;
 pub mod employees;
 pub mod nfc_tags;
 pub mod tenko_call;
 pub mod timecard;
 
+pub use car_inspections::{CarInspectionRepository, PgCarInspectionRepository};
 pub use employees::{EmployeeRepository, PgEmployeeRepository};
 pub use nfc_tags::{NfcTagRepository, PgNfcTagRepository};
 pub use tenko_call::{PgTenkoCallRepository, TenkoCallRepository};
