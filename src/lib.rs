@@ -16,7 +16,8 @@ use std::sync::Arc;
 
 use db::repository::{
     CarInspectionRepository, CommunicationItemsRepository, DeviceRepository, EmployeeRepository,
-    MeasurementsRepository, NfcTagRepository, TenkoCallRepository, TimecardRepository,
+    MeasurementsRepository, NfcTagRepository, TenkoCallRepository, TenkoSessionRepository,
+    TimecardRepository,
 };
 use storage::StorageBackend;
 
@@ -31,6 +32,7 @@ pub struct AppState {
     pub timecard: Arc<dyn TimecardRepository>,
     pub tenko_call: Arc<dyn TenkoCallRepository>,
     pub nfc_tags: Arc<dyn NfcTagRepository>,
+    pub tenko_sessions: Arc<dyn TenkoSessionRepository>,
     pub storage: Arc<dyn StorageBackend>,
     pub carins_storage: Option<Arc<dyn StorageBackend>>,
     pub dtako_storage: Option<Arc<dyn StorageBackend>>,

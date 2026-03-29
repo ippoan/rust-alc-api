@@ -11,7 +11,7 @@ use rust_alc_api::auth::jwt::JwtSecret;
 use rust_alc_api::db::repository::{
     PgCarInspectionRepository, PgCommunicationItemsRepository, PgDeviceRepository,
     PgEmployeeRepository, PgMeasurementsRepository, PgNfcTagRepository, PgTenkoCallRepository,
-    PgTimecardRepository,
+    PgTenkoSessionRepository, PgTimecardRepository,
 };
 use rust_alc_api::storage::StorageBackend;
 use rust_alc_api::AppState;
@@ -125,6 +125,7 @@ async fn main() -> anyhow::Result<()> {
     let timecard = Arc::new(PgTimecardRepository::new(pool.clone()));
     let tenko_call = Arc::new(PgTenkoCallRepository::new(pool.clone()));
     let nfc_tags = Arc::new(PgNfcTagRepository::new(pool.clone()));
+    let tenko_sessions = Arc::new(PgTenkoSessionRepository::new(pool.clone()));
 
     let state = AppState {
         pool: pool.clone(),
@@ -136,6 +137,7 @@ async fn main() -> anyhow::Result<()> {
         timecard,
         tenko_call,
         nfc_tags,
+        tenko_sessions,
         storage,
         carins_storage,
         dtako_storage,

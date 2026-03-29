@@ -12,7 +12,7 @@ use rust_alc_api::db::models::User;
 use rust_alc_api::db::repository::{
     PgCarInspectionRepository, PgCommunicationItemsRepository, PgDeviceRepository,
     PgEmployeeRepository, PgMeasurementsRepository, PgNfcTagRepository, PgTenkoCallRepository,
-    PgTimecardRepository,
+    PgTenkoSessionRepository, PgTimecardRepository,
 };
 use rust_alc_api::AppState;
 
@@ -225,6 +225,7 @@ pub async fn setup_app_state() -> AppState {
     let timecard = Arc::new(PgTimecardRepository::new(pool.clone()));
     let tenko_call = Arc::new(PgTenkoCallRepository::new(pool.clone()));
     let nfc_tags = Arc::new(PgNfcTagRepository::new(pool.clone()));
+    let tenko_sessions = Arc::new(PgTenkoSessionRepository::new(pool.clone()));
 
     AppState {
         pool,
@@ -236,6 +237,7 @@ pub async fn setup_app_state() -> AppState {
         timecard,
         tenko_call,
         nfc_tags,
+        tenko_sessions,
         storage,
         carins_storage: None,
         dtako_storage: Some(dtako_storage),
@@ -289,6 +291,7 @@ pub async fn setup_app_state_no_fcm() -> AppState {
     let timecard = Arc::new(PgTimecardRepository::new(pool.clone()));
     let tenko_call = Arc::new(PgTenkoCallRepository::new(pool.clone()));
     let nfc_tags = Arc::new(PgNfcTagRepository::new(pool.clone()));
+    let tenko_sessions = Arc::new(PgTenkoSessionRepository::new(pool.clone()));
 
     AppState {
         pool,
@@ -300,6 +303,7 @@ pub async fn setup_app_state_no_fcm() -> AppState {
         timecard,
         tenko_call,
         nfc_tags,
+        tenko_sessions,
         storage,
         carins_storage: None,
         dtako_storage: Some(dtako_storage),
@@ -341,6 +345,7 @@ pub async fn setup_app_state_failing_fcm() -> AppState {
     let timecard = Arc::new(PgTimecardRepository::new(pool.clone()));
     let tenko_call = Arc::new(PgTenkoCallRepository::new(pool.clone()));
     let nfc_tags = Arc::new(PgNfcTagRepository::new(pool.clone()));
+    let tenko_sessions = Arc::new(PgTenkoSessionRepository::new(pool.clone()));
 
     AppState {
         pool,
@@ -352,6 +357,7 @@ pub async fn setup_app_state_failing_fcm() -> AppState {
         timecard,
         tenko_call,
         nfc_tags,
+        tenko_sessions,
         storage,
         carins_storage: None,
         dtako_storage: Some(dtako_storage),
