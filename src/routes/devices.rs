@@ -583,11 +583,11 @@ async fn approve_device(
         .device_name
         .or(req.device_name.clone())
         .unwrap_or_default();
-    let device_type = if req.phone_number.is_some() {
-        "android"
-    } else {
-        "kiosk"
-    };
+    let device_type = req
+        .phone_number
+        .as_ref()
+        .map(|_| "android")
+        .unwrap_or("kiosk");
     let approved_by = auth.as_ref().map(|a| a.user_id);
 
     let device_id = state
@@ -635,11 +635,11 @@ async fn approve_by_code(
         .ok_or(StatusCode::NOT_FOUND)?;
 
     let device_name = req.device_name.clone().unwrap_or_default();
-    let device_type = if req.phone_number.is_some() {
-        "android"
-    } else {
-        "kiosk"
-    };
+    let device_type = req
+        .phone_number
+        .as_ref()
+        .map(|_| "android")
+        .unwrap_or("kiosk");
     let approved_by = auth.as_ref().map(|a| a.user_id);
 
     let device_id = state
