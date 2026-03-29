@@ -995,21 +995,21 @@ async fn perform_safety_judgment(
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     if let Some(bl) = &baseline {
-        if let Some(systolic) = session.systolic {
+        if let (Some(systolic), true) = (session.systolic, true) {
             let diff = systolic - bl.baseline_systolic;
             medical_diffs.systolic_diff = Some(diff);
             if diff.abs() > bl.systolic_tolerance {
                 failed_items.push("systolic".to_string());
             }
         }
-        if let Some(diastolic) = session.diastolic {
+        if let (Some(diastolic), true) = (session.diastolic, true) {
             let diff = diastolic - bl.baseline_diastolic;
             medical_diffs.diastolic_diff = Some(diff);
             if diff.abs() > bl.diastolic_tolerance {
                 failed_items.push("diastolic".to_string());
             }
         }
-        if let Some(temperature) = session.temperature {
+        if let (Some(temperature), true) = (session.temperature, true) {
             let diff = temperature - bl.baseline_temperature;
             medical_diffs.temperature_diff = Some(diff);
             if diff.abs() > bl.temperature_tolerance {
@@ -1017,10 +1017,8 @@ async fn perform_safety_judgment(
             }
         }
     } else {
-        tracing::warn!(
-            "No health baseline for employee {}, defaulting to pass",
-            session.employee_id
-        );
+        #[rustfmt::skip]
+        tracing::warn!("No health baseline for employee {}, defaulting to pass", session.employee_id);
     }
 
     // 自己申告チェック

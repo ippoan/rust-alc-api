@@ -555,15 +555,14 @@ pub async fn build_report_with_name_conn(
     }
 
     // Final weekly subtotal
-    if week_restraint > 0 {
-        weekly_subtotals.push(WeeklySubtotal {
-            week_end_date: current_week_end.unwrap_or(month_end),
-            drive_minutes: week_drive,
-            cargo_minutes: week_cargo,
-            break_minutes: week_break,
-            restraint_minutes: week_restraint,
-        });
-    }
+    push_weekly_if_needed(
+        &mut weekly_subtotals,
+        current_week_end.unwrap_or(month_end),
+        week_drive,
+        week_cargo,
+        week_break,
+        week_restraint,
+    );
 
     let monthly_total = MonthlyTotal {
         drive_minutes: days.iter().map(|d| d.drive_minutes).sum(),

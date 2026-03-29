@@ -1978,15 +1978,12 @@ async fn trigger_update_dev(
         set_current_tenant(&mut conn, tid)
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        match send_update_fcm(&state, &mut conn, tid, &body, true).await {
-            Ok(resp) => {
-                total_resp.sent += resp.sent;
-                total_resp.skipped += resp.skipped;
-                total_resp.already_updated += resp.already_updated;
-                total_resp.errors += resp.errors;
-                total_resp.results.extend(resp.results);
-            }
-            Err(e) => tracing::error!("trigger_update_dev error for tenant {tid}: {e}"),
+        if let Ok(resp) = send_update_fcm(&state, &mut conn, tid, &body, true).await {
+            total_resp.sent += resp.sent;
+            total_resp.skipped += resp.skipped;
+            total_resp.already_updated += resp.already_updated;
+            total_resp.errors += resp.errors;
+            total_resp.results.extend(resp.results);
         }
     }
 
@@ -2025,6 +2022,8 @@ async fn generate_unique_code(state: &AppState) -> Result<String, StatusCode> {
             return Ok(code_str);
         }
     }
-    tracing::error!("Failed to generate unique code after 10 attempts");
-    Err(StatusCode::INTERNAL_SERVER_ERROR)
+    Err(db_err(
+        "generate_unique_code: 10 attempts exhausted",
+        sqlx::Error::RowNotFound,
+    ))
 }
