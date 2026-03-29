@@ -1002,12 +1002,11 @@ async fn perform_safety_judgment(
         label: &str,
         failed: &mut Vec<String>,
     ) {
-        if let Some(v) = val {
-            let d = v - base;
-            *diff_out = Some(d);
-            if d.abs() > tol {
-                failed.push(label.to_string());
-            }
+        let Some(v) = val else { return };
+        let d = v - base;
+        *diff_out = Some(d);
+        if d.abs() > tol {
+            failed.push(label.to_string());
         }
     }
     fn check_vital_f64(
@@ -1018,12 +1017,11 @@ async fn perform_safety_judgment(
         label: &str,
         failed: &mut Vec<String>,
     ) {
-        if let Some(v) = val {
-            let d = v - base;
-            *diff_out = Some(d);
-            if d.abs() > tol {
-                failed.push(label.to_string());
-            }
+        let Some(v) = val else { return };
+        let d = v - base;
+        *diff_out = Some(d);
+        if d.abs() > tol {
+            failed.push(label.to_string());
         }
     }
     if let Some(bl) = &baseline {
