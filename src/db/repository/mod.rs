@@ -1,6 +1,8 @@
 pub mod employees;
+pub mod timecard;
 
 pub use employees::{EmployeeRepository, PgEmployeeRepository};
+pub use timecard::{PgTimecardRepository, TimecardRepository};
 
 use sqlx::PgPool;
 
