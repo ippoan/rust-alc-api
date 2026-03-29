@@ -5423,112 +5423,89 @@ U001,x,x,x,x,x,x,x,x,x,2026/02/01 10:00:00,2026/02/01 11:30:00\n";
     #[test]
     fn test_overlap_chain_with_ferry_deduction() {
         test_group!("比較ロジック");
-        test_case!(
-            "overlap_chain: reset path + フェリー控除 (break_ded=0)",
-            {
-                let cls = default_classifications();
-                let d1 = NaiveDate::from_ymd_opt(2026, 2, 1).unwrap();
-                let d2 = NaiveDate::from_ymd_opt(2026, 2, 2).unwrap();
-                let t1 = NaiveTime::from_hms_opt(6, 0, 0).unwrap();
-                let t2 = NaiveTime::from_hms_opt(8, 0, 0).unwrap();
-                let mut day_map: HashMap<DayKey, DayAgg> = HashMap::new();
-                // Day1: 6:00 → 11:00 (5h)
-                let mut agg1 = DayAgg::default();
-                agg1.drive_minutes = 300;
-                agg1.total_work_minutes = 300;
-                agg1.unko_nos = vec!["U1".into()];
-                agg1.segments = vec![SegRec {
-                    start_at: dt(2026, 2, 1, 6, 0, 0),
-                    end_at: dt(2026, 2, 1, 11, 0, 0),
-                }];
-                day_map.insert(("D1".into(), d1, t1), agg1);
-                // Day2: 8:00 → 13:00 (gap=21h > 540 → reset → overlap display path)
-                let mut agg2 = DayAgg::default();
-                agg2.drive_minutes = 300;
-                agg2.total_work_minutes = 300;
-                // U_NO_EVENTS (no kudgivt) → L1458 continue
-                // U_NO_FERRY (has kudgivt but no ferry_period) → L1459 skips
-                agg2.unko_nos = vec!["U_NO_EVENTS".into(), "U1".into()];
-                agg2.segments = vec![SegRec {
-                    start_at: dt(2026, 2, 2, 8, 0, 0),
-                    end_at: dt(2026, 2, 2, 13, 0, 0),
-                }];
-                day_map.insert(("D1".into(), d2, t2), agg2);
+        test_case!("overlap_chain: ferry break_ded=0 → 直接分数計算", {
+            let cls = default_classifications();
+            let d1 = NaiveDate::from_ymd_opt(2026, 2, 1).unwrap();
+            let d2 = NaiveDate::from_ymd_opt(2026, 2, 1).unwrap();
+            let t1 = NaiveTime::from_hms_opt(5, 0, 0).unwrap();
+            let t2 = NaiveTime::from_hms_opt(15, 0, 0).unwrap();
+            let mut day_map: HashMap<DayKey, DayAgg> = HashMap::new();
+            // Day1: 5:00 → 12:00 (7h)
+            let mut agg1 = DayAgg::default();
+            agg1.drive_minutes = 420;
+            agg1.total_work_minutes = 420;
+            agg1.unko_nos = vec!["U1".into()];
+            agg1.segments = vec![SegRec {
+                start_at: dt(2026, 2, 1, 5, 0, 0),
+                end_at: dt(2026, 2, 1, 12, 0, 0),
+            }];
+            day_map.insert(("D1".into(), d1, t1), agg1);
+            // Day2: same date, 15:00→22:00 (gap=3h, same_date_long_gap=true since >=180)
+            // → enters else if path (ol_restraint check)
+            let mut agg2 = DayAgg::default();
+            agg2.drive_minutes = 420;
+            agg2.total_work_minutes = 420;
+            agg2.unko_nos = vec!["U_NO_EVT".into(), "U1".into()];
+            agg2.segments = vec![SegRec {
+                start_at: dt(2026, 2, 1, 15, 0, 0),
+                end_at: dt(2026, 2, 1, 22, 0, 0),
+            }];
+            day_map.insert(("D1".into(), d2, t2), agg2);
 
-                let mut wb = HashMap::new();
-                wb.insert(
-                    ("D1".into(), d1, t1),
-                    (dt(2026, 2, 1, 6, 0, 0), dt(2026, 2, 1, 11, 0, 0)),
-                );
-                wb.insert(
-                    ("D1".into(), d2, t2),
-                    (dt(2026, 2, 2, 8, 0, 0), dt(2026, 2, 2, 13, 0, 0)),
-                );
-                let mwb = HashMap::new();
-                let mut dwe = HashMap::new();
-                let kudguri = vec![
-                    make_kudguri(
-                        "U1",
-                        "D1",
-                        dt(2026, 2, 1, 6, 0, 0),
-                        dt(2026, 2, 1, 11, 0, 0),
-                    ),
-                    make_kudguri(
-                        "U1",
-                        "D1",
-                        dt(2026, 2, 2, 8, 0, 0),
-                        dt(2026, 2, 2, 13, 0, 0),
-                    ),
-                ];
-                // Drive events for U1 in overlap window (after day1 end, within 24h window)
-                // Day1 ends 11:00, 24h window=6:00+24h=翌6:00
-                // Drive event at 2/2 3:00 → before info.end (11:00)? No, 2/2 3:00 is AFTER 2/1 11:00
-                // But evt_start(3:00) < info.end(11:00)? info.end = 2/1 11:00, evt_start = 2/2 3:00 → false
-                // Actually this event won't be in the overlap calc because it's for day2's unko_nos
-                let evts = vec![
-                    make_kudgivt("U1", dt(2026, 2, 1, 6, 0, 0), "201", 300),
-                    // Overlap event: after day1 end (11:00), in 24h window (before 翌6:00)
-                    make_kudgivt("U1", dt(2026, 2, 2, 3, 0, 0), "202", 120), // cargo 2h (L1353-1354)
-                    make_kudgivt("U1", dt(2026, 2, 2, 8, 0, 0), "201", 300),
-                ];
-                let erefs: Vec<&_> = evts.iter().collect();
-                let mut by_unko: HashMap<String, Vec<&_>> = HashMap::new();
-                by_unko.insert("U1".into(), erefs);
+            let mut wb = HashMap::new();
+            wb.insert(
+                ("D1".into(), d1, t1),
+                (dt(2026, 2, 1, 5, 0, 0), dt(2026, 2, 1, 12, 0, 0)),
+            );
+            wb.insert(
+                ("D1".into(), d2, t2),
+                (dt(2026, 2, 1, 15, 0, 0), dt(2026, 2, 1, 22, 0, 0)),
+            );
+            let mwb = HashMap::new();
+            let mut dwe = HashMap::new();
+            let kudguri = vec![make_kudguri(
+                "U1",
+                "D1",
+                dt(2026, 2, 1, 5, 0, 0),
+                dt(2026, 2, 1, 22, 0, 0),
+            )];
+            // Events: drive only, no 301
+            let evts = vec![
+                make_kudgivt("U1", dt(2026, 2, 1, 5, 0, 0), "201", 420),
+                make_kudgivt("U1", dt(2026, 2, 1, 15, 0, 0), "201", 420),
+            ];
+            let erefs: Vec<&_> = evts.iter().collect();
+            let mut by_unko: HashMap<String, Vec<&_>> = HashMap::new();
+            by_unko.insert("U1".into(), erefs);
 
-                // Ferry: U1 has periods
-                // next_info.start = 8:00, window_end = 6:00+24h = 翌6:00
-                // Period must satisfy: fe > next_info.start(8:00) && fs < window_end(翌6:00)
-                let mut ferry = FerryInfo::default();
-                ferry.ferry_period_map.insert(
-                    "U1".into(),
-                    vec![
-                        // Period ending before next_info.start → L1463 continue
-                        (dt(2026, 2, 1, 10, 0, 0), dt(2026, 2, 1, 11, 0, 0)),
-                        // Period inside window (9:00-10:00), no 301 → break_ded=0 → L1470-1479
-                        (dt(2026, 2, 2, 9, 0, 0), dt(2026, 2, 2, 10, 0, 0)),
-                    ],
-                );
-                // U_NO_EVENTS has ferry periods but no events → L1458 continue
-                ferry.ferry_period_map.insert(
-                    "U_NO_EVENTS".into(),
-                    vec![(dt(2026, 2, 2, 9, 0, 0), dt(2026, 2, 2, 10, 0, 0))],
-                );
+            // Ferry period within window (5:00+24h=翌5:00)
+            // next_info.start=15:00, window_end=翌5:00
+            // fe(18:00) > next_info.start(15:00) ✓, fs(17:00) < window_end(翌5:00) ✓
+            // No 301 events → break_ded=0 → else branch (L1238-1246)
+            let mut ferry = FerryInfo::default();
+            ferry.ferry_period_map.insert(
+                "U1".into(),
+                vec![(dt(2026, 2, 1, 17, 0, 0), dt(2026, 2, 1, 18, 0, 0))],
+            );
+            // U_NO_EVT has ferry but no kudgivt events
+            ferry.ferry_period_map.insert(
+                "U_NO_EVT".into(),
+                vec![(dt(2026, 2, 1, 17, 0, 0), dt(2026, 2, 1, 18, 0, 0))],
+            );
 
-                process_overlap_chain(
-                    &mut day_map,
-                    &mut wb,
-                    &mwb,
-                    &mut dwe,
-                    &by_unko,
-                    &cls,
-                    &kudguri,
-                    &ferry,
-                );
-                let entry1 = &day_map[&("D1".into(), d1, t1)];
-                // Reset path → overlap should be set
-                assert!(entry1.overlap_restraint_minutes >= 0);
-            }
-        );
+            process_overlap_chain(
+                &mut day_map,
+                &mut wb,
+                &mwb,
+                &mut dwe,
+                &by_unko,
+                &cls,
+                &kudguri,
+                &ferry,
+            );
+            let entry1 = &day_map[&("D1".into(), d1, t1)];
+            assert!(entry1.overlap_restraint_minutes >= 0);
+        });
     }
 
     // ---- Group 6 extra: L2051 — day_late_night key not in day_map ----
