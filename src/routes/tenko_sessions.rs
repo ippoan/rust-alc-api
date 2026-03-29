@@ -975,12 +975,10 @@ fn check_self_declaration(
     self_declaration: &Option<serde_json::Value>,
     failed_items: &mut Vec<String>,
 ) {
-    let Some(decl) = self_declaration
+    let decl = self_declaration
         .as_ref()
-        .and_then(|j| serde_json::from_value::<SelfDeclaration>(j.clone()).ok())
-    else {
-        return;
-    };
+        .and_then(|j| serde_json::from_value::<SelfDeclaration>(j.clone()).ok());
+    let Some(decl) = decl else { return };
     if decl.illness {
         failed_items.push("illness".to_string());
     }
@@ -1560,4 +1558,25 @@ async fn resume_session(
     })?;
 
     Ok(Json(session))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_check_self_declaration_none() {
+        let mut failed = Vec::new();
+        check_self_declaration(&None, &mut failed);
+        assert!(failed.is_empty());
+    }
+
+    #[test]
+    fn test_check_self_declaration_all_false() {
+        let decl =
+            serde_json::json!({"illness": false, "fatigue": false, "sleep_deprivation": false});
+        let mut failed = Vec::new();
+        check_self_declaration(&Some(decl), &mut failed);
+        assert!(failed.is_empty());
+    }
 }
