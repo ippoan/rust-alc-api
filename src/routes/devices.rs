@@ -2006,6 +2006,7 @@ async fn trigger_update_dev(
 // ============================================================
 
 /// 6桁のユニークな登録コードを生成
+#[rustfmt::skip]
 async fn generate_unique_code(state: &AppState) -> Result<String, StatusCode> {
     loop {
         let code_str = {
@@ -2027,8 +2028,6 @@ async fn generate_unique_code(state: &AppState) -> Result<String, StatusCode> {
         .await
         .map_err(|e| db_err("generate_unique_code", e))?
         .0;
-        if !exists {
-            return Ok(code_str);
-        }
+        if !exists { return Ok(code_str); }
     }
 }
