@@ -14,14 +14,14 @@ pub mod webhook;
 
 use std::sync::Arc;
 
-use db::repository::EmployeeRepository;
-use db::repository::TenkoCallRepository;
+use db::repository::{EmployeeRepository, TenkoCallRepository, TimecardRepository};
 use storage::StorageBackend;
 
 #[derive(Clone)]
 pub struct AppState {
     pub pool: sqlx::PgPool,
     pub employees: Arc<dyn EmployeeRepository>,
+    pub timecard: Arc<dyn TimecardRepository>,
     pub tenko_call: Arc<dyn TenkoCallRepository>,
     pub storage: Arc<dyn StorageBackend>,
     pub carins_storage: Option<Arc<dyn StorageBackend>>,
