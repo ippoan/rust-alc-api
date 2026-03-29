@@ -224,3 +224,18 @@ test_file = "tests/coverage/main.rs"
 path = "src/routes/guidance_records.rs"
 type = "integration"
 test_file = "tests/coverage/main.rs"
+
+[[files]]
+path = "src/routes/devices.rs"
+type = "integration"
+test_file = "tests/devices_test.rs"
+
+[[files]]
+path = "src/routes/tenko_sessions.rs"
+type = "both"
+test_file = "tests/coverage/main.rs"
+
+[[files]]
+path = "src/routes/dtako_restraint_report.rs"
+type = "integration"
+test_file = "tests/dtako_test.rs"
