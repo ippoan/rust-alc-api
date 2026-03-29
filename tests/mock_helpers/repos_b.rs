@@ -78,12 +78,18 @@ impl DtakoEventClassificationsRepository for MockDtakoEventClassificationsReposi
 
 pub struct MockDtakoOperationsRepository {
     pub fail_next: AtomicBool,
+    pub calendar_dates_result: std::sync::Mutex<Vec<(NaiveDate, i64)>>,
+    pub get_result: std::sync::Mutex<Vec<DtakoOperation>>,
+    pub delete_rows_affected: std::sync::Mutex<u64>,
 }
 
 impl Default for MockDtakoOperationsRepository {
     fn default() -> Self {
         Self {
             fail_next: AtomicBool::new(false),
+            calendar_dates_result: std::sync::Mutex::new(vec![]),
+            get_result: std::sync::Mutex::new(vec![]),
+            delete_rows_affected: std::sync::Mutex::new(0),
         }
     }
 }
@@ -97,7 +103,7 @@ impl DtakoOperationsRepository for MockDtakoOperationsRepository {
         _date_to: NaiveDate,
     ) -> Result<Vec<(NaiveDate, i64)>, sqlx::Error> {
         check_fail!(self);
-        Ok(vec![])
+        Ok(self.calendar_dates_result.lock().unwrap().clone())
     }
 
     async fn list(
@@ -120,7 +126,7 @@ impl DtakoOperationsRepository for MockDtakoOperationsRepository {
         _unko_no: &str,
     ) -> Result<Vec<DtakoOperation>, sqlx::Error> {
         check_fail!(self);
-        Ok(vec![])
+        Ok(self.get_result.lock().unwrap().clone())
     }
 
     async fn delete_by_unko_no(
@@ -129,7 +135,7 @@ impl DtakoOperationsRepository for MockDtakoOperationsRepository {
         _unko_no: &str,
     ) -> Result<u64, sqlx::Error> {
         check_fail!(self);
-        Ok(0)
+        Ok(*self.delete_rows_affected.lock().unwrap())
     }
 }
 
@@ -1002,12 +1008,22 @@ impl GuidanceRecordsRepository for MockGuidanceRecordsRepository {
 
 pub struct MockHealthBaselinesRepository {
     pub fail_next: AtomicBool,
+    pub upsert_result: std::sync::Mutex<Option<EmployeeHealthBaseline>>,
+    pub list_result: std::sync::Mutex<Vec<EmployeeHealthBaseline>>,
+    pub get_result: std::sync::Mutex<Option<EmployeeHealthBaseline>>,
+    pub update_result: std::sync::Mutex<Option<EmployeeHealthBaseline>>,
+    pub delete_result: std::sync::Mutex<bool>,
 }
 
 impl Default for MockHealthBaselinesRepository {
     fn default() -> Self {
         Self {
             fail_next: AtomicBool::new(false),
+            upsert_result: std::sync::Mutex::new(None),
+            list_result: std::sync::Mutex::new(vec![]),
+            get_result: std::sync::Mutex::new(None),
+            update_result: std::sync::Mutex::new(None),
+            delete_result: std::sync::Mutex::new(false),
         }
     }
 }
@@ -1020,12 +1036,29 @@ impl HealthBaselinesRepository for MockHealthBaselinesRepository {
         _body: &CreateHealthBaseline,
     ) -> Result<EmployeeHealthBaseline, sqlx::Error> {
         check_fail!(self);
-        todo!("MockHealthBaselinesRepository::upsert")
+        let result = self.upsert_result.lock().unwrap().clone();
+        match result {
+            Some(b) => Ok(b),
+            None => Ok(EmployeeHealthBaseline {
+                id: Uuid::new_v4(),
+                tenant_id: _tenant_id,
+                employee_id: _body.employee_id,
+                baseline_systolic: _body.baseline_systolic.unwrap_or(120),
+                baseline_diastolic: _body.baseline_diastolic.unwrap_or(80),
+                baseline_temperature: _body.baseline_temperature.unwrap_or(36.5),
+                systolic_tolerance: _body.systolic_tolerance.unwrap_or(10),
+                diastolic_tolerance: _body.diastolic_tolerance.unwrap_or(10),
+                temperature_tolerance: _body.temperature_tolerance.unwrap_or(0.5),
+                measurement_validity_minutes: _body.measurement_validity_minutes.unwrap_or(30),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            }),
+        }
     }
 
     async fn list(&self, _tenant_id: Uuid) -> Result<Vec<EmployeeHealthBaseline>, sqlx::Error> {
         check_fail!(self);
-        Ok(vec![])
+        Ok(self.list_result.lock().unwrap().clone())
     }
 
     async fn get(
@@ -1034,7 +1067,7 @@ impl HealthBaselinesRepository for MockHealthBaselinesRepository {
         _employee_id: Uuid,
     ) -> Result<Option<EmployeeHealthBaseline>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        Ok(self.get_result.lock().unwrap().clone())
     }
 
     async fn update(
@@ -1044,12 +1077,12 @@ impl HealthBaselinesRepository for MockHealthBaselinesRepository {
         _body: &UpdateHealthBaseline,
     ) -> Result<Option<EmployeeHealthBaseline>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        Ok(self.update_result.lock().unwrap().clone())
     }
 
     async fn delete(&self, _tenant_id: Uuid, _employee_id: Uuid) -> Result<bool, sqlx::Error> {
         check_fail!(self);
-        Ok(false)
+        Ok(*self.delete_result.lock().unwrap())
     }
 }
 

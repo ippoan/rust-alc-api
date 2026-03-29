@@ -6,7 +6,7 @@ use crate::db::models::TenantAllowedEmail;
 
 use super::TenantConn;
 
-#[derive(Debug, sqlx::FromRow)]
+#[derive(Debug, Clone, sqlx::FromRow)]
 pub struct UserRow {
     pub id: Uuid,
     pub email: String,
