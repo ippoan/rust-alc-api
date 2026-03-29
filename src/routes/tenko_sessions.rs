@@ -971,6 +971,27 @@ async fn submit_self_declaration(
 }
 
 /// 安全運転可否の自動判定 (内部ヘルパー)
+fn check_self_declaration(
+    self_declaration: &Option<serde_json::Value>,
+    failed_items: &mut Vec<String>,
+) {
+    let Some(decl) = self_declaration
+        .as_ref()
+        .and_then(|j| serde_json::from_value::<SelfDeclaration>(j.clone()).ok())
+    else {
+        return;
+    };
+    if decl.illness {
+        failed_items.push("illness".to_string());
+    }
+    if decl.fatigue {
+        failed_items.push("fatigue".to_string());
+    }
+    if decl.sleep_deprivation {
+        failed_items.push("sleep_deprivation".to_string());
+    }
+}
+
 async fn perform_safety_judgment(
     conn: &mut sqlx::pool::PoolConnection<sqlx::Postgres>,
     session: &TenkoSession,
@@ -1055,21 +1076,7 @@ async fn perform_safety_judgment(
     }
 
     // 自己申告チェック
-    if let Some(decl) = session
-        .self_declaration
-        .as_ref()
-        .and_then(|j| serde_json::from_value::<SelfDeclaration>(j.clone()).ok())
-    {
-        if decl.illness {
-            failed_items.push("illness".to_string());
-        }
-        if decl.fatigue {
-            failed_items.push("fatigue".to_string());
-        }
-        if decl.sleep_deprivation {
-            failed_items.push("sleep_deprivation".to_string());
-        }
-    }
+    check_self_declaration(&session.self_declaration, &mut failed_items);
 
     let judgment_status = if failed_items.is_empty() {
         "pass"

@@ -785,46 +785,45 @@ async fn compare_csv(
             .find(|(_, cd, _)| cd.as_deref() == Some(&csv_d.driver_cd));
 
         let (driver_id, system_data, mut diffs) = if let Some((did, _, dname)) = db_match {
-            // システムのレポートを取得
-            match build_report_with_name(&state.pool, tenant_id, *did, dname, year, month).await {
-                Ok(report) => {
-                    let sys_days: Vec<SystemDayRow> = report
-                        .days
-                        .iter()
-                        .map(|d| SystemDayRow {
-                            date: format!("{}月{}日", d.date.month(), d.date.day()),
-                            start_time: d.start_time.clone().unwrap_or_default(),
-                            end_time: d.end_time.clone().unwrap_or_default(),
-                            drive: fmt_min(d.drive_minutes),
-                            overlap_drive: fmt_min(d.overlap_drive_minutes),
-                            cargo: fmt_min(d.cargo_minutes),
-                            overlap_cargo: fmt_min(d.overlap_cargo_minutes),
-                            subtotal: fmt_min(d.restraint_main_minutes),
-                            overlap_subtotal: fmt_min(d.overlap_restraint_minutes),
-                            total: fmt_min(d.restraint_total_minutes),
-                            cumulative: fmt_min(d.restraint_cumulative_minutes),
-                            actual_work: fmt_min(d.actual_work_minutes),
-                            overtime: fmt_min(d.overtime_minutes),
-                            late_night: fmt_min(d.late_night_minutes),
-                        })
-                        .collect();
-
-                    // 差分検出（日付マッチング方式）
-                    let diffs = detect_diffs_matched(&csv_d.days, &sys_days);
-
-                    let sys_data = SystemDriverData {
-                        days: sys_days,
-                        total_drive: fmt_min(report.monthly_total.drive_minutes),
-                        total_overlap_drive: fmt_min(report.monthly_total.overlap_drive_minutes),
-                        total_restraint: fmt_min(report.monthly_total.restraint_minutes),
-                        total_actual_work: fmt_min(report.monthly_total.actual_work_minutes),
-                        total_overtime: fmt_min(report.monthly_total.overtime_minutes),
-                        total_late_night: fmt_min(report.monthly_total.late_night_minutes),
-                    };
-
-                    (Some(did.to_string()), Some(sys_data), diffs)
-                }
-                Err(_) => (Some(did.to_string()), None, Vec::new()),
+            let did_str = did.to_string();
+            // システムのレポートを取得 (エラー時は sys_data=None)
+            let report = build_report_with_name(&state.pool, tenant_id, *did, dname, year, month)
+                .await
+                .ok();
+            if let Some(report) = report {
+                let sys_days: Vec<SystemDayRow> = report
+                    .days
+                    .iter()
+                    .map(|d| SystemDayRow {
+                        date: format!("{}月{}日", d.date.month(), d.date.day()),
+                        start_time: d.start_time.clone().unwrap_or_default(),
+                        end_time: d.end_time.clone().unwrap_or_default(),
+                        drive: fmt_min(d.drive_minutes),
+                        overlap_drive: fmt_min(d.overlap_drive_minutes),
+                        cargo: fmt_min(d.cargo_minutes),
+                        overlap_cargo: fmt_min(d.overlap_cargo_minutes),
+                        subtotal: fmt_min(d.restraint_main_minutes),
+                        overlap_subtotal: fmt_min(d.overlap_restraint_minutes),
+                        total: fmt_min(d.restraint_total_minutes),
+                        cumulative: fmt_min(d.restraint_cumulative_minutes),
+                        actual_work: fmt_min(d.actual_work_minutes),
+                        overtime: fmt_min(d.overtime_minutes),
+                        late_night: fmt_min(d.late_night_minutes),
+                    })
+                    .collect();
+                let diffs = detect_diffs_matched(&csv_d.days, &sys_days);
+                let sys_data = SystemDriverData {
+                    days: sys_days,
+                    total_drive: fmt_min(report.monthly_total.drive_minutes),
+                    total_overlap_drive: fmt_min(report.monthly_total.overlap_drive_minutes),
+                    total_restraint: fmt_min(report.monthly_total.restraint_minutes),
+                    total_actual_work: fmt_min(report.monthly_total.actual_work_minutes),
+                    total_overtime: fmt_min(report.monthly_total.overtime_minutes),
+                    total_late_night: fmt_min(report.monthly_total.late_night_minutes),
+                };
+                (Some(did_str), Some(sys_data), diffs)
+            } else {
+                (Some(did_str), None, Vec::new())
             }
         } else {
             (None, None, Vec::new())
