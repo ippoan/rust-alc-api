@@ -11,7 +11,7 @@ use rust_alc_api::auth::jwt::{create_access_token, JwtSecret};
 use rust_alc_api::db::models::User;
 use rust_alc_api::db::repository::{
     PgCarInspectionRepository, PgCommunicationItemsRepository, PgEmployeeRepository,
-    PgNfcTagRepository, PgTenkoCallRepository, PgTimecardRepository,
+    PgMeasurementsRepository, PgNfcTagRepository, PgTenkoCallRepository, PgTimecardRepository,
 };
 use rust_alc_api::AppState;
 
@@ -219,6 +219,7 @@ pub async fn setup_app_state() -> AppState {
     let car_inspections = Arc::new(PgCarInspectionRepository::new(pool.clone()));
     let employees = Arc::new(PgEmployeeRepository::new(pool.clone()));
     let communication_items = Arc::new(PgCommunicationItemsRepository::new(pool.clone()));
+    let measurements = Arc::new(PgMeasurementsRepository::new(pool.clone()));
     let timecard = Arc::new(PgTimecardRepository::new(pool.clone()));
     let tenko_call = Arc::new(PgTenkoCallRepository::new(pool.clone()));
     let nfc_tags = Arc::new(PgNfcTagRepository::new(pool.clone()));
@@ -228,6 +229,7 @@ pub async fn setup_app_state() -> AppState {
         car_inspections,
         employees,
         communication_items,
+        measurements,
         timecard,
         tenko_call,
         nfc_tags,
@@ -279,6 +281,7 @@ pub async fn setup_app_state_no_fcm() -> AppState {
     let car_inspections = Arc::new(PgCarInspectionRepository::new(pool.clone()));
     let employees = Arc::new(PgEmployeeRepository::new(pool.clone()));
     let communication_items = Arc::new(PgCommunicationItemsRepository::new(pool.clone()));
+    let measurements = Arc::new(PgMeasurementsRepository::new(pool.clone()));
     let timecard = Arc::new(PgTimecardRepository::new(pool.clone()));
     let tenko_call = Arc::new(PgTenkoCallRepository::new(pool.clone()));
     let nfc_tags = Arc::new(PgNfcTagRepository::new(pool.clone()));
@@ -288,6 +291,7 @@ pub async fn setup_app_state_no_fcm() -> AppState {
         car_inspections,
         employees,
         communication_items,
+        measurements,
         timecard,
         tenko_call,
         nfc_tags,
@@ -327,6 +331,7 @@ pub async fn setup_app_state_failing_fcm() -> AppState {
     let car_inspections = Arc::new(PgCarInspectionRepository::new(pool.clone()));
     let employees = Arc::new(PgEmployeeRepository::new(pool.clone()));
     let communication_items = Arc::new(PgCommunicationItemsRepository::new(pool.clone()));
+    let measurements = Arc::new(PgMeasurementsRepository::new(pool.clone()));
     let timecard = Arc::new(PgTimecardRepository::new(pool.clone()));
     let tenko_call = Arc::new(PgTenkoCallRepository::new(pool.clone()));
     let nfc_tags = Arc::new(PgNfcTagRepository::new(pool.clone()));
@@ -336,6 +341,7 @@ pub async fn setup_app_state_failing_fcm() -> AppState {
         car_inspections,
         employees,
         communication_items,
+        measurements,
         timecard,
         tenko_call,
         nfc_tags,
