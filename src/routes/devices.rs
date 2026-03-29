@@ -68,6 +68,21 @@ fn db_err(context: &str, e: sqlx::Error) -> StatusCode {
     StatusCode::INTERNAL_SERVER_ERROR
 }
 
+/// FCM_INTERNAL_SECRET ヘッダー認証 (設定されていなければスキップ)
+fn check_internal_secret(headers: &HeaderMap) -> Result<(), StatusCode> {
+    let Ok(expected) = std::env::var("FCM_INTERNAL_SECRET") else {
+        return Ok(());
+    };
+    let provided = headers
+        .get("X-Internal-Secret")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if provided != expected {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+    Ok(())
+}
+
 // ============================================================
 // 型定義
 // ============================================================
@@ -1264,16 +1279,7 @@ async fn fcm_notify_call(
     headers: HeaderMap,
     Json(body): Json<FcmNotifyCallBody>,
 ) -> Result<Json<FcmNotifyCallResponse>, StatusCode> {
-    // 簡易認証: X-Internal-Secret ヘッダー
-    if let Ok(expected_secret) = std::env::var("FCM_INTERNAL_SECRET") {
-        let provided = headers
-            .get("X-Internal-Secret")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("");
-        if provided != expected_secret {
-            return Err(StatusCode::UNAUTHORIZED);
-        }
-    }
+    check_internal_secret(&headers)?;
 
     let fcm = state.fcm.as_ref().ok_or_else(|| {
         tracing::warn!("FCM notify called but FCM is not configured");
@@ -1376,11 +1382,15 @@ fn should_notify_device(device: &FcmDevice) -> bool {
     let jst_day = jst_now.weekday().num_days_from_sunday() as i64; // 0=日, 1=月, ..., 6=土
 
     // 曜日チェック
-    if let Some(days) = schedule.get("days").and_then(|v| v.as_array()) {
-        let day_nums: Vec<i64> = days.iter().filter_map(|d| d.as_i64()).collect();
-        if !day_nums.is_empty() && !day_nums.contains(&jst_day) {
-            return false;
-        }
+    if schedule
+        .get("days")
+        .and_then(|v| v.as_array())
+        .is_some_and(|days| {
+            let ns: Vec<i64> = days.iter().filter_map(|d| d.as_i64()).collect();
+            !ns.is_empty() && !ns.contains(&jst_day)
+        })
+    {
+        return false;
     }
 
     // 時間範囲チェック
@@ -2022,8 +2032,5 @@ async fn generate_unique_code(state: &AppState) -> Result<String, StatusCode> {
             return Ok(code_str);
         }
     }
-    Err(db_err(
-        "generate_unique_code: 10 attempts exhausted",
-        sqlx::Error::RowNotFound,
-    ))
+    unreachable!("code collision after 10 attempts")
 }

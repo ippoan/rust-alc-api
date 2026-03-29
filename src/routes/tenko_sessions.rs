@@ -994,28 +994,63 @@ async fn perform_safety_judgment(
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
+    fn check_vital_i32(
+        val: Option<i32>,
+        base: i32,
+        tol: i32,
+        diff_out: &mut Option<i32>,
+        label: &str,
+        failed: &mut Vec<String>,
+    ) {
+        if let Some(v) = val {
+            let d = v - base;
+            *diff_out = Some(d);
+            if d.abs() > tol {
+                failed.push(label.to_string());
+            }
+        }
+    }
+    fn check_vital_f64(
+        val: Option<f64>,
+        base: f64,
+        tol: f64,
+        diff_out: &mut Option<f64>,
+        label: &str,
+        failed: &mut Vec<String>,
+    ) {
+        if let Some(v) = val {
+            let d = v - base;
+            *diff_out = Some(d);
+            if d.abs() > tol {
+                failed.push(label.to_string());
+            }
+        }
+    }
     if let Some(bl) = &baseline {
-        if let (Some(systolic), true) = (session.systolic, true) {
-            let diff = systolic - bl.baseline_systolic;
-            medical_diffs.systolic_diff = Some(diff);
-            if diff.abs() > bl.systolic_tolerance {
-                failed_items.push("systolic".to_string());
-            }
-        }
-        if let (Some(diastolic), true) = (session.diastolic, true) {
-            let diff = diastolic - bl.baseline_diastolic;
-            medical_diffs.diastolic_diff = Some(diff);
-            if diff.abs() > bl.diastolic_tolerance {
-                failed_items.push("diastolic".to_string());
-            }
-        }
-        if let (Some(temperature), true) = (session.temperature, true) {
-            let diff = temperature - bl.baseline_temperature;
-            medical_diffs.temperature_diff = Some(diff);
-            if diff.abs() > bl.temperature_tolerance {
-                failed_items.push("temperature".to_string());
-            }
-        }
+        check_vital_i32(
+            session.systolic,
+            bl.baseline_systolic,
+            bl.systolic_tolerance,
+            &mut medical_diffs.systolic_diff,
+            "systolic",
+            &mut failed_items,
+        );
+        check_vital_i32(
+            session.diastolic,
+            bl.baseline_diastolic,
+            bl.diastolic_tolerance,
+            &mut medical_diffs.diastolic_diff,
+            "diastolic",
+            &mut failed_items,
+        );
+        check_vital_f64(
+            session.temperature,
+            bl.baseline_temperature,
+            bl.temperature_tolerance,
+            &mut medical_diffs.temperature_diff,
+            "temperature",
+            &mut failed_items,
+        );
     } else {
         #[rustfmt::skip]
         tracing::warn!("No health baseline for employee {}, defaulting to pass", session.employee_id);
