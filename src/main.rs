@@ -9,7 +9,8 @@ use tracing_subscriber::EnvFilter;
 use rust_alc_api::auth::google::GoogleTokenVerifier;
 use rust_alc_api::auth::jwt::JwtSecret;
 use rust_alc_api::db::repository::{
-    PgEmployeeRepository, PgNfcTagRepository, PgTenkoCallRepository, PgTimecardRepository,
+    PgCommunicationItemsRepository, PgEmployeeRepository, PgNfcTagRepository,
+    PgTenkoCallRepository, PgTimecardRepository,
 };
 use rust_alc_api::storage::StorageBackend;
 use rust_alc_api::AppState;
@@ -116,6 +117,7 @@ async fn main() -> anyhow::Result<()> {
     });
 
     let employees = Arc::new(PgEmployeeRepository::new(pool.clone()));
+    let communication_items = Arc::new(PgCommunicationItemsRepository::new(pool.clone()));
     let timecard = Arc::new(PgTimecardRepository::new(pool.clone()));
     let tenko_call = Arc::new(PgTenkoCallRepository::new(pool.clone()));
     let nfc_tags = Arc::new(PgNfcTagRepository::new(pool.clone()));
@@ -123,6 +125,7 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState {
         pool: pool.clone(),
         employees,
+        communication_items,
         timecard,
         tenko_call,
         nfc_tags,
