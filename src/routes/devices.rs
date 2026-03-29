@@ -71,16 +71,17 @@ fn db_err(context: &str, e: sqlx::Error) -> StatusCode {
 /// FCM_INTERNAL_SECRET ヘッダー認証 (設定されていなければスキップ)
 fn check_internal_secret(headers: &HeaderMap) -> Result<(), StatusCode> {
     let Ok(expected) = std::env::var("FCM_INTERNAL_SECRET") else {
-        return Ok(());
+        return Ok(()); // 未設定 → チェックスキップ
     };
     let provided = headers
         .get("X-Internal-Secret")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    if provided != expected {
-        return Err(StatusCode::UNAUTHORIZED);
+    if provided == expected {
+        Ok(())
+    } else {
+        Err(StatusCode::UNAUTHORIZED)
     }
-    Ok(())
 }
 
 // ============================================================
@@ -2032,5 +2033,5 @@ async fn generate_unique_code(state: &AppState) -> Result<String, StatusCode> {
             return Ok(code_str);
         }
     }
-    unreachable!("code collision after 10 attempts")
+    Err(StatusCode::INTERNAL_SERVER_ERROR) // 10回衝突は事実上不可能
 }
