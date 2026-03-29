@@ -82,29 +82,20 @@ async fn get_driver_info(
     let employee = repo
         .get_employee(tenant_id, employee_id)
         .await
-        .map_err(|e| {
-            tracing::error!("get_employee error: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
 
     // イ 健康基準値
     let health_baseline = repo
         .get_health_baseline(tenant_id, employee_id)
         .await
-        .map_err(|e| {
-            tracing::error!("get_health_baseline error: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // イ 直近5件の測定値 (tenko_sessions から)
     let recent_measurements = repo
         .get_recent_measurements(tenant_id, employee_id)
         .await
-        .map_err(|e| {
-            tracing::error!("get_recent_measurements error: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // ロ 労働時間 (直近7日)
     let working_hours = repo

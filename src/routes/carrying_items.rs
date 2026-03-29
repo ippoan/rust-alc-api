@@ -34,10 +34,10 @@ async fn list_items(
     let tenant_id = tenant.0 .0;
     let repo = PgCarryingItemsRepository::new(state.pool.clone());
 
-    let items = repo.list(tenant_id).await.map_err(|e| {
-        tracing::error!("carrying_items list error: {:?}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    let items = repo
+        .list(tenant_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let item_ids: Vec<Uuid> = items.iter().map(|i| i.id).collect();
 
@@ -46,10 +46,7 @@ async fn list_items(
     } else {
         repo.list_conditions(tenant_id, &item_ids)
             .await
-            .map_err(|e| {
-                tracing::error!("carrying_items list_conditions error: {:?}", e);
-                StatusCode::INTERNAL_SERVER_ERROR
-            })?
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     };
 
     let result = items
@@ -86,20 +83,14 @@ async fn create_item(
             body.sort_order.unwrap_or(0),
         )
         .await
-        .map_err(|e| {
-            tracing::error!("carrying_items create error: {:?}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let mut conditions = Vec::new();
     for vc in &body.vehicle_conditions {
         let cond = repo
             .insert_condition(tenant_id, item.id, &vc.category, &vc.value)
             .await
-            .map_err(|e| {
-                tracing::error!("carrying_items insert_condition error: {:?}", e);
-                StatusCode::INTERNAL_SERVER_ERROR
-            })?;
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         if let Some(c) = cond {
             conditions.push(c);
         }
@@ -132,38 +123,30 @@ async fn update_item(
             body.sort_order,
         )
         .await
-        .map_err(|e| {
-            tracing::error!("carrying_items update error: {:?}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
 
     // vehicle_conditions が指定された場合は全置換
     let conditions = if let Some(vcs) = &body.vehicle_conditions {
-        repo.delete_conditions(tenant_id, id).await.map_err(|e| {
-            tracing::error!("carrying_items delete_conditions error: {:?}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+        repo.delete_conditions(tenant_id, id)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
         let mut conds = Vec::new();
         for vc in vcs {
             let cond = repo
                 .insert_condition(tenant_id, id, &vc.category, &vc.value)
                 .await
-                .map_err(|e| {
-                    tracing::error!("carrying_items insert_condition error: {:?}", e);
-                    StatusCode::INTERNAL_SERVER_ERROR
-                })?;
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
             if let Some(c) = cond {
                 conds.push(c);
             }
         }
         conds
     } else {
-        repo.get_conditions(tenant_id, id).await.map_err(|e| {
-            tracing::error!("carrying_items get_conditions error: {:?}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?
+        repo.get_conditions(tenant_id, id)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     };
 
     Ok(Json(CarryingItemWithConditions {
@@ -181,10 +164,10 @@ async fn delete_item(
     let repo = PgCarryingItemsRepository::new(state.pool.clone());
 
     // ON DELETE CASCADE で conditions も消える
-    let deleted = repo.delete(tenant_id, id).await.map_err(|e| {
-        tracing::error!("carrying_items delete error: {:?}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    let deleted = repo
+        .delete(tenant_id, id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     if !deleted {
         return Err(StatusCode::NOT_FOUND);

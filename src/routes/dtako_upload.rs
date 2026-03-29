@@ -82,9 +82,7 @@ async fn upload_zip(
             }))
         }
         Err(e) => {
-            if let Err(db_err) = r.mark_upload_failed(upload_id, &e.to_string()).await {
-                tracing::error!("Failed to mark upload as failed: {db_err}");
-            }
+            let _ = r.mark_upload_failed(upload_id, &e.to_string()).await;
             Err((StatusCode::BAD_REQUEST, e.to_string()))
         }
     }
@@ -768,15 +766,9 @@ async fn load_or_init_classifications(
         let (cls_str, ec) = default_classification(&row.event_cd);
         map.insert(row.event_cd.clone(), ec);
 
-        if let Err(e) = repo
+        let _ = repo
             .insert_event_classification(tenant_id, &row.event_cd, &row.event_name, cls_str)
-            .await
-        {
-            tracing::error!(
-                "Failed to insert event classification {}: {e}",
-                row.event_cd
-            );
-        }
+            .await;
     }
 
     Ok(map)
@@ -805,16 +797,13 @@ pub fn internal_err(e: impl std::fmt::Display) -> (StatusCode, String) {
 /// upload 失敗時の status 更新。UPDATE 自体の失敗もログのみで無視。
 /// テストから呼ばれるため pub を維持。内部はリポジトリに委譲。
 pub async fn mark_upload_failed(conn: &mut sqlx::PgConnection, upload_id: Uuid, error_msg: &str) {
-    if let Err(db_err) = sqlx::query(
+    let _ = sqlx::query(
         "UPDATE alc_api.dtako_upload_history SET status = 'failed', error_message = $1 WHERE id = $2",
     )
     .bind(error_msg)
     .bind(upload_id)
     .execute(conn)
-    .await
-    {
-        tracing::error!("Failed to mark upload as failed: {db_err}");
-    }
+    .await;
 }
 
 /// 年月から月初・月末を計算 (month==12 の年跨ぎ対応)
@@ -1042,9 +1031,7 @@ async fn internal_rerun(
             }))
         }
         Err(e) => {
-            if let Err(db_err) = r.mark_upload_failed(upload_id, &e.to_string()).await {
-                tracing::error!("Failed to mark upload as failed: {db_err}");
-            }
+            let _ = r.mark_upload_failed(upload_id, &e.to_string()).await;
             Err((StatusCode::BAD_REQUEST, e.to_string()))
         }
     }
