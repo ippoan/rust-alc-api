@@ -495,13 +495,7 @@ async fn create_tenko_record(
             tracing::error!("create_tenko_record: employee lookup error: {e}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?
-        .ok_or_else(|| {
-            tracing::error!(
-                "create_tenko_record: employee not found: {}",
-                session.employee_id
-            );
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+        .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let instruction = repo
         .get_schedule_instruction(tenant_id, session.schedule_id)
