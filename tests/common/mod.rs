@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use rust_alc_api::auth::jwt::{create_access_token, JwtSecret};
 use rust_alc_api::db::models::User;
-use rust_alc_api::db::repository::PgEmployeeRepository;
+use rust_alc_api::db::repository::{PgEmployeeRepository, PgNfcTagRepository};
 use rust_alc_api::AppState;
 
 use mock_storage::MockStorage;
@@ -214,10 +214,12 @@ pub async fn setup_app_state() -> AppState {
     let mock_fcm: Arc<dyn rust_alc_api::fcm::FcmSenderTrait> = Arc::new(MockFcmSender::new());
 
     let employees = Arc::new(PgEmployeeRepository::new(pool.clone()));
+    let nfc_tags = Arc::new(PgNfcTagRepository::new(pool.clone()));
 
     AppState {
         pool,
         employees,
+        nfc_tags,
         storage,
         carins_storage: None,
         dtako_storage: Some(dtako_storage),
@@ -264,10 +266,12 @@ pub async fn setup_app_state_no_fcm() -> AppState {
         Arc::new(MockStorage::new("dtako-bucket"));
 
     let employees = Arc::new(PgEmployeeRepository::new(pool.clone()));
+    let nfc_tags = Arc::new(PgNfcTagRepository::new(pool.clone()));
 
     AppState {
         pool,
         employees,
+        nfc_tags,
         storage,
         carins_storage: None,
         dtako_storage: Some(dtako_storage),
@@ -302,10 +306,12 @@ pub async fn setup_app_state_failing_fcm() -> AppState {
     let failing_fcm: Arc<dyn rust_alc_api::fcm::FcmSenderTrait> = Arc::new(FailingFcmSender);
 
     let employees = Arc::new(PgEmployeeRepository::new(pool.clone()));
+    let nfc_tags = Arc::new(PgNfcTagRepository::new(pool.clone()));
 
     AppState {
         pool,
         employees,
+        nfc_tags,
         storage,
         carins_storage: None,
         dtako_storage: Some(dtako_storage),

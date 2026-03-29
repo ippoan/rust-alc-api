@@ -903,6 +903,17 @@ pub struct DtakoSegmentsResponse {
     pub segments: Vec<DtakoDailyWorkSegment>,
 }
 
+// --- NFC Tag ---
+
+#[derive(Debug, Clone, sqlx::FromRow, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NfcTag {
+    pub id: i32,
+    pub nfc_uuid: String,
+    pub car_inspection_id: i32,
+    pub created_at: DateTime<Utc>,
+}
+
 // --- Carrying Items ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]

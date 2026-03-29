@@ -1,6 +1,8 @@
 pub mod employees;
+pub mod nfc_tags;
 
 pub use employees::{EmployeeRepository, PgEmployeeRepository};
+pub use nfc_tags::{NfcTagRepository, PgNfcTagRepository};
 
 use sqlx::PgPool;
 

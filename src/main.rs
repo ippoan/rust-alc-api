@@ -8,7 +8,7 @@ use tracing_subscriber::EnvFilter;
 
 use rust_alc_api::auth::google::GoogleTokenVerifier;
 use rust_alc_api::auth::jwt::JwtSecret;
-use rust_alc_api::db::repository::PgEmployeeRepository;
+use rust_alc_api::db::repository::{PgEmployeeRepository, PgNfcTagRepository};
 use rust_alc_api::storage::StorageBackend;
 use rust_alc_api::AppState;
 
@@ -114,10 +114,12 @@ async fn main() -> anyhow::Result<()> {
     });
 
     let employees = Arc::new(PgEmployeeRepository::new(pool.clone()));
+    let nfc_tags = Arc::new(PgNfcTagRepository::new(pool.clone()));
 
     let state = AppState {
         pool: pool.clone(),
         employees,
+        nfc_tags,
         storage,
         carins_storage,
         dtako_storage,

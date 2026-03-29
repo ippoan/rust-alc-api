@@ -14,13 +14,14 @@ pub mod webhook;
 
 use std::sync::Arc;
 
-use db::repository::EmployeeRepository;
+use db::repository::{EmployeeRepository, NfcTagRepository};
 use storage::StorageBackend;
 
 #[derive(Clone)]
 pub struct AppState {
     pub pool: sqlx::PgPool,
     pub employees: Arc<dyn EmployeeRepository>,
+    pub nfc_tags: Arc<dyn NfcTagRepository>,
     pub storage: Arc<dyn StorageBackend>,
     pub carins_storage: Option<Arc<dyn StorageBackend>>,
     pub dtako_storage: Option<Arc<dyn StorageBackend>>,
