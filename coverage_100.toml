@@ -212,6 +212,10 @@ path = "src/csv_parser/work_segments.rs"
 type = "unit"
 
 [[files]]
+path = "src/compare/mod.rs"
+type = "both"
+
+[[files]]
 path = "src/routes/upload.rs"
 type = "integration"
 test_file = "tests/coverage/main.rs"
