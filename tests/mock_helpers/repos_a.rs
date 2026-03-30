@@ -322,7 +322,12 @@ impl CarInspectionRepository for MockCarInspectionRepository {
 
     async fn vehicle_categories(&self, _tenant_id: Uuid) -> Result<VehicleCategories, sqlx::Error> {
         check_fail!(self);
-        todo!("MockCarInspectionRepository::vehicle_categories")
+        Ok(VehicleCategories {
+            car_kinds: vec![],
+            uses: vec![],
+            car_shapes: vec![],
+            private_businesses: vec![],
+        })
     }
 
     async fn list_current_files(
@@ -553,7 +558,23 @@ impl CommunicationItemsRepository for MockCommunicationItemsRepository {
         _input: &CreateCommunicationItem,
     ) -> Result<CommunicationItem, sqlx::Error> {
         check_fail!(self);
-        todo!("MockCommunicationItemsRepository::create")
+        Ok(CommunicationItem {
+            id: Uuid::new_v4(),
+            tenant_id: _tenant_id,
+            title: _input.title.clone(),
+            content: _input.content.clone().unwrap_or_default(),
+            priority: _input
+                .priority
+                .clone()
+                .unwrap_or_else(|| "normal".to_string()),
+            target_employee_id: _input.target_employee_id,
+            is_active: true,
+            effective_from: _input.effective_from,
+            effective_until: _input.effective_until,
+            created_by: _input.created_by.clone(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        })
     }
 
     async fn update(

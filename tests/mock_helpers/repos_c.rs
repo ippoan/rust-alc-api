@@ -30,12 +30,18 @@ macro_rules! check_fail {
 
 pub struct MockNfcTagRepository {
     pub fail_next: AtomicBool,
+    pub tag_data: std::sync::Mutex<Option<NfcTag>>,
+    pub car_inspection_json: std::sync::Mutex<Option<serde_json::Value>>,
+    pub delete_returns_true: AtomicBool,
 }
 
 impl Default for MockNfcTagRepository {
     fn default() -> Self {
         Self {
             fail_next: AtomicBool::new(false),
+            tag_data: std::sync::Mutex::new(None),
+            car_inspection_json: std::sync::Mutex::new(None),
+            delete_returns_true: AtomicBool::new(false),
         }
     }
 }
@@ -48,7 +54,7 @@ impl NfcTagRepository for MockNfcTagRepository {
         _nfc_uuid: &str,
     ) -> Result<Option<NfcTag>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        Ok(self.tag_data.lock().unwrap().clone())
     }
 
     async fn get_car_inspection_json(
@@ -57,7 +63,7 @@ impl NfcTagRepository for MockNfcTagRepository {
         _car_inspection_id: i32,
     ) -> Result<Option<serde_json::Value>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        Ok(self.car_inspection_json.lock().unwrap().clone())
     }
 
     async fn list(
@@ -66,22 +72,28 @@ impl NfcTagRepository for MockNfcTagRepository {
         _car_inspection_id: Option<i32>,
     ) -> Result<Vec<NfcTag>, sqlx::Error> {
         check_fail!(self);
-        Ok(vec![])
+        let data = self.tag_data.lock().unwrap();
+        Ok(data.iter().cloned().collect())
     }
 
     async fn register(
         &self,
         _tenant_id: Uuid,
-        _nfc_uuid: &str,
-        _car_inspection_id: i32,
+        nfc_uuid: &str,
+        car_inspection_id: i32,
     ) -> Result<NfcTag, sqlx::Error> {
         check_fail!(self);
-        todo!("MockNfcTagRepository::register")
+        Ok(NfcTag {
+            id: 1,
+            nfc_uuid: nfc_uuid.to_string(),
+            car_inspection_id,
+            created_at: Utc::now(),
+        })
     }
 
     async fn delete(&self, _tenant_id: Uuid, _nfc_uuid: &str) -> Result<bool, sqlx::Error> {
         check_fail!(self);
-        Ok(false)
+        Ok(self.delete_returns_true.load(Ordering::SeqCst))
     }
 }
 
@@ -163,12 +175,14 @@ impl SsoAdminRepository for MockSsoAdminRepository {
 
 pub struct MockTenantUsersRepository {
     pub fail_next: AtomicBool,
+    pub users: std::sync::Mutex<Vec<UserRow>>,
 }
 
 impl Default for MockTenantUsersRepository {
     fn default() -> Self {
         Self {
             fail_next: AtomicBool::new(false),
+            users: std::sync::Mutex::new(vec![]),
         }
     }
 }
@@ -177,7 +191,7 @@ impl Default for MockTenantUsersRepository {
 impl TenantUsersRepository for MockTenantUsersRepository {
     async fn list_users(&self, _tenant_id: Uuid) -> Result<Vec<UserRow>, sqlx::Error> {
         check_fail!(self);
-        Ok(vec![])
+        Ok(self.users.lock().unwrap().clone())
     }
 
     async fn list_invitations(
@@ -195,7 +209,13 @@ impl TenantUsersRepository for MockTenantUsersRepository {
         _role: &str,
     ) -> Result<TenantAllowedEmail, sqlx::Error> {
         check_fail!(self);
-        todo!("MockTenantUsersRepository::invite_user")
+        Ok(TenantAllowedEmail {
+            id: Uuid::new_v4(),
+            tenant_id: _tenant_id,
+            email: _email.to_string(),
+            role: _role.to_string(),
+            created_at: chrono::Utc::now(),
+        })
     }
 
     async fn delete_invitation(&self, _tenant_id: Uuid, _id: Uuid) -> Result<(), sqlx::Error> {
@@ -215,12 +235,18 @@ impl TenantUsersRepository for MockTenantUsersRepository {
 
 pub struct MockTenkoCallRepository {
     pub fail_next: AtomicBool,
+    /// true にすると register_driver / record_tenko が Some を返す (成功パス)
+    pub return_some: AtomicBool,
+    /// true にすると list_numbers / list_drivers がサンプルデータを返す
+    pub return_data: AtomicBool,
 }
 
 impl Default for MockTenkoCallRepository {
     fn default() -> Self {
         Self {
             fail_next: AtomicBool::new(false),
+            return_some: AtomicBool::new(false),
+            return_data: AtomicBool::new(false),
         }
     }
 }
@@ -229,13 +255,20 @@ impl Default for MockTenkoCallRepository {
 impl TenkoCallRepository for MockTenkoCallRepository {
     async fn register_driver(
         &self,
-        _call_number: &str,
+        call_number: &str,
         _phone_number: &str,
         _driver_name: &str,
         _employee_code: Option<&str>,
     ) -> Result<Option<RegisterDriverResult>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        if self.return_some.load(Ordering::SeqCst) {
+            Ok(Some(RegisterDriverResult {
+                driver_id: 42,
+                call_number: Some(call_number.to_string()),
+            }))
+        } else {
+            Ok(None)
+        }
     }
 
     async fn record_tenko(
@@ -246,12 +279,30 @@ impl TenkoCallRepository for MockTenkoCallRepository {
         _longitude: f64,
     ) -> Result<Option<DriverInfo>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        if self.return_some.load(Ordering::SeqCst) {
+            Ok(Some(DriverInfo {
+                id: 42,
+                call_number: Some("090-1234-5678".to_string()),
+                tenant_id: "test-tenant".to_string(),
+            }))
+        } else {
+            Ok(None)
+        }
     }
 
     async fn list_numbers(&self) -> Result<Vec<TenkoCallNumberRow>, sqlx::Error> {
         check_fail!(self);
-        Ok(vec![])
+        if self.return_data.load(Ordering::SeqCst) {
+            Ok(vec![TenkoCallNumberRow {
+                id: 1,
+                call_number: "090-0000-0001".to_string(),
+                tenant_id: "test-tenant".to_string(),
+                label: Some("Office A".to_string()),
+                created_at: "2026-01-01 00:00:00".to_string(),
+            }])
+        } else {
+            Ok(vec![])
+        }
     }
 
     async fn create_number(
@@ -261,7 +312,7 @@ impl TenkoCallRepository for MockTenkoCallRepository {
         _label: Option<&str>,
     ) -> Result<i32, sqlx::Error> {
         check_fail!(self);
-        Ok(0)
+        Ok(99)
     }
 
     async fn delete_number(&self, _id: i32) -> Result<(), sqlx::Error> {
@@ -271,7 +322,19 @@ impl TenkoCallRepository for MockTenkoCallRepository {
 
     async fn list_drivers(&self) -> Result<Vec<TenkoCallDriverRow>, sqlx::Error> {
         check_fail!(self);
-        Ok(vec![])
+        if self.return_data.load(Ordering::SeqCst) {
+            Ok(vec![TenkoCallDriverRow {
+                id: 1,
+                phone_number: "080-1111-2222".to_string(),
+                driver_name: "Test Driver".to_string(),
+                call_number: Some("090-0000-0001".to_string()),
+                tenant_id: "test-tenant".to_string(),
+                employee_code: Some("EMP001".to_string()),
+                created_at: "2026-01-01 00:00:00".to_string(),
+            }])
+        } else {
+            Ok(vec![])
+        }
     }
 }
 
@@ -334,13 +397,54 @@ impl TenkoRecordsRepository for MockTenkoRecordsRepository {
 
 pub struct MockTenkoSchedulesRepository {
     pub fail_next: AtomicBool,
+    pub return_none: AtomicBool,
 }
 
 impl Default for MockTenkoSchedulesRepository {
     fn default() -> Self {
         Self {
             fail_next: AtomicBool::new(false),
+            return_none: AtomicBool::new(false),
         }
+    }
+}
+
+fn make_mock_schedule(
+    tenant_id: Uuid,
+    employee_id: Uuid,
+    tenko_type: &str,
+    instruction: Option<String>,
+) -> TenkoSchedule {
+    TenkoSchedule {
+        id: Uuid::new_v4(),
+        tenant_id,
+        employee_id,
+        tenko_type: tenko_type.to_string(),
+        responsible_manager_name: "Manager".to_string(),
+        scheduled_at: Utc::now(),
+        instruction,
+        consumed: false,
+        consumed_by_session_id: None,
+        overdue_notified_at: None,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+    }
+}
+
+fn make_mock_schedule_with_id(id: Uuid, tenant_id: Uuid) -> TenkoSchedule {
+    TenkoSchedule {
+        id,
+        tenant_id,
+        employee_id: Uuid::new_v4(),
+        tenko_type: "pre_operation".to_string(),
+        responsible_manager_name: "Manager".to_string(),
+        scheduled_at: Utc::now(),
+        instruction: Some("Test instruction".to_string()),
+        consumed: false,
+        consumed_by_session_id: None,
+        overdue_notified_at: None,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
     }
 }
 
@@ -348,20 +452,35 @@ impl Default for MockTenkoSchedulesRepository {
 impl TenkoSchedulesRepository for MockTenkoSchedulesRepository {
     async fn create(
         &self,
-        _tenant_id: Uuid,
-        _input: &CreateTenkoSchedule,
+        tenant_id: Uuid,
+        input: &CreateTenkoSchedule,
     ) -> Result<TenkoSchedule, sqlx::Error> {
         check_fail!(self);
-        todo!("MockTenkoSchedulesRepository::create")
+        Ok(make_mock_schedule(
+            tenant_id,
+            input.employee_id,
+            &input.tenko_type,
+            input.instruction.clone(),
+        ))
     }
 
     async fn batch_create(
         &self,
-        _tenant_id: Uuid,
-        _inputs: &[CreateTenkoSchedule],
+        tenant_id: Uuid,
+        inputs: &[CreateTenkoSchedule],
     ) -> Result<Vec<TenkoSchedule>, sqlx::Error> {
         check_fail!(self);
-        Ok(vec![])
+        Ok(inputs
+            .iter()
+            .map(|s| {
+                make_mock_schedule(
+                    tenant_id,
+                    s.employee_id,
+                    &s.tenko_type,
+                    s.instruction.clone(),
+                )
+            })
+            .collect())
     }
 
     async fn list(
@@ -378,24 +497,33 @@ impl TenkoSchedulesRepository for MockTenkoSchedulesRepository {
         })
     }
 
-    async fn get(&self, _tenant_id: Uuid, _id: Uuid) -> Result<Option<TenkoSchedule>, sqlx::Error> {
+    async fn get(&self, tenant_id: Uuid, id: Uuid) -> Result<Option<TenkoSchedule>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        if self.return_none.load(Ordering::SeqCst) {
+            return Ok(None);
+        }
+        Ok(Some(make_mock_schedule_with_id(id, tenant_id)))
     }
 
     async fn update(
         &self,
-        _tenant_id: Uuid,
-        _id: Uuid,
+        tenant_id: Uuid,
+        id: Uuid,
         _input: &UpdateTenkoSchedule,
     ) -> Result<Option<TenkoSchedule>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        if self.return_none.load(Ordering::SeqCst) {
+            return Ok(None);
+        }
+        Ok(Some(make_mock_schedule_with_id(id, tenant_id)))
     }
 
     async fn delete(&self, _tenant_id: Uuid, _id: Uuid) -> Result<bool, sqlx::Error> {
         check_fail!(self);
-        Ok(false)
+        if self.return_none.load(Ordering::SeqCst) {
+            return Ok(false);
+        }
+        Ok(true)
     }
 
     async fn get_pending(
@@ -710,12 +838,15 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
 
 pub struct MockTenkoWebhooksRepository {
     pub fail_next: AtomicBool,
+    /// When true, `get` returns Some and `delete` returns true.
+    pub return_found: AtomicBool,
 }
 
 impl Default for MockTenkoWebhooksRepository {
     fn default() -> Self {
         Self {
             fail_next: AtomicBool::new(false),
+            return_found: AtomicBool::new(false),
         }
     }
 }
@@ -724,11 +855,21 @@ impl Default for MockTenkoWebhooksRepository {
 impl TenkoWebhooksRepository for MockTenkoWebhooksRepository {
     async fn upsert(
         &self,
-        _tenant_id: Uuid,
-        _input: &CreateWebhookConfig,
+        tenant_id: Uuid,
+        input: &CreateWebhookConfig,
     ) -> Result<WebhookConfig, sqlx::Error> {
         check_fail!(self);
-        todo!("MockTenkoWebhooksRepository::upsert")
+        let now = Utc::now();
+        Ok(WebhookConfig {
+            id: Uuid::new_v4(),
+            tenant_id,
+            event_type: input.event_type.clone(),
+            url: input.url.clone(),
+            secret: input.secret.clone(),
+            enabled: input.enabled,
+            created_at: now,
+            updated_at: now,
+        })
     }
 
     async fn list(&self, _tenant_id: Uuid) -> Result<Vec<WebhookConfig>, sqlx::Error> {
@@ -736,14 +877,32 @@ impl TenkoWebhooksRepository for MockTenkoWebhooksRepository {
         Ok(vec![])
     }
 
-    async fn get(&self, _tenant_id: Uuid, _id: Uuid) -> Result<Option<WebhookConfig>, sqlx::Error> {
+    async fn get(&self, tenant_id: Uuid, id: Uuid) -> Result<Option<WebhookConfig>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        if self.return_found.load(Ordering::SeqCst) {
+            let now = Utc::now();
+            Ok(Some(WebhookConfig {
+                id,
+                tenant_id,
+                event_type: "tenko_completed".to_string(),
+                url: "https://example.com/hook".to_string(),
+                secret: None,
+                enabled: true,
+                created_at: now,
+                updated_at: now,
+            }))
+        } else {
+            Ok(None)
+        }
     }
 
     async fn delete(&self, _tenant_id: Uuid, _id: Uuid) -> Result<bool, sqlx::Error> {
         check_fail!(self);
-        Ok(false)
+        if self.return_found.load(Ordering::SeqCst) {
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 
     async fn list_deliveries(
