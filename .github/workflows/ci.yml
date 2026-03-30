@@ -19,7 +19,6 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: swatinem/rust-cache@v2
-      - run: sudo apt-get install -y mold
       - run: cargo fmt --check
       - run: cargo clippy -- -D warnings
 
