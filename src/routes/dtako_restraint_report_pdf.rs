@@ -1519,6 +1519,7 @@ mod tests {
     use super::*;
     use crate::routes::dtako_restraint_report::{MonthlyTotal, OperationDetail};
     use chrono::NaiveDate;
+    use uuid::Uuid;
 
     fn make_workday(date: NaiveDate, drive: i32, remarks: &str) -> RestraintDayRow {
         RestraintDayRow {
