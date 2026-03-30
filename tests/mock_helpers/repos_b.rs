@@ -37,6 +37,43 @@ macro_rules! check_fail {
 }
 
 // =============================================================================
+// MockDbError — fake sqlx::error::DatabaseError for unique-violation tests
+// =============================================================================
+
+#[derive(Debug)]
+pub struct MockDbError(pub String);
+
+impl std::fmt::Display for MockDbError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::error::Error for MockDbError {}
+
+impl sqlx::error::DatabaseError for MockDbError {
+    fn message(&self) -> &str {
+        &self.0
+    }
+
+    fn as_error(&self) -> &(dyn std::error::Error + Send + Sync + 'static) {
+        self
+    }
+
+    fn as_error_mut(&mut self) -> &mut (dyn std::error::Error + Send + Sync + 'static) {
+        self
+    }
+
+    fn into_error(self: Box<Self>) -> Box<dyn std::error::Error + Send + Sync + 'static> {
+        self
+    }
+
+    fn kind(&self) -> sqlx::error::ErrorKind {
+        sqlx::error::ErrorKind::UniqueViolation
+    }
+}
+
+// =============================================================================
 // MockDtakoEventClassificationsRepository
 // =============================================================================
 
@@ -145,12 +182,16 @@ impl DtakoOperationsRepository for MockDtakoOperationsRepository {
 
 pub struct MockDtakoRestraintReportRepository {
     pub fail_next: AtomicBool,
+    pub return_driver_name: AtomicBool,
+    pub drivers_with_cd: std::sync::Mutex<Vec<(Uuid, Option<String>, String)>>,
 }
 
 impl Default for MockDtakoRestraintReportRepository {
     fn default() -> Self {
         Self {
             fail_next: AtomicBool::new(false),
+            return_driver_name: AtomicBool::new(false),
+            drivers_with_cd: std::sync::Mutex::new(vec![]),
         }
     }
 }
@@ -163,7 +204,11 @@ impl DtakoRestraintReportRepository for MockDtakoRestraintReportRepository {
         _driver_id: Uuid,
     ) -> Result<Option<String>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        if self.return_driver_name.load(Ordering::SeqCst) {
+            Ok(Some("テスト太郎".to_string()))
+        } else {
+            Ok(None)
+        }
     }
 
     async fn get_segments(
@@ -225,7 +270,7 @@ impl DtakoRestraintReportRepository for MockDtakoRestraintReportRepository {
         _tenant_id: Uuid,
     ) -> Result<Vec<(Uuid, Option<String>, String)>, sqlx::Error> {
         check_fail!(self);
-        Ok(vec![])
+        Ok(self.drivers_with_cd.lock().unwrap().clone())
     }
 }
 
@@ -268,12 +313,14 @@ impl DtakoRestraintReportPdfRepository for MockDtakoRestraintReportPdfRepository
 
 pub struct MockDtakoScraperRepository {
     pub fail_next: AtomicBool,
+    pub history_data: std::sync::Mutex<Vec<ScrapeHistoryItem>>,
 }
 
 impl Default for MockDtakoScraperRepository {
     fn default() -> Self {
         Self {
             fail_next: AtomicBool::new(false),
+            history_data: std::sync::Mutex::new(vec![]),
         }
     }
 }
@@ -299,7 +346,7 @@ impl DtakoScraperRepository for MockDtakoScraperRepository {
         _offset: i64,
     ) -> Result<Vec<ScrapeHistoryItem>, sqlx::Error> {
         check_fail!(self);
-        Ok(vec![])
+        Ok(self.history_data.lock().unwrap().clone())
     }
 }
 
@@ -655,12 +702,43 @@ impl DtakoWorkTimesRepository for MockDtakoWorkTimesRepository {
 
 pub struct MockEmployeeRepository {
     pub fail_next: AtomicBool,
+    pub return_some: AtomicBool,
+    pub return_deleted: AtomicBool,
+    pub return_conflict: AtomicBool,
 }
 
 impl Default for MockEmployeeRepository {
     fn default() -> Self {
         Self {
             fail_next: AtomicBool::new(false),
+            return_some: AtomicBool::new(false),
+            return_deleted: AtomicBool::new(false),
+            return_conflict: AtomicBool::new(false),
+        }
+    }
+}
+
+impl MockEmployeeRepository {
+    fn sample_employee(&self) -> Employee {
+        Employee {
+            id: Uuid::new_v4(),
+            tenant_id: Uuid::new_v4(),
+            code: Some("EMP-001".to_string()),
+            nfc_id: Some("nfc-abc".to_string()),
+            name: "Test Employee".to_string(),
+            face_photo_url: None,
+            face_embedding: None,
+            face_embedding_at: None,
+            face_model_version: None,
+            face_approval_status: "pending".to_string(),
+            face_approved_by: None,
+            face_approved_at: None,
+            license_issue_date: None,
+            license_expiry_date: None,
+            role: vec!["driver".to_string()],
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            deleted_at: None,
         }
     }
 }
@@ -673,7 +751,7 @@ impl EmployeeRepository for MockEmployeeRepository {
         _input: &CreateEmployee,
     ) -> Result<Employee, sqlx::Error> {
         check_fail!(self);
-        todo!("MockEmployeeRepository::create")
+        Ok(self.sample_employee())
     }
 
     async fn list(&self, _tenant_id: Uuid) -> Result<Vec<Employee>, sqlx::Error> {
@@ -683,6 +761,9 @@ impl EmployeeRepository for MockEmployeeRepository {
 
     async fn get(&self, _tenant_id: Uuid, _id: Uuid) -> Result<Option<Employee>, sqlx::Error> {
         check_fail!(self);
+        if self.return_some.load(Ordering::SeqCst) {
+            return Ok(Some(self.sample_employee()));
+        }
         Ok(None)
     }
 
@@ -692,6 +773,9 @@ impl EmployeeRepository for MockEmployeeRepository {
         _nfc_id: &str,
     ) -> Result<Option<Employee>, sqlx::Error> {
         check_fail!(self);
+        if self.return_some.load(Ordering::SeqCst) {
+            return Ok(Some(self.sample_employee()));
+        }
         Ok(None)
     }
 
@@ -701,6 +785,9 @@ impl EmployeeRepository for MockEmployeeRepository {
         _code: &str,
     ) -> Result<Option<Employee>, sqlx::Error> {
         check_fail!(self);
+        if self.return_some.load(Ordering::SeqCst) {
+            return Ok(Some(self.sample_employee()));
+        }
         Ok(None)
     }
 
@@ -710,12 +797,23 @@ impl EmployeeRepository for MockEmployeeRepository {
         _id: Uuid,
         _input: &UpdateEmployee,
     ) -> Result<Option<Employee>, sqlx::Error> {
+        if self.return_conflict.load(Ordering::SeqCst) {
+            return Err(sqlx::Error::Database(Box::new(MockDbError(
+                "idx_employees_code".to_string(),
+            ))));
+        }
         check_fail!(self);
+        if self.return_some.load(Ordering::SeqCst) {
+            return Ok(Some(self.sample_employee()));
+        }
         Ok(None)
     }
 
     async fn delete(&self, _tenant_id: Uuid, _id: Uuid) -> Result<bool, sqlx::Error> {
         check_fail!(self);
+        if self.return_deleted.load(Ordering::SeqCst) {
+            return Ok(true);
+        }
         Ok(false)
     }
 
@@ -726,6 +824,9 @@ impl EmployeeRepository for MockEmployeeRepository {
         _input: &UpdateFace,
     ) -> Result<Option<Employee>, sqlx::Error> {
         check_fail!(self);
+        if self.return_some.load(Ordering::SeqCst) {
+            return Ok(Some(self.sample_employee()));
+        }
         Ok(None)
     }
 
@@ -742,6 +843,9 @@ impl EmployeeRepository for MockEmployeeRepository {
         _expiry_date: Option<chrono::NaiveDate>,
     ) -> Result<Option<Employee>, sqlx::Error> {
         check_fail!(self);
+        if self.return_some.load(Ordering::SeqCst) {
+            return Ok(Some(self.sample_employee()));
+        }
         Ok(None)
     }
 
@@ -752,6 +856,9 @@ impl EmployeeRepository for MockEmployeeRepository {
         _nfc_id: &str,
     ) -> Result<Option<Employee>, sqlx::Error> {
         check_fail!(self);
+        if self.return_some.load(Ordering::SeqCst) {
+            return Ok(Some(self.sample_employee()));
+        }
         Ok(None)
     }
 
@@ -761,6 +868,9 @@ impl EmployeeRepository for MockEmployeeRepository {
         _id: Uuid,
     ) -> Result<Option<Employee>, sqlx::Error> {
         check_fail!(self);
+        if self.return_some.load(Ordering::SeqCst) {
+            return Ok(Some(self.sample_employee()));
+        }
         Ok(None)
     }
 
@@ -770,6 +880,9 @@ impl EmployeeRepository for MockEmployeeRepository {
         _id: Uuid,
     ) -> Result<Option<Employee>, sqlx::Error> {
         check_fail!(self);
+        if self.return_some.load(Ordering::SeqCst) {
+            return Ok(Some(self.sample_employee()));
+        }
         Ok(None)
     }
 }
@@ -869,12 +982,26 @@ impl EquipmentFailuresRepository for MockEquipmentFailuresRepository {
 
 pub struct MockGuidanceRecordsRepository {
     pub fail_next: AtomicBool,
+    pub return_record: std::sync::Mutex<Option<GuidanceRecord>>,
+    pub return_attachment: std::sync::Mutex<Option<GuidanceRecordAttachment>>,
+    pub parent_depth: std::sync::Mutex<Option<i32>>,
+    pub delete_rows: std::sync::Mutex<u64>,
+    pub list_tree_result: std::sync::Mutex<Vec<GuidanceRecordWithName>>,
+    pub list_attachments_result: std::sync::Mutex<Vec<GuidanceRecordAttachment>>,
+    pub count_result: std::sync::Mutex<i64>,
 }
 
 impl Default for MockGuidanceRecordsRepository {
     fn default() -> Self {
         Self {
             fail_next: AtomicBool::new(false),
+            return_record: std::sync::Mutex::new(None),
+            return_attachment: std::sync::Mutex::new(None),
+            parent_depth: std::sync::Mutex::new(None),
+            delete_rows: std::sync::Mutex::new(0),
+            list_tree_result: std::sync::Mutex::new(vec![]),
+            list_attachments_result: std::sync::Mutex::new(vec![]),
+            count_result: std::sync::Mutex::new(0),
         }
     }
 }
@@ -890,7 +1017,7 @@ impl GuidanceRecordsRepository for MockGuidanceRecordsRepository {
         _date_to: Option<&str>,
     ) -> Result<i64, sqlx::Error> {
         check_fail!(self);
-        Ok(0)
+        Ok(*self.count_result.lock().unwrap())
     }
 
     async fn list_tree(
@@ -904,7 +1031,7 @@ impl GuidanceRecordsRepository for MockGuidanceRecordsRepository {
         _offset: i64,
     ) -> Result<Vec<GuidanceRecordWithName>, sqlx::Error> {
         check_fail!(self);
-        Ok(vec![])
+        Ok(self.list_tree_result.lock().unwrap().clone())
     }
 
     async fn list_attachments_by_record_ids(
@@ -913,7 +1040,7 @@ impl GuidanceRecordsRepository for MockGuidanceRecordsRepository {
         _record_ids: &[Uuid],
     ) -> Result<Vec<GuidanceRecordAttachment>, sqlx::Error> {
         check_fail!(self);
-        Ok(vec![])
+        Ok(self.list_attachments_result.lock().unwrap().clone())
     }
 
     async fn get(
@@ -922,7 +1049,7 @@ impl GuidanceRecordsRepository for MockGuidanceRecordsRepository {
         _id: Uuid,
     ) -> Result<Option<GuidanceRecord>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        Ok(self.return_record.lock().unwrap().clone())
     }
 
     async fn get_parent_depth(
@@ -931,17 +1058,30 @@ impl GuidanceRecordsRepository for MockGuidanceRecordsRepository {
         _parent_id: Uuid,
     ) -> Result<Option<i32>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        Ok(*self.parent_depth.lock().unwrap())
     }
 
     async fn create(
         &self,
-        _tenant_id: Uuid,
-        _input: &CreateGuidanceRecord,
-        _depth: i32,
+        tenant_id: Uuid,
+        input: &CreateGuidanceRecord,
+        depth: i32,
     ) -> Result<GuidanceRecord, sqlx::Error> {
         check_fail!(self);
-        todo!("MockGuidanceRecordsRepository::create")
+        Ok(GuidanceRecord {
+            id: Uuid::new_v4(),
+            tenant_id,
+            employee_id: input.employee_id,
+            guidance_type: input.guidance_type.clone().unwrap_or_default(),
+            title: input.title.clone(),
+            content: input.content.clone().unwrap_or_default(),
+            guided_by: input.guided_by.clone(),
+            guided_at: input.guided_at.unwrap_or_else(Utc::now),
+            parent_id: input.parent_id,
+            depth,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        })
     }
 
     async fn update(
@@ -951,12 +1091,12 @@ impl GuidanceRecordsRepository for MockGuidanceRecordsRepository {
         _input: &UpdateGuidanceRecord,
     ) -> Result<Option<GuidanceRecord>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        Ok(self.return_record.lock().unwrap().clone())
     }
 
     async fn delete_recursive(&self, _tenant_id: Uuid, _id: Uuid) -> Result<u64, sqlx::Error> {
         check_fail!(self);
-        Ok(0)
+        Ok(*self.delete_rows.lock().unwrap())
     }
 
     async fn list_attachments(
@@ -965,20 +1105,28 @@ impl GuidanceRecordsRepository for MockGuidanceRecordsRepository {
         _record_id: Uuid,
     ) -> Result<Vec<GuidanceRecordAttachment>, sqlx::Error> {
         check_fail!(self);
-        Ok(vec![])
+        Ok(self.list_attachments_result.lock().unwrap().clone())
     }
 
     async fn create_attachment(
         &self,
         _tenant_id: Uuid,
-        _record_id: Uuid,
-        _file_name: &str,
-        _file_type: &str,
-        _file_size: i32,
-        _storage_url: &str,
+        record_id: Uuid,
+        file_name: &str,
+        file_type: &str,
+        file_size: i32,
+        storage_url: &str,
     ) -> Result<GuidanceRecordAttachment, sqlx::Error> {
         check_fail!(self);
-        todo!("MockGuidanceRecordsRepository::create_attachment")
+        Ok(GuidanceRecordAttachment {
+            id: Uuid::new_v4(),
+            record_id,
+            file_name: file_name.to_string(),
+            file_type: file_type.to_string(),
+            file_size: Some(file_size),
+            storage_url: storage_url.to_string(),
+            created_at: Utc::now(),
+        })
     }
 
     async fn get_attachment(
@@ -988,7 +1136,7 @@ impl GuidanceRecordsRepository for MockGuidanceRecordsRepository {
         _att_id: Uuid,
     ) -> Result<Option<GuidanceRecordAttachment>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        Ok(self.return_attachment.lock().unwrap().clone())
     }
 
     async fn delete_attachment(
@@ -998,7 +1146,7 @@ impl GuidanceRecordsRepository for MockGuidanceRecordsRepository {
         _att_id: Uuid,
     ) -> Result<u64, sqlx::Error> {
         check_fail!(self);
-        Ok(0)
+        Ok(*self.delete_rows.lock().unwrap())
     }
 }
 
@@ -1092,12 +1240,45 @@ impl HealthBaselinesRepository for MockHealthBaselinesRepository {
 
 pub struct MockMeasurementsRepository {
     pub fail_next: AtomicBool,
+    pub return_some: AtomicBool,
+    pub face_photo_url: std::sync::Mutex<Option<String>>,
+    pub video_url: std::sync::Mutex<Option<String>>,
 }
 
 impl Default for MockMeasurementsRepository {
     fn default() -> Self {
         Self {
             fail_next: AtomicBool::new(false),
+            return_some: AtomicBool::new(false),
+            face_photo_url: std::sync::Mutex::new(None),
+            video_url: std::sync::Mutex::new(None),
+        }
+    }
+}
+
+impl MockMeasurementsRepository {
+    fn sample_measurement(&self, tenant_id: Uuid) -> Measurement {
+        let now = Utc::now();
+        Measurement {
+            id: Uuid::new_v4(),
+            tenant_id,
+            employee_id: Uuid::new_v4(),
+            alcohol_level: Some(0.0),
+            result: Some("pass".to_string()),
+            device_use_count: 1,
+            face_photo_url: self.face_photo_url.lock().unwrap().clone(),
+            video_url: self.video_url.lock().unwrap().clone(),
+            measured_at: now,
+            created_at: now,
+            updated_at: now,
+            status: "completed".to_string(),
+            temperature: None,
+            systolic: None,
+            diastolic: None,
+            pulse: None,
+            medical_measured_at: None,
+            face_verified: None,
+            medical_manual_input: None,
         }
     }
 }
@@ -1106,35 +1287,47 @@ impl Default for MockMeasurementsRepository {
 impl MeasurementsRepository for MockMeasurementsRepository {
     async fn start(
         &self,
-        _tenant_id: Uuid,
+        tenant_id: Uuid,
         _input: &StartMeasurement,
     ) -> Result<Measurement, sqlx::Error> {
         check_fail!(self);
-        todo!("MockMeasurementsRepository::start")
+        let mut m = self.sample_measurement(tenant_id);
+        m.status = "started".to_string();
+        m.alcohol_level = None;
+        m.result = None;
+        Ok(m)
     }
 
     async fn create(
         &self,
-        _tenant_id: Uuid,
+        tenant_id: Uuid,
         _input: &CreateMeasurement,
     ) -> Result<Measurement, sqlx::Error> {
         check_fail!(self);
-        todo!("MockMeasurementsRepository::create")
+        Ok(self.sample_measurement(tenant_id))
     }
 
     async fn update(
         &self,
-        _tenant_id: Uuid,
+        tenant_id: Uuid,
         _id: Uuid,
         _input: &UpdateMeasurement,
     ) -> Result<Option<Measurement>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        if self.return_some.load(Ordering::SeqCst) {
+            Ok(Some(self.sample_measurement(tenant_id)))
+        } else {
+            Ok(None)
+        }
     }
 
-    async fn get(&self, _tenant_id: Uuid, _id: Uuid) -> Result<Option<Measurement>, sqlx::Error> {
+    async fn get(&self, tenant_id: Uuid, _id: Uuid) -> Result<Option<Measurement>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        if self.return_some.load(Ordering::SeqCst) {
+            Ok(Some(self.sample_measurement(tenant_id)))
+        } else {
+            Ok(None)
+        }
     }
 
     async fn list(

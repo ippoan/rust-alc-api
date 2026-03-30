@@ -42,14 +42,51 @@ macro_rules! check_fail {
 // MockAuthRepository
 // ============================================================
 
+/// Helper to create a dummy User for tests
+pub fn mock_user(tenant_id: Uuid) -> User {
+    User {
+        id: Uuid::new_v4(),
+        tenant_id,
+        google_sub: Some("test-google-sub-12345".to_string()),
+        lineworks_id: None,
+        email: "google-test@example.com".to_string(),
+        name: "Google Test User".to_string(),
+        role: "admin".to_string(),
+        refresh_token_hash: None,
+        refresh_token_expires_at: None,
+        created_at: Utc::now(),
+    }
+}
+
 pub struct MockAuthRepository {
     pub fail_next: AtomicBool,
+    /// If Some, find_user_by_google_sub returns this user
+    pub return_user: std::sync::Mutex<Option<User>>,
+    /// If Some, find_user_by_refresh_token_hash returns this user
+    pub return_refresh_user: std::sync::Mutex<Option<User>>,
+    /// If Some, find_invitation_by_email returns this invitation
+    pub return_invitation: std::sync::Mutex<Option<TenantAllowedEmail>>,
+    /// If Some, find_tenant_by_email_domain returns this tenant
+    pub return_domain_tenant: std::sync::Mutex<Option<Tenant>>,
+    /// If Some, get_tenant_by_id returns this tenant
+    pub return_tenant: std::sync::Mutex<Option<Tenant>>,
+    /// If Some, resolve_sso_config returns this config
+    pub return_sso_config: std::sync::Mutex<Option<SsoConfigRow>>,
+    /// Tenant ID to use for create_tenant_with_domain / create_tenant_by_name
+    pub auto_tenant_id: std::sync::Mutex<Option<Uuid>>,
 }
 
 impl Default for MockAuthRepository {
     fn default() -> Self {
         Self {
             fail_next: AtomicBool::new(false),
+            return_user: std::sync::Mutex::new(None),
+            return_refresh_user: std::sync::Mutex::new(None),
+            return_invitation: std::sync::Mutex::new(None),
+            return_domain_tenant: std::sync::Mutex::new(None),
+            return_tenant: std::sync::Mutex::new(None),
+            return_sso_config: std::sync::Mutex::new(None),
+            auto_tenant_id: std::sync::Mutex::new(None),
         }
     }
 }
@@ -61,7 +98,7 @@ impl AuthRepository for MockAuthRepository {
         _google_sub: &str,
     ) -> Result<Option<User>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        Ok(self.return_user.lock().unwrap().clone())
     }
 
     async fn find_user_by_lineworks_id(
@@ -77,7 +114,7 @@ impl AuthRepository for MockAuthRepository {
         _token_hash: &str,
     ) -> Result<Option<User>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        Ok(self.return_refresh_user.lock().unwrap().clone())
     }
 
     async fn find_invitation_by_email(
@@ -85,7 +122,7 @@ impl AuthRepository for MockAuthRepository {
         _email: &str,
     ) -> Result<Option<TenantAllowedEmail>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        Ok(self.return_invitation.lock().unwrap().clone())
     }
 
     async fn delete_invitation(&self, _id: Uuid) -> Result<(), sqlx::Error> {
@@ -98,22 +135,44 @@ impl AuthRepository for MockAuthRepository {
         _email_domain: &str,
     ) -> Result<Option<Tenant>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        Ok(self.return_domain_tenant.lock().unwrap().clone())
     }
 
-    async fn create_tenant_with_domain(&self, _email_domain: &str) -> Result<Tenant, sqlx::Error> {
+    async fn create_tenant_with_domain(&self, email_domain: &str) -> Result<Tenant, sqlx::Error> {
         check_fail!(self);
-        todo!("MockAuthRepository::create_tenant_with_domain")
+        let tid = self
+            .auto_tenant_id
+            .lock()
+            .unwrap()
+            .unwrap_or_else(Uuid::new_v4);
+        Ok(Tenant {
+            id: tid,
+            name: email_domain.to_string(),
+            slug: None,
+            email_domain: Some(email_domain.to_string()),
+            created_at: Utc::now(),
+        })
     }
 
-    async fn create_tenant_by_name(&self, _name: &str) -> Result<Tenant, sqlx::Error> {
+    async fn create_tenant_by_name(&self, name: &str) -> Result<Tenant, sqlx::Error> {
         check_fail!(self);
-        todo!("MockAuthRepository::create_tenant_by_name")
+        let tid = self
+            .auto_tenant_id
+            .lock()
+            .unwrap()
+            .unwrap_or_else(Uuid::new_v4);
+        Ok(Tenant {
+            id: tid,
+            name: name.to_string(),
+            slug: None,
+            email_domain: None,
+            created_at: Utc::now(),
+        })
     }
 
     async fn get_tenant_by_id(&self, _id: Uuid) -> Result<Option<Tenant>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        Ok(self.return_tenant.lock().unwrap().clone())
     }
 
     async fn get_tenant_slug(&self, _tenant_id: Uuid) -> Result<Option<String>, sqlx::Error> {
@@ -123,25 +182,47 @@ impl AuthRepository for MockAuthRepository {
 
     async fn create_user_google(
         &self,
-        _tenant_id: Uuid,
-        _google_sub: &str,
-        _email: &str,
-        _name: &str,
-        _role: &str,
+        tenant_id: Uuid,
+        google_sub: &str,
+        email: &str,
+        name: &str,
+        role: &str,
     ) -> Result<User, sqlx::Error> {
         check_fail!(self);
-        todo!("MockAuthRepository::create_user_google")
+        Ok(User {
+            id: Uuid::new_v4(),
+            tenant_id,
+            google_sub: Some(google_sub.to_string()),
+            lineworks_id: None,
+            email: email.to_string(),
+            name: name.to_string(),
+            role: role.to_string(),
+            refresh_token_hash: None,
+            refresh_token_expires_at: None,
+            created_at: Utc::now(),
+        })
     }
 
     async fn create_user_lineworks(
         &self,
-        _tenant_id: Uuid,
-        _lineworks_id: &str,
-        _email: &str,
-        _name: &str,
+        tenant_id: Uuid,
+        lineworks_id: &str,
+        email: &str,
+        name: &str,
     ) -> Result<User, sqlx::Error> {
         check_fail!(self);
-        todo!("MockAuthRepository::create_user_lineworks")
+        Ok(User {
+            id: Uuid::new_v4(),
+            tenant_id,
+            google_sub: None,
+            lineworks_id: Some(lineworks_id.to_string()),
+            email: email.to_string(),
+            name: name.to_string(),
+            role: "admin".to_string(),
+            refresh_token_hash: None,
+            refresh_token_expires_at: None,
+            created_at: Utc::now(),
+        })
     }
 
     async fn save_refresh_token(
@@ -165,7 +246,7 @@ impl AuthRepository for MockAuthRepository {
         _domain: &str,
     ) -> Result<Option<SsoConfigRow>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        Ok(self.return_sso_config.lock().unwrap().clone())
     }
 
     async fn resolve_sso_config_required(
@@ -174,7 +255,11 @@ impl AuthRepository for MockAuthRepository {
         _domain: &str,
     ) -> Result<SsoConfigRow, sqlx::Error> {
         check_fail!(self);
-        todo!("MockAuthRepository::resolve_sso_config_required")
+        self.return_sso_config
+            .lock()
+            .unwrap()
+            .clone()
+            .ok_or(sqlx::Error::RowNotFound)
     }
 }
 
@@ -345,12 +430,16 @@ impl CarInspectionRepository for MockCarInspectionRepository {
 
 pub struct MockCarinsFilesRepository {
     pub fail_next: AtomicBool,
+    pub return_file: std::sync::Mutex<Option<FileRow>>,
+    pub return_affected: std::sync::Mutex<bool>,
 }
 
 impl Default for MockCarinsFilesRepository {
     fn default() -> Self {
         Self {
             fail_next: AtomicBool::new(false),
+            return_file: std::sync::Mutex::new(None),
+            return_affected: std::sync::Mutex::new(false),
         }
     }
 }
@@ -382,7 +471,7 @@ impl CarinsFilesRepository for MockCarinsFilesRepository {
         _uuid: &str,
     ) -> Result<Option<FileRow>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        Ok(self.return_file.lock().unwrap().clone())
     }
 
     async fn get_file_for_download(
@@ -391,7 +480,7 @@ impl CarinsFilesRepository for MockCarinsFilesRepository {
         _uuid: &str,
     ) -> Result<Option<FileRow>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        Ok(self.return_file.lock().unwrap().clone())
     }
 
     async fn create_file(
@@ -404,17 +493,30 @@ impl CarinsFilesRepository for MockCarinsFilesRepository {
         _now: DateTime<Utc>,
     ) -> Result<FileRow, sqlx::Error> {
         check_fail!(self);
-        todo!("MockCarinsFilesRepository::create_file")
+        Ok(FileRow {
+            uuid: _file_uuid.to_string(),
+            filename: _filename.to_string(),
+            file_type: _file_type.to_string(),
+            created: _now.to_rfc3339(),
+            deleted: None,
+            blob: None,
+            s3_key: Some(_gcs_key.to_string()),
+            storage_class: Some("STANDARD".to_string()),
+            last_accessed_at: None,
+            access_count_weekly: None,
+            access_count_total: None,
+            promoted_to_standard_at: None,
+        })
     }
 
     async fn delete_file(&self, _tenant_id: Uuid, _uuid: &str) -> Result<bool, sqlx::Error> {
         check_fail!(self);
-        Ok(false)
+        Ok(*self.return_affected.lock().unwrap())
     }
 
     async fn restore_file(&self, _tenant_id: Uuid, _uuid: &str) -> Result<bool, sqlx::Error> {
         check_fail!(self);
-        Ok(false)
+        Ok(*self.return_affected.lock().unwrap())
     }
 }
 
@@ -629,12 +731,14 @@ impl DailyHealthRepository for MockDailyHealthRepository {
 
 pub struct MockDeviceRepository {
     pub fail_next: AtomicBool,
+    pub return_data: AtomicBool,
 }
 
 impl Default for MockDeviceRepository {
     fn default() -> Self {
         Self {
             fail_next: AtomicBool::new(false),
+            return_data: AtomicBool::new(false),
         }
     }
 }
@@ -654,7 +758,10 @@ impl DeviceRepository for MockDeviceRepository {
         _device_name: &str,
     ) -> Result<CreateRegistrationResult, sqlx::Error> {
         check_fail!(self);
-        todo!("MockDeviceRepository::create_registration_request")
+        Ok(CreateRegistrationResult {
+            registration_code: _code.to_string(),
+            expires_at: "2026-12-31T23:59:59Z".to_string(),
+        })
     }
 
     async fn get_registration_status(
@@ -662,7 +769,17 @@ impl DeviceRepository for MockDeviceRepository {
         _code: &str,
     ) -> Result<Option<RegistrationStatusRow>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        if self.return_data.load(Ordering::SeqCst) {
+            Ok(Some(RegistrationStatusRow {
+                status: "pending".to_string(),
+                device_id: None,
+                tenant_id: Some(Uuid::nil()),
+                expires_at: Some("2099-12-31T23:59:59Z".to_string()),
+                device_name: Some("Test Device".to_string()),
+            }))
+        } else {
+            Ok(None)
+        }
     }
 
     async fn is_expired(&self, _expires_at: &str) -> Result<bool, sqlx::Error> {
@@ -672,7 +789,20 @@ impl DeviceRepository for MockDeviceRepository {
 
     async fn find_claim_request(&self, _code: &str) -> Result<Option<ClaimLookupRow>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        if self.return_data.load(Ordering::SeqCst) {
+            Ok(Some(ClaimLookupRow {
+                id: Uuid::nil(),
+                flow_type: "url".to_string(),
+                tenant_id: Some(Uuid::nil()),
+                status: "pending".to_string(),
+                expires_at: Some("2099-12-31T23:59:59Z".to_string()),
+                device_name: Some("Test Device".to_string()),
+                is_device_owner: false,
+                is_dev_device: false,
+            }))
+        } else {
+            Ok(None)
+        }
     }
 
     async fn claim_url_flow(
@@ -703,12 +833,28 @@ impl DeviceRepository for MockDeviceRepository {
         _device_id: Uuid,
     ) -> Result<Option<DeviceSettingsRow>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        if self.return_data.load(Ordering::SeqCst) {
+            Ok(Some(DeviceSettingsRow {
+                call_enabled: true,
+                call_schedule: None,
+                status: "active".to_string(),
+                last_login_employee_id: None,
+                last_login_employee_name: None,
+                last_login_employee_role: None,
+                always_on: false,
+            }))
+        } else {
+            Ok(None)
+        }
     }
 
     async fn lookup_device_tenant(&self, _device_id: Uuid) -> Result<Option<Uuid>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        if self.return_data.load(Ordering::SeqCst) {
+            Ok(Some(Uuid::nil()))
+        } else {
+            Ok(None)
+        }
     }
 
     async fn update_fcm_token(
@@ -735,7 +881,16 @@ impl DeviceRepository for MockDeviceRepository {
 
     async fn list_fcm_devices(&self) -> Result<Vec<FcmDeviceRow>, sqlx::Error> {
         check_fail!(self);
-        Ok(vec![])
+        if self.return_data.load(Ordering::SeqCst) {
+            Ok(vec![FcmDeviceRow {
+                id: Uuid::nil(),
+                fcm_token: "mock-fcm-token-1".to_string(),
+                call_enabled: true,
+                call_schedule: None,
+            }])
+        } else {
+            Ok(vec![])
+        }
     }
 
     async fn get_device_tenant_active(
@@ -743,7 +898,13 @@ impl DeviceRepository for MockDeviceRepository {
         _device_id: Uuid,
     ) -> Result<Option<DeviceTenantRow>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        if self.return_data.load(Ordering::SeqCst) {
+            Ok(Some(DeviceTenantRow {
+                tenant_id: Uuid::nil(),
+            }))
+        } else {
+            Ok(None)
+        }
     }
 
     async fn list_tenant_fcm_tokens_except(
@@ -844,7 +1005,19 @@ impl DeviceRepository for MockDeviceRepository {
         _id: Uuid,
     ) -> Result<Option<ApproveLookupRow>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        if self.return_data.load(Ordering::SeqCst) {
+            Ok(Some(ApproveLookupRow {
+                id: _id,
+                flow_type: "qr_permanent".to_string(),
+                phone_number: Some("090-1234-5678".to_string()),
+                device_name: Some("Test Device".to_string()),
+                status: "pending".to_string(),
+                is_device_owner: false,
+                is_dev_device: false,
+            }))
+        } else {
+            Ok(None)
+        }
     }
 
     async fn approve_device(
@@ -868,7 +1041,19 @@ impl DeviceRepository for MockDeviceRepository {
         _code: &str,
     ) -> Result<Option<ApproveLookupRow>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        if self.return_data.load(Ordering::SeqCst) {
+            Ok(Some(ApproveLookupRow {
+                id: Uuid::nil(),
+                flow_type: "qr_temporary".to_string(),
+                phone_number: Some("090-0000-1111".to_string()),
+                device_name: Some("QR Device".to_string()),
+                status: "pending".to_string(),
+                is_device_owner: false,
+                is_dev_device: false,
+            }))
+        } else {
+            Ok(None)
+        }
     }
 
     async fn approve_by_code(
@@ -888,22 +1073,22 @@ impl DeviceRepository for MockDeviceRepository {
 
     async fn reject_device(&self, _tenant_id: Uuid, _id: Uuid) -> Result<bool, sqlx::Error> {
         check_fail!(self);
-        Ok(false)
+        Ok(self.return_data.load(Ordering::SeqCst))
     }
 
     async fn disable_device(&self, _tenant_id: Uuid, _id: Uuid) -> Result<bool, sqlx::Error> {
         check_fail!(self);
-        Ok(false)
+        Ok(self.return_data.load(Ordering::SeqCst))
     }
 
     async fn enable_device(&self, _tenant_id: Uuid, _id: Uuid) -> Result<bool, sqlx::Error> {
         check_fail!(self);
-        Ok(false)
+        Ok(self.return_data.load(Ordering::SeqCst))
     }
 
     async fn delete_device(&self, _tenant_id: Uuid, _id: Uuid) -> Result<bool, sqlx::Error> {
         check_fail!(self);
-        Ok(false)
+        Ok(self.return_data.load(Ordering::SeqCst))
     }
 
     async fn update_call_settings(
@@ -915,7 +1100,7 @@ impl DeviceRepository for MockDeviceRepository {
         _always_on: Option<bool>,
     ) -> Result<bool, sqlx::Error> {
         check_fail!(self);
-        Ok(false)
+        Ok(self.return_data.load(Ordering::SeqCst))
     }
 
     async fn get_fcm_token_bypass_rls(
@@ -923,7 +1108,11 @@ impl DeviceRepository for MockDeviceRepository {
         _device_id: Uuid,
     ) -> Result<Option<Option<String>>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        if self.return_data.load(Ordering::SeqCst) {
+            Ok(Some(Some("mock-fcm-token-bypass".to_string())))
+        } else {
+            Ok(None)
+        }
     }
 
     async fn get_device_fcm_token(
@@ -932,7 +1121,11 @@ impl DeviceRepository for MockDeviceRepository {
         _id: Uuid,
     ) -> Result<Option<Option<String>>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        if self.return_data.load(Ordering::SeqCst) {
+            Ok(Some(Some("mock-fcm-token".to_string())))
+        } else {
+            Ok(None)
+        }
     }
 
     async fn list_tenant_fcm_devices(
@@ -940,7 +1133,15 @@ impl DeviceRepository for MockDeviceRepository {
         _tenant_id: Uuid,
     ) -> Result<Vec<FcmTestDeviceRow>, sqlx::Error> {
         check_fail!(self);
-        Ok(vec![])
+        if self.return_data.load(Ordering::SeqCst) {
+            Ok(vec![FcmTestDeviceRow {
+                id: Uuid::nil(),
+                device_name: "Test Device".to_string(),
+                fcm_token: "mock-fcm-token-tenant".to_string(),
+            }])
+        } else {
+            Ok(vec![])
+        }
     }
 
     async fn list_ota_devices(
@@ -949,7 +1150,16 @@ impl DeviceRepository for MockDeviceRepository {
         _dev_only: bool,
     ) -> Result<Vec<OtaDeviceRow>, sqlx::Error> {
         check_fail!(self);
-        Ok(vec![])
+        if self.return_data.load(Ordering::SeqCst) {
+            Ok(vec![OtaDeviceRow {
+                id: Uuid::nil(),
+                device_name: "OTA Device".to_string(),
+                fcm_token: "mock-fcm-token-ota".to_string(),
+                app_version_code: Some(10),
+            }])
+        } else {
+            Ok(vec![])
+        }
     }
 }
 

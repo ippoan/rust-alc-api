@@ -6,7 +6,7 @@ use uuid::Uuid;
 use crate::db::models::{Tenant, TenantAllowedEmail, User};
 
 /// SSO プロバイダ設定 (resolve_sso_config 関数の戻り値)
-#[derive(Debug, sqlx::FromRow)]
+#[derive(Debug, Clone, sqlx::FromRow)]
 pub struct SsoConfigRow {
     pub tenant_id: Uuid,
     pub client_id: String,

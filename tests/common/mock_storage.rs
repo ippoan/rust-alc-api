@@ -18,6 +18,13 @@ impl MockStorage {
             fail_upload: std::sync::atomic::AtomicBool::new(false),
         }
     }
+
+    /// Pre-populate a file in the mock storage (for download tests).
+    /// Returns the public URL for the inserted file.
+    pub fn insert_file(&self, key: &str, data: Vec<u8>) -> String {
+        self.files.lock().unwrap().insert(key.to_string(), data);
+        self.public_url(key)
+    }
 }
 
 #[async_trait::async_trait]

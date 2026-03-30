@@ -52,7 +52,7 @@ struct SseEvent {
     message: Option<String>,
 }
 
-#[derive(Serialize, sqlx::FromRow)]
+#[derive(Clone, Serialize, sqlx::FromRow)]
 pub struct ScrapeHistoryItem {
     pub id: Uuid,
     pub target_date: NaiveDate,

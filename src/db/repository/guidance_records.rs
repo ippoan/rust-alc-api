@@ -9,7 +9,7 @@ use crate::db::models::{
 use super::TenantConn;
 
 /// list_records で使う中間型 (employee_name を JOIN で取得)
-#[derive(Debug, serde::Serialize, sqlx::FromRow)]
+#[derive(Debug, Clone, serde::Serialize, sqlx::FromRow)]
 pub struct GuidanceRecordWithName {
     pub id: Uuid,
     pub tenant_id: Uuid,

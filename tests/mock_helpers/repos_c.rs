@@ -344,13 +344,61 @@ impl TenkoCallRepository for MockTenkoCallRepository {
 
 pub struct MockTenkoRecordsRepository {
     pub fail_next: AtomicBool,
+    pub return_some: AtomicBool,
+    pub return_data: AtomicBool,
 }
 
 impl Default for MockTenkoRecordsRepository {
     fn default() -> Self {
         Self {
             fail_next: AtomicBool::new(false),
+            return_some: AtomicBool::new(false),
+            return_data: AtomicBool::new(false),
         }
+    }
+}
+
+fn make_mock_tenko_record_for_list(tenant_id: Uuid, id: Uuid) -> TenkoRecord {
+    TenkoRecord {
+        id,
+        tenant_id,
+        session_id: Uuid::new_v4(),
+        employee_id: Uuid::new_v4(),
+        tenko_type: "pre_operation".to_string(),
+        status: "completed".to_string(),
+        record_data: serde_json::json!({}),
+        employee_name: "Test Employee".to_string(),
+        responsible_manager_name: "Manager A".to_string(),
+        tenko_method: "face_to_face".to_string(),
+        location: Some("Tokyo Office".to_string()),
+        alcohol_result: Some("negative".to_string()),
+        alcohol_value: Some(0.0),
+        alcohol_has_face_photo: true,
+        temperature: Some(36.5),
+        systolic: Some(120),
+        diastolic: Some(80),
+        pulse: Some(72),
+        instruction: Some("Drive safely".to_string()),
+        instruction_confirmed_at: Some(Utc::now()),
+        report_vehicle_road_status: Some("good".to_string()),
+        report_driver_alternation: Some("none".to_string()),
+        report_no_report: Some(false),
+        report_vehicle_road_audio_url: None,
+        report_driver_alternation_audio_url: None,
+        started_at: Some(Utc::now()),
+        completed_at: Some(Utc::now()),
+        recorded_at: Utc::now(),
+        record_hash: "abc123hash".to_string(),
+        self_declaration: Some(
+            serde_json::json!({"illness": false, "fatigue": false, "sleep_deprivation": false}),
+        ),
+        safety_judgment: Some(serde_json::json!({"status": "pass", "failed_items": []})),
+        daily_inspection: Some(
+            serde_json::json!({"brakes": "ok", "tires": "ok", "lights": "ok", "steering": "ok", "wipers": "ok", "mirrors": "ok", "horn": "ok", "seatbelts": "ok"}),
+        ),
+        interrupted_at: None,
+        resumed_at: None,
+        resume_reason: None,
     }
 }
 
@@ -362,6 +410,9 @@ impl TenkoRecordsRepository for MockTenkoRecordsRepository {
         _filter: &TenkoRecordFilter,
     ) -> Result<i64, sqlx::Error> {
         check_fail!(self);
+        if self.return_data.load(Ordering::SeqCst) {
+            return Ok(1);
+        }
         Ok(0)
     }
 
@@ -373,11 +424,20 @@ impl TenkoRecordsRepository for MockTenkoRecordsRepository {
         _offset: i64,
     ) -> Result<Vec<TenkoRecord>, sqlx::Error> {
         check_fail!(self);
+        if self.return_data.load(Ordering::SeqCst) {
+            return Ok(vec![make_mock_tenko_record_for_list(
+                _tenant_id,
+                Uuid::new_v4(),
+            )]);
+        }
         Ok(vec![])
     }
 
     async fn get(&self, _tenant_id: Uuid, _id: Uuid) -> Result<Option<TenkoRecord>, sqlx::Error> {
         check_fail!(self);
+        if self.return_some.load(Ordering::SeqCst) {
+            return Ok(Some(make_mock_tenko_record_for_list(_tenant_id, _id)));
+        }
         Ok(None)
     }
 
@@ -387,6 +447,12 @@ impl TenkoRecordsRepository for MockTenkoRecordsRepository {
         _filter: &TenkoRecordFilter,
     ) -> Result<Vec<TenkoRecord>, sqlx::Error> {
         check_fail!(self);
+        if self.return_data.load(Ordering::SeqCst) {
+            return Ok(vec![make_mock_tenko_record_for_list(
+                _tenant_id,
+                Uuid::new_v4(),
+            )]);
+        }
         Ok(vec![])
     }
 }
@@ -542,13 +608,153 @@ impl TenkoSchedulesRepository for MockTenkoSchedulesRepository {
 
 pub struct MockTenkoSessionRepository {
     pub fail_next: AtomicBool,
+    /// Controls the status of the session returned by get()
+    pub session_status: std::sync::Mutex<String>,
+    /// Controls the tenko_type of the session returned by get()
+    pub session_tenko_type: std::sync::Mutex<String>,
+    /// Controls the employee_id of sessions returned by get()
+    pub session_employee_id: std::sync::Mutex<Uuid>,
+    /// When true, get() returns Some session; when false, returns None
+    pub return_session: AtomicBool,
+    /// When true, get_schedule_unconsumed returns a schedule
+    pub return_schedule: AtomicBool,
+    /// Employee ID set on the schedule (for mismatch tests)
+    pub schedule_employee_id: std::sync::Mutex<Uuid>,
+    /// When true, get_employee_name returns Some
+    pub return_employee_name: AtomicBool,
+    /// When true, get_schedule_instruction returns Some instruction
+    pub return_instruction: AtomicBool,
+    /// Controls carrying items count
+    pub carrying_items_count: std::sync::Mutex<i64>,
+    /// Controls daily_inspection on session (for resume logic)
+    pub session_has_daily_inspection: AtomicBool,
+    /// Controls self_declaration on session (for resume logic)
+    pub session_has_self_declaration: AtomicBool,
 }
 
 impl Default for MockTenkoSessionRepository {
     fn default() -> Self {
+        let emp_id = Uuid::new_v4();
         Self {
             fail_next: AtomicBool::new(false),
+            session_status: std::sync::Mutex::new("identity_verified".to_string()),
+            session_tenko_type: std::sync::Mutex::new("pre_operation".to_string()),
+            session_employee_id: std::sync::Mutex::new(emp_id),
+            return_session: AtomicBool::new(true),
+            return_schedule: AtomicBool::new(true),
+            schedule_employee_id: std::sync::Mutex::new(emp_id),
+            return_employee_name: AtomicBool::new(true),
+            return_instruction: AtomicBool::new(false),
+            carrying_items_count: std::sync::Mutex::new(0),
+            session_has_daily_inspection: AtomicBool::new(false),
+            session_has_self_declaration: AtomicBool::new(false),
         }
+    }
+}
+
+fn make_mock_session(
+    tenant_id: Uuid,
+    id: Uuid,
+    employee_id: Uuid,
+    status: &str,
+    tenko_type: &str,
+    has_daily_inspection: bool,
+    has_self_declaration: bool,
+) -> TenkoSession {
+    let now = Utc::now();
+    TenkoSession {
+        id,
+        tenant_id,
+        employee_id,
+        schedule_id: Some(Uuid::new_v4()),
+        tenko_type: tenko_type.to_string(),
+        status: status.to_string(),
+        identity_verified_at: Some(now),
+        identity_face_photo_url: None,
+        measurement_id: None,
+        alcohol_result: None,
+        alcohol_value: None,
+        alcohol_tested_at: None,
+        alcohol_face_photo_url: None,
+        temperature: Some(36.5),
+        systolic: Some(120),
+        diastolic: Some(80),
+        pulse: Some(72),
+        medical_measured_at: Some(now),
+        medical_manual_input: None,
+        instruction_confirmed_at: None,
+        report_vehicle_road_status: None,
+        report_driver_alternation: None,
+        report_no_report: None,
+        report_vehicle_road_audio_url: None,
+        report_driver_alternation_audio_url: None,
+        report_submitted_at: None,
+        location: None,
+        responsible_manager_name: Some("Manager".to_string()),
+        cancel_reason: None,
+        interrupted_at: None,
+        resumed_at: None,
+        resume_reason: None,
+        resumed_by_user_id: None,
+        self_declaration: if has_self_declaration {
+            Some(
+                serde_json::json!({"illness": false, "fatigue": false, "sleep_deprivation": false, "declared_at": now}),
+            )
+        } else {
+            None
+        },
+        safety_judgment: None,
+        daily_inspection: if has_daily_inspection {
+            Some(serde_json::json!({"brakes": "ok"}))
+        } else {
+            None
+        },
+        carrying_items_checked: None,
+        started_at: Some(now),
+        completed_at: None,
+        created_at: now,
+        updated_at: now,
+    }
+}
+
+fn make_mock_tenko_record(tenant_id: Uuid, session: &TenkoSession) -> TenkoRecord {
+    let now = Utc::now();
+    TenkoRecord {
+        id: Uuid::new_v4(),
+        tenant_id,
+        session_id: session.id,
+        employee_id: session.employee_id,
+        tenko_type: session.tenko_type.clone(),
+        status: session.status.clone(),
+        record_data: serde_json::to_value(session).unwrap_or_default(),
+        employee_name: "Test Employee".to_string(),
+        responsible_manager_name: session.responsible_manager_name.clone().unwrap_or_default(),
+        tenko_method: "face".to_string(),
+        location: session.location.clone(),
+        alcohol_result: session.alcohol_result.clone(),
+        alcohol_value: session.alcohol_value,
+        alcohol_has_face_photo: false,
+        temperature: session.temperature,
+        systolic: session.systolic,
+        diastolic: session.diastolic,
+        pulse: session.pulse,
+        instruction: None,
+        instruction_confirmed_at: session.instruction_confirmed_at,
+        report_vehicle_road_status: session.report_vehicle_road_status.clone(),
+        report_driver_alternation: session.report_driver_alternation.clone(),
+        report_no_report: session.report_no_report,
+        report_vehicle_road_audio_url: session.report_vehicle_road_audio_url.clone(),
+        report_driver_alternation_audio_url: session.report_driver_alternation_audio_url.clone(),
+        started_at: session.started_at,
+        completed_at: session.completed_at,
+        recorded_at: now,
+        record_hash: "mock_hash".to_string(),
+        self_declaration: session.self_declaration.clone(),
+        safety_judgment: session.safety_judgment.clone(),
+        daily_inspection: session.daily_inspection.clone(),
+        interrupted_at: session.interrupted_at,
+        resumed_at: session.resumed_at,
+        resume_reason: session.resume_reason.clone(),
     }
 }
 
@@ -556,7 +762,23 @@ impl Default for MockTenkoSessionRepository {
 impl TenkoSessionRepository for MockTenkoSessionRepository {
     async fn get(&self, _tenant_id: Uuid, _id: Uuid) -> Result<Option<TenkoSession>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        if !self.return_session.load(Ordering::SeqCst) {
+            return Ok(None);
+        }
+        let status = self.session_status.lock().unwrap().clone();
+        let tenko_type = self.session_tenko_type.lock().unwrap().clone();
+        let employee_id = *self.session_employee_id.lock().unwrap();
+        let has_di = self.session_has_daily_inspection.load(Ordering::SeqCst);
+        let has_sd = self.session_has_self_declaration.load(Ordering::SeqCst);
+        Ok(Some(make_mock_session(
+            _tenant_id,
+            _id,
+            employee_id,
+            &status,
+            &tenko_type,
+            has_di,
+            has_sd,
+        )))
     }
 
     async fn list(
@@ -579,7 +801,25 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
         _schedule_id: Uuid,
     ) -> Result<Option<TenkoSchedule>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        if !self.return_schedule.load(Ordering::SeqCst) {
+            return Ok(None);
+        }
+        let employee_id = *self.schedule_employee_id.lock().unwrap();
+        let tenko_type = self.session_tenko_type.lock().unwrap().clone();
+        Ok(Some(TenkoSchedule {
+            id: _schedule_id,
+            tenant_id: _tenant_id,
+            employee_id,
+            tenko_type,
+            responsible_manager_name: "Manager".to_string(),
+            scheduled_at: Utc::now(),
+            instruction: Some("Test instruction".to_string()),
+            consumed: false,
+            consumed_by_session_id: None,
+            overdue_notified_at: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }))
     }
 
     async fn consume_schedule(
@@ -607,7 +847,11 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
         _schedule_id: Option<Uuid>,
     ) -> Result<Option<String>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        if self.return_instruction.load(Ordering::SeqCst) {
+            Ok(Some("Test instruction".to_string()))
+        } else {
+            Ok(None)
+        }
     }
 
     async fn create_session(
@@ -622,7 +866,15 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
         _responsible_manager_name: &Option<String>,
     ) -> Result<TenkoSession, sqlx::Error> {
         check_fail!(self);
-        todo!("MockTenkoSessionRepository::create_session")
+        Ok(make_mock_session(
+            _tenant_id,
+            Uuid::new_v4(),
+            _employee_id,
+            _initial_status,
+            _tenko_type,
+            false,
+            false,
+        ))
     }
 
     async fn update_alcohol(
@@ -638,7 +890,22 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
         _completed_at: Option<DateTime<Utc>>,
     ) -> Result<TenkoSession, sqlx::Error> {
         check_fail!(self);
-        todo!("MockTenkoSessionRepository::update_alcohol")
+        let employee_id = *self.session_employee_id.lock().unwrap();
+        let tenko_type = self.session_tenko_type.lock().unwrap().clone();
+        let mut session = make_mock_session(
+            _tenant_id,
+            _id,
+            employee_id,
+            _next_status,
+            &tenko_type,
+            false,
+            false,
+        );
+        session.alcohol_result = Some(_alcohol_result.to_string());
+        session.alcohol_value = Some(_alcohol_value);
+        session.cancel_reason = _cancel_reason.clone();
+        session.completed_at = _completed_at;
+        Ok(session)
     }
 
     async fn update_medical(
@@ -653,7 +920,21 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
         _medical_manual_input: Option<bool>,
     ) -> Result<TenkoSession, sqlx::Error> {
         check_fail!(self);
-        todo!("MockTenkoSessionRepository::update_medical")
+        let employee_id = *self.session_employee_id.lock().unwrap();
+        let mut session = make_mock_session(
+            _tenant_id,
+            _id,
+            employee_id,
+            "self_declaration_pending",
+            "pre_operation",
+            false,
+            false,
+        );
+        session.temperature = _temperature;
+        session.systolic = _systolic;
+        session.diastolic = _diastolic;
+        session.pulse = _pulse;
+        Ok(session)
     }
 
     async fn confirm_instruction(
@@ -662,7 +943,20 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
         _id: Uuid,
     ) -> Result<TenkoSession, sqlx::Error> {
         check_fail!(self);
-        todo!("MockTenkoSessionRepository::confirm_instruction")
+        let employee_id = *self.session_employee_id.lock().unwrap();
+        let tenko_type = self.session_tenko_type.lock().unwrap().clone();
+        let mut session = make_mock_session(
+            _tenant_id,
+            _id,
+            employee_id,
+            "completed",
+            &tenko_type,
+            false,
+            false,
+        );
+        session.instruction_confirmed_at = Some(Utc::now());
+        session.completed_at = Some(Utc::now());
+        Ok(session)
     }
 
     async fn update_report(
@@ -677,7 +971,20 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
         _completed_at: Option<DateTime<Utc>>,
     ) -> Result<TenkoSession, sqlx::Error> {
         check_fail!(self);
-        todo!("MockTenkoSessionRepository::update_report")
+        let employee_id = *self.session_employee_id.lock().unwrap();
+        let mut session = make_mock_session(
+            _tenant_id,
+            _id,
+            employee_id,
+            _next_status,
+            "post_operation",
+            false,
+            false,
+        );
+        session.report_vehicle_road_status = Some(_vehicle_road_status.to_string());
+        session.report_driver_alternation = Some(_driver_alternation.to_string());
+        session.completed_at = _completed_at;
+        Ok(session)
     }
 
     async fn cancel(
@@ -687,7 +994,20 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
         _reason: &Option<String>,
     ) -> Result<TenkoSession, sqlx::Error> {
         check_fail!(self);
-        todo!("MockTenkoSessionRepository::cancel")
+        let employee_id = *self.session_employee_id.lock().unwrap();
+        let tenko_type = self.session_tenko_type.lock().unwrap().clone();
+        let mut session = make_mock_session(
+            _tenant_id,
+            _id,
+            employee_id,
+            "cancelled",
+            &tenko_type,
+            false,
+            false,
+        );
+        session.cancel_reason = _reason.clone();
+        session.completed_at = Some(Utc::now());
+        Ok(session)
     }
 
     async fn update_self_declaration(
@@ -697,7 +1017,18 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
         _declaration_json: &serde_json::Value,
     ) -> Result<TenkoSession, sqlx::Error> {
         check_fail!(self);
-        todo!("MockTenkoSessionRepository::update_self_declaration")
+        let employee_id = *self.session_employee_id.lock().unwrap();
+        let mut session = make_mock_session(
+            _tenant_id,
+            _id,
+            employee_id,
+            "self_declaration_pending",
+            "pre_operation",
+            false,
+            false,
+        );
+        session.self_declaration = Some(_declaration_json.clone());
+        Ok(session)
     }
 
     async fn update_safety_judgment(
@@ -709,7 +1040,19 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
         _interrupted_at: Option<DateTime<Utc>>,
     ) -> Result<TenkoSession, sqlx::Error> {
         check_fail!(self);
-        todo!("MockTenkoSessionRepository::update_safety_judgment")
+        let employee_id = *self.session_employee_id.lock().unwrap();
+        let mut session = make_mock_session(
+            _tenant_id,
+            _id,
+            employee_id,
+            _next_status,
+            "pre_operation",
+            false,
+            false,
+        );
+        session.safety_judgment = Some(_judgment_json.clone());
+        session.interrupted_at = _interrupted_at;
+        Ok(session)
     }
 
     async fn update_daily_inspection(
@@ -722,7 +1065,20 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
         _completed_at: Option<DateTime<Utc>>,
     ) -> Result<TenkoSession, sqlx::Error> {
         check_fail!(self);
-        todo!("MockTenkoSessionRepository::update_daily_inspection")
+        let employee_id = *self.session_employee_id.lock().unwrap();
+        let mut session = make_mock_session(
+            _tenant_id,
+            _id,
+            employee_id,
+            _next_status,
+            "pre_operation",
+            true,
+            false,
+        );
+        session.daily_inspection = Some(_inspection_json.clone());
+        session.cancel_reason = _cancel_reason.clone();
+        session.completed_at = _completed_at;
+        Ok(session)
     }
 
     async fn update_carrying_items(
@@ -732,7 +1088,18 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
         _carrying_json: &serde_json::Value,
     ) -> Result<TenkoSession, sqlx::Error> {
         check_fail!(self);
-        todo!("MockTenkoSessionRepository::update_carrying_items")
+        let employee_id = *self.session_employee_id.lock().unwrap();
+        let mut session = make_mock_session(
+            _tenant_id,
+            _id,
+            employee_id,
+            "identity_verified",
+            "pre_operation",
+            true,
+            false,
+        );
+        session.carrying_items_checked = Some(_carrying_json.clone());
+        Ok(session)
     }
 
     async fn interrupt(
@@ -742,7 +1109,19 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
         _reason: &Option<String>,
     ) -> Result<TenkoSession, sqlx::Error> {
         check_fail!(self);
-        todo!("MockTenkoSessionRepository::interrupt")
+        let employee_id = *self.session_employee_id.lock().unwrap();
+        let tenko_type = self.session_tenko_type.lock().unwrap().clone();
+        let mut session = make_mock_session(
+            _tenant_id,
+            _id,
+            employee_id,
+            "interrupted",
+            &tenko_type,
+            false,
+            false,
+        );
+        session.interrupted_at = Some(Utc::now());
+        Ok(session)
     }
 
     async fn resume(
@@ -754,7 +1133,21 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
         _resumed_by_user_id: Option<Uuid>,
     ) -> Result<TenkoSession, sqlx::Error> {
         check_fail!(self);
-        todo!("MockTenkoSessionRepository::resume")
+        let employee_id = *self.session_employee_id.lock().unwrap();
+        let tenko_type = self.session_tenko_type.lock().unwrap().clone();
+        let mut session = make_mock_session(
+            _tenant_id,
+            _id,
+            employee_id,
+            _resume_to,
+            &tenko_type,
+            false,
+            false,
+        );
+        session.resumed_at = Some(Utc::now());
+        session.resume_reason = Some(_reason.to_string());
+        session.resumed_by_user_id = _resumed_by_user_id;
+        Ok(session)
     }
 
     async fn get_carrying_item_name(
@@ -781,7 +1174,7 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
 
     async fn count_carrying_items(&self, _tenant_id: Uuid) -> Result<i64, sqlx::Error> {
         check_fail!(self);
-        Ok(0)
+        Ok(*self.carrying_items_count.lock().unwrap())
     }
 
     async fn get_employee_name(
@@ -790,7 +1183,11 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
         _employee_id: Uuid,
     ) -> Result<Option<String>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        if self.return_employee_name.load(Ordering::SeqCst) {
+            Ok(Some("Test Employee".to_string()))
+        } else {
+            Ok(None)
+        }
     }
 
     async fn get_health_baseline(
@@ -812,7 +1209,7 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
         _record_hash: &str,
     ) -> Result<TenkoRecord, sqlx::Error> {
         check_fail!(self);
-        todo!("MockTenkoSessionRepository::create_tenko_record")
+        Ok(make_mock_tenko_record(_tenant_id, _session))
     }
 
     async fn dashboard(
@@ -921,12 +1318,36 @@ impl TenkoWebhooksRepository for MockTenkoWebhooksRepository {
 
 pub struct MockTimecardRepository {
     pub fail_next: AtomicBool,
+    /// Controls create_card: when true, returns a card; when false, returns conflict error
+    pub create_card_conflict: AtomicBool,
+    /// Controls get_card / get_card_by_card_id: when set, returns Some
+    pub card_data: std::sync::Mutex<Option<TimecardCard>>,
+    /// Controls delete_card: when true, returns true (deleted)
+    pub delete_returns_true: AtomicBool,
+    /// Controls find_card_by_card_id for punch: when set, returns Some
+    pub find_card_data: std::sync::Mutex<Option<TimecardCard>>,
+    /// Controls find_employee_id_by_nfc for punch fallback
+    pub nfc_employee_id: std::sync::Mutex<Option<Uuid>>,
+    /// Employee name returned by get_employee_name
+    pub employee_name: std::sync::Mutex<String>,
+    /// CSV rows returned by list_punches_for_csv
+    pub csv_rows: std::sync::Mutex<Vec<TimePunchCsvRow>>,
+    /// Cards returned by list_cards
+    pub cards_list: std::sync::Mutex<Vec<TimecardCard>>,
 }
 
 impl Default for MockTimecardRepository {
     fn default() -> Self {
         Self {
             fail_next: AtomicBool::new(false),
+            create_card_conflict: AtomicBool::new(false),
+            card_data: std::sync::Mutex::new(None),
+            delete_returns_true: AtomicBool::new(false),
+            find_card_data: std::sync::Mutex::new(None),
+            nfc_employee_id: std::sync::Mutex::new(None),
+            employee_name: std::sync::Mutex::new(String::new()),
+            csv_rows: std::sync::Mutex::new(vec![]),
+            cards_list: std::sync::Mutex::new(vec![]),
         }
     }
 }
@@ -935,13 +1356,26 @@ impl Default for MockTimecardRepository {
 impl TimecardRepository for MockTimecardRepository {
     async fn create_card(
         &self,
-        _tenant_id: Uuid,
-        _employee_id: Uuid,
-        _card_id: &str,
-        _label: Option<&str>,
+        tenant_id: Uuid,
+        employee_id: Uuid,
+        card_id: &str,
+        label: Option<&str>,
     ) -> Result<TimecardCard, sqlx::Error> {
         check_fail!(self);
-        todo!("MockTimecardRepository::create_card")
+        if self.create_card_conflict.load(Ordering::SeqCst) {
+            return Err(sqlx::Error::Database(Box::new(MockDbErrorC(
+                "duplicate key value violates unique constraint \"idx_timecard_cards_unique\""
+                    .to_string(),
+            ))));
+        }
+        Ok(TimecardCard {
+            id: Uuid::new_v4(),
+            tenant_id,
+            employee_id,
+            card_id: card_id.to_string(),
+            label: label.map(|s| s.to_string()),
+            created_at: Utc::now(),
+        })
     }
 
     async fn list_cards(
@@ -950,7 +1384,7 @@ impl TimecardRepository for MockTimecardRepository {
         _employee_id: Option<Uuid>,
     ) -> Result<Vec<TimecardCard>, sqlx::Error> {
         check_fail!(self);
-        Ok(vec![])
+        Ok(self.cards_list.lock().unwrap().clone())
     }
 
     async fn get_card(
@@ -959,7 +1393,7 @@ impl TimecardRepository for MockTimecardRepository {
         _id: Uuid,
     ) -> Result<Option<TimecardCard>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        Ok(self.card_data.lock().unwrap().clone())
     }
 
     async fn get_card_by_card_id(
@@ -968,12 +1402,12 @@ impl TimecardRepository for MockTimecardRepository {
         _card_id: &str,
     ) -> Result<Option<TimecardCard>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        Ok(self.card_data.lock().unwrap().clone())
     }
 
     async fn delete_card(&self, _tenant_id: Uuid, _id: Uuid) -> Result<bool, sqlx::Error> {
         check_fail!(self);
-        Ok(false)
+        Ok(self.delete_returns_true.load(Ordering::SeqCst))
     }
 
     async fn find_card_by_card_id(
@@ -982,7 +1416,7 @@ impl TimecardRepository for MockTimecardRepository {
         _card_id: &str,
     ) -> Result<Option<TimecardCard>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        Ok(self.find_card_data.lock().unwrap().clone())
     }
 
     async fn find_employee_id_by_nfc(
@@ -991,17 +1425,24 @@ impl TimecardRepository for MockTimecardRepository {
         _nfc_id: &str,
     ) -> Result<Option<Uuid>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        Ok(*self.nfc_employee_id.lock().unwrap())
     }
 
     async fn create_punch(
         &self,
-        _tenant_id: Uuid,
-        _employee_id: Uuid,
-        _device_id: Option<Uuid>,
+        tenant_id: Uuid,
+        employee_id: Uuid,
+        device_id: Option<Uuid>,
     ) -> Result<TimePunch, sqlx::Error> {
         check_fail!(self);
-        todo!("MockTimecardRepository::create_punch")
+        Ok(TimePunch {
+            id: Uuid::new_v4(),
+            tenant_id,
+            employee_id,
+            device_id,
+            punched_at: Utc::now(),
+            created_at: Utc::now(),
+        })
     }
 
     async fn get_employee_name(
@@ -1010,7 +1451,7 @@ impl TimecardRepository for MockTimecardRepository {
         _employee_id: Uuid,
     ) -> Result<String, sqlx::Error> {
         check_fail!(self);
-        Ok(String::new())
+        Ok(self.employee_name.lock().unwrap().clone())
     }
 
     async fn list_today_punches(
@@ -1054,6 +1495,45 @@ impl TimecardRepository for MockTimecardRepository {
         _date_to: Option<DateTime<Utc>>,
     ) -> Result<Vec<TimePunchCsvRow>, sqlx::Error> {
         check_fail!(self);
-        Ok(vec![])
+        Ok(self.csv_rows.lock().unwrap().clone())
+    }
+}
+
+/// Helper for creating database errors with custom messages
+struct MockDbErrorC(String);
+
+impl std::fmt::Debug for MockDbErrorC {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "MockDbErrorC({})", self.0)
+    }
+}
+
+impl std::fmt::Display for MockDbErrorC {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::error::Error for MockDbErrorC {}
+
+impl sqlx::error::DatabaseError for MockDbErrorC {
+    fn message(&self) -> &str {
+        &self.0
+    }
+
+    fn as_error(&self) -> &(dyn std::error::Error + Send + Sync + 'static) {
+        self
+    }
+
+    fn as_error_mut(&mut self) -> &mut (dyn std::error::Error + Send + Sync + 'static) {
+        self
+    }
+
+    fn into_error(self: Box<Self>) -> Box<dyn std::error::Error + Send + Sync + 'static> {
+        self
+    }
+
+    fn kind(&self) -> sqlx::error::ErrorKind {
+        sqlx::error::ErrorKind::UniqueViolation
     }
 }
