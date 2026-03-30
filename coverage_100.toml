@@ -1,9 +1,9 @@
 # 100% カバレッジ達成済みファイルの登録簿
 #
 # type = "unit"        — cargo test --lib だけで 100% (DB 不要)
-# type = "mock"        — cargo test --test 'mock_*' だけで 100% (DB 不要)
+# type = "mock"        — cargo test --test mock_tests だけで 100% (DB 不要)
 # type = "integration" — tests/ のインテグレーションテストが必要 (DB 必要)
-# type = "both"        — ユニット + インテグレーション両方で 100%
+# type = "both"        — ユニット + mock 両方で 100%
 #
 # 新しいファイルが 100% に到達したら追加する。
 # カバレッジ確認: bash scripts/check_coverage_100.sh
@@ -30,7 +30,7 @@ type = "both"
 path = "src/csv_parser/kudguri.rs"
 type = "both"
 
-# --- Integration test files (DB 必要) ---
+# --- Mock test files (DB 不要) ---
 
 [[files]]
 path = "src/db/models.rs"
@@ -38,43 +38,35 @@ type = "mock"
 
 [[files]]
 path = "src/middleware/auth.rs"
-type = "integration"
-test_file = "tests/coverage_100_test.rs"
+type = "mock"
 
 [[files]]
 path = "src/routes/daily_health.rs"
 type = "mock"
-test_file = "tests/coverage_100_test.rs"
 
 [[files]]
 path = "src/routes/driver_info.rs"
 type = "mock"
-test_file = "tests/misc_routes_test.rs"
 
 [[files]]
 path = "src/routes/dtako_csv_proxy.rs"
 type = "mock"
-test_file = "tests/dtako_test.rs"
 
 [[files]]
 path = "src/routes/dtako_daily_hours.rs"
 type = "mock"
-test_file = "tests/dtako_test.rs"
 
 [[files]]
 path = "src/routes/dtako_drivers.rs"
 type = "mock"
-test_file = "tests/dtako_test.rs"
 
 [[files]]
 path = "src/routes/dtako_event_classifications.rs"
 type = "mock"
-test_file = "tests/dtako_test.rs"
 
 [[files]]
 path = "src/routes/dtako_operations.rs"
 type = "mock"
-test_file = "tests/coverage_100_test.rs"
 
 [[files]]
 path = "src/routes/dtako_scraper.rs"
@@ -83,27 +75,22 @@ type = "integration"
 [[files]]
 path = "src/routes/dtako_upload.rs"
 type = "integration"
-test_file = "tests/dtako_test.rs"
 
 [[files]]
 path = "src/routes/dtako_vehicles.rs"
 type = "mock"
-test_file = "tests/dtako_test.rs"
 
 [[files]]
 path = "src/routes/dtako_work_times.rs"
 type = "mock"
-test_file = "tests/dtako_test.rs"
 
 [[files]]
 path = "src/routes/health.rs"
 type = "mock"
-test_file = "tests/health_test.rs"
 
 [[files]]
 path = "src/routes/health_baselines.rs"
 type = "mock"
-test_file = "tests/coverage_100_test.rs"
 
 [[files]]
 path = "src/routes/mod.rs"
@@ -112,82 +99,66 @@ type = "mock"
 [[files]]
 path = "src/routes/auth.rs"
 type = "integration"
-test_file = "tests/auth_test.rs"
 
 [[files]]
 path = "src/routes/carrying_items.rs"
 type = "mock"
-test_file = "tests/misc_routes_test.rs"
 
 [[files]]
 path = "src/routes/tenko_call.rs"
 type = "mock"
-test_file = "tests/coverage/main.rs"
 
 [[files]]
 path = "src/routes/nfc_tags.rs"
 type = "mock"
-test_file = "tests/coverage_100_test.rs"
 
 [[files]]
 path = "src/routes/car_inspection_files.rs"
 type = "mock"
-test_file = "tests/carins_test.rs"
 
 [[files]]
 path = "src/routes/timecard.rs"
 type = "mock"
-test_file = "tests/coverage/main.rs"
 
 [[files]]
 path = "src/routes/tenant_users.rs"
 type = "mock"
-test_file = "tests/coverage/main.rs"
 
 [[files]]
 path = "src/webhook.rs"
 type = "integration"
-test_file = "tests/tenko_webhooks_test.rs"
 
 [[files]]
 path = "src/routes/car_inspections.rs"
 type = "mock"
-test_file = "tests/coverage/main.rs"
 
 [[files]]
 path = "src/routes/employees.rs"
-type = "integration"
-test_file = "tests/coverage/main.rs"
+type = "mock"
 
 [[files]]
 path = "src/routes/communication_items.rs"
 type = "mock"
-test_file = "tests/coverage/main.rs"
 
 [[files]]
 path = "src/routes/sso_admin.rs"
-type = "integration"
-test_file = "tests/coverage/main.rs"
+type = "mock"
 
 [[files]]
 path = "src/routes/tenko_schedules.rs"
 type = "mock"
-test_file = "tests/coverage/main.rs"
 
 [[files]]
 path = "src/routes/equipment_failures.rs"
 type = "mock"
-test_file = "tests/coverage/main.rs"
 
 [[files]]
 path = "src/routes/tenko_webhooks.rs"
 type = "mock"
-test_file = "tests/coverage/main.rs"
 
 [[files]]
 path = "src/routes/bot_admin.rs"
-type = "integration"
-test_file = "tests/coverage/main.rs"
+type = "mock"
 
 [[files]]
 path = "src/auth/lineworks.rs"
@@ -196,17 +167,14 @@ type = "both"
 [[files]]
 path = "src/routes/carins_files.rs"
 type = "mock"
-test_file = "tests/coverage/main.rs"
 
 [[files]]
 path = "src/routes/measurements.rs"
-type = "integration"
-test_file = "tests/coverage/main.rs"
+type = "mock"
 
 [[files]]
 path = "src/routes/tenko_records.rs"
-type = "integration"
-test_file = "tests/coverage/main.rs"
+type = "mock"
 
 [[files]]
 path = "src/csv_parser/work_segments.rs"
@@ -219,24 +187,19 @@ type = "both"
 [[files]]
 path = "src/routes/upload.rs"
 type = "mock"
-test_file = "tests/coverage/main.rs"
 
 [[files]]
 path = "src/routes/guidance_records.rs"
-type = "integration"
-test_file = "tests/coverage/main.rs"
+type = "mock"
 
 [[files]]
 path = "src/routes/devices.rs"
 type = "integration"
-test_file = "tests/devices_test.rs"
 
 [[files]]
 path = "src/routes/tenko_sessions.rs"
 type = "both"
-test_file = "tests/coverage/main.rs"
 
 [[files]]
 path = "src/routes/dtako_restraint_report.rs"
 type = "integration"
-test_file = "tests/dtako_test.rs"
