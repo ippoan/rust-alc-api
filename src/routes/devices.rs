@@ -819,8 +819,11 @@ async fn update_call_settings(
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateCallSettingsBody>,
 ) -> Result<StatusCode, StatusCode> {
-    #[rustfmt::skip]
-    tracing::info!("update_call_settings: device={id} call_enabled={} always_on={:?}", body.call_enabled, body.always_on);
+    let msg = format!(
+        "update_call_settings: device={id} call_enabled={} always_on={:?}",
+        body.call_enabled, body.always_on
+    );
+    tracing::info!("{msg}");
 
     let affected = state
         .devices
@@ -851,8 +854,11 @@ async fn update_call_settings(
             .ok()
             .flatten();
 
-        #[rustfmt::skip]
-        tracing::info!("FCM settings_changed: device={id} token={:?}", token_row.as_ref().map(|r| r.is_some()));
+        let msg = format!(
+            "FCM settings_changed: device={id} token={:?}",
+            token_row.as_ref().map(|r| r.is_some())
+        );
+        tracing::info!("{msg}");
 
         if let Some(Some(token)) = token_row {
             let mut data = std::collections::HashMap::new();
@@ -982,8 +988,13 @@ async fn update_last_login(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-    #[rustfmt::skip]
-    tracing::info!("Last login updated for device {}: {} ({})", body.device_id, body.employee_name, body.employee_role.join(","));
+    let msg = format!(
+        "Last login updated for device {}: {} ({})",
+        body.device_id,
+        body.employee_name,
+        body.employee_role.join(",")
+    );
+    tracing::info!("{msg}");
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1185,8 +1196,11 @@ async fn fcm_dismiss_test(
         }
     }
 
-    #[rustfmt::skip]
-    tracing::info!("fcm_dismiss_test: sent dismiss to {sent}/{} devices", tokens.len());
+    let msg = format!(
+        "fcm_dismiss_test: sent dismiss to {sent}/{} devices",
+        tokens.len()
+    );
+    tracing::info!("{msg}");
     Ok(Json(serde_json::json!({ "sent": sent })))
 }
 
@@ -1253,8 +1267,11 @@ async fn test_fcm_all_exclude(
         }
     }
 
-    #[rustfmt::skip]
-    tracing::info!("test_fcm_all_exclude: sent={sent}, errors={errors}, excluded={}", exclude_set.len());
+    let msg = format!(
+        "test_fcm_all_exclude: sent={sent}, errors={errors}, excluded={}",
+        exclude_set.len()
+    );
+    tracing::info!("{msg}");
     Ok(Json(
         serde_json::json!({ "sent": sent, "errors": errors, "results": results }),
     ))
@@ -1391,8 +1408,11 @@ async fn test_fcm_all(
     }
 
     let skipped = 0; // All active devices with tokens are sent
-    #[rustfmt::skip]
-    tracing::info!("FCM test-all: sent={sent}, errors={errors}, total={}", rows.len());
+    let msg = format!(
+        "FCM test-all: sent={sent}, errors={errors}, total={}",
+        rows.len()
+    );
+    tracing::info!("{msg}");
 
     Ok(Json(TestFcmAllResponse {
         sent,
@@ -1449,8 +1469,15 @@ async fn report_version(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-    #[rustfmt::skip]
-    tracing::info!("Version reported for device {}: v{}({}), device_owner={}, dev_device={}", body.device_id, body.version_name, body.version_code, body.is_device_owner, body.is_dev_device);
+    let msg = format!(
+        "Version reported for device {}: v{}({}), device_owner={}, dev_device={}",
+        body.device_id,
+        body.version_name,
+        body.version_code,
+        body.is_device_owner,
+        body.is_dev_device
+    );
+    tracing::info!("{msg}");
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1568,8 +1595,8 @@ async fn send_update_fcm(
         }
     }
 
-    #[rustfmt::skip]
-    tracing::info!("trigger_update: sent={sent}, skipped={skipped}, already_updated={already_updated}, errors={errors}, dev_only={dev_only}");
+    let msg = format!("trigger_update: sent={sent}, skipped={skipped}, already_updated={already_updated}, errors={errors}, dev_only={dev_only}");
+    tracing::info!("{msg}");
 
     Ok(TriggerUpdateResponse {
         sent,
@@ -1647,7 +1674,6 @@ async fn trigger_update_dev(
 // ============================================================
 
 /// 6桁のユニークな登録コードを生成
-#[rustfmt::skip]
 async fn generate_unique_code(state: &AppState) -> Result<String, StatusCode> {
     loop {
         let code_str = {
@@ -1655,8 +1681,13 @@ async fn generate_unique_code(state: &AppState) -> Result<String, StatusCode> {
             let code: u32 = rng.random_range(100_000..1_000_000);
             code.to_string()
         };
-        let exists = state.devices.code_exists(&code_str).await
+        let exists = state
+            .devices
+            .code_exists(&code_str)
+            .await
             .map_err(|e| db_err("generate_unique_code", e))?;
-        if !exists { return Ok(code_str); }
+        if !exists {
+            return Ok(code_str);
+        }
     }
 }
