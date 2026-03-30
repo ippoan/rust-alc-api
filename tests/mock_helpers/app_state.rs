@@ -61,5 +61,6 @@ pub fn setup_mock_app_state() -> AppState {
         carins_storage: None,
         dtako_storage: Some(dtako_storage),
         fcm: None,
+        webhook: None,
     }
 }

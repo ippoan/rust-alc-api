@@ -312,6 +312,7 @@ fn build_app_state(
         carins_storage: None,
         dtako_storage,
         fcm,
+        webhook: None,
     }
 }
 

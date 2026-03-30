@@ -6,6 +6,7 @@ use axum::{
 };
 use chrono::Utc;
 use sha2::{Digest, Sha256};
+use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::db::models::{
@@ -213,12 +214,11 @@ async fn submit_alcohol(
             }
         });
 
-        let pool = match state.pool.clone() {
-            Some(p) => p,
-            None => return Ok(Json(session)),
-        };
-        #[rustfmt::skip]
-        tokio::spawn(async move { let _ = crate::webhook::fire_event(&pool, tenant_id, "alcohol_detected", payload).await; });
+        if let Some(wh) = state.webhook.clone() {
+            tokio::spawn(async move {
+                wh.fire_event(tenant_id, "alcohol_detected", payload).await;
+            });
+        }
     }
 
     Ok(Json(session))
@@ -379,13 +379,11 @@ async fn submit_report(
             }
         });
 
-        let pool = match state.pool.clone() {
-            Some(p) => p,
-            None => return Ok(Json(session)),
-        };
-        tokio::spawn(async move {
-            let _ = crate::webhook::fire_event(&pool, tenant_id, "report_submitted", payload).await;
-        });
+        if let Some(wh) = state.webhook.clone() {
+            tokio::spawn(async move {
+                wh.fire_event(tenant_id, "report_submitted", payload).await;
+            });
+        }
     }
 
     Ok(Json(session))
@@ -571,12 +569,8 @@ async fn submit_self_declaration(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-    // 安全判定を自動実行 (pool がない場合はスキップ)
-    let session = if let Some(pool) = state.pool.as_ref() {
-        perform_safety_judgment(repo, &session, tenant_id, pool).await?
-    } else {
-        session
-    };
+    // 安全判定を自動実行
+    let session = perform_safety_judgment(repo, &session, tenant_id, state.webhook.clone()).await?;
 
     Ok(Json(session))
 }
@@ -605,7 +599,7 @@ async fn perform_safety_judgment(
     repo: &dyn TenkoSessionRepository,
     session: &TenkoSession,
     tenant_id: Uuid,
-    pool: &sqlx::PgPool,
+    webhook: Option<Arc<dyn crate::webhook::WebhookService>>,
 ) -> Result<TenkoSession, StatusCode> {
     let mut failed_items: Vec<String> = Vec::new();
     let mut medical_diffs = MedicalDiffs {
@@ -750,11 +744,11 @@ async fn perform_safety_judgment(
             }
         });
 
-        let pool = pool.clone();
-        tokio::spawn(async move {
-            let _ =
-                crate::webhook::fire_event(&pool, tenant_id, "tenko_interrupted", payload).await;
-        });
+        if let Some(wh) = webhook {
+            tokio::spawn(async move {
+                wh.fire_event(tenant_id, "tenko_interrupted", payload).await;
+            });
+        }
     }
 
     Ok(session)
@@ -869,12 +863,11 @@ async fn submit_daily_inspection(
             }
         });
 
-        let pool = match state.pool.clone() {
-            Some(p) => p,
-            None => return Ok(Json(session)),
-        };
-        #[rustfmt::skip]
-        tokio::spawn(async move { let _ = crate::webhook::fire_event(&pool, tenant_id, "inspection_ng", payload).await; });
+        if let Some(wh) = state.webhook.clone() {
+            tokio::spawn(async move {
+                wh.fire_event(tenant_id, "inspection_ng", payload).await;
+            });
+        }
     }
 
     Ok(Json(session))
@@ -997,13 +990,11 @@ async fn interrupt_session(
         }
     });
 
-    let pool = match state.pool.clone() {
-        Some(p) => p,
-        None => return Ok(Json(session)),
-    };
-    tokio::spawn(async move {
-        let _ = crate::webhook::fire_event(&pool, tenant_id, "tenko_interrupted", payload).await;
-    });
+    if let Some(wh) = state.webhook.clone() {
+        tokio::spawn(async move {
+            wh.fire_event(tenant_id, "tenko_interrupted", payload).await;
+        });
+    }
 
     Ok(Json(session))
 }

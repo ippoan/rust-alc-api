@@ -202,6 +202,9 @@ async fn main() -> anyhow::Result<()> {
         carins_storage,
         dtako_storage,
         fcm,
+        webhook: Some(Arc::new(rust_alc_api::webhook::PgWebhookService::new(
+            pool.clone(),
+        ))),
     };
 
     // 点呼予定超過チェック バックグラウンドタスク

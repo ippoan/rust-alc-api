@@ -69,6 +69,7 @@ pub struct AppState {
     pub carins_storage: Option<Arc<dyn StorageBackend>>,
     pub dtako_storage: Option<Arc<dyn StorageBackend>>,
     pub fcm: Option<Arc<dyn fcm::FcmSenderTrait>>,
+    pub webhook: Option<Arc<dyn webhook::WebhookService>>,
 }
 
 impl AppState {

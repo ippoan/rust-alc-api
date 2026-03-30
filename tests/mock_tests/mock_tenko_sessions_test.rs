@@ -911,8 +911,8 @@ async fn test_submit_self_declaration_success() {
 
     assert_eq!(res.status(), 200);
     let body: serde_json::Value = res.json().await.unwrap();
-    // Safety judgment skipped (pool=None) — status stays at self_declaration_pending
-    assert_eq!(body["status"], "self_declaration_pending");
+    // Safety judgment runs (no baseline → pass) → daily_inspection_pending
+    assert_eq!(body["status"], "daily_inspection_pending");
 }
 
 #[tokio::test]

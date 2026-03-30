@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use chrono::Utc;
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
@@ -6,8 +7,32 @@ use uuid::Uuid;
 
 type HmacSha256 = Hmac<Sha256>;
 
+/// Webhook サービス trait — テスト時に mock 差し替え可能
+#[async_trait]
+pub trait WebhookService: Send + Sync {
+    async fn fire_event(&self, tenant_id: Uuid, event_type: &str, payload: serde_json::Value);
+}
+
+/// 本番用 WebhookService (PgPool ベース)
+pub struct PgWebhookService {
+    pool: PgPool,
+}
+
+impl PgWebhookService {
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+}
+
+#[async_trait]
+impl WebhookService for PgWebhookService {
+    async fn fire_event(&self, tenant_id: Uuid, event_type: &str, payload: serde_json::Value) {
+        let _ = fire_event_impl(&self.pool, tenant_id, event_type, payload).await;
+    }
+}
+
 /// Webhook イベントを発火 (非同期で配信)
-pub async fn fire_event(
+async fn fire_event_impl(
     pool: &PgPool,
     tenant_id: Uuid,
     event_type: &str,
