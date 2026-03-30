@@ -2,8 +2,9 @@
 # coverage_100.toml に登録されたファイルが 100% カバレッジを維持しているか検証する
 #
 # Usage:
-#   bash scripts/check_coverage_100.sh              # 全ファイル (unit + integration)
+#   bash scripts/check_coverage_100.sh              # 全ファイル (unit + mock + integration)
 #   bash scripts/check_coverage_100.sh --unit-only   # unit タイプのファイルのみ
+#   bash scripts/check_coverage_100.sh --mock-only   # mock タイプのファイルのみ (DB 不要)
 #
 # 前提: cargo-llvm-cov がインストール済み
 # integration モードでは TEST_DATABASE_URL が設定済みであること
@@ -14,10 +15,12 @@
 set -euo pipefail
 
 UNIT_ONLY=false
+MOCK_ONLY=false
 EXTERNAL_CACHE=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --unit-only) UNIT_ONLY=true; shift ;;
+    --mock-only) MOCK_ONLY=true; shift ;;
     --use-cache) EXTERNAL_CACHE="$2"; shift 2 ;;
     *) shift ;;
   esac
@@ -45,7 +48,8 @@ while IFS= read -r line; do
 done < "$CONFIG"
 
 echo "=== Coverage 100% Check ==="
-echo "Mode: $([ "$UNIT_ONLY" = true ] && echo 'unit-only' || echo 'full')"
+if [ "$UNIT_ONLY" = true ]; then MODE="unit-only"; elif [ "$MOCK_ONLY" = true ]; then MODE="mock-only"; else MODE="full"; fi
+echo "Mode: $MODE"
 echo "Registered files: ${#PATHS[@]}"
 echo ""
 
@@ -62,6 +66,8 @@ else
   echo "Running cargo llvm-cov --text..."
   if [ "$UNIT_ONLY" = true ]; then
     cargo llvm-cov --lib --text > "$CACHE_FILE" 2>&1 || { echo "cargo llvm-cov failed:"; tail -50 "$CACHE_FILE"; exit 101; }
+  elif [ "$MOCK_ONLY" = true ]; then
+    cargo llvm-cov --test 'mock_*' --text > "$CACHE_FILE" 2>&1 || { echo "cargo llvm-cov failed:"; tail -50 "$CACHE_FILE"; exit 101; }
   else
     [[ -f .test-config ]] && source .test-config
     cargo llvm-cov --text > "$CACHE_FILE" 2>&1 || { echo "cargo llvm-cov failed:"; tail -50 "$CACHE_FILE"; exit 101; }
@@ -100,6 +106,12 @@ for filepath in "${PATHS[@]}"; do
 
   # unit-only モードでは unit タイプのみチェック
   if [ "$UNIT_ONLY" = true ] && [ "$ftype" != "unit" ]; then
+    SKIPPED=$((SKIPPED + 1))
+    continue
+  fi
+
+  # mock-only モードでは mock タイプのみチェック
+  if [ "$MOCK_ONLY" = true ] && [ "$ftype" != "mock" ]; then
     SKIPPED=$((SKIPPED + 1))
     continue
   fi

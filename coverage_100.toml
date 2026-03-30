@@ -1,6 +1,7 @@
 # 100% カバレッジ達成済みファイルの登録簿
 #
 # type = "unit"        — cargo test --lib だけで 100% (DB 不要)
+# type = "mock"        — cargo test --test 'mock_*' だけで 100% (DB 不要)
 # type = "integration" — tests/ のインテグレーションテストが必要 (DB 必要)
 # type = "both"        — ユニット + インテグレーション両方で 100%
 #
@@ -33,7 +34,7 @@ type = "both"
 
 [[files]]
 path = "src/db/models.rs"
-type = "integration"
+type = "mock"
 
 [[files]]
 path = "src/middleware/auth.rs"
@@ -42,37 +43,37 @@ test_file = "tests/coverage_100_test.rs"
 
 [[files]]
 path = "src/routes/daily_health.rs"
-type = "integration"
+type = "mock"
 test_file = "tests/coverage_100_test.rs"
 
 [[files]]
 path = "src/routes/driver_info.rs"
-type = "integration"
+type = "mock"
 test_file = "tests/misc_routes_test.rs"
 
 [[files]]
 path = "src/routes/dtako_csv_proxy.rs"
-type = "integration"
+type = "mock"
 test_file = "tests/dtako_test.rs"
 
 [[files]]
 path = "src/routes/dtako_daily_hours.rs"
-type = "integration"
+type = "mock"
 test_file = "tests/dtako_test.rs"
 
 [[files]]
 path = "src/routes/dtako_drivers.rs"
-type = "integration"
+type = "mock"
 test_file = "tests/dtako_test.rs"
 
 [[files]]
 path = "src/routes/dtako_event_classifications.rs"
-type = "integration"
+type = "mock"
 test_file = "tests/dtako_test.rs"
 
 [[files]]
 path = "src/routes/dtako_operations.rs"
-type = "integration"
+type = "mock"
 test_file = "tests/coverage_100_test.rs"
 
 [[files]]
@@ -86,27 +87,27 @@ test_file = "tests/dtako_test.rs"
 
 [[files]]
 path = "src/routes/dtako_vehicles.rs"
-type = "integration"
+type = "mock"
 test_file = "tests/dtako_test.rs"
 
 [[files]]
 path = "src/routes/dtako_work_times.rs"
-type = "integration"
+type = "mock"
 test_file = "tests/dtako_test.rs"
 
 [[files]]
 path = "src/routes/health.rs"
-type = "integration"
+type = "mock"
 test_file = "tests/health_test.rs"
 
 [[files]]
 path = "src/routes/health_baselines.rs"
-type = "integration"
+type = "mock"
 test_file = "tests/coverage_100_test.rs"
 
 [[files]]
 path = "src/routes/mod.rs"
-type = "integration"
+type = "mock"
 
 [[files]]
 path = "src/routes/auth.rs"
@@ -115,32 +116,32 @@ test_file = "tests/auth_test.rs"
 
 [[files]]
 path = "src/routes/carrying_items.rs"
-type = "integration"
+type = "mock"
 test_file = "tests/misc_routes_test.rs"
 
 [[files]]
 path = "src/routes/tenko_call.rs"
-type = "integration"
+type = "mock"
 test_file = "tests/coverage/main.rs"
 
 [[files]]
 path = "src/routes/nfc_tags.rs"
-type = "integration"
+type = "mock"
 test_file = "tests/coverage_100_test.rs"
 
 [[files]]
 path = "src/routes/car_inspection_files.rs"
-type = "integration"
+type = "mock"
 test_file = "tests/carins_test.rs"
 
 [[files]]
 path = "src/routes/timecard.rs"
-type = "integration"
+type = "mock"
 test_file = "tests/coverage/main.rs"
 
 [[files]]
 path = "src/routes/tenant_users.rs"
-type = "integration"
+type = "mock"
 test_file = "tests/coverage/main.rs"
 
 [[files]]
@@ -150,7 +151,7 @@ test_file = "tests/tenko_webhooks_test.rs"
 
 [[files]]
 path = "src/routes/car_inspections.rs"
-type = "integration"
+type = "mock"
 test_file = "tests/coverage/main.rs"
 
 [[files]]
@@ -160,7 +161,7 @@ test_file = "tests/coverage/main.rs"
 
 [[files]]
 path = "src/routes/communication_items.rs"
-type = "integration"
+type = "mock"
 test_file = "tests/coverage/main.rs"
 
 [[files]]
@@ -170,17 +171,17 @@ test_file = "tests/coverage/main.rs"
 
 [[files]]
 path = "src/routes/tenko_schedules.rs"
-type = "integration"
+type = "mock"
 test_file = "tests/coverage/main.rs"
 
 [[files]]
 path = "src/routes/equipment_failures.rs"
-type = "integration"
+type = "mock"
 test_file = "tests/coverage/main.rs"
 
 [[files]]
 path = "src/routes/tenko_webhooks.rs"
-type = "integration"
+type = "mock"
 test_file = "tests/coverage/main.rs"
 
 [[files]]
@@ -194,7 +195,7 @@ type = "both"
 
 [[files]]
 path = "src/routes/carins_files.rs"
-type = "integration"
+type = "mock"
 test_file = "tests/coverage/main.rs"
 
 [[files]]
@@ -217,7 +218,7 @@ type = "both"
 
 [[files]]
 path = "src/routes/upload.rs"
-type = "integration"
+type = "mock"
 test_file = "tests/coverage/main.rs"
 
 [[files]]

@@ -43,6 +43,17 @@ cov-check:
 cov-check-unit:
 	bash scripts/check_coverage_100.sh --unit-only
 
+cov-check-mock:
+	bash scripts/check_coverage_100.sh --mock-only
+
+# --- Mock テスト (DB 不要) ---
+
+mock-test:
+	cargo test --test 'mock_*'
+
+mock-cov:
+	cargo llvm-cov --test 'mock_*' --summary-only
+
 # --- CI カバレッジ取得 (artifact からダウンロード) ---
 
 COV_CACHE := /tmp/llvm-cov-cache/ci-latest.txt
