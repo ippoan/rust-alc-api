@@ -1,6 +1,8 @@
 mod common;
 mod mock_helpers;
 
+use uuid::Uuid;
+
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
@@ -11,8 +13,8 @@ use mock_helpers::MockEmployeeRepository;
 // ---------------------------------------------------------------------------
 
 async fn setup() -> (String, String) {
-    let state = mock_helpers::app_state::setup_mock_app_state().await;
-    let tenant_id = common::create_test_tenant(&state.pool, "emp-test").await;
+    let state = mock_helpers::app_state::setup_mock_app_state();
+    let tenant_id = Uuid::new_v4();
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let base = common::spawn_test_server(state).await;
     let auth = format!("Bearer {jwt}");
@@ -21,8 +23,8 @@ async fn setup() -> (String, String) {
 
 /// spawn server with a custom employees mock
 async fn setup_with_mock(mock: Arc<MockEmployeeRepository>) -> (String, String) {
-    let mut state = mock_helpers::app_state::setup_mock_app_state().await;
-    let tenant_id = common::create_test_tenant(&state.pool, "emp-custom").await;
+    let mut state = mock_helpers::app_state::setup_mock_app_state();
+    let tenant_id = Uuid::new_v4();
     let jwt = common::create_test_jwt(tenant_id, "admin");
     state.employees = mock;
     let base = common::spawn_test_server(state).await;
@@ -34,8 +36,8 @@ async fn setup_with_mock(mock: Arc<MockEmployeeRepository>) -> (String, String) 
 async fn setup_failing() -> (String, String) {
     let mock = Arc::new(MockEmployeeRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
-    let mut state = mock_helpers::app_state::setup_mock_app_state().await;
-    let tenant_id = common::create_test_tenant(&state.pool, "emp-fail").await;
+    let mut state = mock_helpers::app_state::setup_mock_app_state();
+    let tenant_id = Uuid::new_v4();
     let jwt = common::create_test_jwt(tenant_id, "admin");
     state.employees = mock;
     let base = common::spawn_test_server(state).await;
@@ -669,7 +671,7 @@ async fn get_employee_by_code_db_error_returns_500() {
 
 #[tokio::test]
 async fn employees_unauthorized_without_jwt() {
-    let state = mock_helpers::app_state::setup_mock_app_state().await;
+    let state = mock_helpers::app_state::setup_mock_app_state();
     let base = common::spawn_test_server(state).await;
 
     // GET /api/employees without Authorization header

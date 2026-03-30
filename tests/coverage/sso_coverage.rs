@@ -13,12 +13,12 @@ async fn setup_sso_admin() -> (
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
     let tenant_id = common::create_test_tenant(
-        &state.pool,
+        state.pool(),
         &format!("SSO{}", uuid::Uuid::new_v4().simple()),
     )
     .await;
     let (user_id, _) =
-        common::create_test_user_in_db(&state.pool, tenant_id, "ssoadmin@test.com", "admin").await;
+        common::create_test_user_in_db(state.pool(), tenant_id, "ssoadmin@test.com", "admin").await;
     let jwt = common::create_test_jwt_for_user(user_id, tenant_id, "ssoadmin@test.com", "admin");
     let client = reqwest::Client::new();
     (state, base_url, tenant_id, jwt, client)
@@ -64,12 +64,12 @@ async fn test_sso_upsert_encrypt_error() {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
         let tenant_id = common::create_test_tenant(
-            &state.pool,
+            state.pool(),
             &format!("SSOEnc{}", uuid::Uuid::new_v4().simple()),
         )
         .await;
         let (user_id, _) =
-            common::create_test_user_in_db(&state.pool, tenant_id, "ssoenc@test.com", "admin")
+            common::create_test_user_in_db(state.pool(), tenant_id, "ssoenc@test.com", "admin")
                 .await;
         let jwt = common::create_test_jwt_for_user(user_id, tenant_id, "ssoenc@test.com", "admin");
         let client = reqwest::Client::new();
@@ -102,7 +102,7 @@ async fn test_sso_list_configs_db_error() {
         let (state, base_url, _tenant_id, jwt, client) = setup_sso_admin().await;
 
         sqlx::query("ALTER TABLE alc_api.sso_provider_configs RENAME TO sso_provider_configs_bak")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
@@ -115,7 +115,7 @@ async fn test_sso_list_configs_db_error() {
         assert_eq!(res.status(), 500);
 
         sqlx::query("ALTER TABLE alc_api.sso_provider_configs_bak RENAME TO sso_provider_configs")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -135,11 +135,11 @@ async fn test_sso_upsert_db_error() {
             BEGIN RAISE EXCEPTION 'test: sso insert blocked'; END;
             $$ LANGUAGE plpgsql"#,
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
         sqlx::query("CREATE OR REPLACE TRIGGER fail_sso_insert BEFORE INSERT ON alc_api.sso_provider_configs FOR EACH ROW EXECUTE FUNCTION alc_api.fail_sso_insert()")
-            .execute(&state.pool).await.unwrap();
+            .execute(state.pool()).await.unwrap();
 
         let res = client
             .post(format!("{base_url}/api/admin/sso/configs"))
@@ -154,11 +154,11 @@ async fn test_sso_upsert_db_error() {
         assert_eq!(res.status(), 500);
 
         sqlx::query("DROP TRIGGER fail_sso_insert ON alc_api.sso_provider_configs")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
         sqlx::query("DROP FUNCTION alc_api.fail_sso_insert")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -174,7 +174,7 @@ async fn test_sso_delete_db_error() {
         let (state, base_url, _tenant_id, jwt, client) = setup_sso_admin().await;
 
         sqlx::query("ALTER TABLE alc_api.sso_provider_configs RENAME TO sso_provider_configs_bak")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
@@ -188,7 +188,7 @@ async fn test_sso_delete_db_error() {
         assert_eq!(res.status(), 500);
 
         sqlx::query("ALTER TABLE alc_api.sso_provider_configs_bak RENAME TO sso_provider_configs")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });

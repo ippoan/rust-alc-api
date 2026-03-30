@@ -13,7 +13,7 @@ async fn test_list_files() {
     test_case!("GET /api/files でファイル一覧を取得する", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "CarinsFiles").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "CarinsFiles").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -37,7 +37,7 @@ async fn test_list_files_with_type_filter() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "CarinsType").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "CarinsType").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let client = reqwest::Client::new();
 
@@ -58,7 +58,7 @@ async fn test_list_recent_files() {
     test_case!("最近のファイル一覧を取得する", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "CarinsRecent").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "CarinsRecent").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -78,7 +78,7 @@ async fn test_list_not_attached_files() {
     test_case!("未添付ファイル一覧を取得する", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "CarinsNotAtt").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "CarinsNotAtt").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -120,7 +120,7 @@ async fn test_get_file_not_found() {
     test_case!("存在しないファイル UUID で 404 を返す", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "CarinsGetNF").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "CarinsGetNF").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -145,7 +145,7 @@ async fn test_upload_face_photo() {
     test_case!("顔写真をアップロードする", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "UploadFace").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "UploadFace").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -174,7 +174,7 @@ async fn test_upload_report_audio() {
     test_case!("レポート音声をアップロードする", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "UploadAudio").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "UploadAudio").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -203,7 +203,7 @@ async fn test_upload_blow_video() {
     test_case!("吹込動画をアップロードする", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "UploadVideo").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "UploadVideo").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -240,7 +240,7 @@ async fn test_create_file_base64() {
 
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "CarinsCreate").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "CarinsCreate").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -298,7 +298,7 @@ async fn test_delete_file_not_found() {
     test_case!("存在しないファイルの削除で 404 を返す", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "CarinsDelNF").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "CarinsDelNF").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -323,7 +323,7 @@ async fn test_download_file() {
 
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "CarinsDL").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "CarinsDL").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -371,14 +371,14 @@ async fn test_car_inspections_db_error() {
             let _flock = common::db_rename_flock();
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "CarInsDbErr").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "CarInsDbErr").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
 
             // RENAME car_inspection to break all queries
             sqlx::query("ALTER TABLE alc_api.car_inspection RENAME TO car_inspection_bak")
-                .execute(&state.pool)
+                .execute(state.pool())
                 .await
                 .unwrap();
 
@@ -438,7 +438,7 @@ async fn test_car_inspections_db_error() {
 
             // Restore
             sqlx::query("ALTER TABLE alc_api.car_inspection_bak RENAME TO car_inspection")
-                .execute(&state.pool)
+                .execute(state.pool())
                 .await
                 .unwrap();
         }

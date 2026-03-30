@@ -17,7 +17,7 @@ async fn test_create_employee_db_error() {
         let _flock = crate::common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "EmpCreateErr").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "EmpCreateErr").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -27,14 +27,14 @@ async fn test_create_employee_db_error() {
                BEGIN RAISE EXCEPTION 'test: employees insert blocked'; END;
                $$ LANGUAGE plpgsql"#,
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
         sqlx::query(
             "CREATE TRIGGER reject_emp_insert BEFORE INSERT ON alc_api.employees \
              FOR EACH ROW EXECUTE FUNCTION alc_api.reject_emp_insert()",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -51,11 +51,11 @@ async fn test_create_employee_db_error() {
         assert_eq!(res.status(), 500);
 
         sqlx::query("DROP TRIGGER reject_emp_insert ON alc_api.employees")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
         sqlx::query("DROP FUNCTION alc_api.reject_emp_insert()")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -74,7 +74,7 @@ async fn test_delete_employee_db_error() {
         let _flock = crate::common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "EmpDelErr").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "EmpDelErr").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -90,14 +90,14 @@ async fn test_delete_employee_db_error() {
                BEGIN RAISE EXCEPTION 'test: employees update blocked'; END;
                $$ LANGUAGE plpgsql"#,
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
         sqlx::query(
             "CREATE TRIGGER reject_emp_update BEFORE UPDATE ON alc_api.employees \
              FOR EACH ROW EXECUTE FUNCTION alc_api.reject_emp_update()",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -110,11 +110,11 @@ async fn test_delete_employee_db_error() {
         assert_eq!(res.status(), 500);
 
         sqlx::query("DROP TRIGGER reject_emp_update ON alc_api.employees")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
         sqlx::query("DROP FUNCTION alc_api.reject_emp_update()")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -133,7 +133,7 @@ async fn test_update_face_db_error() {
         let _flock = crate::common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "FaceErr").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "FaceErr").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -147,14 +147,14 @@ async fn test_update_face_db_error() {
                BEGIN RAISE EXCEPTION 'test: employees update blocked'; END;
                $$ LANGUAGE plpgsql"#,
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
         sqlx::query(
             "CREATE TRIGGER reject_emp_update_face BEFORE UPDATE ON alc_api.employees \
              FOR EACH ROW EXECUTE FUNCTION alc_api.reject_emp_update_face()",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -172,11 +172,11 @@ async fn test_update_face_db_error() {
         assert_eq!(res.status(), 500);
 
         sqlx::query("DROP TRIGGER reject_emp_update_face ON alc_api.employees")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
         sqlx::query("DROP FUNCTION alc_api.reject_emp_update_face()")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -195,7 +195,7 @@ async fn test_update_license_db_error() {
         let _flock = crate::common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "LicErr").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "LicErr").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -209,14 +209,14 @@ async fn test_update_license_db_error() {
                BEGIN RAISE EXCEPTION 'test: employees update blocked'; END;
                $$ LANGUAGE plpgsql"#,
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
         sqlx::query(
             "CREATE TRIGGER reject_emp_update_lic BEFORE UPDATE ON alc_api.employees \
              FOR EACH ROW EXECUTE FUNCTION alc_api.reject_emp_update_lic()",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -233,11 +233,11 @@ async fn test_update_license_db_error() {
         assert_eq!(res.status(), 500);
 
         sqlx::query("DROP TRIGGER reject_emp_update_lic ON alc_api.employees")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
         sqlx::query("DROP FUNCTION alc_api.reject_emp_update_lic()")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -256,7 +256,7 @@ async fn test_update_nfc_id_db_error() {
         let _flock = crate::common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "NfcErr").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "NfcErr").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -270,14 +270,14 @@ async fn test_update_nfc_id_db_error() {
                BEGIN RAISE EXCEPTION 'test: employees update blocked'; END;
                $$ LANGUAGE plpgsql"#,
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
         sqlx::query(
             "CREATE TRIGGER reject_emp_update_nfc BEFORE UPDATE ON alc_api.employees \
              FOR EACH ROW EXECUTE FUNCTION alc_api.reject_emp_update_nfc()",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -293,11 +293,11 @@ async fn test_update_nfc_id_db_error() {
         assert_eq!(res.status(), 500);
 
         sqlx::query("DROP TRIGGER reject_emp_update_nfc ON alc_api.employees")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
         sqlx::query("DROP FUNCTION alc_api.reject_emp_update_nfc()")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -316,7 +316,7 @@ async fn test_approve_face_db_error() {
         let _flock = crate::common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "AppFaceErr").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "AppFaceErr").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -345,14 +345,14 @@ async fn test_approve_face_db_error() {
                BEGIN RAISE EXCEPTION 'test: employees update blocked'; END;
                $$ LANGUAGE plpgsql"#,
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
         sqlx::query(
             "CREATE TRIGGER reject_emp_update_appr BEFORE UPDATE ON alc_api.employees \
              FOR EACH ROW EXECUTE FUNCTION alc_api.reject_emp_update_appr()",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -365,11 +365,11 @@ async fn test_approve_face_db_error() {
         assert_eq!(res.status(), 500);
 
         sqlx::query("DROP TRIGGER reject_emp_update_appr ON alc_api.employees")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
         sqlx::query("DROP FUNCTION alc_api.reject_emp_update_appr()")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -388,7 +388,7 @@ async fn test_reject_face_db_error() {
         let _flock = crate::common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "RejFaceErr").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "RejFaceErr").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -417,14 +417,14 @@ async fn test_reject_face_db_error() {
                BEGIN RAISE EXCEPTION 'test: employees update blocked'; END;
                $$ LANGUAGE plpgsql"#,
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
         sqlx::query(
             "CREATE TRIGGER reject_emp_update_rej BEFORE UPDATE ON alc_api.employees \
              FOR EACH ROW EXECUTE FUNCTION alc_api.reject_emp_update_rej()",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -437,11 +437,11 @@ async fn test_reject_face_db_error() {
         assert_eq!(res.status(), 500);
 
         sqlx::query("DROP TRIGGER reject_emp_update_rej ON alc_api.employees")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
         sqlx::query("DROP FUNCTION alc_api.reject_emp_update_rej()")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });

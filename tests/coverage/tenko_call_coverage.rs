@@ -11,7 +11,7 @@ async fn test_tenko_call_register_pool_closed() {
     test_case!("register: pool closed → 500 + register_err カバー", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        state.pool.close().await;
+        state.pool().close().await;
 
         let client = reqwest::Client::new();
         let res = client
@@ -41,13 +41,13 @@ async fn test_tenko_call_register_trigger_error() {
         let _flock = crate::common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "TkRegTrig").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "TkRegTrig").await;
 
         let call_num = format!("err-reg-{}", uuid::Uuid::new_v4().simple());
         sqlx::query("INSERT INTO tenko_call_numbers (call_number, tenant_id) VALUES ($1, $2)")
             .bind(&call_num)
             .bind(tenant_id.to_string())
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
@@ -57,13 +57,13 @@ async fn test_tenko_call_register_trigger_error() {
                BEGIN RAISE EXCEPTION 'test: blocked'; END;
                $$ LANGUAGE plpgsql"#,
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
         sqlx::query(
             "CREATE TRIGGER reject_tenko_driver BEFORE INSERT OR UPDATE ON alc_api.tenko_call_drivers FOR EACH ROW EXECUTE FUNCTION alc_api.reject_tenko_driver_fn()",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -82,11 +82,11 @@ async fn test_tenko_call_register_trigger_error() {
 
         // Cleanup
         sqlx::query("DROP TRIGGER reject_tenko_driver ON alc_api.tenko_call_drivers")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
         sqlx::query("DROP FUNCTION alc_api.reject_tenko_driver_fn()")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -103,7 +103,7 @@ async fn test_tenko_call_tenko_pool_closed() {
     test_case!("tenko: pool closed → 500", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        state.pool.close().await;
+        state.pool().close().await;
 
         let client = reqwest::Client::new();
         let res = client
@@ -134,7 +134,7 @@ async fn test_tenko_call_tenko_trigger_error() {
         let _flock = crate::common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "TkTenkoTrig").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "TkTenkoTrig").await;
 
         let call_num = format!("err-tk-{}", uuid::Uuid::new_v4().simple());
         let phone = format!("090-tk-{}", uuid::Uuid::new_v4().simple());
@@ -142,13 +142,13 @@ async fn test_tenko_call_tenko_trigger_error() {
         sqlx::query("INSERT INTO tenko_call_numbers (call_number, tenant_id) VALUES ($1, $2)")
             .bind(&call_num)
             .bind(tenant_id.to_string())
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
         sqlx::query("SELECT set_current_tenant($1)")
             .bind(tenant_id.to_string())
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
         sqlx::query(
@@ -158,7 +158,7 @@ async fn test_tenko_call_tenko_trigger_error() {
         .bind("テンコテスト")
         .bind(&call_num)
         .bind(tenant_id.to_string())
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -168,13 +168,13 @@ async fn test_tenko_call_tenko_trigger_error() {
                BEGIN RAISE EXCEPTION 'test: blocked'; END;
                $$ LANGUAGE plpgsql"#,
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
         sqlx::query(
             "CREATE TRIGGER reject_tenko_log BEFORE INSERT ON alc_api.tenko_call_logs FOR EACH ROW EXECUTE FUNCTION alc_api.reject_tenko_log_fn()",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -194,11 +194,11 @@ async fn test_tenko_call_tenko_trigger_error() {
 
         // Cleanup
         sqlx::query("DROP TRIGGER reject_tenko_log ON alc_api.tenko_call_logs")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
         sqlx::query("DROP FUNCTION alc_api.reject_tenko_log_fn()")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -219,7 +219,7 @@ async fn test_tenko_call_register_master_lookup_rename() {
         let base_url = common::spawn_test_server(state.clone()).await;
 
         sqlx::query("ALTER TABLE alc_api.tenko_call_numbers RENAME TO tenko_call_numbers_bak3")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
@@ -237,7 +237,7 @@ async fn test_tenko_call_register_master_lookup_rename() {
         assert_eq!(res.status(), 500);
 
         sqlx::query("ALTER TABLE alc_api.tenko_call_numbers_bak3 RENAME TO tenko_call_numbers")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -256,13 +256,13 @@ async fn test_tenko_call_register_set_tenant_error() {
         let _flock = crate::common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "TkSetTenErr").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "TkSetTenErr").await;
 
         let call_num = format!("err-st-{}", uuid::Uuid::new_v4().simple());
         sqlx::query("INSERT INTO tenko_call_numbers (call_number, tenant_id) VALUES ($1, $2)")
             .bind(&call_num)
             .bind(tenant_id.to_string())
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
@@ -270,7 +270,7 @@ async fn test_tenko_call_register_set_tenant_error() {
         sqlx::query(
             "ALTER FUNCTION alc_api.set_current_tenant(text) RENAME TO set_current_tenant_bak",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -290,7 +290,7 @@ async fn test_tenko_call_register_set_tenant_error() {
         sqlx::query(
             "ALTER FUNCTION alc_api.set_current_tenant_bak(text) RENAME TO set_current_tenant",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
     });
@@ -311,7 +311,7 @@ async fn test_tenko_call_tenko_driver_lookup_rename() {
         let base_url = common::spawn_test_server(state.clone()).await;
 
         sqlx::query("ALTER TABLE alc_api.tenko_call_drivers RENAME TO tenko_call_drivers_bak3")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
@@ -330,7 +330,7 @@ async fn test_tenko_call_tenko_driver_lookup_rename() {
         assert_eq!(res.status(), 500);
 
         sqlx::query("ALTER TABLE alc_api.tenko_call_drivers_bak3 RENAME TO tenko_call_drivers")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -349,7 +349,7 @@ async fn test_tenko_call_tenko_set_tenant_error() {
         let _flock = crate::common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "TkTkSetTenErr").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "TkTkSetTenErr").await;
 
         let call_num = format!("err-tkst-{}", uuid::Uuid::new_v4().simple());
         let phone = format!("090-tkst-{}", uuid::Uuid::new_v4().simple());
@@ -357,13 +357,13 @@ async fn test_tenko_call_tenko_set_tenant_error() {
         sqlx::query("INSERT INTO tenko_call_numbers (call_number, tenant_id) VALUES ($1, $2)")
             .bind(&call_num)
             .bind(tenant_id.to_string())
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
         sqlx::query("SELECT set_current_tenant($1)")
             .bind(tenant_id.to_string())
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
         sqlx::query(
@@ -373,7 +373,7 @@ async fn test_tenko_call_tenko_set_tenant_error() {
         .bind("SetTenantテスト")
         .bind(&call_num)
         .bind(tenant_id.to_string())
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -381,7 +381,7 @@ async fn test_tenko_call_tenko_set_tenant_error() {
         sqlx::query(
             "ALTER FUNCTION alc_api.set_current_tenant(text) RENAME TO set_current_tenant_bak",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -402,7 +402,7 @@ async fn test_tenko_call_tenko_set_tenant_error() {
         sqlx::query(
             "ALTER FUNCTION alc_api.set_current_tenant_bak(text) RENAME TO set_current_tenant",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
     });
@@ -421,13 +421,13 @@ async fn test_tenko_call_register_commit_error() {
         let _flock = crate::common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "TkCommitErr").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "TkCommitErr").await;
 
         let call_num = format!("err-cm-{}", uuid::Uuid::new_v4().simple());
         sqlx::query("INSERT INTO tenko_call_numbers (call_number, tenant_id) VALUES ($1, $2)")
             .bind(&call_num)
             .bind(tenant_id.to_string())
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
@@ -437,13 +437,13 @@ async fn test_tenko_call_register_commit_error() {
                BEGIN RAISE EXCEPTION 'test: commit blocked'; END;
                $$ LANGUAGE plpgsql"#,
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
         sqlx::query(
             "CREATE CONSTRAINT TRIGGER reject_commit_driver AFTER INSERT OR UPDATE ON alc_api.tenko_call_drivers DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION alc_api.reject_commit_driver_fn()",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -462,11 +462,11 @@ async fn test_tenko_call_register_commit_error() {
 
         // Cleanup
         sqlx::query("DROP TRIGGER reject_commit_driver ON alc_api.tenko_call_drivers")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
         sqlx::query("DROP FUNCTION alc_api.reject_commit_driver_fn()")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -485,7 +485,7 @@ async fn test_tenko_call_tenko_commit_error() {
         let _flock = crate::common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "TkTkCommitErr").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "TkTkCommitErr").await;
 
         let call_num = format!("err-tkcm-{}", uuid::Uuid::new_v4().simple());
         let phone = format!("090-tkcm-{}", uuid::Uuid::new_v4().simple());
@@ -493,13 +493,13 @@ async fn test_tenko_call_tenko_commit_error() {
         sqlx::query("INSERT INTO tenko_call_numbers (call_number, tenant_id) VALUES ($1, $2)")
             .bind(&call_num)
             .bind(tenant_id.to_string())
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
         sqlx::query("SELECT set_current_tenant($1)")
             .bind(tenant_id.to_string())
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
         sqlx::query(
@@ -509,7 +509,7 @@ async fn test_tenko_call_tenko_commit_error() {
         .bind("コミットテスト")
         .bind(&call_num)
         .bind(tenant_id.to_string())
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -519,13 +519,13 @@ async fn test_tenko_call_tenko_commit_error() {
                BEGIN RAISE EXCEPTION 'test: commit blocked'; END;
                $$ LANGUAGE plpgsql"#,
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
         sqlx::query(
             "CREATE CONSTRAINT TRIGGER reject_commit_log AFTER INSERT ON alc_api.tenko_call_logs DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION alc_api.reject_commit_log_fn()",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -545,11 +545,11 @@ async fn test_tenko_call_tenko_commit_error() {
 
         // Cleanup
         sqlx::query("DROP TRIGGER reject_commit_log ON alc_api.tenko_call_logs")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
         sqlx::query("DROP FUNCTION alc_api.reject_commit_log_fn()")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -565,10 +565,10 @@ async fn test_tenko_call_list_numbers_db_error() {
     test_group!("tenko_call カバレッジ");
     test_case!("list_numbers: pool closed → 500", {
         let state = common::setup_app_state().await;
-        let tenant_id = common::create_test_tenant(&state.pool, "TkListNumErr").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "TkListNumErr").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let base_url = common::spawn_test_server(state.clone()).await;
-        state.pool.close().await;
+        state.pool().close().await;
 
         let client = reqwest::Client::new();
         let res = client
@@ -587,10 +587,10 @@ async fn test_tenko_call_create_number_db_error() {
     test_group!("tenko_call カバレッジ");
     test_case!("create_number: pool closed → 500", {
         let state = common::setup_app_state().await;
-        let tenant_id = common::create_test_tenant(&state.pool, "TkCreateNumErr").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "TkCreateNumErr").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let base_url = common::spawn_test_server(state.clone()).await;
-        state.pool.close().await;
+        state.pool().close().await;
 
         let client = reqwest::Client::new();
         let res = client
@@ -613,10 +613,10 @@ async fn test_tenko_call_delete_number_db_error() {
     test_group!("tenko_call カバレッジ");
     test_case!("delete_number: pool closed → 500", {
         let state = common::setup_app_state().await;
-        let tenant_id = common::create_test_tenant(&state.pool, "TkDelNumErr").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "TkDelNumErr").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let base_url = common::spawn_test_server(state.clone()).await;
-        state.pool.close().await;
+        state.pool().close().await;
 
         let client = reqwest::Client::new();
         let res = client
@@ -635,10 +635,10 @@ async fn test_tenko_call_list_drivers_db_error() {
     test_group!("tenko_call カバレッジ");
     test_case!("list_drivers: pool closed → 500", {
         let state = common::setup_app_state().await;
-        let tenant_id = common::create_test_tenant(&state.pool, "TkListDrvErr").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "TkListDrvErr").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let base_url = common::spawn_test_server(state.clone()).await;
-        state.pool.close().await;
+        state.pool().close().await;
 
         let client = reqwest::Client::new();
         let res = client

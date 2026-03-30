@@ -213,7 +213,10 @@ async fn submit_alcohol(
             }
         });
 
-        let pool = state.pool.clone();
+        let pool = match state.pool.clone() {
+            Some(p) => p,
+            None => return Ok(Json(session)),
+        };
         #[rustfmt::skip]
         tokio::spawn(async move { let _ = crate::webhook::fire_event(&pool, tenant_id, "alcohol_detected", payload).await; });
     }
@@ -376,7 +379,10 @@ async fn submit_report(
             }
         });
 
-        let pool = state.pool.clone();
+        let pool = match state.pool.clone() {
+            Some(p) => p,
+            None => return Ok(Json(session)),
+        };
         tokio::spawn(async move {
             let _ = crate::webhook::fire_event(&pool, tenant_id, "report_submitted", payload).await;
         });
@@ -565,8 +571,12 @@ async fn submit_self_declaration(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-    // 安全判定を自動実行
-    let session = perform_safety_judgment(repo, &session, tenant_id, &state.pool).await?;
+    // 安全判定を自動実行 (pool がない場合はスキップ)
+    let session = if let Some(pool) = state.pool.as_ref() {
+        perform_safety_judgment(repo, &session, tenant_id, pool).await?
+    } else {
+        session
+    };
 
     Ok(Json(session))
 }
@@ -856,7 +866,10 @@ async fn submit_daily_inspection(
             }
         });
 
-        let pool = state.pool.clone();
+        let pool = match state.pool.clone() {
+            Some(p) => p,
+            None => return Ok(Json(session)),
+        };
         #[rustfmt::skip]
         tokio::spawn(async move { let _ = crate::webhook::fire_event(&pool, tenant_id, "inspection_ng", payload).await; });
     }
@@ -981,7 +994,10 @@ async fn interrupt_session(
         }
     });
 
-    let pool = state.pool.clone();
+    let pool = match state.pool.clone() {
+        Some(p) => p,
+        None => return Ok(Json(session)),
+    };
     tokio::spawn(async move {
         let _ = crate::webhook::fire_event(&pool, tenant_id, "tenko_interrupted", payload).await;
     });

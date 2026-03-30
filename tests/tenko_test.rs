@@ -27,7 +27,7 @@ async fn setup_tenko() -> (String, String, String, reqwest::Client) {
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
     let tenant_id = common::create_test_tenant(
-        &state.pool,
+        state.pool(),
         &format!("Tenko{}", uuid::Uuid::new_v4().simple()),
     )
     .await;
@@ -1307,7 +1307,7 @@ async fn test_alcohol_fail_fires_webhook() {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
         let tenant_id = common::create_test_tenant(
-            &state.pool,
+            state.pool(),
             &format!("AlcWH{}", uuid::Uuid::new_v4().simple()),
         )
         .await;
@@ -1375,7 +1375,7 @@ async fn test_self_declaration_with_illness_interrupts() {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
         let tenant_id = common::create_test_tenant(
-            &state.pool,
+            state.pool(),
             &format!("SelfDecl{}", uuid::Uuid::new_v4().simple()),
         )
         .await;
@@ -3099,13 +3099,13 @@ async fn test_fire_event_no_config() {
         let state = common::setup_app_state().await;
         let _base_url = common::spawn_test_server(state.clone()).await;
         let tenant_id = common::create_test_tenant(
-            &state.pool,
+            state.pool(),
             &format!("WHNone{}", uuid::Uuid::new_v4().simple()),
         )
         .await;
 
         let result = rust_alc_api::webhook::fire_event(
-            &state.pool,
+            state.pool(),
             tenant_id,
             "alcohol_detected",
             serde_json::json!({"test": true}),
@@ -3128,7 +3128,7 @@ async fn test_fire_event_with_config_delivers() {
         let state = common::setup_app_state().await;
         let _base_url = common::spawn_test_server(state.clone()).await;
         let tenant_id = common::create_test_tenant(
-            &state.pool,
+            state.pool(),
             &format!("WHDeliv{}", uuid::Uuid::new_v4().simple()),
         )
         .await;
@@ -3171,7 +3171,7 @@ async fn test_fire_event_with_config_delivers() {
 
         // fire_event
         rust_alc_api::webhook::fire_event(
-            &state.pool,
+            state.pool(),
             tenant_id,
             "alcohol_detected",
             serde_json::json!({"employee_id": "test", "value": 0.15}),
@@ -3187,7 +3187,7 @@ async fn test_fire_event_with_config_delivers() {
         );
 
         // webhook_deliveries にログが記録されたか確認
-        let mut conn = state.pool.acquire().await.unwrap();
+        let mut conn = state.pool().acquire().await.unwrap();
         sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
             .bind(tenant_id.to_string())
             .execute(&mut *conn)
@@ -3222,7 +3222,7 @@ async fn test_fire_event_delivery_failure_retries() {
             let state = common::setup_app_state().await;
             let _base_url = common::spawn_test_server(state.clone()).await;
             let tenant_id = common::create_test_tenant(
-                &state.pool,
+                state.pool(),
                 &format!("WHFail{}", uuid::Uuid::new_v4().simple()),
             )
             .await;
@@ -3259,7 +3259,7 @@ async fn test_fire_event_delivery_failure_retries() {
 
             // fire → リトライ (1s + 5s + 25s = 遅いが、500エラーは即返るのでsleep分のみ)
             rust_alc_api::webhook::fire_event(
-                &state.pool,
+                state.pool(),
                 tenant_id,
                 "tenko_completed",
                 serde_json::json!({"session_id": "test"}),
@@ -3270,7 +3270,7 @@ async fn test_fire_event_delivery_failure_retries() {
             // リトライは非同期なので少し待つ (最初のリトライ1sだけ待てば少なくとも2回の配信ログがある)
             tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
 
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                 .bind(tenant_id.to_string())
                 .execute(&mut *conn)
@@ -3302,7 +3302,7 @@ async fn test_check_overdue_no_config() {
         let state = common::setup_app_state().await;
         let _base_url = common::spawn_test_server(state.clone()).await;
 
-        let result = rust_alc_api::webhook::check_overdue_schedules(&state.pool).await;
+        let result = rust_alc_api::webhook::check_overdue_schedules(state.pool()).await;
         assert!(result.is_ok());
     });
 }
@@ -3326,7 +3326,7 @@ async fn test_safety_judgment_fail_with_baseline() {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
             let tenant_id = common::create_test_tenant(
-                &state.pool,
+                state.pool(),
                 &format!("SJFail{}", uuid::Uuid::new_v4().simple()),
             )
             .await;
@@ -3424,7 +3424,7 @@ async fn test_safety_judgment_pass_with_baseline() {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
             let tenant_id = common::create_test_tenant(
-                &state.pool,
+                state.pool(),
                 &format!("SJPass{}", uuid::Uuid::new_v4().simple()),
             )
             .await;
@@ -3505,7 +3505,7 @@ async fn test_safety_judgment_multiple_failures() {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
         let tenant_id = common::create_test_tenant(
-            &state.pool,
+            state.pool(),
             &format!("SJMulti{}", uuid::Uuid::new_v4().simple()),
         )
         .await;
@@ -3592,7 +3592,7 @@ async fn test_check_overdue_with_overdue_schedule() {
             let state = common::setup_app_state().await;
             let _base_url = common::spawn_test_server(state.clone()).await;
             let tenant_id = common::create_test_tenant(
-                &state.pool,
+                state.pool(),
                 &format!("WHOver{}", uuid::Uuid::new_v4().simple()),
             )
             .await;
@@ -3667,14 +3667,14 @@ async fn test_check_overdue_with_overdue_schedule() {
 
             // check_overdue_schedules (TENKO_OVERDUE_MINUTES デフォルト60分なので2時間前は overdue)
             std::env::set_var("TENKO_OVERDUE_MINUTES", "60");
-            let result = rust_alc_api::webhook::check_overdue_schedules(&state.pool).await;
+            let result = rust_alc_api::webhook::check_overdue_schedules(state.pool()).await;
             assert!(result.is_ok(), "check_overdue failed: {:?}", result.err());
 
             // 少し待つ (deliver_webhook は sync in check_overdue, not spawned)
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
             // overdue_notified_at が更新されたか確認
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                 .bind(tenant_id.to_string())
                 .execute(&mut *conn)
@@ -3706,7 +3706,7 @@ async fn test_equipment_failure_create_db_error() {
         let _flock = common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "EqFailErr").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "EqFailErr").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -3717,14 +3717,14 @@ async fn test_equipment_failure_create_db_error() {
                BEGIN RAISE EXCEPTION 'test: equipment_failures insert blocked'; END;
                $$ LANGUAGE plpgsql"#,
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
         sqlx::query(
             "CREATE OR REPLACE TRIGGER fail_eq_insert BEFORE INSERT ON alc_api.equipment_failures \
              FOR EACH ROW EXECUTE FUNCTION alc_api.fail_eq_insert()",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -3742,11 +3742,11 @@ async fn test_equipment_failure_create_db_error() {
 
         // Cleanup
         sqlx::query("DROP TRIGGER fail_eq_insert ON alc_api.equipment_failures")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
         sqlx::query("DROP FUNCTION alc_api.fail_eq_insert")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -3767,14 +3767,14 @@ async fn test_equipment_failure_list_db_error() {
         let _flock = common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "EqListErr").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "EqListErr").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
 
-        ensure_table_exists(&state.pool, "equipment_failures").await;
+        ensure_table_exists(state.pool(), "equipment_failures").await;
         sqlx::query("ALTER TABLE alc_api.equipment_failures RENAME TO equipment_failures_bak")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
@@ -3787,7 +3787,7 @@ async fn test_equipment_failure_list_db_error() {
         assert_eq!(res.status(), 500);
 
         sqlx::query("ALTER TABLE alc_api.equipment_failures_bak RENAME TO equipment_failures")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -3808,7 +3808,7 @@ async fn test_tenko_schedule_create_db_error() {
         let _flock = common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "SchedCreateErr").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "SchedCreateErr").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -3824,14 +3824,14 @@ async fn test_tenko_schedule_create_db_error() {
                BEGIN RAISE EXCEPTION 'test: tenko_schedules insert blocked'; END;
                $$ LANGUAGE plpgsql"#,
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
         sqlx::query(
             "CREATE OR REPLACE TRIGGER fail_sched_insert BEFORE INSERT ON alc_api.tenko_schedules \
              FOR EACH ROW EXECUTE FUNCTION alc_api.fail_sched_insert()",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -3852,11 +3852,11 @@ async fn test_tenko_schedule_create_db_error() {
 
         // Cleanup
         sqlx::query("DROP TRIGGER fail_sched_insert ON alc_api.tenko_schedules")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
         sqlx::query("DROP FUNCTION alc_api.fail_sched_insert")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -3873,13 +3873,13 @@ async fn test_tenko_schedule_list_db_error() {
         let _flock = common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "SchedListErr").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "SchedListErr").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
 
         sqlx::query("ALTER TABLE alc_api.tenko_schedules RENAME TO tenko_schedules_bak")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
@@ -3892,7 +3892,7 @@ async fn test_tenko_schedule_list_db_error() {
         assert_eq!(res.status(), 500);
 
         sqlx::query("ALTER TABLE alc_api.tenko_schedules_bak RENAME TO tenko_schedules")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -3909,7 +3909,7 @@ async fn test_tenko_schedule_update_db_error() {
         let _flock = common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "SchedUpdErr").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "SchedUpdErr").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -3941,14 +3941,14 @@ async fn test_tenko_schedule_update_db_error() {
                BEGIN RAISE EXCEPTION 'test: tenko_schedules update blocked'; END;
                $$ LANGUAGE plpgsql"#,
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
         sqlx::query(
             "CREATE OR REPLACE TRIGGER fail_sched_update BEFORE UPDATE ON alc_api.tenko_schedules \
              FOR EACH ROW EXECUTE FUNCTION alc_api.fail_sched_update()",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -3965,11 +3965,11 @@ async fn test_tenko_schedule_update_db_error() {
 
         // Cleanup
         sqlx::query("DROP TRIGGER fail_sched_update ON alc_api.tenko_schedules")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
         sqlx::query("DROP FUNCTION alc_api.fail_sched_update")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -3986,7 +3986,7 @@ async fn test_tenko_schedule_delete_db_error() {
         let _flock = common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "SchedDelErr").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "SchedDelErr").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -4018,14 +4018,14 @@ async fn test_tenko_schedule_delete_db_error() {
                BEGIN RAISE EXCEPTION 'test: tenko_schedules delete blocked'; END;
                $$ LANGUAGE plpgsql"#,
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
         sqlx::query(
             "CREATE OR REPLACE TRIGGER fail_sched_delete BEFORE DELETE ON alc_api.tenko_schedules \
              FOR EACH ROW EXECUTE FUNCTION alc_api.fail_sched_delete()",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -4039,11 +4039,11 @@ async fn test_tenko_schedule_delete_db_error() {
 
         // Cleanup
         sqlx::query("DROP TRIGGER fail_sched_delete ON alc_api.tenko_schedules")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
         sqlx::query("DROP FUNCTION alc_api.fail_sched_delete")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -4068,7 +4068,7 @@ async fn test_start_session_employee_mismatch() {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
             let tenant_id = common::create_test_tenant(
-                &state.pool,
+                state.pool(),
                 &format!("EmpMismatch{}", uuid::Uuid::new_v4().simple()),
             )
             .await;
@@ -4134,7 +4134,7 @@ async fn test_submit_alcohol_invalid_tenko_type() {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
         let tenant_id = common::create_test_tenant(
-            &state.pool,
+            state.pool(),
             &format!("InvType{}", uuid::Uuid::new_v4().simple()),
         )
         .await;
@@ -4171,18 +4171,18 @@ async fn test_submit_alcohol_invalid_tenko_type() {
         // DROP CHECK → UPDATE tenko_type to invalid → テスト → 行を戻す → ADD CHECK
         let constraint_name: String = sqlx::query_scalar(
             "SELECT conname FROM pg_constraint WHERE conrelid = 'alc_api.tenko_sessions'::regclass AND conname LIKE '%tenko_type%'"
-        ).fetch_one(&state.pool).await.unwrap();
+        ).fetch_one(state.pool()).await.unwrap();
         sqlx::query(&format!(
             "ALTER TABLE alc_api.tenko_sessions DROP CONSTRAINT {constraint_name}"
         ))
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
         sqlx::query(
             "UPDATE alc_api.tenko_sessions SET tenko_type = 'invalid_type' WHERE id = $1::uuid",
         )
         .bind(session_id)
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -4206,11 +4206,11 @@ async fn test_submit_alcohol_invalid_tenko_type() {
             "UPDATE alc_api.tenko_sessions SET tenko_type = 'post_operation' WHERE id = $1::uuid",
         )
         .bind(session_id)
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
         sqlx::query(&format!("ALTER TABLE alc_api.tenko_sessions ADD CONSTRAINT {constraint_name} CHECK (tenko_type IN ('pre_operation', 'post_operation'))"))
-            .execute(&state.pool).await.unwrap();
+            .execute(state.pool()).await.unwrap();
     });
 }
 
@@ -4366,7 +4366,7 @@ async fn test_submit_alcohol_db_error() {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
         let tenant_id = common::create_test_tenant(
-            &state.pool,
+            state.pool(),
             &format!("AlcErr{}", uuid::Uuid::new_v4().simple()),
         )
         .await;
@@ -4396,14 +4396,14 @@ async fn test_submit_alcohol_db_error() {
                BEGIN RAISE EXCEPTION 'test: tenko_sessions alcohol update blocked'; END;
                $$ LANGUAGE plpgsql"#,
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
         sqlx::query(
             "CREATE OR REPLACE TRIGGER fail_ts_alc_update BEFORE UPDATE ON alc_api.tenko_sessions \
              FOR EACH ROW EXECUTE FUNCTION alc_api.fail_ts_alc_update()",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -4423,11 +4423,11 @@ async fn test_submit_alcohol_db_error() {
 
         // Cleanup
         sqlx::query("DROP TRIGGER fail_ts_alc_update ON alc_api.tenko_sessions")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
         sqlx::query("DROP FUNCTION alc_api.fail_ts_alc_update")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -4449,7 +4449,7 @@ async fn test_submit_medical_db_error() {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
         let tenant_id = common::create_test_tenant(
-            &state.pool,
+            state.pool(),
             &format!("MedErr{}", uuid::Uuid::new_v4().simple()),
         )
         .await;
@@ -4478,14 +4478,14 @@ async fn test_submit_medical_db_error() {
                BEGIN RAISE EXCEPTION 'test: tenko_sessions medical update blocked'; END;
                $$ LANGUAGE plpgsql"#,
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
         sqlx::query(
             "CREATE OR REPLACE TRIGGER fail_ts_med_update BEFORE UPDATE ON alc_api.tenko_sessions \
              FOR EACH ROW EXECUTE FUNCTION alc_api.fail_ts_med_update()",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -4502,11 +4502,11 @@ async fn test_submit_medical_db_error() {
 
         // Cleanup
         sqlx::query("DROP TRIGGER fail_ts_med_update ON alc_api.tenko_sessions")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
         sqlx::query("DROP FUNCTION alc_api.fail_ts_med_update")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -4528,7 +4528,7 @@ async fn test_confirm_instruction_db_error() {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
         let tenant_id = common::create_test_tenant(
-            &state.pool,
+            state.pool(),
             &format!("InstrErr{}", uuid::Uuid::new_v4().simple()),
         )
         .await;
@@ -4585,14 +4585,14 @@ async fn test_confirm_instruction_db_error() {
                BEGIN RAISE EXCEPTION 'test: tenko_sessions instruction update blocked'; END;
                $$ LANGUAGE plpgsql"#,
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
         sqlx::query(
             "CREATE OR REPLACE TRIGGER fail_ts_instr_update BEFORE UPDATE ON alc_api.tenko_sessions \
              FOR EACH ROW EXECUTE FUNCTION alc_api.fail_ts_instr_update()",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -4608,11 +4608,11 @@ async fn test_confirm_instruction_db_error() {
 
         // Cleanup
         sqlx::query("DROP TRIGGER fail_ts_instr_update ON alc_api.tenko_sessions")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
         sqlx::query("DROP FUNCTION alc_api.fail_ts_instr_update")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -4903,7 +4903,7 @@ async fn test_resume_session_state_logic() {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
             let tenant_id = common::create_test_tenant(
-                &state.pool,
+                state.pool(),
                 &format!("ResumeState{}", uuid::Uuid::new_v4().simple()),
             )
             .await;
@@ -4990,7 +4990,7 @@ async fn test_resume_session_self_declaration_none() {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
             let tenant_id = common::create_test_tenant(
-                &state.pool,
+                state.pool(),
                 &format!("ResumeSd{}", uuid::Uuid::new_v4().simple()),
             )
             .await;
@@ -5022,7 +5022,7 @@ async fn test_resume_session_self_declaration_none() {
                 WHERE id = $1::uuid"#,
             )
             .bind(session_id)
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
@@ -5157,7 +5157,7 @@ async fn test_safety_judgment_diastolic_fail() {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
         let tenant_id = common::create_test_tenant(
-            &state.pool,
+            state.pool(),
             &format!("SJDia{}", uuid::Uuid::new_v4().simple()),
         )
         .await;
@@ -5367,7 +5367,7 @@ async fn test_submit_report_db_error() {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
         let tenant_id = common::create_test_tenant(
-            &state.pool,
+            state.pool(),
             &format!("RptErr{}", uuid::Uuid::new_v4().simple()),
         )
         .await;
@@ -5406,14 +5406,14 @@ async fn test_submit_report_db_error() {
                BEGIN RAISE EXCEPTION 'test: report update blocked'; END;
                $$ LANGUAGE plpgsql"#,
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
         sqlx::query(
             "CREATE OR REPLACE TRIGGER fail_ts_rpt BEFORE UPDATE ON alc_api.tenko_sessions \
              FOR EACH ROW EXECUTE FUNCTION alc_api.fail_ts_rpt()",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -5430,11 +5430,11 @@ async fn test_submit_report_db_error() {
         assert_eq!(res.status(), 500);
 
         sqlx::query("DROP TRIGGER fail_ts_rpt ON alc_api.tenko_sessions")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
         sqlx::query("DROP FUNCTION alc_api.fail_ts_rpt")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -5456,7 +5456,7 @@ async fn test_cancel_session_db_error() {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
         let tenant_id = common::create_test_tenant(
-            &state.pool,
+            state.pool(),
             &format!("CnlErr{}", uuid::Uuid::new_v4().simple()),
         )
         .await;
@@ -5482,14 +5482,14 @@ async fn test_cancel_session_db_error() {
                BEGIN RAISE EXCEPTION 'test: cancel update blocked'; END;
                $$ LANGUAGE plpgsql"#,
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
         sqlx::query(
             "CREATE OR REPLACE TRIGGER fail_ts_cnl BEFORE UPDATE ON alc_api.tenko_sessions \
              FOR EACH ROW EXECUTE FUNCTION alc_api.fail_ts_cnl()",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -5503,11 +5503,11 @@ async fn test_cancel_session_db_error() {
         assert_eq!(res.status(), 500);
 
         sqlx::query("DROP TRIGGER fail_ts_cnl ON alc_api.tenko_sessions")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
         sqlx::query("DROP FUNCTION alc_api.fail_ts_cnl")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -5529,7 +5529,7 @@ async fn test_create_tenko_record_db_error() {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
         let tenant_id = common::create_test_tenant(
-            &state.pool,
+            state.pool(),
             &format!("RecErr{}", uuid::Uuid::new_v4().simple()),
         )
         .await;
@@ -5575,7 +5575,7 @@ async fn test_create_tenko_record_db_error() {
 
         // RENAME employees before confirm_instruction
         sqlx::query("ALTER TABLE alc_api.employees RENAME TO employees_bak")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
@@ -5604,7 +5604,7 @@ async fn test_create_tenko_record_db_error() {
         );
 
         sqlx::query("ALTER TABLE alc_api.employees_bak RENAME TO employees")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -5626,7 +5626,7 @@ async fn test_submit_self_declaration_db_error() {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
         let tenant_id = common::create_test_tenant(
-            &state.pool,
+            state.pool(),
             &format!("DeclErr{}", uuid::Uuid::new_v4().simple()),
         )
         .await;
@@ -5664,14 +5664,14 @@ async fn test_submit_self_declaration_db_error() {
                BEGIN RAISE EXCEPTION 'test: self_declaration update blocked'; END;
                $$ LANGUAGE plpgsql"#,
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
         sqlx::query(
             "CREATE OR REPLACE TRIGGER fail_ts_decl BEFORE UPDATE ON alc_api.tenko_sessions \
              FOR EACH ROW EXECUTE FUNCTION alc_api.fail_ts_decl()",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -5691,11 +5691,11 @@ async fn test_submit_self_declaration_db_error() {
         assert_eq!(res.status(), 500);
 
         sqlx::query("DROP TRIGGER fail_ts_decl ON alc_api.tenko_sessions")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
         sqlx::query("DROP FUNCTION alc_api.fail_ts_decl")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -5717,7 +5717,7 @@ async fn test_perform_safety_judgment_db_error() {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
         let tenant_id = common::create_test_tenant(
-            &state.pool,
+            state.pool(),
             &format!("SJErr{}", uuid::Uuid::new_v4().simple()),
         )
         .await;
@@ -5765,14 +5765,14 @@ async fn test_perform_safety_judgment_db_error() {
                END;
                $$ LANGUAGE plpgsql"#,
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
         sqlx::query(
             "CREATE OR REPLACE TRIGGER fail_ts_sj BEFORE UPDATE ON alc_api.tenko_sessions \
              FOR EACH ROW EXECUTE FUNCTION alc_api.fail_ts_sj()",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -5792,11 +5792,11 @@ async fn test_perform_safety_judgment_db_error() {
         assert_eq!(res.status(), 500);
 
         sqlx::query("DROP TRIGGER fail_ts_sj ON alc_api.tenko_sessions")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
         sqlx::query("DROP FUNCTION alc_api.fail_ts_sj")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -5818,7 +5818,7 @@ async fn test_submit_daily_inspection_db_error() {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
         let tenant_id = common::create_test_tenant(
-            &state.pool,
+            state.pool(),
             &format!("DIErr{}", uuid::Uuid::new_v4().simple()),
         )
         .await;
@@ -5874,14 +5874,14 @@ async fn test_submit_daily_inspection_db_error() {
                END;
                $$ LANGUAGE plpgsql"#,
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
         sqlx::query(
             "CREATE OR REPLACE TRIGGER fail_ts_di BEFORE UPDATE ON alc_api.tenko_sessions \
              FOR EACH ROW EXECUTE FUNCTION alc_api.fail_ts_di()",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -5900,11 +5900,11 @@ async fn test_submit_daily_inspection_db_error() {
         assert_eq!(res.status(), 500);
 
         sqlx::query("DROP TRIGGER fail_ts_di ON alc_api.tenko_sessions")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
         sqlx::query("DROP FUNCTION alc_api.fail_ts_di")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -5926,7 +5926,7 @@ async fn test_submit_carrying_items_db_error() {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
         let tenant_id = common::create_test_tenant(
-            &state.pool,
+            state.pool(),
             &format!("CIErr{}", uuid::Uuid::new_v4().simple()),
         )
         .await;
@@ -6000,7 +6000,7 @@ async fn test_submit_carrying_items_db_error() {
 
         // RENAME tenko_sessions → the lookup SELECT will fail
         sqlx::query("ALTER TABLE alc_api.tenko_sessions RENAME TO tenko_sessions_bak")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
@@ -6018,7 +6018,7 @@ async fn test_submit_carrying_items_db_error() {
         assert_eq!(res.status(), 500);
 
         sqlx::query("ALTER TABLE alc_api.tenko_sessions_bak RENAME TO tenko_sessions")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -6040,7 +6040,7 @@ async fn test_submit_carrying_items_update_db_error() {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
         let tenant_id = common::create_test_tenant(
-            &state.pool,
+            state.pool(),
             &format!("CIUpd{}", uuid::Uuid::new_v4().simple()),
         )
         .await;
@@ -6123,14 +6123,14 @@ async fn test_submit_carrying_items_update_db_error() {
                END;
                $$ LANGUAGE plpgsql"#,
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
         sqlx::query(
             "CREATE OR REPLACE TRIGGER fail_ts_ci_upd BEFORE UPDATE ON alc_api.tenko_sessions \
              FOR EACH ROW EXECUTE FUNCTION alc_api.fail_ts_ci_upd()",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -6148,11 +6148,11 @@ async fn test_submit_carrying_items_update_db_error() {
         assert_eq!(res.status(), 500);
 
         sqlx::query("DROP TRIGGER fail_ts_ci_upd ON alc_api.tenko_sessions")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
         sqlx::query("DROP FUNCTION alc_api.fail_ts_ci_upd")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -6174,7 +6174,7 @@ async fn test_interrupt_session_db_error() {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
         let tenant_id = common::create_test_tenant(
-            &state.pool,
+            state.pool(),
             &format!("IntErr{}", uuid::Uuid::new_v4().simple()),
         )
         .await;
@@ -6200,14 +6200,14 @@ async fn test_interrupt_session_db_error() {
                BEGIN RAISE EXCEPTION 'test: interrupt update blocked'; END;
                $$ LANGUAGE plpgsql"#,
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
         sqlx::query(
             "CREATE OR REPLACE TRIGGER fail_ts_int BEFORE UPDATE ON alc_api.tenko_sessions \
              FOR EACH ROW EXECUTE FUNCTION alc_api.fail_ts_int()",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -6223,11 +6223,11 @@ async fn test_interrupt_session_db_error() {
         assert_eq!(res.status(), 500);
 
         sqlx::query("DROP TRIGGER fail_ts_int ON alc_api.tenko_sessions")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
         sqlx::query("DROP FUNCTION alc_api.fail_ts_int")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -6249,7 +6249,7 @@ async fn test_resume_session_db_error() {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
         let tenant_id = common::create_test_tenant(
-            &state.pool,
+            state.pool(),
             &format!("ResErr{}", uuid::Uuid::new_v4().simple()),
         )
         .await;
@@ -6292,14 +6292,14 @@ async fn test_resume_session_db_error() {
                END;
                $$ LANGUAGE plpgsql"#,
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
         sqlx::query(
             "CREATE OR REPLACE TRIGGER fail_ts_res BEFORE UPDATE ON alc_api.tenko_sessions \
              FOR EACH ROW EXECUTE FUNCTION alc_api.fail_ts_res()",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -6313,11 +6313,11 @@ async fn test_resume_session_db_error() {
         assert_eq!(res.status(), 500);
 
         sqlx::query("DROP TRIGGER fail_ts_res ON alc_api.tenko_sessions")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
         sqlx::query("DROP FUNCTION alc_api.fail_ts_res")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -6377,7 +6377,7 @@ async fn test_post_operation_report_no_instruction_completes() {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
             let tenant_id = common::create_test_tenant(
-                &state.pool,
+                state.pool(),
                 &format!("NoInstr{}", uuid::Uuid::new_v4().simple()),
             )
             .await;

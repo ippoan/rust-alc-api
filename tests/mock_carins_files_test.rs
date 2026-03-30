@@ -1,6 +1,8 @@
 mod common;
 mod mock_helpers;
 
+use uuid::Uuid;
+
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
@@ -9,7 +11,6 @@ use mock_helpers::app_state::setup_mock_app_state;
 use mock_helpers::MockCarinsFilesRepository;
 use rust_alc_api::routes::carins_files::FileRow;
 use rust_alc_api::storage::StorageBackend;
-use uuid::Uuid;
 
 fn test_tenant_id() -> Uuid {
     Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap()
@@ -49,7 +50,7 @@ fn make_file_row(uuid: &str, s3_key: Option<&str>, blob: Option<&str>) -> FileRo
 
 #[tokio::test]
 async fn test_list_files_success_empty() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let base_url = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
 
@@ -71,7 +72,7 @@ async fn test_list_files_success_empty() {
 
 #[tokio::test]
 async fn test_list_files_with_type_filter() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let base_url = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
 
@@ -96,7 +97,7 @@ async fn test_list_files_db_error() {
     let mock_repo = Arc::new(MockCarinsFilesRepository::default());
     mock_repo.fail_next.store(true, Ordering::SeqCst);
 
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.carins_files = mock_repo;
 
     let base_url = common::spawn_test_server(state).await;
@@ -118,7 +119,7 @@ async fn test_list_files_db_error() {
 
 #[tokio::test]
 async fn test_create_file_success() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let base_url = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
 
@@ -150,7 +151,7 @@ async fn test_create_file_success() {
 
 #[tokio::test]
 async fn test_create_file_invalid_base64() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let base_url = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
 
@@ -178,7 +179,7 @@ async fn test_create_file_db_error() {
     let mock_repo = Arc::new(MockCarinsFilesRepository::default());
     mock_repo.fail_next.store(true, Ordering::SeqCst);
 
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.carins_files = mock_repo;
 
     let base_url = common::spawn_test_server(state).await;
@@ -211,7 +212,7 @@ async fn test_create_file_storage_error() {
     let mock_storage = Arc::new(MockStorage::new("test-bucket"));
     mock_storage.fail_upload.store(true, Ordering::SeqCst);
 
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.storage = mock_storage;
 
     let base_url = common::spawn_test_server(state).await;
@@ -241,7 +242,7 @@ async fn test_create_file_storage_error() {
 
 #[tokio::test]
 async fn test_list_recent_success() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let base_url = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
 
@@ -266,7 +267,7 @@ async fn test_list_recent_db_error() {
     let mock_repo = Arc::new(MockCarinsFilesRepository::default());
     mock_repo.fail_next.store(true, Ordering::SeqCst);
 
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.carins_files = mock_repo;
 
     let base_url = common::spawn_test_server(state).await;
@@ -288,7 +289,7 @@ async fn test_list_recent_db_error() {
 
 #[tokio::test]
 async fn test_list_not_attached_success() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let base_url = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
 
@@ -313,7 +314,7 @@ async fn test_list_not_attached_db_error() {
     let mock_repo = Arc::new(MockCarinsFilesRepository::default());
     mock_repo.fail_next.store(true, Ordering::SeqCst);
 
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.carins_files = mock_repo;
 
     let base_url = common::spawn_test_server(state).await;
@@ -339,7 +340,7 @@ async fn test_get_file_found() {
     let mock_repo = Arc::new(MockCarinsFilesRepository::default());
     *mock_repo.return_file.lock().unwrap() = Some(make_file_row(&file_uuid, None, None));
 
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.carins_files = mock_repo;
 
     let base_url = common::spawn_test_server(state).await;
@@ -364,7 +365,7 @@ async fn test_get_file_found() {
 
 #[tokio::test]
 async fn test_get_file_not_found() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let base_url = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
 
@@ -387,7 +388,7 @@ async fn test_get_file_db_error() {
     let mock_repo = Arc::new(MockCarinsFilesRepository::default());
     mock_repo.fail_next.store(true, Ordering::SeqCst);
 
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.carins_files = mock_repo;
 
     let base_url = common::spawn_test_server(state).await;
@@ -421,7 +422,7 @@ async fn test_download_file_s3_key_carins_storage() {
         .await
         .unwrap();
 
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.carins_files = mock_repo;
     state.carins_storage = Some(carins_storage);
 
@@ -470,7 +471,7 @@ async fn test_download_file_s3_key_fallback_storage() {
         .await
         .unwrap();
 
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.carins_files = mock_repo;
     state.storage = main_storage;
     // carins_storage remains None, so fallback to state.storage
@@ -504,7 +505,7 @@ async fn test_download_file_blob() {
     *mock_repo.return_file.lock().unwrap() =
         Some(make_file_row("file-uuid-3", None, Some(&blob_b64)));
 
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.carins_files = mock_repo;
 
     let base_url = common::spawn_test_server(state).await;
@@ -528,7 +529,7 @@ async fn test_download_file_blob() {
 
 #[tokio::test]
 async fn test_download_file_not_found() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let base_url = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
 
@@ -551,7 +552,7 @@ async fn test_download_file_no_s3_key_no_blob() {
     let mock_repo = Arc::new(MockCarinsFilesRepository::default());
     *mock_repo.return_file.lock().unwrap() = Some(make_file_row("file-uuid-empty", None, None));
 
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.carins_files = mock_repo;
 
     let base_url = common::spawn_test_server(state).await;
@@ -576,7 +577,7 @@ async fn test_download_file_db_error() {
     let mock_repo = Arc::new(MockCarinsFilesRepository::default());
     mock_repo.fail_next.store(true, Ordering::SeqCst);
 
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.carins_files = mock_repo;
 
     let base_url = common::spawn_test_server(state).await;
@@ -605,7 +606,7 @@ async fn test_download_file_storage_error() {
         Some(make_file_row("file-uuid-err", Some(s3_key), None));
 
     // Do NOT upload the file to storage, so download will fail
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.carins_files = mock_repo;
 
     let base_url = common::spawn_test_server(state).await;
@@ -630,7 +631,7 @@ async fn test_delete_file_success() {
     let mock_repo = Arc::new(MockCarinsFilesRepository::default());
     *mock_repo.return_affected.lock().unwrap() = true;
 
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.carins_files = mock_repo;
 
     let base_url = common::spawn_test_server(state).await;
@@ -653,7 +654,7 @@ async fn test_delete_file_success() {
 #[tokio::test]
 async fn test_delete_file_not_found() {
     // default return_affected is false
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let base_url = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
 
@@ -676,7 +677,7 @@ async fn test_delete_file_db_error() {
     let mock_repo = Arc::new(MockCarinsFilesRepository::default());
     mock_repo.fail_next.store(true, Ordering::SeqCst);
 
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.carins_files = mock_repo;
 
     let base_url = common::spawn_test_server(state).await;
@@ -701,7 +702,7 @@ async fn test_restore_file_success() {
     let mock_repo = Arc::new(MockCarinsFilesRepository::default());
     *mock_repo.return_affected.lock().unwrap() = true;
 
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.carins_files = mock_repo;
 
     let base_url = common::spawn_test_server(state).await;
@@ -723,7 +724,7 @@ async fn test_restore_file_success() {
 
 #[tokio::test]
 async fn test_restore_file_not_found() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let base_url = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
 
@@ -746,7 +747,7 @@ async fn test_restore_file_db_error() {
     let mock_repo = Arc::new(MockCarinsFilesRepository::default());
     mock_repo.fail_next.store(true, Ordering::SeqCst);
 
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.carins_files = mock_repo;
 
     let base_url = common::spawn_test_server(state).await;
@@ -768,7 +769,7 @@ async fn test_restore_file_db_error() {
 
 #[tokio::test]
 async fn test_no_auth_returns_401() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let base_url = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
 

@@ -13,7 +13,7 @@ async fn test_timecard_punch_db_error() {
         let _flock = crate::common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "TcPunchErr").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "TcPunchErr").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -42,14 +42,14 @@ async fn test_timecard_punch_db_error() {
                BEGIN RAISE EXCEPTION 'test: time_punches insert blocked'; END;
                $$ LANGUAGE plpgsql"#,
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
         sqlx::query(
             "CREATE TRIGGER reject_time_punch BEFORE INSERT ON alc_api.time_punches \
              FOR EACH ROW EXECUTE FUNCTION alc_api.reject_time_punch()",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -66,11 +66,11 @@ async fn test_timecard_punch_db_error() {
 
         // Cleanup
         sqlx::query("DROP TRIGGER reject_time_punch ON alc_api.time_punches")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
         sqlx::query("DROP FUNCTION alc_api.reject_time_punch()")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -85,7 +85,7 @@ async fn test_timecard_create_card_db_error() {
         let _flock = crate::common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "TcCardErr").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "TcCardErr").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -100,14 +100,14 @@ async fn test_timecard_create_card_db_error() {
                BEGIN RAISE EXCEPTION 'test: timecard_cards insert blocked'; END;
                $$ LANGUAGE plpgsql"#,
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
         sqlx::query(
             "CREATE TRIGGER reject_timecard_card BEFORE INSERT ON alc_api.timecard_cards \
              FOR EACH ROW EXECUTE FUNCTION alc_api.reject_timecard_card()",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -126,11 +126,11 @@ async fn test_timecard_create_card_db_error() {
 
         // Cleanup
         sqlx::query("DROP TRIGGER reject_timecard_card ON alc_api.timecard_cards")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
         sqlx::query("DROP FUNCTION alc_api.reject_timecard_card()")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });

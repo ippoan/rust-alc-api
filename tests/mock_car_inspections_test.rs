@@ -2,11 +2,12 @@
 mod common;
 mod mock_helpers;
 
+use uuid::Uuid;
+
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use serde_json::Value;
-use uuid::Uuid;
 
 use rust_alc_api::db::repository::car_inspections::{
     CarInspectionFile, CarInspectionRepository, VehicleCategories,
@@ -100,7 +101,7 @@ async fn spawn_with_mock(mock: Arc<dyn CarInspectionRepository>) -> (String, Str
     let tenant_id = Uuid::new_v4();
     let jwt = common::create_test_jwt(tenant_id, "admin");
 
-    let mut state = mock_helpers::app_state::setup_mock_app_state().await;
+    let mut state = mock_helpers::app_state::setup_mock_app_state();
     state.car_inspections = mock;
     let base_url = common::spawn_test_server(state).await;
 

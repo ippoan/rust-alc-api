@@ -1,6 +1,8 @@
 mod common;
 mod mock_helpers;
 
+use uuid::Uuid;
+
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
@@ -13,9 +15,9 @@ use mock_helpers::MockDtakoVehiclesRepository;
 
 #[tokio::test]
 async fn test_list_vehicles_success() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "MockVehicles").await;
+    let tenant_id = Uuid::new_v4();
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -38,7 +40,7 @@ async fn test_list_vehicles_success() {
 
 #[tokio::test]
 async fn test_list_vehicles_no_auth() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let base_url = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
 
@@ -57,9 +59,9 @@ async fn test_list_vehicles_no_auth() {
 
 #[tokio::test]
 async fn test_list_vehicles_tenant_header() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "MockVehiclesTenant").await;
+    let tenant_id = Uuid::new_v4();
     let client = reqwest::Client::new();
 
     let res = client
@@ -80,7 +82,7 @@ async fn test_list_vehicles_tenant_header() {
 
 #[tokio::test]
 async fn test_list_vehicles_db_error() {
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
 
     // Replace dtako_vehicles with a mock that will fail on next call
     let mock = Arc::new(MockDtakoVehiclesRepository::default());
@@ -88,7 +90,7 @@ async fn test_list_vehicles_db_error() {
     state.dtako_vehicles = mock;
 
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "MockVehiclesErr").await;
+    let tenant_id = Uuid::new_v4();
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 

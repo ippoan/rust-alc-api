@@ -9,7 +9,7 @@ async fn csv_proxy_setup_and_get(
 ) -> reqwest::StatusCode {
     let state = crate::common::setup_app_state().await;
     let base_url = crate::common::spawn_test_server(state.clone()).await;
-    let tenant_id = crate::common::create_test_tenant(&state.pool, tenant_suffix).await;
+    let tenant_id = crate::common::create_test_tenant(state.pool(), tenant_suffix).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let auth = format!("Bearer {jwt}");
     let client = reqwest::Client::new();
@@ -94,7 +94,7 @@ async fn test_invalid_type() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "CsvBad").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "CsvBad").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
 
         let res = reqwest::Client::new()
@@ -116,7 +116,7 @@ async fn test_not_found() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "CsvNF").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "CsvNF").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -157,7 +157,7 @@ async fn test_no_operation_record() {
             let _flock = crate::common::db_rename_flock();
             let state = crate::common::setup_app_state().await;
             let base_url = crate::common::spawn_test_server(state.clone()).await;
-            let tenant_id = crate::common::create_test_tenant(&state.pool, "CsvNoOp").await;
+            let tenant_id = crate::common::create_test_tenant(state.pool(), "CsvNoOp").await;
             let jwt = crate::common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
 

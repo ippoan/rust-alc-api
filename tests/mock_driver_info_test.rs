@@ -1,11 +1,12 @@
 mod common;
 mod mock_helpers;
 
+use uuid::Uuid;
+
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use chrono::Utc;
-use uuid::Uuid;
 
 use mock_helpers::app_state::setup_mock_app_state;
 use rust_alc_api::db::models::*;
@@ -154,7 +155,7 @@ impl DriverInfoRepository for MockDriverInfoWithEmployee {
 // ============================================================
 
 async fn setup_state_with_employee(tenant_id: Uuid, employee_id: Uuid) -> rust_alc_api::AppState {
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.driver_info = Arc::new(MockDriverInfoWithEmployee::new(tenant_id, employee_id));
     state
 }
@@ -222,7 +223,7 @@ async fn test_get_driver_info_employee_not_found() {
 /// GET /api/tenko/driver-info/{employee_id} — no auth → 401
 #[tokio::test]
 async fn test_get_driver_info_no_auth() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let base_url = common::spawn_test_server(state).await;
 
     let employee_id = Uuid::new_v4();
@@ -265,7 +266,7 @@ async fn test_get_driver_info_db_error_get_employee() {
     let mock = Arc::new(MockDriverInfoWithEmployee::new(tenant_id, employee_id));
     mock.fail_get_employee.store(true, Ordering::SeqCst);
 
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.driver_info = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -289,7 +290,7 @@ async fn test_get_driver_info_db_error_get_health_baseline() {
     let mock = Arc::new(MockDriverInfoWithEmployee::new(tenant_id, employee_id));
     mock.fail_get_health_baseline.store(true, Ordering::SeqCst);
 
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.driver_info = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -314,7 +315,7 @@ async fn test_get_driver_info_db_error_get_recent_measurements() {
     mock.fail_get_recent_measurements
         .store(true, Ordering::SeqCst);
 
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.driver_info = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -334,7 +335,7 @@ async fn test_get_driver_info_db_error_get_recent_measurements() {
 #[tokio::test]
 async fn test_get_driver_info_invalid_uuid() {
     let tenant_id = Uuid::new_v4();
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let base_url = common::spawn_test_server(state).await;
 
     let jwt = common::create_test_jwt(tenant_id, "admin");

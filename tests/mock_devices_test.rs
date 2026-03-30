@@ -2,11 +2,12 @@
 mod common;
 mod mock_helpers;
 
+use uuid::Uuid;
+
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use serde_json::Value;
-use uuid::Uuid;
 
 use mock_helpers::app_state::setup_mock_app_state;
 use mock_helpers::MockDeviceRepository;
@@ -21,7 +22,7 @@ async fn test_register_request_success() {
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockDeviceRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -44,7 +45,7 @@ async fn test_register_request_no_device_name() {
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockDeviceRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -65,7 +66,7 @@ async fn test_register_request_db_error() {
 
     let mock = Arc::new(MockDeviceRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -90,7 +91,7 @@ async fn test_registration_status_found() {
 
     let mock = Arc::new(MockDeviceRepository::default());
     mock.return_data.store(true, Ordering::SeqCst);
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -112,7 +113,7 @@ async fn test_registration_status_not_found() {
 
     let mock = Arc::new(MockDeviceRepository::default());
     // return_data=false -> None -> 404
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -132,7 +133,7 @@ async fn test_registration_status_db_error() {
 
     let mock = Arc::new(MockDeviceRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -156,7 +157,7 @@ async fn test_claim_url_flow_success() {
 
     let mock = Arc::new(MockDeviceRepository::default());
     mock.return_data.store(true, Ordering::SeqCst);
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -186,7 +187,7 @@ async fn test_claim_not_found() {
 
     let mock = Arc::new(MockDeviceRepository::default());
     // return_data=false -> None -> error
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -211,7 +212,7 @@ async fn test_claim_db_error() {
 
     let mock = Arc::new(MockDeviceRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -240,7 +241,7 @@ async fn test_device_settings_found() {
 
     let mock = Arc::new(MockDeviceRepository::default());
     mock.return_data.store(true, Ordering::SeqCst);
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -264,7 +265,7 @@ async fn test_device_settings_not_found() {
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockDeviceRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -289,7 +290,7 @@ async fn test_register_fcm_token_success() {
 
     let mock = Arc::new(MockDeviceRepository::default());
     mock.return_data.store(true, Ordering::SeqCst); // lookup_device_tenant returns Some
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -313,7 +314,7 @@ async fn test_register_fcm_token_device_not_found() {
 
     let mock = Arc::new(MockDeviceRepository::default());
     // return_data=false -> lookup_device_tenant returns None -> 404
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -341,7 +342,7 @@ async fn test_report_version_success() {
 
     let mock = Arc::new(MockDeviceRepository::default());
     mock.return_data.store(true, Ordering::SeqCst);
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -367,7 +368,7 @@ async fn test_report_version_device_not_found() {
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockDeviceRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -396,7 +397,7 @@ async fn test_report_watchdog_success() {
 
     let mock = Arc::new(MockDeviceRepository::default());
     mock.return_data.store(true, Ordering::SeqCst);
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -419,7 +420,7 @@ async fn test_report_watchdog_device_not_found() {
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockDeviceRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -447,7 +448,7 @@ async fn test_update_last_login_success() {
 
     let mock = Arc::new(MockDeviceRepository::default());
     mock.return_data.store(true, Ordering::SeqCst);
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -477,7 +478,7 @@ async fn test_fcm_notify_call_no_fcm() {
     std::env::remove_var("FCM_INTERNAL_SECRET");
 
     let mock = Arc::new(MockDeviceRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     // fcm = None
     let base_url = common::spawn_test_server(state).await;
@@ -501,7 +502,7 @@ async fn test_fcm_notify_call_empty_rooms() {
     std::env::remove_var("FCM_INTERNAL_SECRET");
 
     let mock = Arc::new(MockDeviceRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(common::MockFcmSender::new()));
     let base_url = common::spawn_test_server(state).await;
@@ -530,7 +531,7 @@ async fn test_fcm_notify_call_with_devices() {
 
     let mock = Arc::new(MockDeviceRepository::default());
     mock.return_data.store(true, Ordering::SeqCst);
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(common::MockFcmSender::new()));
     let base_url = common::spawn_test_server(state).await;
@@ -557,7 +558,7 @@ async fn test_fcm_notify_call_with_internal_secret_check() {
     std::env::set_var("FCM_INTERNAL_SECRET", "my-secret-123");
 
     let mock = Arc::new(MockDeviceRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(common::MockFcmSender::new()));
     let base_url = common::spawn_test_server(state).await;
@@ -596,7 +597,7 @@ async fn test_fcm_dismiss_test_no_fcm() {
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockDeviceRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     // fcm = None
     let base_url = common::spawn_test_server(state).await;
@@ -618,7 +619,7 @@ async fn test_fcm_dismiss_test_device_not_found() {
 
     let mock = Arc::new(MockDeviceRepository::default());
     // return_data=false -> get_device_tenant_active returns None -> 404
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(common::MockFcmSender::new()));
     let base_url = common::spawn_test_server(state).await;
@@ -640,7 +641,7 @@ async fn test_fcm_dismiss_test_success() {
 
     let mock = Arc::new(MockDeviceRepository::default());
     mock.return_data.store(true, Ordering::SeqCst);
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(common::MockFcmSender::new()));
     let base_url = common::spawn_test_server(state).await;
@@ -667,7 +668,7 @@ async fn test_fcm_all_exclude_no_fcm() {
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockDeviceRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -692,7 +693,7 @@ async fn test_list_devices_empty() {
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockDeviceRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -717,7 +718,7 @@ async fn test_list_devices_no_auth() {
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockDeviceRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -737,7 +738,7 @@ async fn test_list_devices_db_error() {
 
     let mock = Arc::new(MockDeviceRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -761,7 +762,7 @@ async fn test_list_pending_empty() {
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockDeviceRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -787,7 +788,7 @@ async fn test_create_url_token_success() {
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockDeviceRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -817,7 +818,7 @@ async fn test_create_url_token_no_auth() {
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockDeviceRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -838,7 +839,7 @@ async fn test_create_permanent_qr_success() {
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockDeviceRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -867,7 +868,7 @@ async fn test_create_device_owner_token_success() {
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockDeviceRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -897,7 +898,7 @@ async fn test_approve_device_success() {
 
     let mock = Arc::new(MockDeviceRepository::default());
     mock.return_data.store(true, Ordering::SeqCst);
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -926,7 +927,7 @@ async fn test_approve_device_not_found() {
 
     let mock = Arc::new(MockDeviceRepository::default());
     // return_data=false -> find_approve_request returns None -> 404
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -953,7 +954,7 @@ async fn test_approve_by_code_success() {
 
     let mock = Arc::new(MockDeviceRepository::default());
     mock.return_data.store(true, Ordering::SeqCst);
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -978,7 +979,7 @@ async fn test_approve_by_code_not_found() {
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockDeviceRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -1003,7 +1004,7 @@ async fn test_reject_device_success() {
 
     let mock = Arc::new(MockDeviceRepository::default());
     mock.return_data.store(true, Ordering::SeqCst);
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -1027,7 +1028,7 @@ async fn test_reject_device_not_found() {
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockDeviceRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -1053,7 +1054,7 @@ async fn test_disable_device_success() {
 
     let mock = Arc::new(MockDeviceRepository::default());
     mock.return_data.store(true, Ordering::SeqCst);
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -1079,7 +1080,7 @@ async fn test_enable_device_success() {
 
     let mock = Arc::new(MockDeviceRepository::default());
     mock.return_data.store(true, Ordering::SeqCst);
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -1105,7 +1106,7 @@ async fn test_delete_device_success() {
 
     let mock = Arc::new(MockDeviceRepository::default());
     mock.return_data.store(true, Ordering::SeqCst);
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -1129,7 +1130,7 @@ async fn test_delete_device_not_found() {
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockDeviceRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -1155,7 +1156,7 @@ async fn test_update_call_settings_success() {
 
     let mock = Arc::new(MockDeviceRepository::default());
     mock.return_data.store(true, Ordering::SeqCst);
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(common::MockFcmSender::new()));
     let base_url = common::spawn_test_server(state).await;
@@ -1185,7 +1186,7 @@ async fn test_update_call_settings_not_found() {
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockDeviceRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -1214,7 +1215,7 @@ async fn test_fcm_single_device_success() {
 
     let mock = Arc::new(MockDeviceRepository::default());
     mock.return_data.store(true, Ordering::SeqCst);
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(common::MockFcmSender::new()));
     let base_url = common::spawn_test_server(state).await;
@@ -1241,7 +1242,7 @@ async fn test_fcm_single_device_no_fcm() {
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockDeviceRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     // fcm = None
     let base_url = common::spawn_test_server(state).await;
@@ -1267,7 +1268,7 @@ async fn test_fcm_single_device_not_found() {
 
     let mock = Arc::new(MockDeviceRepository::default());
     // return_data=false -> get_device_fcm_token returns None -> 404
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(common::MockFcmSender::new()));
     let base_url = common::spawn_test_server(state).await;
@@ -1293,7 +1294,7 @@ async fn test_fcm_single_device_failing_sender() {
 
     let mock = Arc::new(MockDeviceRepository::default());
     mock.return_data.store(true, Ordering::SeqCst);
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(common::FailingFcmSender));
     let base_url = common::spawn_test_server(state).await;
@@ -1323,7 +1324,7 @@ async fn test_fcm_all_success() {
 
     let mock = Arc::new(MockDeviceRepository::default());
     mock.return_data.store(true, Ordering::SeqCst);
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(common::MockFcmSender::new()));
     let base_url = common::spawn_test_server(state).await;
@@ -1353,7 +1354,7 @@ async fn test_fcm_all_no_fcm() {
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockDeviceRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -1378,7 +1379,7 @@ async fn test_trigger_update_success() {
 
     let mock = Arc::new(MockDeviceRepository::default());
     mock.return_data.store(true, Ordering::SeqCst);
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(common::MockFcmSender::new()));
     let base_url = common::spawn_test_server(state).await;
@@ -1410,7 +1411,7 @@ async fn test_trigger_update_already_updated() {
 
     let mock = Arc::new(MockDeviceRepository::default());
     mock.return_data.store(true, Ordering::SeqCst);
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(common::MockFcmSender::new()));
     let base_url = common::spawn_test_server(state).await;
@@ -1444,7 +1445,7 @@ async fn test_trigger_update_dev_no_secret() {
     std::env::remove_var("FCM_INTERNAL_SECRET");
 
     let mock = Arc::new(MockDeviceRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(common::MockFcmSender::new()));
     let base_url = common::spawn_test_server(state).await;
@@ -1467,7 +1468,7 @@ async fn test_trigger_update_dev_wrong_secret() {
     std::env::set_var("FCM_INTERNAL_SECRET", "correct-secret");
 
     let mock = Arc::new(MockDeviceRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(common::MockFcmSender::new()));
     let base_url = common::spawn_test_server(state).await;
@@ -1492,7 +1493,7 @@ async fn test_trigger_update_dev_success() {
 
     let mock = Arc::new(MockDeviceRepository::default());
     // return_data=false -> list_dev_device_tenant_ids returns empty vec -> no devices
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(common::MockFcmSender::new()));
     let base_url = common::spawn_test_server(state).await;
@@ -1521,7 +1522,7 @@ async fn test_list_devices_with_x_tenant_id() {
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockDeviceRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.devices = mock;
     let base_url = common::spawn_test_server(state).await;
 

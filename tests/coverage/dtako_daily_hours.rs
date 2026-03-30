@@ -9,7 +9,7 @@ async fn test_daily_segments() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "DtakoSeg").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "DtakoSeg").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -20,7 +20,7 @@ async fn test_daily_segments() {
         let emp_id: uuid::Uuid = emp["id"].as_str().unwrap().parse().unwrap();
 
         {
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                 .bind(tenant_id.to_string())
                 .execute(&mut *conn)
@@ -64,7 +64,7 @@ async fn test_daily_segments() {
     test_case!("データなしで空配列を返す", {
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "DtakoSegE").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "DtakoSegE").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();

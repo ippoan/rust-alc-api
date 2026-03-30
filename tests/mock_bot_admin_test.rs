@@ -2,11 +2,12 @@
 mod common;
 mod mock_helpers;
 
+use uuid::Uuid;
+
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use serde_json::Value;
-use uuid::Uuid;
 
 use mock_helpers::app_state::setup_mock_app_state;
 use mock_helpers::MockBotAdminRepository;
@@ -23,7 +24,7 @@ async fn test_list_configs_success() {
         std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
         let mock = Arc::new(MockBotAdminRepository::default());
-        let mut state = setup_mock_app_state().await;
+        let mut state = setup_mock_app_state();
         state.bot_admin = mock;
         let base_url = common::spawn_test_server(state).await;
 
@@ -51,7 +52,7 @@ async fn test_list_configs_forbidden_for_viewer() {
         std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
         let mock = Arc::new(MockBotAdminRepository::default());
-        let mut state = setup_mock_app_state().await;
+        let mut state = setup_mock_app_state();
         state.bot_admin = mock;
         let base_url = common::spawn_test_server(state).await;
 
@@ -78,7 +79,7 @@ async fn test_list_configs_db_error() {
 
         let mock = Arc::new(MockBotAdminRepository::default());
         mock.fail_next.store(true, Ordering::SeqCst);
-        let mut state = setup_mock_app_state().await;
+        let mut state = setup_mock_app_state();
         state.bot_admin = mock;
         let base_url = common::spawn_test_server(state).await;
 
@@ -108,7 +109,7 @@ async fn test_create_config_success() {
         std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
         let mock = Arc::new(MockBotAdminRepository::default());
-        let mut state = setup_mock_app_state().await;
+        let mut state = setup_mock_app_state();
         state.bot_admin = mock;
         let base_url = common::spawn_test_server(state).await;
 
@@ -150,7 +151,7 @@ async fn test_create_config_with_explicit_provider_and_disabled() {
         std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
         let mock = Arc::new(MockBotAdminRepository::default());
-        let mut state = setup_mock_app_state().await;
+        let mut state = setup_mock_app_state();
         state.bot_admin = mock;
         let base_url = common::spawn_test_server(state).await;
 
@@ -187,7 +188,7 @@ async fn test_create_config_forbidden_for_viewer() {
         std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
         let mock = Arc::new(MockBotAdminRepository::default());
-        let mut state = setup_mock_app_state().await;
+        let mut state = setup_mock_app_state();
         state.bot_admin = mock;
         let base_url = common::spawn_test_server(state).await;
 
@@ -220,7 +221,7 @@ async fn test_create_config_db_error() {
 
         let mock = Arc::new(MockBotAdminRepository::default());
         mock.fail_next.store(true, Ordering::SeqCst);
-        let mut state = setup_mock_app_state().await;
+        let mut state = setup_mock_app_state();
         state.bot_admin = mock;
         let base_url = common::spawn_test_server(state).await;
 
@@ -256,7 +257,7 @@ async fn test_update_config_success() {
         std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
         let mock = Arc::new(MockBotAdminRepository::default());
-        let mut state = setup_mock_app_state().await;
+        let mut state = setup_mock_app_state();
         state.bot_admin = mock;
         let base_url = common::spawn_test_server(state).await;
 
@@ -295,7 +296,7 @@ async fn test_update_config_with_secrets() {
         std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
         let mock = Arc::new(MockBotAdminRepository::default());
-        let mut state = setup_mock_app_state().await;
+        let mut state = setup_mock_app_state();
         state.bot_admin = mock;
         let base_url = common::spawn_test_server(state).await;
 
@@ -333,7 +334,7 @@ async fn test_update_config_with_empty_secrets() {
             std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
             let mock = Arc::new(MockBotAdminRepository::default());
-            let mut state = setup_mock_app_state().await;
+            let mut state = setup_mock_app_state();
             state.bot_admin = mock;
             let base_url = common::spawn_test_server(state).await;
 
@@ -370,7 +371,7 @@ async fn test_update_config_invalid_uuid() {
         std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
         let mock = Arc::new(MockBotAdminRepository::default());
-        let mut state = setup_mock_app_state().await;
+        let mut state = setup_mock_app_state();
         state.bot_admin = mock;
         let base_url = common::spawn_test_server(state).await;
 
@@ -403,7 +404,7 @@ async fn test_update_config_forbidden_for_viewer() {
         std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
         let mock = Arc::new(MockBotAdminRepository::default());
-        let mut state = setup_mock_app_state().await;
+        let mut state = setup_mock_app_state();
         state.bot_admin = mock;
         let base_url = common::spawn_test_server(state).await;
 
@@ -437,7 +438,7 @@ async fn test_update_config_db_error() {
 
         let mock = Arc::new(MockBotAdminRepository::default());
         mock.fail_next.store(true, Ordering::SeqCst);
-        let mut state = setup_mock_app_state().await;
+        let mut state = setup_mock_app_state();
         state.bot_admin = mock;
         let base_url = common::spawn_test_server(state).await;
 
@@ -477,7 +478,7 @@ async fn test_upsert_no_encryption_key() {
         std::env::remove_var("SSO_ENCRYPTION_KEY");
 
         let mock = Arc::new(MockBotAdminRepository::default());
-        let mut state = setup_mock_app_state().await;
+        let mut state = setup_mock_app_state();
         state.bot_admin = mock;
         let base_url = common::spawn_test_server(state).await;
 
@@ -518,7 +519,7 @@ async fn test_delete_config_success() {
         std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
         let mock = Arc::new(MockBotAdminRepository::default());
-        let mut state = setup_mock_app_state().await;
+        let mut state = setup_mock_app_state();
         state.bot_admin = mock;
         let base_url = common::spawn_test_server(state).await;
 
@@ -547,7 +548,7 @@ async fn test_delete_config_invalid_uuid() {
         std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
         let mock = Arc::new(MockBotAdminRepository::default());
-        let mut state = setup_mock_app_state().await;
+        let mut state = setup_mock_app_state();
         state.bot_admin = mock;
         let base_url = common::spawn_test_server(state).await;
 
@@ -576,7 +577,7 @@ async fn test_delete_config_forbidden_for_viewer() {
         std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
         let mock = Arc::new(MockBotAdminRepository::default());
-        let mut state = setup_mock_app_state().await;
+        let mut state = setup_mock_app_state();
         state.bot_admin = mock;
         let base_url = common::spawn_test_server(state).await;
 
@@ -606,7 +607,7 @@ async fn test_delete_config_db_error() {
 
         let mock = Arc::new(MockBotAdminRepository::default());
         mock.fail_next.store(true, Ordering::SeqCst);
-        let mut state = setup_mock_app_state().await;
+        let mut state = setup_mock_app_state();
         state.bot_admin = mock;
         let base_url = common::spawn_test_server(state).await;
 

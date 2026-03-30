@@ -16,12 +16,12 @@ async fn setup_admin_for_coverage() -> (
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
     let tenant_id = common::create_test_tenant(
-        &state.pool,
+        state.pool(),
         &format!("AdmCov{}", uuid::Uuid::new_v4().simple()),
     )
     .await;
     let (user_id, _) =
-        common::create_test_user_in_db(&state.pool, tenant_id, "admcov@test.com", "admin").await;
+        common::create_test_user_in_db(state.pool(), tenant_id, "admcov@test.com", "admin").await;
     let jwt = common::create_test_jwt_for_user(user_id, tenant_id, "admcov@test.com", "admin");
     let client = reqwest::Client::new();
     (state, base_url, tenant_id, jwt, client)
@@ -41,7 +41,7 @@ async fn test_tenant_users_list_users_db_error() {
         let (state, base_url, _tenant_id, jwt, client) = setup_admin_for_coverage().await;
 
         sqlx::query("ALTER TABLE alc_api.users RENAME TO users_bak_tu")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
@@ -54,7 +54,7 @@ async fn test_tenant_users_list_users_db_error() {
         assert_eq!(res.status(), 500);
 
         sqlx::query("ALTER TABLE alc_api.users_bak_tu RENAME TO users")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -76,7 +76,7 @@ async fn test_tenant_users_list_invitations_db_error() {
         sqlx::query(
             "ALTER TABLE alc_api.tenant_allowed_emails RENAME TO tenant_allowed_emails_bak_tu",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -91,7 +91,7 @@ async fn test_tenant_users_list_invitations_db_error() {
         sqlx::query(
             "ALTER TABLE alc_api.tenant_allowed_emails_bak_tu RENAME TO tenant_allowed_emails",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
     });
@@ -114,7 +114,7 @@ async fn test_tenant_users_invite_user_db_error() {
         sqlx::query(
             "ALTER TABLE alc_api.tenant_allowed_emails RENAME TO tenant_allowed_emails_bak_inv",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -133,7 +133,7 @@ async fn test_tenant_users_invite_user_db_error() {
         sqlx::query(
             "ALTER TABLE alc_api.tenant_allowed_emails_bak_inv RENAME TO tenant_allowed_emails",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
     });
@@ -155,7 +155,7 @@ async fn test_tenant_users_delete_invitation_db_error() {
         sqlx::query(
             "ALTER TABLE alc_api.tenant_allowed_emails RENAME TO tenant_allowed_emails_bak_di",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -171,7 +171,7 @@ async fn test_tenant_users_delete_invitation_db_error() {
         sqlx::query(
             "ALTER TABLE alc_api.tenant_allowed_emails_bak_di RENAME TO tenant_allowed_emails",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
     });
@@ -191,7 +191,7 @@ async fn test_tenant_users_delete_user_db_error() {
         let (state, base_url, _tenant_id, jwt, client) = setup_admin_for_coverage().await;
 
         sqlx::query("ALTER TABLE alc_api.users RENAME TO users_bak_du")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
@@ -205,7 +205,7 @@ async fn test_tenant_users_delete_user_db_error() {
         assert_eq!(res.status(), 500);
 
         sqlx::query("ALTER TABLE alc_api.users_bak_du RENAME TO users")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -225,7 +225,7 @@ async fn test_bot_list_configs_db_error() {
         let (state, base_url, _tenant_id, jwt, client) = setup_admin_for_coverage().await;
 
         sqlx::query("ALTER TABLE alc_api.bot_configs RENAME TO bot_configs_bak_lc")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
@@ -238,7 +238,7 @@ async fn test_bot_list_configs_db_error() {
         assert_eq!(res.status(), 500);
 
         sqlx::query("ALTER TABLE alc_api.bot_configs_bak_lc RENAME TO bot_configs")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -262,14 +262,14 @@ async fn test_bot_upsert_db_error() {
                BEGIN RAISE EXCEPTION 'test: bot_configs insert blocked'; END;
                $$ LANGUAGE plpgsql"#,
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
         sqlx::query(
             "CREATE TRIGGER reject_bot_config_insert BEFORE INSERT ON alc_api.bot_configs \
              FOR EACH ROW EXECUTE FUNCTION alc_api.reject_bot_config_insert()",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -288,11 +288,11 @@ async fn test_bot_upsert_db_error() {
         assert_eq!(res.status(), 500);
 
         sqlx::query("DROP TRIGGER reject_bot_config_insert ON alc_api.bot_configs")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
         sqlx::query("DROP FUNCTION alc_api.reject_bot_config_insert()")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -312,7 +312,7 @@ async fn test_bot_delete_db_error() {
         let (state, base_url, _tenant_id, jwt, client) = setup_admin_for_coverage().await;
 
         sqlx::query("ALTER TABLE alc_api.bot_configs RENAME TO bot_configs_bak_dc")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
@@ -327,7 +327,7 @@ async fn test_bot_delete_db_error() {
         assert_eq!(res.status(), 500);
 
         sqlx::query("ALTER TABLE alc_api.bot_configs_bak_dc RENAME TO bot_configs")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });

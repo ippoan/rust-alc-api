@@ -1,6 +1,8 @@
 mod common;
 mod mock_helpers;
 
+use uuid::Uuid;
+
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
@@ -10,7 +12,6 @@ use mock_helpers::MockGuidanceRecordsRepository;
 use rust_alc_api::db::models::{GuidanceRecord, GuidanceRecordAttachment};
 use rust_alc_api::db::repository::guidance_records::GuidanceRecordWithName;
 use rust_alc_api::storage::StorageBackend;
-use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -64,7 +65,7 @@ fn make_attachment(record_id: Uuid, storage_url: &str) -> GuidanceRecordAttachme
 }
 
 async fn setup() -> (String, String, Uuid) {
-    let state = mock_helpers::app_state::setup_mock_app_state().await;
+    let state = mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
     let base_url = common::spawn_test_server(state).await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
@@ -73,7 +74,7 @@ async fn setup() -> (String, String, Uuid) {
 }
 
 async fn setup_with_mock(mock: Arc<MockGuidanceRecordsRepository>) -> (String, String, Uuid) {
-    let mut state = mock_helpers::app_state::setup_mock_app_state().await;
+    let mut state = mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
     let jwt = common::create_test_jwt(tenant_id, "admin");
     state.guidance_records = mock;
@@ -86,7 +87,7 @@ async fn setup_with_mock_and_storage(
     mock: Arc<MockGuidanceRecordsRepository>,
     storage: Arc<MockStorage>,
 ) -> (String, String, Uuid) {
-    let mut state = mock_helpers::app_state::setup_mock_app_state().await;
+    let mut state = mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
     let jwt = common::create_test_jwt(tenant_id, "admin");
     state.guidance_records = mock;

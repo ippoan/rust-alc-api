@@ -16,8 +16,8 @@ async fn test_tenant_isolation() {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
 
-            let tenant_a = common::create_test_tenant(&state.pool, "Tenant A").await;
-            let tenant_b = common::create_test_tenant(&state.pool, "Tenant B").await;
+            let tenant_a = common::create_test_tenant(state.pool(), "Tenant A").await;
+            let tenant_b = common::create_test_tenant(state.pool(), "Tenant B").await;
 
             let jwt_a = common::create_test_jwt(tenant_a, "admin");
             let jwt_b = common::create_test_jwt(tenant_b, "admin");
@@ -76,7 +76,7 @@ async fn test_kiosk_mode_with_tenant_header() {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
 
-            let tenant_id = common::create_test_tenant(&state.pool, "Kiosk Tenant").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "Kiosk Tenant").await;
 
             let client = reqwest::Client::new();
 
@@ -102,7 +102,7 @@ async fn test_create_employee() {
     test_case!("従業員を作成できること", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "Create Emp").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "Create Emp").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -130,7 +130,7 @@ async fn test_create_employee_with_optional_fields() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "Opt Fields").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "Opt Fields").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let client = reqwest::Client::new();
 
@@ -164,7 +164,7 @@ async fn test_list_employees_empty() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "Empty List").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "Empty List").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let client = reqwest::Client::new();
 
@@ -187,7 +187,7 @@ async fn test_list_employees_returns_created() {
     test_case!("作成した従業員が一覧に表示されること", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "List Emp").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "List Emp").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -216,7 +216,7 @@ async fn test_get_employee_by_id() {
     test_case!("IDで従業員を取得できること", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "Get Emp").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "Get Emp").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -242,7 +242,7 @@ async fn test_get_employee_not_found() {
     test_case!("存在しない従業員IDで404を返すこと", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "Not Found").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "Not Found").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -263,7 +263,7 @@ async fn test_update_employee() {
     test_case!("従業員情報を更新できること", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "Update Emp").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "Update Emp").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -291,7 +291,7 @@ async fn test_delete_employee() {
     test_case!("従業員を削除できること", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "Delete Emp").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "Delete Emp").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -324,7 +324,7 @@ async fn test_delete_employee_not_found() {
     test_case!("存在しない従業員の削除で404を返すこと", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "Del NF").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "Del NF").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -345,7 +345,7 @@ async fn test_get_employee_by_nfc() {
     test_case!("NFC IDで従業員を取得できること", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "NFC Emp").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "NFC Emp").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -379,7 +379,7 @@ async fn test_get_employee_by_code() {
     test_case!("コードで従業員を取得できること", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "Code Emp").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "Code Emp").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -408,7 +408,7 @@ async fn test_update_nfc_id() {
     test_case!("NFC IDを更新できること", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "NfcUpdate").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "NfcUpdate").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -435,7 +435,7 @@ async fn test_update_license() {
     test_case!("免許情報を更新できること", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "LicUpdate").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "LicUpdate").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -463,7 +463,7 @@ async fn test_update_face_invalid_embedding() {
     test_case!("不正な次元のembeddingで400を返すこと", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "FaceInv").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "FaceInv").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -493,7 +493,7 @@ async fn test_update_face_and_approve() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "FaceApprove").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "FaceApprove").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -549,7 +549,7 @@ async fn test_update_face_and_reject() {
     test_case!("顔登録して却下できること", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "FaceReject").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "FaceReject").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -589,7 +589,7 @@ async fn test_list_face_data_empty() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "Face Data").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "Face Data").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let client = reqwest::Client::new();
 
@@ -618,7 +618,7 @@ async fn test_update_face_valid_embedding_pending() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "FacePend").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "FacePend").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -663,7 +663,7 @@ async fn test_face_approve_visible_in_face_data() {
     test_case!("承認後にface-dataに表示されること", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "FaceVis").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "FaceVis").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -720,7 +720,7 @@ async fn test_face_reject_not_in_face_data() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "FaceRejND").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "FaceRejND").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -776,7 +776,7 @@ async fn test_face_approve_non_pending_returns_404() {
     test_case!("pending以外の従業員の承認で404を返すこと", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "FaceAppNP").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "FaceAppNP").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -802,7 +802,7 @@ async fn test_face_reject_non_pending_returns_404() {
     test_case!("pending以外の従業員の却下で404を返すこと", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "FaceRejNP").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "FaceRejNP").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -829,7 +829,7 @@ async fn test_face_reregister_resets_to_pending() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "FaceReReg").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "FaceReReg").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -899,7 +899,7 @@ async fn test_update_face_nonexistent_employee() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "FaceNE").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "FaceNE").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let client = reqwest::Client::new();
 
@@ -928,7 +928,7 @@ async fn test_update_face_photo_only_no_status_change() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "FacePhoto").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "FacePhoto").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -970,7 +970,7 @@ async fn test_update_employee_code_conflict() {
     test_case!("重複コードで更新すると409", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "CodeConflict").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "CodeConflict").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();

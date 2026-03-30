@@ -2,11 +2,12 @@
 mod common;
 mod mock_helpers;
 
+use uuid::Uuid;
+
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use serde_json::Value;
-use uuid::Uuid;
 
 use mock_helpers::app_state::setup_mock_app_state;
 use mock_helpers::{mock_user, MockAuthRepository};
@@ -29,7 +30,7 @@ async fn test_google_login_existing_user() {
     let mock = Arc::new(MockAuthRepository::default());
     *mock.return_user.lock().unwrap() = Some(user.clone());
 
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.auth = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -62,7 +63,7 @@ async fn test_google_login_new_user_new_tenant() {
 
     // return_user = None → no invitation → no domain tenant → create new tenant + user
     let mock = Arc::new(MockAuthRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.auth = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -101,7 +102,7 @@ async fn test_google_login_new_user_via_invitation() {
         created_at: chrono::Utc::now(),
     });
 
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.auth = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -138,7 +139,7 @@ async fn test_google_login_new_user_via_email_domain() {
         created_at: chrono::Utc::now(),
     });
 
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.auth = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -166,7 +167,7 @@ async fn test_google_login_invalid_token() {
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockAuthRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.auth = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -192,7 +193,7 @@ async fn test_google_login_db_error() {
 
     let mock = Arc::new(MockAuthRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.auth = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -222,7 +223,7 @@ async fn test_refresh_token_success() {
     let mock = Arc::new(MockAuthRepository::default());
     *mock.return_refresh_user.lock().unwrap() = Some(user);
 
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.auth = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -251,7 +252,7 @@ async fn test_refresh_token_invalid() {
 
     // return_refresh_user = None → user not found → 401
     let mock = Arc::new(MockAuthRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.auth = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -277,7 +278,7 @@ async fn test_refresh_token_db_error() {
 
     let mock = Arc::new(MockAuthRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.auth = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -303,7 +304,7 @@ async fn test_me_success() {
 
     let tenant_id = Uuid::new_v4();
     let mock = Arc::new(MockAuthRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.auth = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -333,7 +334,7 @@ async fn test_me_unauthorized() {
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockAuthRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.auth = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -358,7 +359,7 @@ async fn test_logout_success() {
 
     let tenant_id = Uuid::new_v4();
     let mock = Arc::new(MockAuthRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.auth = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -384,7 +385,7 @@ async fn test_logout_unauthorized() {
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockAuthRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.auth = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -410,7 +411,7 @@ async fn test_logout_db_error() {
     let tenant_id = Uuid::new_v4();
     let mock = Arc::new(MockAuthRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.auth = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -445,7 +446,7 @@ async fn test_my_orgs_success() {
         created_at: chrono::Utc::now(),
     });
 
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.auth = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -479,7 +480,7 @@ async fn test_my_orgs_empty() {
     let tenant_id = Uuid::new_v4();
     // return_tenant = None → empty organizations
     let mock = Arc::new(MockAuthRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.auth = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -510,7 +511,7 @@ async fn test_my_orgs_db_error() {
     let tenant_id = Uuid::new_v4();
     let mock = Arc::new(MockAuthRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.auth = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -536,7 +537,7 @@ async fn test_my_orgs_unauthorized() {
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockAuthRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.auth = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -561,7 +562,7 @@ async fn test_create_tenant_success() {
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockAuthRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.auth = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -590,7 +591,7 @@ async fn test_create_tenant_db_error() {
 
     let mock = Arc::new(MockAuthRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.auth = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -623,7 +624,7 @@ async fn test_woff_config_success() {
         woff_id: Some("woff-12345".to_string()),
     });
 
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.auth = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -652,7 +653,7 @@ async fn test_woff_config_not_found() {
 
     // return_sso_config = None → 404
     let mock = Arc::new(MockAuthRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.auth = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -686,7 +687,7 @@ async fn test_woff_config_no_woff_id() {
         woff_id: None, // no woff_id configured
     });
 
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.auth = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -713,7 +714,7 @@ async fn test_woff_config_db_error() {
 
     let mock = Arc::new(MockAuthRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.auth = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -739,7 +740,7 @@ async fn test_woff_config_missing_domain() {
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockAuthRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.auth = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -765,7 +766,7 @@ async fn test_google_code_login_valid_code() {
 
     // GoogleTokenVerifier in test mode accepts "test-valid-code"
     let mock = Arc::new(MockAuthRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.auth = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -796,7 +797,7 @@ async fn test_google_code_login_invalid_code() {
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockAuthRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.auth = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -825,7 +826,7 @@ async fn test_lineworks_redirect_missing_domain() {
     std::env::set_var("OAUTH_STATE_SECRET", "test-state-secret");
 
     let mock = Arc::new(MockAuthRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.auth = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -857,7 +858,7 @@ async fn test_lineworks_redirect_sso_not_found() {
 
     // return_sso_config = None → 404
     let mock = Arc::new(MockAuthRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.auth = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -895,7 +896,7 @@ async fn test_lineworks_redirect_success() {
         woff_id: None,
     });
 
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.auth = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -936,7 +937,7 @@ async fn test_lineworks_redirect_with_address() {
         woff_id: None,
     });
 
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.auth = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -968,7 +969,7 @@ async fn test_lineworks_redirect_db_error() {
 
     let mock = Arc::new(MockAuthRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.auth = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -998,7 +999,7 @@ async fn test_google_redirect_success() {
     std::env::set_var("OAUTH_STATE_SECRET", "test-state-secret");
 
     let mock = Arc::new(MockAuthRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.auth = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -1031,7 +1032,7 @@ async fn test_google_redirect_missing_state_secret() {
     std::env::remove_var("OAUTH_STATE_SECRET");
 
     let mock = Arc::new(MockAuthRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.auth = mock;
     let base_url = common::spawn_test_server(state).await;
 

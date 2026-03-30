@@ -18,12 +18,12 @@ async fn setup_admin() -> (
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
     let tenant_id = common::create_test_tenant(
-        &state.pool,
+        state.pool(),
         &format!("Admin{}", uuid::Uuid::new_v4().simple()),
     )
     .await;
     let (user_id, _) =
-        common::create_test_user_in_db(&state.pool, tenant_id, "admin@test.com", "admin").await;
+        common::create_test_user_in_db(state.pool(), tenant_id, "admin@test.com", "admin").await;
     let jwt = common::create_test_jwt_for_user(user_id, tenant_id, "admin@test.com", "admin");
     let client = reqwest::Client::new();
     (guard, state, base_url, tenant_id, jwt, client)
@@ -140,7 +140,7 @@ async fn test_delete_user() {
 
         // 削除用ユーザーを作成
         let (target_id, _) =
-            common::create_test_user_in_db(&state.pool, tenant_id, "target@test.com", "viewer")
+            common::create_test_user_in_db(state.pool(), tenant_id, "target@test.com", "viewer")
                 .await;
 
         let res = client
@@ -159,9 +159,9 @@ async fn test_users_forbidden_for_viewer() {
     test_case!("viewerロールでユーザー一覧が403", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "ViewerForbid").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "ViewerForbid").await;
         let (user_id, _) =
-            common::create_test_user_in_db(&state.pool, tenant_id, "viewer@test.com", "viewer")
+            common::create_test_user_in_db(state.pool(), tenant_id, "viewer@test.com", "viewer")
                 .await;
         let jwt = common::create_test_jwt_for_user(user_id, tenant_id, "viewer@test.com", "viewer");
         let client = reqwest::Client::new();
@@ -488,7 +488,7 @@ async fn test_bot_forbidden_for_viewer() {
         let (_guard, state, base_url, tenant_id, _jwt, client) = setup_admin().await;
 
         let (viewer_id, _) =
-            common::create_test_user_in_db(&state.pool, tenant_id, "botviewer@test.com", "viewer")
+            common::create_test_user_in_db(state.pool(), tenant_id, "botviewer@test.com", "viewer")
                 .await;
         let viewer_jwt =
             common::create_test_jwt_for_user(viewer_id, tenant_id, "botviewer@test.com", "viewer");
@@ -638,7 +638,7 @@ async fn test_sso_forbidden_for_viewer() {
         let (_guard, state, base_url, tenant_id, _jwt, client) = setup_admin().await;
 
         let (viewer_id, _) =
-            common::create_test_user_in_db(&state.pool, tenant_id, "ssoviewer@test.com", "viewer")
+            common::create_test_user_in_db(state.pool(), tenant_id, "ssoviewer@test.com", "viewer")
                 .await;
         let viewer_jwt =
             common::create_test_jwt_for_user(viewer_id, tenant_id, "ssoviewer@test.com", "viewer");
@@ -686,7 +686,7 @@ async fn test_tenant_users_viewer_forbidden_all() {
         let (_guard, state, base_url, tenant_id, _jwt, client) = setup_admin().await;
 
         let (viewer_id, _) =
-            common::create_test_user_in_db(&state.pool, tenant_id, "tu-viewer@test.com", "viewer")
+            common::create_test_user_in_db(state.pool(), tenant_id, "tu-viewer@test.com", "viewer")
                 .await;
         let viewer_jwt =
             common::create_test_jwt_for_user(viewer_id, tenant_id, "tu-viewer@test.com", "viewer");
@@ -760,7 +760,7 @@ async fn test_delete_user_self_delete() {
         let (_guard, state, base_url, tenant_id, _jwt, client) = setup_admin().await;
 
         let (self_id, _) =
-            common::create_test_user_in_db(&state.pool, tenant_id, "selfdelete@test.com", "admin")
+            common::create_test_user_in_db(state.pool(), tenant_id, "selfdelete@test.com", "admin")
                 .await;
         let self_jwt =
             common::create_test_jwt_for_user(self_id, tenant_id, "selfdelete@test.com", "admin");
@@ -790,9 +790,9 @@ async fn test_bot_upsert_encrypt_error_no_key() {
 
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "BotNoKey").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "BotNoKey").await;
         let (user_id, _) =
-            common::create_test_user_in_db(&state.pool, tenant_id, "botnokey@test.com", "admin")
+            common::create_test_user_in_db(state.pool(), tenant_id, "botnokey@test.com", "admin")
                 .await;
         let jwt =
             common::create_test_jwt_for_user(user_id, tenant_id, "botnokey@test.com", "admin");

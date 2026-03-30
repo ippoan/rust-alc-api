@@ -9,12 +9,12 @@ use serde_json::Value;
 
 async fn setup_tenant_with_user(state: &rust_alc_api::AppState) -> (uuid::Uuid, String) {
     let tenant_id = common::create_test_tenant(
-        &state.pool,
+        state.pool(),
         &format!("Dev{}", uuid::Uuid::new_v4().simple()),
     )
     .await;
     let (user_id, _) =
-        common::create_test_user_in_db(&state.pool, tenant_id, "dev@test.com", "admin").await;
+        common::create_test_user_in_db(state.pool(), tenant_id, "dev@test.com", "admin").await;
     let jwt = common::create_test_jwt_for_user(user_id, tenant_id, "dev@test.com", "admin");
     (tenant_id, jwt)
 }
@@ -197,7 +197,7 @@ async fn test_url_flow_create_token() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "URL Token").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "URL Token").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let client = reqwest::Client::new();
 
@@ -230,7 +230,7 @@ async fn test_url_flow_claim() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "URL Claim").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "URL Claim").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -255,7 +255,7 @@ async fn test_url_flow_device_in_list() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "URL List").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "URL List").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -294,7 +294,7 @@ async fn test_qr_permanent_create() {
     test_case!("管理者がQR永久コードを生成できる", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "QR Perm Create").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "QR Perm Create").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -327,7 +327,7 @@ async fn test_qr_permanent_claim() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "QR Perm Claim").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "QR Perm Claim").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let client = reqwest::Client::new();
 
@@ -378,7 +378,7 @@ async fn test_qr_permanent_in_pending() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "QR Perm Pending").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "QR Perm Pending").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -523,7 +523,7 @@ async fn test_list_devices_returns_ok() {
     test_case!("デバイス一覧が200で返る", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "Empty Devices").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "Empty Devices").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -618,7 +618,7 @@ async fn test_reject_device() {
     test_case!("登録リクエストを拒否できる", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "Reject Dev").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "Reject Dev").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -680,7 +680,7 @@ async fn test_reject_not_found() {
     test_case!("存在しないリクエストIDの拒否で404が返る", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "Reject NF").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "Reject NF").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -707,7 +707,7 @@ async fn test_disable_enable() {
     test_case!("デバイスの無効化と有効化ができる", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "Disable Enable").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "Disable Enable").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -748,7 +748,7 @@ async fn test_delete_device() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "Delete Dev").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "Delete Dev").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -786,7 +786,7 @@ async fn test_delete_not_found() {
     test_case!("存在しないデバイスIDの削除で404が返る", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "Del NF Dev").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "Del NF Dev").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -820,8 +820,8 @@ async fn test_device_operations_from_different_tenant() {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
 
-            let tenant_a = common::create_test_tenant(&state.pool, "Dev Iso A").await;
-            let tenant_b = common::create_test_tenant(&state.pool, "Dev Iso B").await;
+            let tenant_a = common::create_test_tenant(state.pool(), "Dev Iso A").await;
+            let tenant_b = common::create_test_tenant(state.pool(), "Dev Iso B").await;
 
             let jwt_a = common::create_test_jwt(tenant_a, "admin");
             let _jwt_b = common::create_test_jwt(tenant_b, "admin");
@@ -866,7 +866,7 @@ async fn test_register_fcm_token() {
     test_case!("FCMトークンを登録できる", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "FCM Token").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "FCM Token").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -898,7 +898,7 @@ async fn test_update_last_login() {
     test_case!("最終ログイン情報を更新できる", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "Last Login").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "Last Login").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -943,7 +943,7 @@ async fn test_report_version() {
     test_case!("バージョン情報を報告できる", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "Version").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "Version").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -976,7 +976,7 @@ async fn test_report_watchdog() {
     test_case!("Watchdog状態を報告できる", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "Watchdog").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "Watchdog").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -1040,7 +1040,7 @@ async fn test_fcm_notify_call_with_token() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "FCM Notify Token").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "FCM Notify Token").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -1089,7 +1089,7 @@ async fn test_fcm_notify_call_with_exclude() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "FCM Exclude").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "FCM Exclude").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -1140,7 +1140,7 @@ async fn test_fcm_notify_call_with_schedule() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "FCM Schedule").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "FCM Schedule").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -1203,7 +1203,7 @@ async fn test_fcm_notify_call_disabled() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "FCM Disabled").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "FCM Disabled").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -1242,7 +1242,7 @@ async fn test_device_owner_flow() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "Dev Owner").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "Dev Owner").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -1298,7 +1298,7 @@ async fn test_device_settings_after_creation() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "Settings Test").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "Settings Test").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -1332,7 +1332,7 @@ async fn test_update_call_settings() {
     test_case!("着信設定を更新できる", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "Call Settings").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "Call Settings").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -1380,7 +1380,7 @@ async fn test_fcm_dismiss_test_no_fcm_configured() {
     test_case!("MockFcmSenderでfcm-dismiss-testが成功する", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "FCM Dismiss").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "FCM Dismiss").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -1493,7 +1493,7 @@ async fn test_device_owner_claim_and_verify_in_list() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "DO Verify").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "DO Verify").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -1577,7 +1577,7 @@ async fn test_update_call_settings_not_found() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "Call NF").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "Call NF").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let client = reqwest::Client::new();
 
@@ -1645,7 +1645,7 @@ async fn test_trigger_update_dev_with_secret() {
             std::env::set_var("FCM_INTERNAL_SECRET", "test-internal-secret");
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "TrigDevSec").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "TrigDevSec").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -1696,7 +1696,7 @@ async fn test_trigger_update_already_updated() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "TrigAlready").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "TrigAlready").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -1742,7 +1742,7 @@ async fn test_trigger_update_with_device_ids_filter() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "TrigFilter").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "TrigFilter").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -1814,7 +1814,7 @@ async fn test_test_fcm_all_with_token() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "FcmAllToken").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "FcmAllToken").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -1853,7 +1853,7 @@ async fn test_trigger_update_with_jwt() {
     test_case!("JWT認証でtrigger-updateが呼べる", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "TriggerUpd").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "TriggerUpd").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -1930,7 +1930,7 @@ async fn test_trigger_update() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "TrigUpd").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "TrigUpd").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let client = reqwest::Client::new();
 
@@ -1972,7 +1972,7 @@ async fn test_test_fcm_for_device() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "FcmDev").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "FcmDev").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -2016,7 +2016,7 @@ async fn test_test_fcm_all() {
     test_case!("test-fcm-allが正常に動作する", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "FcmAll").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "FcmAll").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -2051,7 +2051,7 @@ async fn test_create_registration_request_db_error() {
     let _flock_guard = common::db_rename_flock();
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    state.pool.close().await;
+    state.pool().close().await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -2075,7 +2075,7 @@ async fn test_check_registration_status_db_error() {
     let _flock_guard = common::db_rename_flock();
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    state.pool.close().await;
+    state.pool().close().await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -2110,7 +2110,7 @@ async fn test_check_registration_status_expired() {
         "#,
     )
     .bind(&code)
-    .execute(&state.pool)
+    .execute(state.pool())
     .await
     .unwrap();
 
@@ -2148,7 +2148,7 @@ async fn test_check_registration_status_no_expires_at() {
         "#,
     )
     .bind(&code)
-    .execute(&state.pool)
+    .execute(state.pool())
     .await
     .unwrap();
 
@@ -2174,7 +2174,7 @@ async fn test_claim_registration_db_error() {
     let _flock_guard = common::db_rename_flock();
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    state.pool.close().await;
+    state.pool().close().await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -2235,7 +2235,7 @@ async fn test_claim_registration_already_used() {
     let _flock_guard = common::db_rename_flock();
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "ClaimUsed").await;
+    let tenant_id = common::create_test_tenant(state.pool(), "ClaimUsed").await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let auth = format!("Bearer {jwt}");
     let client = reqwest::Client::new();
@@ -2273,7 +2273,7 @@ async fn test_claim_registration_unknown_flow_type() {
 
     // CHECK制約を一時的にDROP
     sqlx::query("ALTER TABLE alc_api.device_registration_requests DROP CONSTRAINT IF EXISTS device_registration_requests_flow_type_check")
-        .execute(&state.pool).await.unwrap();
+        .execute(state.pool()).await.unwrap();
 
     let code = format!("UNK{}", uuid::Uuid::new_v4().simple());
     sqlx::query(
@@ -2284,7 +2284,7 @@ async fn test_claim_registration_unknown_flow_type() {
         "#,
     )
     .bind(&code)
-    .execute(&state.pool)
+    .execute(state.pool())
     .await
     .unwrap();
 
@@ -2308,11 +2308,11 @@ async fn test_claim_registration_unknown_flow_type() {
     sqlx::query(
         "DELETE FROM alc_api.device_registration_requests WHERE flow_type = 'unknown_flow'",
     )
-    .execute(&state.pool)
+    .execute(state.pool())
     .await
     .unwrap();
     sqlx::query("ALTER TABLE alc_api.device_registration_requests ADD CONSTRAINT device_registration_requests_flow_type_check CHECK (flow_type IN ('qr_temp', 'qr_permanent', 'url', 'device_owner'))")
-        .execute(&state.pool).await.unwrap();
+        .execute(state.pool()).await.unwrap();
 }
 
 // ============================================================
@@ -2346,13 +2346,13 @@ async fn test_list_devices_db_error() {
     let _flock = common::db_rename_flock();
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "DevListErr").await;
+    let tenant_id = common::create_test_tenant(state.pool(), "DevListErr").await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
-    ensure_table_exists(&state.pool, "devices").await;
+    ensure_table_exists(state.pool(), "devices").await;
     sqlx::query("ALTER TABLE alc_api.devices RENAME TO devices_bak")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -2365,7 +2365,7 @@ async fn test_list_devices_db_error() {
     assert_eq!(res.status(), 500);
 
     sqlx::query("ALTER TABLE alc_api.devices_bak RENAME TO devices")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 }
@@ -2380,13 +2380,13 @@ async fn test_list_pending_db_error() {
     let _flock = common::db_rename_flock();
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "DevPendErr").await;
+    let tenant_id = common::create_test_tenant(state.pool(), "DevPendErr").await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
-    ensure_table_exists(&state.pool, "device_registration_requests").await;
+    ensure_table_exists(state.pool(), "device_registration_requests").await;
     sqlx::query("ALTER TABLE alc_api.device_registration_requests RENAME TO device_registration_requests_bak")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -2399,7 +2399,7 @@ async fn test_list_pending_db_error() {
     assert_eq!(res.status(), 500);
 
     sqlx::query("ALTER TABLE alc_api.device_registration_requests_bak RENAME TO device_registration_requests")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 }
@@ -2414,7 +2414,7 @@ async fn test_create_url_token_db_error() {
     let _flock = common::db_rename_flock();
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "UrlTokErr").await;
+    let tenant_id = common::create_test_tenant(state.pool(), "UrlTokErr").await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -2422,11 +2422,11 @@ async fn test_create_url_token_db_error() {
         r#"CREATE OR REPLACE FUNCTION alc_api.fail_drr_ins_url() RETURNS trigger AS $$
         BEGIN RAISE EXCEPTION 'test error'; END; $$ LANGUAGE plpgsql"#,
     )
-    .execute(&state.pool)
+    .execute(state.pool())
     .await
     .unwrap();
     sqlx::query("CREATE OR REPLACE TRIGGER fail_drr_ins_url BEFORE INSERT ON alc_api.device_registration_requests FOR EACH ROW EXECUTE FUNCTION alc_api.fail_drr_ins_url()")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -2440,11 +2440,11 @@ async fn test_create_url_token_db_error() {
     assert_eq!(res.status(), 500);
 
     sqlx::query("DROP TRIGGER fail_drr_ins_url ON alc_api.device_registration_requests")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
     sqlx::query("DROP FUNCTION alc_api.fail_drr_ins_url")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 }
@@ -2459,7 +2459,7 @@ async fn test_create_device_owner_token_db_error() {
     let _flock = common::db_rename_flock();
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "DOTokErr").await;
+    let tenant_id = common::create_test_tenant(state.pool(), "DOTokErr").await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -2467,11 +2467,11 @@ async fn test_create_device_owner_token_db_error() {
         r#"CREATE OR REPLACE FUNCTION alc_api.fail_drr_ins_do() RETURNS trigger AS $$
         BEGIN RAISE EXCEPTION 'test error'; END; $$ LANGUAGE plpgsql"#,
     )
-    .execute(&state.pool)
+    .execute(state.pool())
     .await
     .unwrap();
     sqlx::query("CREATE OR REPLACE TRIGGER fail_drr_ins_do BEFORE INSERT ON alc_api.device_registration_requests FOR EACH ROW EXECUTE FUNCTION alc_api.fail_drr_ins_do()")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -2487,11 +2487,11 @@ async fn test_create_device_owner_token_db_error() {
     assert_eq!(res.status(), 500);
 
     sqlx::query("DROP TRIGGER fail_drr_ins_do ON alc_api.device_registration_requests")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
     sqlx::query("DROP FUNCTION alc_api.fail_drr_ins_do")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 }
@@ -2506,7 +2506,7 @@ async fn test_create_permanent_qr_db_error() {
     let _flock = common::db_rename_flock();
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "PQRErr").await;
+    let tenant_id = common::create_test_tenant(state.pool(), "PQRErr").await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -2514,11 +2514,11 @@ async fn test_create_permanent_qr_db_error() {
         r#"CREATE OR REPLACE FUNCTION alc_api.fail_drr_ins_pqr() RETURNS trigger AS $$
         BEGIN RAISE EXCEPTION 'test error'; END; $$ LANGUAGE plpgsql"#,
     )
-    .execute(&state.pool)
+    .execute(state.pool())
     .await
     .unwrap();
     sqlx::query("CREATE OR REPLACE TRIGGER fail_drr_ins_pqr BEFORE INSERT ON alc_api.device_registration_requests FOR EACH ROW EXECUTE FUNCTION alc_api.fail_drr_ins_pqr()")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -2534,11 +2534,11 @@ async fn test_create_permanent_qr_db_error() {
     assert_eq!(res.status(), 500);
 
     sqlx::query("DROP TRIGGER fail_drr_ins_pqr ON alc_api.device_registration_requests")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
     sqlx::query("DROP FUNCTION alc_api.fail_drr_ins_pqr")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 }
@@ -2553,15 +2553,15 @@ async fn test_approve_device_db_error() {
     let _flock = common::db_rename_flock();
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "AppDevErr").await;
+    let tenant_id = common::create_test_tenant(state.pool(), "AppDevErr").await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
     let fake_id = uuid::Uuid::new_v4();
 
-    ensure_table_exists(&state.pool, "device_registration_requests").await;
+    ensure_table_exists(state.pool(), "device_registration_requests").await;
     sqlx::query("ALTER TABLE alc_api.device_registration_requests RENAME TO device_registration_requests_bak")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -2575,7 +2575,7 @@ async fn test_approve_device_db_error() {
     assert_eq!(res.status(), 500);
 
     sqlx::query("ALTER TABLE alc_api.device_registration_requests_bak RENAME TO device_registration_requests")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 }
@@ -2590,13 +2590,13 @@ async fn test_approve_by_code_db_error() {
     let _flock = common::db_rename_flock();
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "AppCodeErr").await;
+    let tenant_id = common::create_test_tenant(state.pool(), "AppCodeErr").await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
-    ensure_table_exists(&state.pool, "device_registration_requests").await;
+    ensure_table_exists(state.pool(), "device_registration_requests").await;
     sqlx::query("ALTER TABLE alc_api.device_registration_requests RENAME TO device_registration_requests_bak")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -2609,7 +2609,7 @@ async fn test_approve_by_code_db_error() {
     assert_eq!(res.status(), 500);
 
     sqlx::query("ALTER TABLE alc_api.device_registration_requests_bak RENAME TO device_registration_requests")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 }
@@ -2624,7 +2624,7 @@ async fn test_reject_device_db_error() {
     let _flock = common::db_rename_flock();
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "RejDevErr").await;
+    let tenant_id = common::create_test_tenant(state.pool(), "RejDevErr").await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let auth = format!("Bearer {jwt}");
     let client = reqwest::Client::new();
@@ -2671,11 +2671,11 @@ async fn test_reject_device_db_error() {
         r#"CREATE OR REPLACE FUNCTION alc_api.fail_drr_upd_rej() RETURNS trigger AS $$
         BEGIN RAISE EXCEPTION 'test error'; END; $$ LANGUAGE plpgsql"#,
     )
-    .execute(&state.pool)
+    .execute(state.pool())
     .await
     .unwrap();
     sqlx::query("CREATE OR REPLACE TRIGGER fail_drr_upd_rej BEFORE UPDATE ON alc_api.device_registration_requests FOR EACH ROW EXECUTE FUNCTION alc_api.fail_drr_upd_rej()")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -2688,11 +2688,11 @@ async fn test_reject_device_db_error() {
     assert_eq!(res.status(), 500);
 
     sqlx::query("DROP TRIGGER fail_drr_upd_rej ON alc_api.device_registration_requests")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
     sqlx::query("DROP FUNCTION alc_api.fail_drr_upd_rej")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 }
@@ -2707,7 +2707,7 @@ async fn test_disable_device_db_error() {
     let _flock = common::db_rename_flock();
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "DisDevErr").await;
+    let tenant_id = common::create_test_tenant(state.pool(), "DisDevErr").await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let auth = format!("Bearer {jwt}");
     let client = reqwest::Client::new();
@@ -2718,11 +2718,11 @@ async fn test_disable_device_db_error() {
         r#"CREATE OR REPLACE FUNCTION alc_api.fail_dev_upd_dis() RETURNS trigger AS $$
         BEGIN RAISE EXCEPTION 'test error'; END; $$ LANGUAGE plpgsql"#,
     )
-    .execute(&state.pool)
+    .execute(state.pool())
     .await
     .unwrap();
     sqlx::query("CREATE OR REPLACE TRIGGER fail_dev_upd_dis BEFORE UPDATE ON alc_api.devices FOR EACH ROW EXECUTE FUNCTION alc_api.fail_dev_upd_dis()")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -2735,11 +2735,11 @@ async fn test_disable_device_db_error() {
     assert_eq!(res.status(), 500);
 
     sqlx::query("DROP TRIGGER fail_dev_upd_dis ON alc_api.devices")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
     sqlx::query("DROP FUNCTION alc_api.fail_dev_upd_dis")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 }
@@ -2754,7 +2754,7 @@ async fn test_enable_device_db_error() {
     let _flock = common::db_rename_flock();
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "EnDevErr").await;
+    let tenant_id = common::create_test_tenant(state.pool(), "EnDevErr").await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let auth = format!("Bearer {jwt}");
     let client = reqwest::Client::new();
@@ -2773,11 +2773,11 @@ async fn test_enable_device_db_error() {
         r#"CREATE OR REPLACE FUNCTION alc_api.fail_dev_upd_en() RETURNS trigger AS $$
         BEGIN RAISE EXCEPTION 'test error'; END; $$ LANGUAGE plpgsql"#,
     )
-    .execute(&state.pool)
+    .execute(state.pool())
     .await
     .unwrap();
     sqlx::query("CREATE OR REPLACE TRIGGER fail_dev_upd_en BEFORE UPDATE ON alc_api.devices FOR EACH ROW EXECUTE FUNCTION alc_api.fail_dev_upd_en()")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -2790,11 +2790,11 @@ async fn test_enable_device_db_error() {
     assert_eq!(res.status(), 500);
 
     sqlx::query("DROP TRIGGER fail_dev_upd_en ON alc_api.devices")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
     sqlx::query("DROP FUNCTION alc_api.fail_dev_upd_en")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 }
@@ -2809,7 +2809,7 @@ async fn test_delete_device_db_error() {
     let _flock = common::db_rename_flock();
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "DelDevErr").await;
+    let tenant_id = common::create_test_tenant(state.pool(), "DelDevErr").await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let auth = format!("Bearer {jwt}");
     let client = reqwest::Client::new();
@@ -2820,11 +2820,11 @@ async fn test_delete_device_db_error() {
         r#"CREATE OR REPLACE FUNCTION alc_api.fail_dev_del() RETURNS trigger AS $$
         BEGIN RAISE EXCEPTION 'test error'; END; $$ LANGUAGE plpgsql"#,
     )
-    .execute(&state.pool)
+    .execute(state.pool())
     .await
     .unwrap();
     sqlx::query("CREATE OR REPLACE TRIGGER fail_dev_del BEFORE DELETE ON alc_api.devices FOR EACH ROW EXECUTE FUNCTION alc_api.fail_dev_del()")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -2837,11 +2837,11 @@ async fn test_delete_device_db_error() {
     assert_eq!(res.status(), 500);
 
     sqlx::query("DROP TRIGGER fail_dev_del ON alc_api.devices")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
     sqlx::query("DROP FUNCTION alc_api.fail_dev_del")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 }
@@ -2856,7 +2856,7 @@ async fn test_update_call_settings_db_error() {
     let _flock = common::db_rename_flock();
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "CallSetErr").await;
+    let tenant_id = common::create_test_tenant(state.pool(), "CallSetErr").await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let auth = format!("Bearer {jwt}");
     let client = reqwest::Client::new();
@@ -2867,11 +2867,11 @@ async fn test_update_call_settings_db_error() {
         r#"CREATE OR REPLACE FUNCTION alc_api.fail_dev_upd_call() RETURNS trigger AS $$
         BEGIN RAISE EXCEPTION 'test error'; END; $$ LANGUAGE plpgsql"#,
     )
-    .execute(&state.pool)
+    .execute(state.pool())
     .await
     .unwrap();
     sqlx::query("CREATE OR REPLACE TRIGGER fail_dev_upd_call BEFORE UPDATE ON alc_api.devices FOR EACH ROW EXECUTE FUNCTION alc_api.fail_dev_upd_call()")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -2885,11 +2885,11 @@ async fn test_update_call_settings_db_error() {
     assert_eq!(res.status(), 500);
 
     sqlx::query("DROP TRIGGER fail_dev_upd_call ON alc_api.devices")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
     sqlx::query("DROP FUNCTION alc_api.fail_dev_upd_call")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 }
@@ -2909,9 +2909,9 @@ async fn test_report_watchdog_state_db_error() {
     let fake_id = uuid::Uuid::new_v4();
 
     // RENAME devices so lookup_device_tenant function fails
-    ensure_table_exists(&state.pool, "devices").await;
+    ensure_table_exists(state.pool(), "devices").await;
     sqlx::query("ALTER TABLE alc_api.devices RENAME TO devices_bak")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -2924,7 +2924,7 @@ async fn test_report_watchdog_state_db_error() {
     assert_eq!(res.status(), 500);
 
     sqlx::query("ALTER TABLE alc_api.devices_bak RENAME TO devices")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 }
@@ -2943,9 +2943,9 @@ async fn test_register_fcm_token_db_error() {
 
     let fake_id = uuid::Uuid::new_v4();
 
-    ensure_table_exists(&state.pool, "devices").await;
+    ensure_table_exists(state.pool(), "devices").await;
     sqlx::query("ALTER TABLE alc_api.devices RENAME TO devices_bak")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -2958,7 +2958,7 @@ async fn test_register_fcm_token_db_error() {
     assert_eq!(res.status(), 500);
 
     sqlx::query("ALTER TABLE alc_api.devices_bak RENAME TO devices")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 }
@@ -2977,9 +2977,9 @@ async fn test_update_last_login_db_error() {
 
     let fake_id = uuid::Uuid::new_v4();
 
-    ensure_table_exists(&state.pool, "devices").await;
+    ensure_table_exists(state.pool(), "devices").await;
     sqlx::query("ALTER TABLE alc_api.devices RENAME TO devices_bak")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -2997,7 +2997,7 @@ async fn test_update_last_login_db_error() {
     assert_eq!(res.status(), 500);
 
     sqlx::query("ALTER TABLE alc_api.devices_bak RENAME TO devices")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 }
@@ -3016,9 +3016,9 @@ async fn test_report_version_db_error() {
 
     let fake_id = uuid::Uuid::new_v4();
 
-    ensure_table_exists(&state.pool, "devices").await;
+    ensure_table_exists(state.pool(), "devices").await;
     sqlx::query("ALTER TABLE alc_api.devices RENAME TO devices_bak")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -3035,7 +3035,7 @@ async fn test_report_version_db_error() {
     assert_eq!(res.status(), 500);
 
     sqlx::query("ALTER TABLE alc_api.devices_bak RENAME TO devices")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 }
@@ -3054,9 +3054,9 @@ async fn test_get_device_settings_db_error() {
 
     let fake_id = uuid::Uuid::new_v4();
 
-    ensure_table_exists(&state.pool, "devices").await;
+    ensure_table_exists(state.pool(), "devices").await;
     sqlx::query("ALTER TABLE alc_api.devices RENAME TO devices_bak")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -3068,7 +3068,7 @@ async fn test_get_device_settings_db_error() {
     assert_eq!(res.status(), 500);
 
     sqlx::query("ALTER TABLE alc_api.devices_bak RENAME TO devices")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 }
@@ -3085,9 +3085,9 @@ async fn test_fcm_notify_call_db_error() {
     let base_url = common::spawn_test_server(state.clone()).await;
     let client = reqwest::Client::new();
 
-    ensure_table_exists(&state.pool, "devices").await;
+    ensure_table_exists(state.pool(), "devices").await;
     sqlx::query("ALTER TABLE alc_api.devices RENAME TO devices_bak")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -3100,7 +3100,7 @@ async fn test_fcm_notify_call_db_error() {
     assert_eq!(res.status(), 500);
 
     sqlx::query("ALTER TABLE alc_api.devices_bak RENAME TO devices")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 }
@@ -3119,9 +3119,9 @@ async fn test_fcm_dismiss_test_db_error() {
 
     let fake_id = uuid::Uuid::new_v4();
 
-    ensure_table_exists(&state.pool, "devices").await;
+    ensure_table_exists(state.pool(), "devices").await;
     sqlx::query("ALTER TABLE alc_api.devices RENAME TO devices_bak")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -3134,7 +3134,7 @@ async fn test_fcm_dismiss_test_db_error() {
     assert_eq!(res.status(), 500);
 
     sqlx::query("ALTER TABLE alc_api.devices_bak RENAME TO devices")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 }
@@ -3151,9 +3151,9 @@ async fn test_test_fcm_all_exclude_db_error() {
     let base_url = common::spawn_test_server(state.clone()).await;
     let client = reqwest::Client::new();
 
-    ensure_table_exists(&state.pool, "devices").await;
+    ensure_table_exists(state.pool(), "devices").await;
     sqlx::query("ALTER TABLE alc_api.devices RENAME TO devices_bak")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -3166,7 +3166,7 @@ async fn test_test_fcm_all_exclude_db_error() {
     assert_eq!(res.status(), 500);
 
     sqlx::query("ALTER TABLE alc_api.devices_bak RENAME TO devices")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 }
@@ -3181,15 +3181,15 @@ async fn test_test_fcm_db_error() {
     let _flock = common::db_rename_flock();
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "FcmTestErr").await;
+    let tenant_id = common::create_test_tenant(state.pool(), "FcmTestErr").await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
     let fake_id = uuid::Uuid::new_v4();
 
-    ensure_table_exists(&state.pool, "devices").await;
+    ensure_table_exists(state.pool(), "devices").await;
     sqlx::query("ALTER TABLE alc_api.devices RENAME TO devices_bak")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -3202,7 +3202,7 @@ async fn test_test_fcm_db_error() {
     assert_eq!(res.status(), 500);
 
     sqlx::query("ALTER TABLE alc_api.devices_bak RENAME TO devices")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 }
@@ -3217,13 +3217,13 @@ async fn test_test_fcm_all_db_error() {
     let _flock = common::db_rename_flock();
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "FcmAllErr").await;
+    let tenant_id = common::create_test_tenant(state.pool(), "FcmAllErr").await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
-    ensure_table_exists(&state.pool, "devices").await;
+    ensure_table_exists(state.pool(), "devices").await;
     sqlx::query("ALTER TABLE alc_api.devices RENAME TO devices_bak")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -3236,7 +3236,7 @@ async fn test_test_fcm_all_db_error() {
     assert_eq!(res.status(), 500);
 
     sqlx::query("ALTER TABLE alc_api.devices_bak RENAME TO devices")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 }
@@ -3251,13 +3251,13 @@ async fn test_trigger_update_db_error() {
     let _flock = common::db_rename_flock();
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "TrigUpdErr").await;
+    let tenant_id = common::create_test_tenant(state.pool(), "TrigUpdErr").await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
-    ensure_table_exists(&state.pool, "devices").await;
+    ensure_table_exists(state.pool(), "devices").await;
     sqlx::query("ALTER TABLE alc_api.devices RENAME TO devices_bak")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -3271,7 +3271,7 @@ async fn test_trigger_update_db_error() {
     assert_eq!(res.status(), 500);
 
     sqlx::query("ALTER TABLE alc_api.devices_bak RENAME TO devices")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 }
@@ -3291,9 +3291,9 @@ async fn test_trigger_update_dev_db_error() {
     std::env::set_var("FCM_INTERNAL_SECRET", "test-secret-dev-err");
 
     // RENAME devices so the tenant query in trigger_update_dev fails
-    ensure_table_exists(&state.pool, "devices").await;
+    ensure_table_exists(state.pool(), "devices").await;
     sqlx::query("ALTER TABLE alc_api.devices RENAME TO devices_bak")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -3307,7 +3307,7 @@ async fn test_trigger_update_dev_db_error() {
     assert_eq!(res.status(), 500);
 
     sqlx::query("ALTER TABLE alc_api.devices_bak RENAME TO devices")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 }
@@ -3328,7 +3328,7 @@ async fn test_disable_device_not_found() {
     let _flock_guard = common::db_rename_flock();
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "DisNF").await;
+    let tenant_id = common::create_test_tenant(state.pool(), "DisNF").await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -3354,7 +3354,7 @@ async fn test_enable_device_not_found() {
     let _flock_guard = common::db_rename_flock();
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "EnNF").await;
+    let tenant_id = common::create_test_tenant(state.pool(), "EnNF").await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -3509,7 +3509,7 @@ async fn test_test_fcm_not_found() {
     let _flock_guard = common::db_rename_flock();
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "FcmNF").await;
+    let tenant_id = common::create_test_tenant(state.pool(), "FcmNF").await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -3535,7 +3535,7 @@ async fn test_test_fcm_no_token() {
     let _flock_guard = common::db_rename_flock();
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "FcmNoTok").await;
+    let tenant_id = common::create_test_tenant(state.pool(), "FcmNoTok").await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let auth = format!("Bearer {jwt}");
     let client = reqwest::Client::new();
@@ -3588,7 +3588,7 @@ async fn test_approve_device_not_found() {
     let _flock_guard = common::db_rename_flock();
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "AppNF").await;
+    let tenant_id = common::create_test_tenant(state.pool(), "AppNF").await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -3615,7 +3615,7 @@ async fn test_approve_by_code_not_found() {
     let _flock_guard = common::db_rename_flock();
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "AppCodeNF").await;
+    let tenant_id = common::create_test_tenant(state.pool(), "AppCodeNF").await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -3667,7 +3667,7 @@ async fn test_fcm_notify_schedule_enabled_false() {
     let _flock_guard = common::db_rename_flock();
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "SchedEnF").await;
+    let tenant_id = common::create_test_tenant(state.pool(), "SchedEnF").await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let auth = format!("Bearer {jwt}");
     let client = reqwest::Client::new();
@@ -3713,7 +3713,7 @@ async fn test_fcm_notify_schedule_wrong_day() {
     let _flock_guard = common::db_rename_flock();
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "SchedDay").await;
+    let tenant_id = common::create_test_tenant(state.pool(), "SchedDay").await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let auth = format!("Bearer {jwt}");
     let client = reqwest::Client::new();
@@ -3778,7 +3778,7 @@ async fn test_fcm_notify_schedule_overnight_pass() {
     let _flock_guard = common::db_rename_flock();
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "SchedOvn").await;
+    let tenant_id = common::create_test_tenant(state.pool(), "SchedOvn").await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let auth = format!("Bearer {jwt}");
     let client = reqwest::Client::new();
@@ -3833,7 +3833,7 @@ async fn test_update_call_settings_always_on_fcm() {
     let _flock_guard = common::db_rename_flock();
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "AlwaysOnFcm").await;
+    let tenant_id = common::create_test_tenant(state.pool(), "AlwaysOnFcm").await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let auth = format!("Bearer {jwt}");
     let client = reqwest::Client::new();
@@ -3874,7 +3874,7 @@ async fn test_generate_unique_code_db_error() {
     let _flock_guard = common::db_rename_flock();
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    state.pool.close().await;
+    state.pool().close().await;
     let client = reqwest::Client::new();
 
     // create_registration_request calls generate_unique_code which will fail
@@ -3926,7 +3926,7 @@ async fn test_test_fcm_no_fcm_configured() {
     let _flock_guard = common::db_rename_flock();
     let state = common::setup_app_state_no_fcm().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "FcmNoCfg").await;
+    let tenant_id = common::create_test_tenant(state.pool(), "FcmNoCfg").await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -3952,7 +3952,7 @@ async fn test_test_fcm_all_no_fcm_configured() {
     let _flock_guard = common::db_rename_flock();
     let state = common::setup_app_state_no_fcm().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "FcmAllNoCfg").await;
+    let tenant_id = common::create_test_tenant(state.pool(), "FcmAllNoCfg").await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -4024,7 +4024,7 @@ async fn test_trigger_update_no_fcm_configured() {
     let _flock_guard = common::db_rename_flock();
     let state = common::setup_app_state_no_fcm().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "TrigNoFcm").await;
+    let tenant_id = common::create_test_tenant(state.pool(), "TrigNoFcm").await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -4054,7 +4054,7 @@ async fn test_fcm_notify_call_send_failure() {
     let _flock_guard = common::db_rename_flock();
     let state = common::setup_app_state_failing_fcm().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "FcmFail").await;
+    let tenant_id = common::create_test_tenant(state.pool(), "FcmFail").await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let auth = format!("Bearer {jwt}");
     let client = reqwest::Client::new();
@@ -4097,7 +4097,7 @@ async fn test_test_fcm_send_failure() {
     let _flock_guard = common::db_rename_flock();
     let state = common::setup_app_state_failing_fcm().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "FcmTestFail").await;
+    let tenant_id = common::create_test_tenant(state.pool(), "FcmTestFail").await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let auth = format!("Bearer {jwt}");
     let client = reqwest::Client::new();
@@ -4134,7 +4134,7 @@ async fn test_test_fcm_all_send_failure() {
     let _flock_guard = common::db_rename_flock();
     let state = common::setup_app_state_failing_fcm().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "FcmAllFail").await;
+    let tenant_id = common::create_test_tenant(state.pool(), "FcmAllFail").await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let auth = format!("Bearer {jwt}");
     let client = reqwest::Client::new();
@@ -4170,7 +4170,7 @@ async fn test_test_fcm_all_exclude_send_failure() {
     let _flock_guard = common::db_rename_flock();
     let state = common::setup_app_state_failing_fcm().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "FcmExFail").await;
+    let tenant_id = common::create_test_tenant(state.pool(), "FcmExFail").await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let auth = format!("Bearer {jwt}");
     let client = reqwest::Client::new();
@@ -4231,7 +4231,7 @@ async fn test_trigger_update_send_failure() {
     let _flock_guard = common::db_rename_flock();
     let state = common::setup_app_state_failing_fcm().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "TrigFail").await;
+    let tenant_id = common::create_test_tenant(state.pool(), "TrigFail").await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let auth = format!("Bearer {jwt}");
     let client = reqwest::Client::new();
@@ -4268,7 +4268,7 @@ async fn test_fcm_dismiss_test_with_tokens() {
     let _flock_guard = common::db_rename_flock();
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "DismissTok").await;
+    let tenant_id = common::create_test_tenant(state.pool(), "DismissTok").await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let auth = format!("Bearer {jwt}");
     let client = reqwest::Client::new();
@@ -4316,7 +4316,7 @@ async fn test_claim_url_create_device_db_error() {
     let _flock = common::db_rename_flock();
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "ClmUrlInsErr").await;
+    let tenant_id = common::create_test_tenant(state.pool(), "ClmUrlInsErr").await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -4336,11 +4336,11 @@ async fn test_claim_url_create_device_db_error() {
         r#"CREATE OR REPLACE FUNCTION alc_api.fail_dev_ins_clm_url() RETURNS trigger AS $$
         BEGIN RAISE EXCEPTION 'test error claim url insert'; END; $$ LANGUAGE plpgsql"#,
     )
-    .execute(&state.pool)
+    .execute(state.pool())
     .await
     .unwrap();
     sqlx::query("CREATE OR REPLACE TRIGGER fail_dev_ins_clm_url BEFORE INSERT ON alc_api.devices FOR EACH ROW EXECUTE FUNCTION alc_api.fail_dev_ins_clm_url()")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -4358,11 +4358,11 @@ async fn test_claim_url_create_device_db_error() {
     assert_eq!(body["success"], false);
 
     sqlx::query("DROP TRIGGER fail_dev_ins_clm_url ON alc_api.devices")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
     sqlx::query("DROP FUNCTION alc_api.fail_dev_ins_clm_url")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 }
@@ -4377,7 +4377,7 @@ async fn test_claim_device_owner_create_device_db_error() {
     let _flock = common::db_rename_flock();
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "ClmDOInsErr").await;
+    let tenant_id = common::create_test_tenant(state.pool(), "ClmDOInsErr").await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let auth = format!("Bearer {jwt}");
     let client = reqwest::Client::new();
@@ -4400,11 +4400,11 @@ async fn test_claim_device_owner_create_device_db_error() {
         r#"CREATE OR REPLACE FUNCTION alc_api.fail_dev_ins_clm_do() RETURNS trigger AS $$
         BEGIN RAISE EXCEPTION 'test error claim do insert'; END; $$ LANGUAGE plpgsql"#,
     )
-    .execute(&state.pool)
+    .execute(state.pool())
     .await
     .unwrap();
     sqlx::query("CREATE OR REPLACE TRIGGER fail_dev_ins_clm_do BEFORE INSERT ON alc_api.devices FOR EACH ROW EXECUTE FUNCTION alc_api.fail_dev_ins_clm_do()")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -4421,11 +4421,11 @@ async fn test_claim_device_owner_create_device_db_error() {
     assert_eq!(body["success"], false);
 
     sqlx::query("DROP TRIGGER fail_dev_ins_clm_do ON alc_api.devices")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
     sqlx::query("DROP FUNCTION alc_api.fail_dev_ins_clm_do")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 }
@@ -4440,7 +4440,7 @@ async fn test_claim_qr_permanent_update_db_error() {
     let _flock = common::db_rename_flock();
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "ClmPQRUpdErr").await;
+    let tenant_id = common::create_test_tenant(state.pool(), "ClmPQRUpdErr").await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let auth = format!("Bearer {jwt}");
     let client = reqwest::Client::new();
@@ -4463,11 +4463,11 @@ async fn test_claim_qr_permanent_update_db_error() {
         r#"CREATE OR REPLACE FUNCTION alc_api.fail_drr_upd_clm_pqr() RETURNS trigger AS $$
         BEGIN RAISE EXCEPTION 'test error claim pqr update'; END; $$ LANGUAGE plpgsql"#,
     )
-    .execute(&state.pool)
+    .execute(state.pool())
     .await
     .unwrap();
     sqlx::query("CREATE OR REPLACE TRIGGER fail_drr_upd_clm_pqr BEFORE UPDATE ON alc_api.device_registration_requests FOR EACH ROW EXECUTE FUNCTION alc_api.fail_drr_upd_clm_pqr()")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -4484,11 +4484,11 @@ async fn test_claim_qr_permanent_update_db_error() {
     assert_eq!(body["success"], false);
 
     sqlx::query("DROP TRIGGER fail_drr_upd_clm_pqr ON alc_api.device_registration_requests")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
     sqlx::query("DROP FUNCTION alc_api.fail_drr_upd_clm_pqr")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 }
@@ -4552,11 +4552,11 @@ async fn test_approve_device_create_device_db_error() {
         r#"CREATE OR REPLACE FUNCTION alc_api.fail_dev_ins_appr() RETURNS trigger AS $$
         BEGIN RAISE EXCEPTION 'test error approve insert'; END; $$ LANGUAGE plpgsql"#,
     )
-    .execute(&state.pool)
+    .execute(state.pool())
     .await
     .unwrap();
     sqlx::query("CREATE OR REPLACE TRIGGER fail_dev_ins_appr BEFORE INSERT ON alc_api.devices FOR EACH ROW EXECUTE FUNCTION alc_api.fail_dev_ins_appr()")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -4570,11 +4570,11 @@ async fn test_approve_device_create_device_db_error() {
     assert_eq!(res.status(), 500);
 
     sqlx::query("DROP TRIGGER fail_dev_ins_appr ON alc_api.devices")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
     sqlx::query("DROP FUNCTION alc_api.fail_dev_ins_appr")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 }
@@ -4608,11 +4608,11 @@ async fn test_approve_by_code_create_device_db_error() {
         r#"CREATE OR REPLACE FUNCTION alc_api.fail_dev_ins_appr_code() RETURNS trigger AS $$
         BEGIN RAISE EXCEPTION 'test error approve_by_code insert'; END; $$ LANGUAGE plpgsql"#,
     )
-    .execute(&state.pool)
+    .execute(state.pool())
     .await
     .unwrap();
     sqlx::query("CREATE OR REPLACE TRIGGER fail_dev_ins_appr_code BEFORE INSERT ON alc_api.devices FOR EACH ROW EXECUTE FUNCTION alc_api.fail_dev_ins_appr_code()")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -4625,11 +4625,11 @@ async fn test_approve_by_code_create_device_db_error() {
     assert_eq!(res.status(), 500);
 
     sqlx::query("DROP TRIGGER fail_dev_ins_appr_code ON alc_api.devices")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
     sqlx::query("DROP FUNCTION alc_api.fail_dev_ins_appr_code")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 }
@@ -4648,7 +4648,7 @@ async fn test_report_watchdog_state_update_error() {
     let _flock = common::db_rename_flock();
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "WdgUpdErr").await;
+    let tenant_id = common::create_test_tenant(state.pool(), "WdgUpdErr").await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let auth = format!("Bearer {jwt}");
     let client = reqwest::Client::new();
@@ -4659,11 +4659,11 @@ async fn test_report_watchdog_state_update_error() {
         r#"CREATE OR REPLACE FUNCTION alc_api.fail_dev_upd_wdg() RETURNS trigger AS $$
         BEGIN RAISE EXCEPTION 'test error watchdog update'; END; $$ LANGUAGE plpgsql"#,
     )
-    .execute(&state.pool)
+    .execute(state.pool())
     .await
     .unwrap();
     sqlx::query("CREATE OR REPLACE TRIGGER fail_dev_upd_wdg BEFORE UPDATE ON alc_api.devices FOR EACH ROW EXECUTE FUNCTION alc_api.fail_dev_upd_wdg()")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -4676,11 +4676,11 @@ async fn test_report_watchdog_state_update_error() {
     assert_eq!(res.status(), 500);
 
     sqlx::query("DROP TRIGGER fail_dev_upd_wdg ON alc_api.devices")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
     sqlx::query("DROP FUNCTION alc_api.fail_dev_upd_wdg")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 }
@@ -4695,7 +4695,7 @@ async fn test_register_fcm_token_update_error() {
     let _flock = common::db_rename_flock();
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "FcmTokUpdErr").await;
+    let tenant_id = common::create_test_tenant(state.pool(), "FcmTokUpdErr").await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let auth = format!("Bearer {jwt}");
     let client = reqwest::Client::new();
@@ -4706,11 +4706,11 @@ async fn test_register_fcm_token_update_error() {
         r#"CREATE OR REPLACE FUNCTION alc_api.fail_dev_upd_fcm() RETURNS trigger AS $$
         BEGIN RAISE EXCEPTION 'test error fcm token update'; END; $$ LANGUAGE plpgsql"#,
     )
-    .execute(&state.pool)
+    .execute(state.pool())
     .await
     .unwrap();
     sqlx::query("CREATE OR REPLACE TRIGGER fail_dev_upd_fcm BEFORE UPDATE ON alc_api.devices FOR EACH ROW EXECUTE FUNCTION alc_api.fail_dev_upd_fcm()")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -4723,11 +4723,11 @@ async fn test_register_fcm_token_update_error() {
     assert_eq!(res.status(), 500);
 
     sqlx::query("DROP TRIGGER fail_dev_upd_fcm ON alc_api.devices")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
     sqlx::query("DROP FUNCTION alc_api.fail_dev_upd_fcm")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 }
@@ -4742,7 +4742,7 @@ async fn test_update_last_login_update_error() {
     let _flock = common::db_rename_flock();
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "LastLogUpdErr").await;
+    let tenant_id = common::create_test_tenant(state.pool(), "LastLogUpdErr").await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let auth = format!("Bearer {jwt}");
     let client = reqwest::Client::new();
@@ -4753,11 +4753,11 @@ async fn test_update_last_login_update_error() {
         r#"CREATE OR REPLACE FUNCTION alc_api.fail_dev_upd_login() RETURNS trigger AS $$
         BEGIN RAISE EXCEPTION 'test error last login update'; END; $$ LANGUAGE plpgsql"#,
     )
-    .execute(&state.pool)
+    .execute(state.pool())
     .await
     .unwrap();
     sqlx::query("CREATE OR REPLACE TRIGGER fail_dev_upd_login BEFORE UPDATE ON alc_api.devices FOR EACH ROW EXECUTE FUNCTION alc_api.fail_dev_upd_login()")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -4775,11 +4775,11 @@ async fn test_update_last_login_update_error() {
     assert_eq!(res.status(), 500);
 
     sqlx::query("DROP TRIGGER fail_dev_upd_login ON alc_api.devices")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
     sqlx::query("DROP FUNCTION alc_api.fail_dev_upd_login")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 }
@@ -4794,7 +4794,7 @@ async fn test_report_version_update_error() {
     let _flock = common::db_rename_flock();
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "VerUpdErr").await;
+    let tenant_id = common::create_test_tenant(state.pool(), "VerUpdErr").await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let auth = format!("Bearer {jwt}");
     let client = reqwest::Client::new();
@@ -4805,11 +4805,11 @@ async fn test_report_version_update_error() {
         r#"CREATE OR REPLACE FUNCTION alc_api.fail_dev_upd_ver() RETURNS trigger AS $$
         BEGIN RAISE EXCEPTION 'test error version update'; END; $$ LANGUAGE plpgsql"#,
     )
-    .execute(&state.pool)
+    .execute(state.pool())
     .await
     .unwrap();
     sqlx::query("CREATE OR REPLACE TRIGGER fail_dev_upd_ver BEFORE UPDATE ON alc_api.devices FOR EACH ROW EXECUTE FUNCTION alc_api.fail_dev_upd_ver()")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -4826,11 +4826,11 @@ async fn test_report_version_update_error() {
     assert_eq!(res.status(), 500);
 
     sqlx::query("DROP TRIGGER fail_dev_upd_ver ON alc_api.devices")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
     sqlx::query("DROP FUNCTION alc_api.fail_dev_upd_ver")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 }
@@ -4890,11 +4890,11 @@ async fn test_approve_device_update_request_db_error() {
         r#"CREATE OR REPLACE FUNCTION alc_api.fail_drr_upd_appr() RETURNS trigger AS $$
         BEGIN RAISE EXCEPTION 'test error approve update request'; END; $$ LANGUAGE plpgsql"#,
     )
-    .execute(&state.pool)
+    .execute(state.pool())
     .await
     .unwrap();
     sqlx::query("CREATE OR REPLACE TRIGGER fail_drr_upd_appr BEFORE UPDATE ON alc_api.device_registration_requests FOR EACH ROW EXECUTE FUNCTION alc_api.fail_drr_upd_appr()")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -4908,11 +4908,11 @@ async fn test_approve_device_update_request_db_error() {
     assert_eq!(res.status(), 500);
 
     sqlx::query("DROP TRIGGER fail_drr_upd_appr ON alc_api.device_registration_requests")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
     sqlx::query("DROP FUNCTION alc_api.fail_drr_upd_appr")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 }
@@ -4946,11 +4946,11 @@ async fn test_approve_by_code_update_request_db_error() {
         r#"CREATE OR REPLACE FUNCTION alc_api.fail_drr_upd_appr_code() RETURNS trigger AS $$
         BEGIN RAISE EXCEPTION 'test error approve_by_code update'; END; $$ LANGUAGE plpgsql"#,
     )
-    .execute(&state.pool)
+    .execute(state.pool())
     .await
     .unwrap();
     sqlx::query("CREATE OR REPLACE TRIGGER fail_drr_upd_appr_code BEFORE UPDATE ON alc_api.device_registration_requests FOR EACH ROW EXECUTE FUNCTION alc_api.fail_drr_upd_appr_code()")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -4963,11 +4963,11 @@ async fn test_approve_by_code_update_request_db_error() {
     assert_eq!(res.status(), 500);
 
     sqlx::query("DROP TRIGGER fail_drr_upd_appr_code ON alc_api.device_registration_requests")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
     sqlx::query("DROP FUNCTION alc_api.fail_drr_upd_appr_code")
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 }
@@ -4984,7 +4984,7 @@ async fn test_update_call_settings_fcm_send_failure() {
     let _flock_guard = common::db_rename_flock();
     let state = common::setup_app_state_failing_fcm().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "CallFcmFail").await;
+    let tenant_id = common::create_test_tenant(state.pool(), "CallFcmFail").await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let auth = format!("Bearer {jwt}");
     let client = reqwest::Client::new();

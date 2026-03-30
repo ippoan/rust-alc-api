@@ -6,26 +6,14 @@ use super::*;
 use crate::common::mock_storage::MockStorage;
 
 /// DB 不要の mock AppState を構築。
-/// pool は dummy (mock repo が先にハンドルするため使われない)。
+/// pool: None — mock repo が全ハンドラを処理するため DB 接続不要。
 /// テスト側で `state.xxx` の `fail_next` を設定して DB エラー注入可能。
-pub async fn setup_mock_app_state() -> AppState {
+pub fn setup_mock_app_state() -> AppState {
     // tracing 初期化 (1回だけ)
     let _ = tracing_subscriber::fmt()
         .with_env_filter("warn")
         .with_test_writer()
         .try_init();
-
-    // テスト DB に接続 (一部ルートが pool を直接使う可能性があるため)
-    let pool = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(2)
-        .connect(&crate::common::test_database_url())
-        .await
-        .expect("Failed to connect to test DB");
-
-    sqlx::migrate!("./migrations")
-        .run(&pool)
-        .await
-        .expect("Failed to run migrations");
 
     let storage: Arc<dyn rust_alc_api::storage::StorageBackend> =
         Arc::new(MockStorage::new("test-bucket"));
@@ -34,7 +22,7 @@ pub async fn setup_mock_app_state() -> AppState {
         Arc::new(MockStorage::new("dtako-bucket"));
 
     AppState {
-        pool,
+        pool: None,
         auth: Arc::new(MockAuthRepository::default()),
         bot_admin: Arc::new(MockBotAdminRepository::default()),
         car_inspections: Arc::new(MockCarInspectionRepository::default()),

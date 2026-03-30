@@ -10,7 +10,7 @@ async fn test_calendar_december() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "CalDec").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "CalDec").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
 
         let client = reqwest::Client::new();
@@ -40,7 +40,7 @@ async fn test_auth_jwt_fail_fallback_to_tenant_id() {
             let _flock = crate::common::db_rename_flock();
             let state = crate::common::setup_app_state().await;
             let base_url = crate::common::spawn_test_server(state.clone()).await;
-            let tenant_id = crate::common::create_test_tenant(&state.pool, "AuthFB").await;
+            let tenant_id = crate::common::create_test_tenant(state.pool(), "AuthFB").await;
 
             let client = reqwest::Client::new();
             let res = client
@@ -64,7 +64,7 @@ async fn test_nfc_tag_register_db_error() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "NFCErr").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "NFCErr").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
 
         sqlx::query(
@@ -72,14 +72,14 @@ async fn test_nfc_tag_register_db_error() {
                BEGIN RAISE EXCEPTION 'test: nfc insert blocked'; END;
                $$ LANGUAGE plpgsql"#,
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
         sqlx::query(
             "CREATE TRIGGER reject_nfc_insert BEFORE INSERT ON alc_api.car_inspection_nfc_tags \
              FOR EACH ROW EXECUTE FUNCTION alc_api.reject_nfc_insert()",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -97,11 +97,11 @@ async fn test_nfc_tag_register_db_error() {
         assert_eq!(res.status(), 500);
 
         sqlx::query("DROP TRIGGER reject_nfc_insert ON alc_api.car_inspection_nfc_tags")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
         sqlx::query("DROP FUNCTION alc_api.reject_nfc_insert()")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -118,7 +118,7 @@ async fn test_health_baseline_upsert_db_error() {
             let _flock = crate::common::db_rename_flock();
             let state = crate::common::setup_app_state().await;
             let base_url = crate::common::spawn_test_server(state.clone()).await;
-            let tenant_id = crate::common::create_test_tenant(&state.pool, "HBErr").await;
+            let tenant_id = crate::common::create_test_tenant(state.pool(), "HBErr").await;
             let jwt = crate::common::create_test_jwt(tenant_id, "admin");
 
             sqlx::query(
@@ -126,14 +126,14 @@ async fn test_health_baseline_upsert_db_error() {
                BEGIN RAISE EXCEPTION 'test: health baseline insert blocked'; END;
                $$ LANGUAGE plpgsql"#,
             )
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
             sqlx::query(
                 "CREATE TRIGGER reject_hb_insert BEFORE INSERT ON alc_api.employee_health_baselines \
                  FOR EACH ROW EXECUTE FUNCTION alc_api.reject_hb_insert()",
             )
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
@@ -153,11 +153,11 @@ async fn test_health_baseline_upsert_db_error() {
             assert_eq!(res.status(), 500);
 
             sqlx::query("DROP TRIGGER reject_hb_insert ON alc_api.employee_health_baselines")
-                .execute(&state.pool)
+                .execute(state.pool())
                 .await
                 .unwrap();
             sqlx::query("DROP FUNCTION alc_api.reject_hb_insert()")
-                .execute(&state.pool)
+                .execute(state.pool())
                 .await
                 .unwrap();
         }
@@ -175,7 +175,7 @@ async fn test_carrying_items_empty_tenant() {
             let _flock = crate::common::db_rename_flock();
             let state = crate::common::setup_app_state().await;
             let base_url = crate::common::spawn_test_server(state.clone()).await;
-            let tenant_id = crate::common::create_test_tenant(&state.pool, "CarryEmpty").await;
+            let tenant_id = crate::common::create_test_tenant(state.pool(), "CarryEmpty").await;
             let jwt = crate::common::create_test_jwt(tenant_id, "admin");
 
             let client = reqwest::Client::new();
@@ -205,7 +205,7 @@ async fn test_car_inspection_get_by_id_success() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "CarInsGet").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "CarInsGet").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
 
         // INSERT a minimal car_inspection row with all 96 NOT NULL columns
@@ -292,7 +292,7 @@ async fn test_car_inspection_get_by_id_success() {
             ) RETURNING id"#,
         )
         .bind(tenant_id)
-        .fetch_one(&state.pool)
+        .fetch_one(state.pool())
         .await
         .unwrap();
 
@@ -310,7 +310,7 @@ async fn test_car_inspection_get_by_id_success() {
         // Cleanup
         sqlx::query("DELETE FROM alc_api.car_inspection WHERE id = $1")
             .bind(row)
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -329,7 +329,7 @@ async fn test_update_employee_non_conflict_db_error() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "EmpUpdISE").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "EmpUpdISE").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -346,14 +346,14 @@ async fn test_update_employee_non_conflict_db_error() {
                BEGIN RAISE EXCEPTION 'test: generic update error'; END;
                $$ LANGUAGE plpgsql"#,
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
         sqlx::query(
             "CREATE TRIGGER reject_emp_update_ise BEFORE UPDATE ON alc_api.employees \
              FOR EACH ROW EXECUTE FUNCTION alc_api.reject_emp_update_ise()",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -371,11 +371,11 @@ async fn test_update_employee_non_conflict_db_error() {
 
         // Cleanup
         sqlx::query("DROP TRIGGER reject_emp_update_ise ON alc_api.employees")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
         sqlx::query("DROP FUNCTION alc_api.reject_emp_update_ise()")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -394,13 +394,13 @@ async fn test_communication_items_list_db_error() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "CommListErr").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "CommListErr").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
 
         // Rename employees table so the JOIN in the second query fails,
         // but the COUNT query (no join) succeeds.
         sqlx::query("ALTER TABLE alc_api.employees RENAME TO employees_bak")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
@@ -415,7 +415,7 @@ async fn test_communication_items_list_db_error() {
 
         // Restore
         sqlx::query("ALTER TABLE alc_api.employees_bak RENAME TO employees")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -436,12 +436,12 @@ async fn test_sso_upsert_no_client_secret() {
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
         let tenant_id = crate::common::create_test_tenant(
-            &state.pool,
+            state.pool(),
             &format!("SSONoSec{}", uuid::Uuid::new_v4().simple()),
         )
         .await;
         let (user_id, _) = crate::common::create_test_user_in_db(
-            &state.pool,
+            state.pool(),
             tenant_id,
             "ssonosec@test.com",
             "admin",
@@ -493,12 +493,12 @@ async fn test_bot_admin_update_with_secrets() {
             let state = crate::common::setup_app_state().await;
             let base_url = crate::common::spawn_test_server(state.clone()).await;
             let tenant_id = crate::common::create_test_tenant(
-                &state.pool,
+                state.pool(),
                 &format!("BotUpd{}", uuid::Uuid::new_v4().simple()),
             )
             .await;
             let (user_id, _) = crate::common::create_test_user_in_db(
-                &state.pool,
+                state.pool(),
                 tenant_id,
                 "botupd@test.com",
                 "admin",
@@ -554,7 +554,7 @@ async fn test_bot_admin_update_with_secrets() {
             // Cleanup
             sqlx::query("DELETE FROM alc_api.bot_configs WHERE id = $1::uuid")
                 .bind(&config_id)
-                .execute(&state.pool)
+                .execute(state.pool())
                 .await
                 .unwrap();
         }
@@ -579,12 +579,12 @@ async fn test_bot_admin_update_without_secrets() {
             let state = crate::common::setup_app_state().await;
             let base_url = crate::common::spawn_test_server(state.clone()).await;
             let tenant_id = crate::common::create_test_tenant(
-                &state.pool,
+                state.pool(),
                 &format!("BotNone{}", uuid::Uuid::new_v4().simple()),
             )
             .await;
             let (user_id, _) = crate::common::create_test_user_in_db(
-                &state.pool,
+                state.pool(),
                 tenant_id,
                 "botnone@test.com",
                 "admin",
@@ -636,7 +636,7 @@ async fn test_bot_admin_update_without_secrets() {
             // Cleanup
             sqlx::query("DELETE FROM alc_api.bot_configs WHERE id = $1::uuid")
                 .bind(&config_id)
-                .execute(&state.pool)
+                .execute(state.pool())
                 .await
                 .unwrap();
         }
@@ -656,7 +656,7 @@ async fn test_tenko_schedules_batch_empty() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "TSchEmpty").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "TSchEmpty").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
 
         let client = reqwest::Client::new();
@@ -686,7 +686,7 @@ async fn test_tenko_schedules_pre_op_no_instruction() {
             let _flock = crate::common::db_rename_flock();
             let state = crate::common::setup_app_state().await;
             let base_url = crate::common::spawn_test_server(state.clone()).await;
-            let tenant_id = crate::common::create_test_tenant(&state.pool, "TSchNoIns").await;
+            let tenant_id = crate::common::create_test_tenant(state.pool(), "TSchNoIns").await;
             let jwt = crate::common::create_test_jwt(tenant_id, "admin");
 
             let client = reqwest::Client::new();
@@ -724,7 +724,7 @@ async fn test_tenko_schedules_list_with_filters() {
             let _flock = crate::common::db_rename_flock();
             let state = crate::common::setup_app_state().await;
             let base_url = crate::common::spawn_test_server(state.clone()).await;
-            let tenant_id = crate::common::create_test_tenant(&state.pool, "TSchFilt").await;
+            let tenant_id = crate::common::create_test_tenant(state.pool(), "TSchFilt").await;
             let jwt = crate::common::create_test_jwt(tenant_id, "admin");
 
             let emp_id = "00000000-0000-0000-0000-000000000099";
@@ -757,7 +757,7 @@ async fn test_tenko_schedules_batch_db_error() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "TSchBErr").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "TSchBErr").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
 
         // Create trigger to block INSERT
@@ -766,14 +766,14 @@ async fn test_tenko_schedules_batch_db_error() {
                BEGIN RAISE EXCEPTION 'test: schedule insert blocked'; END;
                $$ LANGUAGE plpgsql"#,
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
         sqlx::query(
             "CREATE TRIGGER reject_sched_insert BEFORE INSERT ON alc_api.tenko_schedules \
              FOR EACH ROW EXECUTE FUNCTION alc_api.reject_sched_insert()",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -796,11 +796,11 @@ async fn test_tenko_schedules_batch_db_error() {
 
         // Cleanup
         sqlx::query("DROP TRIGGER reject_sched_insert ON alc_api.tenko_schedules")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
         sqlx::query("DROP FUNCTION alc_api.reject_sched_insert()")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -819,7 +819,7 @@ async fn test_equipment_failures_list_with_filters() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "EqFltFilt").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "EqFltFilt").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
 
         let session_id = "00000000-0000-0000-0000-000000000099";
@@ -851,7 +851,7 @@ async fn test_equipment_failures_csv_with_date_filters() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "EqCsvFlt").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "EqCsvFlt").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
 
         let client = reqwest::Client::new();
@@ -882,7 +882,7 @@ async fn test_tenko_webhooks_invalid_event_type() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "WHInvEvt").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "WHInvEvt").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
 
         let client = reqwest::Client::new();
@@ -913,7 +913,7 @@ async fn test_tenko_webhooks_get_and_delete_not_found() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "WHGetDel").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "WHGetDel").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -955,7 +955,7 @@ async fn test_tenko_webhooks_get_and_delete_not_found() {
         // Cleanup: delete the actual webhook
         sqlx::query("DELETE FROM alc_api.webhook_configs WHERE id = $1::uuid")
             .bind(webhook_id)
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -974,7 +974,7 @@ async fn test_tenko_webhooks_upsert_db_error() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "WHUpsErr").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "WHUpsErr").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
 
         // Create trigger to block INSERT on webhook_configs
@@ -983,14 +983,14 @@ async fn test_tenko_webhooks_upsert_db_error() {
                BEGIN RAISE EXCEPTION 'test: webhook insert blocked'; END;
                $$ LANGUAGE plpgsql"#,
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
         sqlx::query(
             "CREATE TRIGGER reject_wh_insert BEFORE INSERT ON alc_api.webhook_configs \
              FOR EACH ROW EXECUTE FUNCTION alc_api.reject_wh_insert()",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -1009,11 +1009,11 @@ async fn test_tenko_webhooks_upsert_db_error() {
 
         // Cleanup
         sqlx::query("DROP TRIGGER reject_wh_insert ON alc_api.webhook_configs")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
         sqlx::query("DROP FUNCTION alc_api.reject_wh_insert()")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -1032,12 +1032,12 @@ async fn test_tenko_webhooks_delete_db_error() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "WHDelErr").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "WHDelErr").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
 
         // RENAME webhook_configs to cause DB error
         sqlx::query("ALTER TABLE alc_api.webhook_configs RENAME TO webhook_configs_bak")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
@@ -1053,7 +1053,7 @@ async fn test_tenko_webhooks_delete_db_error() {
 
         // Restore
         sqlx::query("ALTER TABLE alc_api.webhook_configs_bak RENAME TO webhook_configs")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -1074,12 +1074,12 @@ async fn test_carins_files_list_db_error() {
             let _flock = crate::common::db_rename_flock();
             let state = crate::common::setup_app_state().await;
             let base_url = crate::common::spawn_test_server(state.clone()).await;
-            let tenant_id = crate::common::create_test_tenant(&state.pool, "CFiles").await;
+            let tenant_id = crate::common::create_test_tenant(state.pool(), "CFiles").await;
             let jwt = crate::common::create_test_jwt(tenant_id, "admin");
 
             // RENAME files table
             sqlx::query("ALTER TABLE alc_api.files RENAME TO files_bak")
-                .execute(&state.pool)
+                .execute(state.pool())
                 .await
                 .unwrap();
 
@@ -1114,7 +1114,7 @@ async fn test_carins_files_list_db_error() {
 
             // Restore
             sqlx::query("ALTER TABLE alc_api.files_bak RENAME TO files")
-                .execute(&state.pool)
+                .execute(state.pool())
                 .await
                 .unwrap();
         }
@@ -1130,14 +1130,14 @@ async fn test_carins_files_get_download_db_error() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "CFGet").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "CFGet").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
 
         let fake_uuid = "00000000-0000-0000-0000-000000000099";
 
         // RENAME files table
         sqlx::query("ALTER TABLE alc_api.files RENAME TO files_bak")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
@@ -1163,7 +1163,7 @@ async fn test_carins_files_get_download_db_error() {
 
         // Restore
         sqlx::query("ALTER TABLE alc_api.files_bak RENAME TO files")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -1178,7 +1178,7 @@ async fn test_carins_files_create_and_download() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "CFCreate").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "CFCreate").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
 
         let client = reqwest::Client::new();
@@ -1223,7 +1223,7 @@ async fn test_carins_files_create_db_error() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "CFIns").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "CFIns").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
 
         // Create trigger to reject INSERT on files
@@ -1232,14 +1232,14 @@ async fn test_carins_files_create_db_error() {
                BEGIN RAISE EXCEPTION 'test: files insert blocked'; END;
                $$ LANGUAGE plpgsql"#,
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
         sqlx::query(
             "CREATE TRIGGER reject_files_insert BEFORE INSERT ON alc_api.files \
              FOR EACH ROW EXECUTE FUNCTION alc_api.reject_files_insert()",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -1261,11 +1261,11 @@ async fn test_carins_files_create_db_error() {
 
         // Cleanup
         sqlx::query("DROP TRIGGER IF EXISTS reject_files_insert ON alc_api.files")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
         sqlx::query("DROP FUNCTION IF EXISTS alc_api.reject_files_insert()")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -1280,7 +1280,7 @@ async fn test_carins_files_delete_not_found() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "CFDel").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "CFDel").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
 
         let client = reqwest::Client::new();
@@ -1315,7 +1315,7 @@ async fn test_carins_files_download_not_found() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "CFDnf").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "CFDnf").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
 
         let client = reqwest::Client::new();
@@ -1343,7 +1343,7 @@ async fn test_carins_files_download_storage_error() {
             let _flock = crate::common::db_rename_flock();
             let state = crate::common::setup_app_state().await;
             let base_url = crate::common::spawn_test_server(state.clone()).await;
-            let tenant_id = crate::common::create_test_tenant(&state.pool, "CFStErr").await;
+            let tenant_id = crate::common::create_test_tenant(state.pool(), "CFStErr").await;
             let jwt = crate::common::create_test_jwt(tenant_id, "admin");
 
             // Insert a file row with s3_key but don't upload to mock storage
@@ -1354,7 +1354,7 @@ async fn test_carins_files_download_storage_error() {
         )
         .bind(file_uuid)
         .bind(tenant_id)
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -1384,7 +1384,7 @@ async fn test_measurements_start_db_error() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "MStart").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "MStart").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
 
         let emp = crate::common::create_test_employee(
@@ -1399,7 +1399,7 @@ async fn test_measurements_start_db_error() {
 
         // RENAME measurements table
         sqlx::query("ALTER TABLE alc_api.measurements RENAME TO measurements_bak")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
@@ -1415,7 +1415,7 @@ async fn test_measurements_start_db_error() {
 
         // Restore
         sqlx::query("ALTER TABLE alc_api.measurements_bak RENAME TO measurements")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -1430,7 +1430,7 @@ async fn test_measurements_update_deserialize_error() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "MUpDe").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "MUpDe").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
 
         let client = reqwest::Client::new();
@@ -1476,7 +1476,7 @@ async fn test_measurements_update_db_error() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "MUpDb").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "MUpDb").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
 
         let client = reqwest::Client::new();
@@ -1500,7 +1500,7 @@ async fn test_measurements_update_db_error() {
 
         // RENAME measurements
         sqlx::query("ALTER TABLE alc_api.measurements RENAME TO measurements_bak")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
@@ -1516,7 +1516,7 @@ async fn test_measurements_update_db_error() {
 
         // Restore
         sqlx::query("ALTER TABLE alc_api.measurements_bak RENAME TO measurements")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -1531,12 +1531,12 @@ async fn test_measurements_list_db_error() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "MList").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "MList").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
 
         // RENAME measurements
         sqlx::query("ALTER TABLE alc_api.measurements RENAME TO measurements_bak")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
@@ -1551,7 +1551,7 @@ async fn test_measurements_list_db_error() {
 
         // Restore
         sqlx::query("ALTER TABLE alc_api.measurements_bak RENAME TO measurements")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -1566,7 +1566,7 @@ async fn test_measurements_video_proxy() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "MVid").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "MVid").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -1649,12 +1649,12 @@ async fn test_measurements_video_db_error() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "MVErr").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "MVErr").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
 
         // RENAME measurements
         sqlx::query("ALTER TABLE alc_api.measurements RENAME TO measurements_bak")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
@@ -1670,7 +1670,7 @@ async fn test_measurements_video_db_error() {
 
         // Restore
         sqlx::query("ALTER TABLE alc_api.measurements_bak RENAME TO measurements")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -1685,7 +1685,7 @@ async fn test_measurements_create_kiosk_db_error() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "MKiosk").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "MKiosk").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
 
         let client = reqwest::Client::new();
@@ -1701,7 +1701,7 @@ async fn test_measurements_create_kiosk_db_error() {
 
         // RENAME measurements
         sqlx::query("ALTER TABLE alc_api.measurements RENAME TO measurements_bak")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
@@ -1724,7 +1724,7 @@ async fn test_measurements_create_kiosk_db_error() {
 
         // Restore
         sqlx::query("ALTER TABLE alc_api.measurements_bak RENAME TO measurements")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -1743,7 +1743,7 @@ async fn test_tenko_records_csv_with_filters_and_phase2() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "TRCsv").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "TRCsv").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -1766,7 +1766,7 @@ async fn test_tenko_records_csv_with_filters_and_phase2() {
         .bind(session_id)
         .bind(tenant_id)
         .bind(emp_id)
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -1812,7 +1812,7 @@ async fn test_tenko_records_csv_with_filters_and_phase2() {
         .bind(&self_declaration)
         .bind(&safety_judgment)
         .bind(&daily_inspection)
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -1860,7 +1860,7 @@ async fn test_tenko_records_csv_all_ok_inspection() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "TRCok").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "TRCok").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -1882,7 +1882,7 @@ async fn test_tenko_records_csv_all_ok_inspection() {
         .bind(session_id)
         .bind(tenant_id)
         .bind(emp_id)
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -1909,7 +1909,7 @@ async fn test_tenko_records_csv_all_ok_inspection() {
         .bind(session_id)
         .bind(emp_id)
         .bind(&daily_inspection)
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -1943,7 +1943,7 @@ async fn test_carins_files_blob_download() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "CFBlob").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "CFBlob").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -1960,7 +1960,7 @@ async fn test_carins_files_blob_download() {
             .bind(blob_uuid)
             .bind(tenant_id)
             .bind(&blob_b64)
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
@@ -1971,7 +1971,7 @@ async fn test_carins_files_blob_download() {
             )
             .bind(no_data_uuid)
             .bind(tenant_id)
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
@@ -1999,7 +1999,7 @@ async fn test_carins_files_blob_download() {
         sqlx::query("DELETE FROM alc_api.files WHERE uuid IN ($1, $2)")
             .bind(blob_uuid)
             .bind(no_data_uuid)
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -2026,7 +2026,7 @@ async fn test_carins_files_upload_storage_error() {
             let state = rust_alc_api::AppState { storage, ..state };
 
             let base_url = crate::common::spawn_test_server(state.clone()).await;
-            let tenant_id = crate::common::create_test_tenant(&state.pool, "CFUpErr").await;
+            let tenant_id = crate::common::create_test_tenant(state.pool(), "CFUpErr").await;
             let jwt = crate::common::create_test_jwt(tenant_id, "admin");
             let client = reqwest::Client::new();
 
@@ -2062,7 +2062,7 @@ async fn test_measurements_create_deserialize_error() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "MDeser").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "MDeser").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -2087,7 +2087,7 @@ async fn test_measurements_list_date_filters() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "MDateF").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "MDateF").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -2114,7 +2114,7 @@ async fn test_measurements_face_photo_proxy() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "MFace").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "MFace").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -2141,7 +2141,7 @@ async fn test_measurements_face_photo_proxy() {
         sqlx::query("UPDATE alc_api.measurements SET face_photo_url = $1 WHERE id = $2::uuid")
             .bind(&face_url)
             .bind(m_id)
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
@@ -2161,7 +2161,7 @@ async fn test_measurements_face_photo_proxy() {
             "UPDATE alc_api.measurements SET face_photo_url = 'https://unknown-host/bad-key' WHERE id = $1::uuid",
         )
         .bind(m_id)
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
         let res = client
@@ -2183,7 +2183,7 @@ async fn test_measurements_video_extract_key_error() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "MVidEK").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "MVidEK").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -2201,7 +2201,7 @@ async fn test_measurements_video_extract_key_error() {
             "UPDATE alc_api.measurements SET video_url = 'https://unknown/bad' WHERE id = $1::uuid",
         )
         .bind(mid)
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
         let res = client
@@ -2218,7 +2218,7 @@ async fn test_measurements_video_extract_key_error() {
         sqlx::query("UPDATE alc_api.measurements SET video_url = $1 WHERE id = $2::uuid")
             .bind(&fake_url)
             .bind(mid)
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
         let res = client
@@ -2242,7 +2242,7 @@ async fn test_guidance_records_crud_full() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "GuidRec").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "GuidRec").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -2504,7 +2504,7 @@ async fn test_restraint_report_pdf_no_driver() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "PdfNoDr").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "PdfNoDr").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -2530,7 +2530,7 @@ async fn test_restraint_report_pdf_with_driver() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "PdfDr").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "PdfDr").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -2570,7 +2570,7 @@ async fn test_restraint_report_pdf_specific_driver() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "PdfSp").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "PdfSp").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -2601,7 +2601,7 @@ async fn test_restraint_report_pdf_stream() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "PdfStr").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "PdfStr").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -2640,7 +2640,7 @@ async fn test_restraint_report_pdf_stream_no_driver() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "PdfStrNo").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "PdfStrNo").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -2669,7 +2669,7 @@ async fn test_restraint_report_pdf_april_fiscal_year() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "PdfApr").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "PdfApr").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -2698,7 +2698,7 @@ async fn test_restraint_report_pdf_empty_name_driver_skipped() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "PdfEmp").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "PdfEmp").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -2708,7 +2708,7 @@ async fn test_restraint_report_pdf_empty_name_driver_skipped() {
             "INSERT INTO alc_api.employees (tenant_id, name, code) VALUES ($1, '', 'EMPTY01')",
         )
         .bind(tenant_id)
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -2737,14 +2737,14 @@ async fn test_restraint_report_pdf_db_error() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "PdfDbErr").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "PdfDbErr").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
 
         // RENAME employees to break the query
         sqlx::query("ALTER TABLE alc_api.employees RENAME TO employees_pdf_bak")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
@@ -2760,7 +2760,7 @@ async fn test_restraint_report_pdf_db_error() {
 
         // Restore
         sqlx::query("ALTER TABLE alc_api.employees_pdf_bak RENAME TO employees")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -2775,14 +2775,14 @@ async fn test_restraint_report_pdf_stream_db_error() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "PdfStrErr").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "PdfStrErr").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
 
         // RENAME employees to break the query
         sqlx::query("ALTER TABLE alc_api.employees RENAME TO employees_pdf_bak")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
@@ -2803,7 +2803,7 @@ async fn test_restraint_report_pdf_stream_db_error() {
 
         // Restore
         sqlx::query("ALTER TABLE alc_api.employees_pdf_bak RENAME TO employees")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -2821,7 +2821,7 @@ async fn test_restraint_report_pdf_stream_report_build_error() {
             let _flock = crate::common::db_rename_flock();
             let state = crate::common::setup_app_state().await;
             let base_url = crate::common::spawn_test_server(state.clone()).await;
-            let tenant_id = crate::common::create_test_tenant(&state.pool, "PdfSkip").await;
+            let tenant_id = crate::common::create_test_tenant(state.pool(), "PdfSkip").await;
             let jwt = crate::common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -2834,7 +2834,7 @@ async fn test_restraint_report_pdf_stream_report_build_error() {
             sqlx::query(
             "ALTER TABLE alc_api.dtako_daily_work_segments RENAME TO dtako_daily_work_segments_bak",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -2856,7 +2856,7 @@ async fn test_restraint_report_pdf_stream_report_build_error() {
             sqlx::query(
             "ALTER TABLE alc_api.dtako_daily_work_segments_bak RENAME TO dtako_daily_work_segments",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
         }
@@ -2876,11 +2876,11 @@ async fn test_guidance_records_list_db_error() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "GRLErr").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "GRLErr").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
 
         sqlx::query("ALTER TABLE alc_api.guidance_records RENAME TO guidance_records_bak")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
@@ -2894,7 +2894,7 @@ async fn test_guidance_records_list_db_error() {
         assert_eq!(res.status(), 500);
 
         sqlx::query("ALTER TABLE alc_api.guidance_records_bak RENAME TO guidance_records")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -2909,7 +2909,7 @@ async fn test_guidance_records_create_db_error() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "GRCErr").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "GRCErr").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -2921,7 +2921,7 @@ async fn test_guidance_records_create_db_error() {
         let emp_id = emp["id"].as_str().unwrap();
 
         sqlx::query("ALTER TABLE alc_api.guidance_records RENAME TO guidance_records_bak")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
@@ -2939,7 +2939,7 @@ async fn test_guidance_records_create_db_error() {
         assert_eq!(res.status(), 500);
 
         sqlx::query("ALTER TABLE alc_api.guidance_records_bak RENAME TO guidance_records")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -2964,7 +2964,7 @@ async fn test_guidance_records_upload_storage_error() {
         let state = rust_alc_api::AppState { storage, ..state };
 
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "GRUpErr").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "GRUpErr").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -3016,7 +3016,7 @@ async fn test_guidance_records_attachment_db_insert_error() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "GRAtErr").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "GRAtErr").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -3044,7 +3044,7 @@ async fn test_guidance_records_attachment_db_insert_error() {
         sqlx::query(
             "ALTER TABLE alc_api.guidance_record_attachments RENAME TO guidance_record_attachments_bak",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -3067,7 +3067,7 @@ async fn test_guidance_records_attachment_db_insert_error() {
         sqlx::query(
             "ALTER TABLE alc_api.guidance_record_attachments_bak RENAME TO guidance_record_attachments",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
     });
@@ -3082,7 +3082,7 @@ async fn test_guidance_records_download_bad_storage_url() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "GRBUrl").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "GRBUrl").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -3115,7 +3115,7 @@ async fn test_guidance_records_download_bad_storage_url() {
         )
         .bind(att_id)
         .bind(rec_uuid)
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -3140,7 +3140,7 @@ async fn test_guidance_records_download_storage_error() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "GRDlErr").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "GRDlErr").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -3173,7 +3173,7 @@ async fn test_guidance_records_download_storage_error() {
         )
         .bind(att_id)
         .bind(rec_uuid)
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -3211,7 +3211,7 @@ async fn test_upload_face_photo_storage_error() {
         let state = rust_alc_api::AppState { storage, ..state };
 
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "UpFace").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "UpFace").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -3252,7 +3252,7 @@ async fn test_upload_report_audio_storage_error() {
         let state = rust_alc_api::AppState { storage, ..state };
 
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "UpAudio").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "UpAudio").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -3293,7 +3293,7 @@ async fn test_upload_blow_video_storage_error() {
         let state = rust_alc_api::AppState { storage, ..state };
 
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "UpVideo").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "UpVideo").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -3331,7 +3331,7 @@ async fn test_guidance_records_list_rename_error() {
             let _flock = crate::common::db_rename_flock();
             let state = crate::common::setup_app_state().await;
             let base_url = crate::common::spawn_test_server(state.clone()).await;
-            let tenant_id = crate::common::create_test_tenant(&state.pool, "GrListE").await;
+            let tenant_id = crate::common::create_test_tenant(state.pool(), "GrListE").await;
             let jwt = crate::common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -3357,7 +3357,7 @@ async fn test_guidance_records_list_rename_error() {
 
             // employees を RENAME → COUNT は成功するが WITH RECURSIVE の LEFT JOIN employees が失敗
             sqlx::query("ALTER TABLE alc_api.employees RENAME TO employees_bak")
-                .execute(&state.pool)
+                .execute(state.pool())
                 .await
                 .unwrap();
 
@@ -3370,7 +3370,7 @@ async fn test_guidance_records_list_rename_error() {
             assert_eq!(res.status(), 500);
 
             sqlx::query("ALTER TABLE alc_api.employees_bak RENAME TO employees")
-                .execute(&state.pool)
+                .execute(state.pool())
                 .await
                 .unwrap();
         }
@@ -3390,7 +3390,7 @@ async fn test_guidance_records_attachment_extract_key_error() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "GrExtK").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "GrExtK").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -3424,7 +3424,7 @@ async fn test_guidance_records_attachment_extract_key_error() {
         )
         .bind(att_id)
         .bind(uuid::Uuid::parse_str(rec_id).unwrap())
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 

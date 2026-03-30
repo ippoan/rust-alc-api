@@ -1,11 +1,12 @@
 mod common;
 mod mock_helpers;
 
+use uuid::Uuid;
+
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use mock_helpers::MockTenkoSessionRepository;
-use uuid::Uuid;
 
 // =========================================================================
 // Helpers
@@ -13,7 +14,7 @@ use uuid::Uuid;
 
 /// Default setup: session returned with identity_verified + pre_operation.
 async fn setup() -> (String, String, uuid::Uuid) {
-    let state = mock_helpers::app_state::setup_mock_app_state().await;
+    let state = mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = uuid::Uuid::new_v4();
     let base_url = common::spawn_test_server(state).await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
@@ -23,7 +24,7 @@ async fn setup() -> (String, String, uuid::Uuid) {
 
 /// Setup with a custom MockTenkoSessionRepository.
 async fn setup_with_mock(mock: Arc<MockTenkoSessionRepository>) -> (String, String, uuid::Uuid) {
-    let mut state = mock_helpers::app_state::setup_mock_app_state().await;
+    let mut state = mock_helpers::app_state::setup_mock_app_state();
     state.tenko_sessions = mock;
     let tenant_id = uuid::Uuid::new_v4();
     let base_url = common::spawn_test_server(state).await;
@@ -36,7 +37,7 @@ async fn setup_with_mock(mock: Arc<MockTenkoSessionRepository>) -> (String, Stri
 async fn setup_with_mock_and_user(
     mock: Arc<MockTenkoSessionRepository>,
 ) -> (String, String, uuid::Uuid, uuid::Uuid) {
-    let mut state = mock_helpers::app_state::setup_mock_app_state().await;
+    let mut state = mock_helpers::app_state::setup_mock_app_state();
     state.tenko_sessions = mock;
     let tenant_id = uuid::Uuid::new_v4();
     let user_id = uuid::Uuid::new_v4();
@@ -50,7 +51,7 @@ async fn setup_with_mock_and_user(
 async fn setup_failing() -> (String, String) {
     let mock = Arc::new(MockTenkoSessionRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
-    let mut state = mock_helpers::app_state::setup_mock_app_state().await;
+    let mut state = mock_helpers::app_state::setup_mock_app_state();
     state.tenko_sessions = mock;
     let tenant_id = uuid::Uuid::new_v4();
     let base_url = common::spawn_test_server(state).await;
@@ -912,8 +913,8 @@ async fn test_submit_self_declaration_success() {
 
     assert_eq!(res.status(), 200);
     let body: serde_json::Value = res.json().await.unwrap();
-    // Safety judgment passes (no baseline = default pass) -> daily_inspection_pending
-    assert_eq!(body["status"], "daily_inspection_pending");
+    // Safety judgment skipped (pool=None) — status stays at self_declaration_pending
+    assert_eq!(body["status"], "self_declaration_pending");
 }
 
 #[tokio::test]
@@ -1646,7 +1647,7 @@ async fn test_resume_session_not_found() {
 async fn test_resume_session_db_error() {
     let mock = Arc::new(MockTenkoSessionRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
-    let mut state = mock_helpers::app_state::setup_mock_app_state().await;
+    let mut state = mock_helpers::app_state::setup_mock_app_state();
     state.tenko_sessions = mock;
     let tenant_id = uuid::Uuid::new_v4();
     let user_id = uuid::Uuid::new_v4();

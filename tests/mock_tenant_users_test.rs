@@ -1,6 +1,8 @@
 mod common;
 mod mock_helpers;
 
+use uuid::Uuid;
+
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
@@ -9,7 +11,7 @@ use mock_helpers::MockTenantUsersRepository;
 /// Helper: set up mock AppState and spawn test server with admin JWT.
 /// Returns (base_url, auth_header, user_id, tenant_id).
 async fn setup() -> (String, String, uuid::Uuid, uuid::Uuid) {
-    let state = mock_helpers::app_state::setup_mock_app_state().await;
+    let state = mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = uuid::Uuid::new_v4();
     let user_id = uuid::Uuid::new_v4();
     let base_url = common::spawn_test_server(state).await;
@@ -22,7 +24,7 @@ async fn setup() -> (String, String, uuid::Uuid, uuid::Uuid) {
 async fn setup_failing() -> (String, String, uuid::Uuid, uuid::Uuid) {
     let mock = Arc::new(MockTenantUsersRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
-    let mut state = mock_helpers::app_state::setup_mock_app_state().await;
+    let mut state = mock_helpers::app_state::setup_mock_app_state();
     state.tenant_users = mock;
     let tenant_id = uuid::Uuid::new_v4();
     let user_id = uuid::Uuid::new_v4();
@@ -55,7 +57,7 @@ async fn test_list_users_success() {
 
 #[tokio::test]
 async fn test_list_users_forbidden_for_viewer() {
-    let state = mock_helpers::app_state::setup_mock_app_state().await;
+    let state = mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = uuid::Uuid::new_v4();
     let base_url = common::spawn_test_server(state).await;
     let jwt = common::create_test_jwt(tenant_id, "viewer");
@@ -73,7 +75,7 @@ async fn test_list_users_forbidden_for_viewer() {
 
 #[tokio::test]
 async fn test_list_users_no_auth() {
-    let state = mock_helpers::app_state::setup_mock_app_state().await;
+    let state = mock_helpers::app_state::setup_mock_app_state();
     let base_url = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
 
@@ -122,7 +124,7 @@ async fn test_list_invitations_success() {
 
 #[tokio::test]
 async fn test_list_invitations_forbidden_for_viewer() {
-    let state = mock_helpers::app_state::setup_mock_app_state().await;
+    let state = mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = uuid::Uuid::new_v4();
     let base_url = common::spawn_test_server(state).await;
     let jwt = common::create_test_jwt(tenant_id, "viewer");
@@ -140,7 +142,7 @@ async fn test_list_invitations_forbidden_for_viewer() {
 
 #[tokio::test]
 async fn test_list_invitations_no_auth() {
-    let state = mock_helpers::app_state::setup_mock_app_state().await;
+    let state = mock_helpers::app_state::setup_mock_app_state();
     let base_url = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
 
@@ -156,7 +158,7 @@ async fn test_list_invitations_no_auth() {
 async fn test_list_invitations_db_error() {
     let mock = Arc::new(MockTenantUsersRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
-    let mut state = mock_helpers::app_state::setup_mock_app_state().await;
+    let mut state = mock_helpers::app_state::setup_mock_app_state();
     state.tenant_users = mock;
     let tenant_id = uuid::Uuid::new_v4();
     let base_url = common::spawn_test_server(state).await;
@@ -259,7 +261,7 @@ async fn test_invite_user_invalid_role() {
 
 #[tokio::test]
 async fn test_invite_user_forbidden_for_viewer() {
-    let state = mock_helpers::app_state::setup_mock_app_state().await;
+    let state = mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = uuid::Uuid::new_v4();
     let base_url = common::spawn_test_server(state).await;
     let jwt = common::create_test_jwt(tenant_id, "viewer");
@@ -280,7 +282,7 @@ async fn test_invite_user_forbidden_for_viewer() {
 
 #[tokio::test]
 async fn test_invite_user_no_auth() {
-    let state = mock_helpers::app_state::setup_mock_app_state().await;
+    let state = mock_helpers::app_state::setup_mock_app_state();
     let base_url = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
 
@@ -299,7 +301,7 @@ async fn test_invite_user_no_auth() {
 async fn test_invite_user_db_error() {
     let mock = Arc::new(MockTenantUsersRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
-    let mut state = mock_helpers::app_state::setup_mock_app_state().await;
+    let mut state = mock_helpers::app_state::setup_mock_app_state();
     state.tenant_users = mock;
     let tenant_id = uuid::Uuid::new_v4();
     let base_url = common::spawn_test_server(state).await;
@@ -340,7 +342,7 @@ async fn test_delete_invitation_success() {
 
 #[tokio::test]
 async fn test_delete_invitation_forbidden_for_viewer() {
-    let state = mock_helpers::app_state::setup_mock_app_state().await;
+    let state = mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = uuid::Uuid::new_v4();
     let base_url = common::spawn_test_server(state).await;
     let jwt = common::create_test_jwt(tenant_id, "viewer");
@@ -359,7 +361,7 @@ async fn test_delete_invitation_forbidden_for_viewer() {
 
 #[tokio::test]
 async fn test_delete_invitation_no_auth() {
-    let state = mock_helpers::app_state::setup_mock_app_state().await;
+    let state = mock_helpers::app_state::setup_mock_app_state();
     let base_url = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
     let id = uuid::Uuid::new_v4();
@@ -376,7 +378,7 @@ async fn test_delete_invitation_no_auth() {
 async fn test_delete_invitation_db_error() {
     let mock = Arc::new(MockTenantUsersRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
-    let mut state = mock_helpers::app_state::setup_mock_app_state().await;
+    let mut state = mock_helpers::app_state::setup_mock_app_state();
     state.tenant_users = mock;
     let tenant_id = uuid::Uuid::new_v4();
     let base_url = common::spawn_test_server(state).await;
@@ -429,7 +431,7 @@ async fn test_delete_user_cannot_delete_self() {
 
 #[tokio::test]
 async fn test_delete_user_forbidden_for_viewer() {
-    let state = mock_helpers::app_state::setup_mock_app_state().await;
+    let state = mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = uuid::Uuid::new_v4();
     let base_url = common::spawn_test_server(state).await;
     let jwt = common::create_test_jwt(tenant_id, "viewer");
@@ -448,7 +450,7 @@ async fn test_delete_user_forbidden_for_viewer() {
 
 #[tokio::test]
 async fn test_delete_user_no_auth() {
-    let state = mock_helpers::app_state::setup_mock_app_state().await;
+    let state = mock_helpers::app_state::setup_mock_app_state();
     let base_url = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
     let id = uuid::Uuid::new_v4();
@@ -465,7 +467,7 @@ async fn test_delete_user_no_auth() {
 async fn test_delete_user_db_error() {
     let mock = Arc::new(MockTenantUsersRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
-    let mut state = mock_helpers::app_state::setup_mock_app_state().await;
+    let mut state = mock_helpers::app_state::setup_mock_app_state();
     state.tenant_users = mock;
     let tenant_id = uuid::Uuid::new_v4();
     let user_id = uuid::Uuid::new_v4();
@@ -492,8 +494,8 @@ async fn test_delete_user_db_error() {
 async fn test_list_users_with_data() {
     use rust_alc_api::db::repository::tenant_users::UserRow;
 
-    let mut state = mock_helpers::app_state::setup_mock_app_state().await;
-    let tenant_id = common::create_test_tenant(&state.pool, "MockTUData").await;
+    let mut state = mock_helpers::app_state::setup_mock_app_state();
+    let tenant_id = Uuid::new_v4();
 
     let mock = std::sync::Arc::new(mock_helpers::MockTenantUsersRepository::default());
     *mock.users.lock().unwrap() = vec![UserRow {

@@ -1,13 +1,14 @@
 mod common;
 mod mock_helpers;
 
+use uuid::Uuid;
+
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use mock_helpers::app_state::setup_mock_app_state;
 use mock_helpers::{MockDtakoRestraintReportPdfRepository, MockDtakoRestraintReportRepository};
 use rust_alc_api::db::repository::dtako_restraint_report_pdf::PdfDriver;
-use uuid::Uuid;
 
 /// Build mock AppState with shared MockDtakoRestraintReportRepository and
 /// MockDtakoRestraintReportPdfRepository references so we can toggle
@@ -17,7 +18,7 @@ async fn setup_with_shared_repos() -> (
     Arc<MockDtakoRestraintReportRepository>,
     Arc<MockDtakoRestraintReportPdfRepository>,
 ) {
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     let report_repo = Arc::new(MockDtakoRestraintReportRepository::default());
     let pdf_repo = Arc::new(MockDtakoRestraintReportPdfRepository::default());
     state.dtako_restraint_report = report_repo.clone();

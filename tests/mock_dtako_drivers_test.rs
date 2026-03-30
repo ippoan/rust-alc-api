@@ -1,6 +1,8 @@
 mod common;
 mod mock_helpers;
 
+use uuid::Uuid;
+
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
@@ -10,7 +12,7 @@ use mock_helpers::MockDtakoDriversRepository;
 /// GET /api/drivers — success: returns empty list (mock returns vec![])
 #[tokio::test]
 async fn list_drivers_success_returns_empty() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let base_url = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
     let tenant_id = uuid::Uuid::new_v4();
@@ -31,7 +33,7 @@ async fn list_drivers_success_returns_empty() {
 /// GET /api/drivers — no auth: returns 401
 #[tokio::test]
 async fn list_drivers_no_auth_returns_401() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let base_url = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
 
@@ -50,7 +52,7 @@ async fn list_drivers_db_error_returns_500() {
     let mock_drivers = Arc::new(MockDtakoDriversRepository::default());
     mock_drivers.fail_next.store(true, Ordering::SeqCst);
 
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.dtako_drivers = mock_drivers;
 
     let base_url = common::spawn_test_server(state).await;
@@ -71,7 +73,7 @@ async fn list_drivers_db_error_returns_500() {
 /// GET /api/drivers — X-Tenant-ID header fallback (no JWT): returns 200
 #[tokio::test]
 async fn list_drivers_with_tenant_header_returns_200() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let base_url = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
     let tenant_id = uuid::Uuid::new_v4();

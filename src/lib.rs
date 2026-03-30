@@ -30,7 +30,7 @@ use storage::StorageBackend;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub pool: sqlx::PgPool,
+    pub pool: Option<sqlx::PgPool>,
     pub auth: Arc<dyn AuthRepository>,
     pub bot_admin: Arc<dyn BotAdminRepository>,
     pub car_inspections: Arc<dyn CarInspectionRepository>,
@@ -69,4 +69,11 @@ pub struct AppState {
     pub carins_storage: Option<Arc<dyn StorageBackend>>,
     pub dtako_storage: Option<Arc<dyn StorageBackend>>,
     pub fcm: Option<Arc<dyn fcm::FcmSenderTrait>>,
+}
+
+impl AppState {
+    /// pool が必要な統合テスト・本番コード用。None なら panic。
+    pub fn pool(&self) -> &sqlx::PgPool {
+        self.pool.as_ref().expect("PgPool is required but not set")
+    }
 }

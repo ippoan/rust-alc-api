@@ -1,13 +1,14 @@
 mod common;
 mod mock_helpers;
 
+use uuid::Uuid;
+
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use common::mock_storage::MockStorage;
 use mock_helpers::MockMeasurementsRepository;
 use serde_json::Value;
-use uuid::Uuid;
 
 // =========================================================================
 // POST /api/measurements — success (201)
@@ -18,7 +19,7 @@ async fn test_create_measurement_success() {
     let _guard = common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
-    let state = mock_helpers::app_state::setup_mock_app_state().await;
+    let state = mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
     let base_url = common::spawn_test_server(state).await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
@@ -55,7 +56,7 @@ async fn test_create_measurement_db_error() {
     let mock = Arc::new(MockMeasurementsRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
 
-    let mut state = mock_helpers::app_state::setup_mock_app_state().await;
+    let mut state = mock_helpers::app_state::setup_mock_app_state();
     state.measurements = mock;
 
     let tenant_id = Uuid::new_v4();
@@ -89,7 +90,7 @@ async fn test_create_measurement_invalid_result_type() {
     let _guard = common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
-    let state = mock_helpers::app_state::setup_mock_app_state().await;
+    let state = mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
     let base_url = common::spawn_test_server(state).await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
@@ -121,7 +122,7 @@ async fn test_create_measurement_invalid_json() {
     let _guard = common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
-    let state = mock_helpers::app_state::setup_mock_app_state().await;
+    let state = mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
     let base_url = common::spawn_test_server(state).await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
@@ -148,7 +149,7 @@ async fn test_start_measurement_success() {
     let _guard = common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
-    let state = mock_helpers::app_state::setup_mock_app_state().await;
+    let state = mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
     let base_url = common::spawn_test_server(state).await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
@@ -183,7 +184,7 @@ async fn test_start_measurement_db_error() {
     let mock = Arc::new(MockMeasurementsRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
 
-    let mut state = mock_helpers::app_state::setup_mock_app_state().await;
+    let mut state = mock_helpers::app_state::setup_mock_app_state();
     state.measurements = mock;
 
     let tenant_id = Uuid::new_v4();
@@ -215,7 +216,7 @@ async fn test_list_measurements_success() {
     let _guard = common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
-    let state = mock_helpers::app_state::setup_mock_app_state().await;
+    let state = mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
     let base_url = common::spawn_test_server(state).await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
@@ -248,7 +249,7 @@ async fn test_list_measurements_db_error() {
     let mock = Arc::new(MockMeasurementsRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
 
-    let mut state = mock_helpers::app_state::setup_mock_app_state().await;
+    let mut state = mock_helpers::app_state::setup_mock_app_state();
     state.measurements = mock;
 
     let tenant_id = Uuid::new_v4();
@@ -275,7 +276,7 @@ async fn test_get_measurement_not_found() {
     let _guard = common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
-    let state = mock_helpers::app_state::setup_mock_app_state().await;
+    let state = mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
     let base_url = common::spawn_test_server(state).await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
@@ -304,7 +305,7 @@ async fn test_get_measurement_found() {
     let mock = Arc::new(MockMeasurementsRepository::default());
     mock.return_some.store(true, Ordering::SeqCst);
 
-    let mut state = mock_helpers::app_state::setup_mock_app_state().await;
+    let mut state = mock_helpers::app_state::setup_mock_app_state();
     state.measurements = mock;
 
     let tenant_id = Uuid::new_v4();
@@ -337,7 +338,7 @@ async fn test_get_measurement_db_error() {
     let mock = Arc::new(MockMeasurementsRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
 
-    let mut state = mock_helpers::app_state::setup_mock_app_state().await;
+    let mut state = mock_helpers::app_state::setup_mock_app_state();
     state.measurements = mock;
 
     let tenant_id = Uuid::new_v4();
@@ -368,7 +369,7 @@ async fn test_update_measurement_success() {
     let mock = Arc::new(MockMeasurementsRepository::default());
     mock.return_some.store(true, Ordering::SeqCst);
 
-    let mut state = mock_helpers::app_state::setup_mock_app_state().await;
+    let mut state = mock_helpers::app_state::setup_mock_app_state();
     state.measurements = mock;
 
     let tenant_id = Uuid::new_v4();
@@ -406,7 +407,7 @@ async fn test_update_measurement_not_found() {
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
     // return_some defaults to false → update returns None → 404
-    let state = mock_helpers::app_state::setup_mock_app_state().await;
+    let state = mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
     let base_url = common::spawn_test_server(state).await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
@@ -440,7 +441,7 @@ async fn test_update_measurement_db_error() {
     let mock = Arc::new(MockMeasurementsRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
 
-    let mut state = mock_helpers::app_state::setup_mock_app_state().await;
+    let mut state = mock_helpers::app_state::setup_mock_app_state();
     state.measurements = mock;
 
     let tenant_id = Uuid::new_v4();
@@ -473,7 +474,7 @@ async fn test_update_measurement_invalid_result_type() {
     let _guard = common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
-    let state = mock_helpers::app_state::setup_mock_app_state().await;
+    let state = mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
     let base_url = common::spawn_test_server(state).await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
@@ -504,7 +505,7 @@ async fn test_update_measurement_invalid_status() {
     let _guard = common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
-    let state = mock_helpers::app_state::setup_mock_app_state().await;
+    let state = mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
     let base_url = common::spawn_test_server(state).await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
@@ -535,7 +536,7 @@ async fn test_update_measurement_invalid_json() {
     let _guard = common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
-    let state = mock_helpers::app_state::setup_mock_app_state().await;
+    let state = mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
     let base_url = common::spawn_test_server(state).await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
@@ -572,7 +573,7 @@ async fn test_get_face_photo_success() {
     mock_repo.return_some.store(true, Ordering::SeqCst);
     *mock_repo.face_photo_url.lock().unwrap() = Some(photo_url);
 
-    let mut state = mock_helpers::app_state::setup_mock_app_state().await;
+    let mut state = mock_helpers::app_state::setup_mock_app_state();
     state.measurements = mock_repo;
     state.storage = mock_storage;
 
@@ -608,7 +609,7 @@ async fn test_get_face_photo_no_url() {
     mock_repo.return_some.store(true, Ordering::SeqCst);
     // face_photo_url is None by default
 
-    let mut state = mock_helpers::app_state::setup_mock_app_state().await;
+    let mut state = mock_helpers::app_state::setup_mock_app_state();
     state.measurements = mock_repo;
 
     let tenant_id = Uuid::new_v4();
@@ -637,7 +638,7 @@ async fn test_get_face_photo_measurement_not_found() {
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
     // return_some defaults to false → get returns None → 404
-    let state = mock_helpers::app_state::setup_mock_app_state().await;
+    let state = mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
     let base_url = common::spawn_test_server(state).await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
@@ -666,7 +667,7 @@ async fn test_get_face_photo_db_error() {
     let mock_repo = Arc::new(MockMeasurementsRepository::default());
     mock_repo.fail_next.store(true, Ordering::SeqCst);
 
-    let mut state = mock_helpers::app_state::setup_mock_app_state().await;
+    let mut state = mock_helpers::app_state::setup_mock_app_state();
     state.measurements = mock_repo;
 
     let tenant_id = Uuid::new_v4();
@@ -703,7 +704,7 @@ async fn test_get_video_success() {
     mock_repo.return_some.store(true, Ordering::SeqCst);
     *mock_repo.video_url.lock().unwrap() = Some(video_url);
 
-    let mut state = mock_helpers::app_state::setup_mock_app_state().await;
+    let mut state = mock_helpers::app_state::setup_mock_app_state();
     state.measurements = mock_repo;
     state.storage = mock_storage;
 
@@ -739,7 +740,7 @@ async fn test_get_video_no_url() {
     mock_repo.return_some.store(true, Ordering::SeqCst);
     // video_url is None by default
 
-    let mut state = mock_helpers::app_state::setup_mock_app_state().await;
+    let mut state = mock_helpers::app_state::setup_mock_app_state();
     state.measurements = mock_repo;
 
     let tenant_id = Uuid::new_v4();
@@ -768,7 +769,7 @@ async fn test_get_video_measurement_not_found() {
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
     // return_some defaults to false → get returns None → 404
-    let state = mock_helpers::app_state::setup_mock_app_state().await;
+    let state = mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
     let base_url = common::spawn_test_server(state).await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
@@ -797,7 +798,7 @@ async fn test_get_video_db_error() {
     let mock_repo = Arc::new(MockMeasurementsRepository::default());
     mock_repo.fail_next.store(true, Ordering::SeqCst);
 
-    let mut state = mock_helpers::app_state::setup_mock_app_state().await;
+    let mut state = mock_helpers::app_state::setup_mock_app_state();
     state.measurements = mock_repo;
 
     let tenant_id = Uuid::new_v4();
@@ -825,7 +826,7 @@ async fn test_measurements_no_auth() {
     let _guard = common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
-    let state = mock_helpers::app_state::setup_mock_app_state().await;
+    let state = mock_helpers::app_state::setup_mock_app_state();
     let base_url = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
 
@@ -908,7 +909,7 @@ async fn test_get_face_photo_storage_download_error() {
     mock_repo.return_some.store(true, Ordering::SeqCst);
     *mock_repo.face_photo_url.lock().unwrap() = Some(missing_url);
 
-    let mut state = mock_helpers::app_state::setup_mock_app_state().await;
+    let mut state = mock_helpers::app_state::setup_mock_app_state();
     state.measurements = mock_repo;
     state.storage = mock_storage;
 
@@ -944,7 +945,7 @@ async fn test_get_video_storage_download_error() {
     mock_repo.return_some.store(true, Ordering::SeqCst);
     *mock_repo.video_url.lock().unwrap() = Some(missing_url);
 
-    let mut state = mock_helpers::app_state::setup_mock_app_state().await;
+    let mut state = mock_helpers::app_state::setup_mock_app_state();
     state.measurements = mock_repo;
     state.storage = mock_storage;
 
@@ -980,7 +981,7 @@ async fn test_get_face_photo_extract_key_fails() {
     *mock_repo.face_photo_url.lock().unwrap() =
         Some("https://other-storage.example.com/photo.jpg".to_string());
 
-    let mut state = mock_helpers::app_state::setup_mock_app_state().await;
+    let mut state = mock_helpers::app_state::setup_mock_app_state();
     state.measurements = mock_repo;
 
     let tenant_id = Uuid::new_v4();
@@ -1013,7 +1014,7 @@ async fn test_get_video_extract_key_fails() {
     *mock_repo.video_url.lock().unwrap() =
         Some("https://other-storage.example.com/video.webm".to_string());
 
-    let mut state = mock_helpers::app_state::setup_mock_app_state().await;
+    let mut state = mock_helpers::app_state::setup_mock_app_state();
     state.measurements = mock_repo;
 
     let tenant_id = Uuid::new_v4();
@@ -1041,7 +1042,7 @@ async fn test_measurements_with_tenant_header() {
     let _guard = common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
-    let state = mock_helpers::app_state::setup_mock_app_state().await;
+    let state = mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
     let base_url = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();

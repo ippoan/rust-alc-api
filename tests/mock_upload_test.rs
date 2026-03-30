@@ -1,16 +1,17 @@
 mod common;
 mod mock_helpers;
 
+use uuid::Uuid;
+
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use common::mock_storage::MockStorage;
-use uuid::Uuid;
 
 /// Helper: set up mock AppState and spawn test server with JWT.
 /// Returns (base_url, auth_header, tenant_id).
 async fn setup() -> (String, String, Uuid) {
-    let state = mock_helpers::app_state::setup_mock_app_state().await;
+    let state = mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
     let base_url = common::spawn_test_server(state).await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
@@ -24,7 +25,7 @@ async fn setup_failing_storage() -> (String, String) {
     let mock_storage = Arc::new(MockStorage::new("test-bucket"));
     mock_storage.fail_upload.store(true, Ordering::SeqCst);
 
-    let mut state = mock_helpers::app_state::setup_mock_app_state().await;
+    let mut state = mock_helpers::app_state::setup_mock_app_state();
     state.storage = mock_storage;
 
     let tenant_id = Uuid::new_v4();
@@ -418,7 +419,7 @@ async fn test_upload_blow_video_invalid_multipart() {
 
 #[tokio::test]
 async fn test_upload_face_photo_with_tenant_header() {
-    let state = mock_helpers::app_state::setup_mock_app_state().await;
+    let state = mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
     let base_url = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();

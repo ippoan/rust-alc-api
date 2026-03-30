@@ -273,7 +273,7 @@ fn build_app_state(
     let timecard = Arc::new(PgTimecardRepository::new(pool.clone()));
 
     AppState {
-        pool,
+        pool: Some(pool),
         auth,
         bot_admin,
         car_inspections,

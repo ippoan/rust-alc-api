@@ -1,17 +1,18 @@
 mod common;
 mod mock_helpers;
 
+use uuid::Uuid;
+
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use mock_helpers::app_state::setup_mock_app_state;
 use mock_helpers::MockDtakoDailyHoursRepository;
-use uuid::Uuid;
 
 /// Build mock AppState with a shared MockDtakoDailyHoursRepository reference
 /// so we can toggle `fail_next` from test code.
 async fn setup_with_shared_repo() -> (rust_alc_api::AppState, Arc<MockDtakoDailyHoursRepository>) {
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     let repo = Arc::new(MockDtakoDailyHoursRepository::default());
     state.dtako_daily_hours = repo.clone();
     (state, repo)
@@ -29,7 +30,7 @@ fn auth_header(tenant_id: Uuid) -> String {
 #[tokio::test]
 async fn test_list_daily_hours_success() {
     let (state, _repo) = setup_with_shared_repo().await;
-    let tenant_id = common::create_test_tenant(&state.pool, "dh-list-ok").await;
+    let tenant_id = Uuid::new_v4();
     let base = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
     let auth = auth_header(tenant_id);
@@ -115,7 +116,7 @@ async fn test_list_daily_hours_no_auth() {
 #[tokio::test]
 async fn test_list_daily_hours_db_error_count() {
     let (state, repo) = setup_with_shared_repo().await;
-    let tenant_id = common::create_test_tenant(&state.pool, "dh-list-err-count").await;
+    let tenant_id = Uuid::new_v4();
     let base = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
     let auth = auth_header(tenant_id);
@@ -134,7 +135,7 @@ async fn test_list_daily_hours_db_error_count() {
 #[tokio::test]
 async fn test_list_daily_hours_db_error_list() {
     let (state, repo) = setup_with_shared_repo().await;
-    let tenant_id = common::create_test_tenant(&state.pool, "dh-list-err-list").await;
+    let tenant_id = Uuid::new_v4();
     let base = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
     let auth = auth_header(tenant_id);
@@ -169,7 +170,7 @@ async fn test_list_daily_hours_db_error_list() {
 #[tokio::test]
 async fn test_get_daily_segments_success() {
     let (state, _repo) = setup_with_shared_repo().await;
-    let tenant_id = common::create_test_tenant(&state.pool, "dh-seg-ok").await;
+    let tenant_id = Uuid::new_v4();
     let base = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
     let auth = auth_header(tenant_id);
@@ -208,7 +209,7 @@ async fn test_get_daily_segments_no_auth() {
 #[tokio::test]
 async fn test_get_daily_segments_db_error() {
     let (state, repo) = setup_with_shared_repo().await;
-    let tenant_id = common::create_test_tenant(&state.pool, "dh-seg-err").await;
+    let tenant_id = Uuid::new_v4();
     let base = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
     let auth = auth_header(tenant_id);
@@ -229,7 +230,7 @@ async fn test_get_daily_segments_db_error() {
 #[tokio::test]
 async fn test_get_daily_segments_invalid_date() {
     let (state, _repo) = setup_with_shared_repo().await;
-    let tenant_id = common::create_test_tenant(&state.pool, "dh-seg-bad-date").await;
+    let tenant_id = Uuid::new_v4();
     let base = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
     let auth = auth_header(tenant_id);
@@ -254,7 +255,7 @@ async fn test_get_daily_segments_invalid_date() {
 #[tokio::test]
 async fn test_get_daily_segments_invalid_driver_id() {
     let (state, _repo) = setup_with_shared_repo().await;
-    let tenant_id = common::create_test_tenant(&state.pool, "dh-seg-bad-id").await;
+    let tenant_id = Uuid::new_v4();
     let base = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
     let auth = auth_header(tenant_id);
@@ -281,7 +282,7 @@ async fn test_get_daily_segments_invalid_driver_id() {
 #[tokio::test]
 async fn test_list_daily_hours_with_tenant_header() {
     let (state, _repo) = setup_with_shared_repo().await;
-    let tenant_id = common::create_test_tenant(&state.pool, "dh-tenant-hdr").await;
+    let tenant_id = Uuid::new_v4();
     let base = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
 
@@ -299,7 +300,7 @@ async fn test_list_daily_hours_with_tenant_header() {
 #[tokio::test]
 async fn test_get_segments_with_tenant_header() {
     let (state, _repo) = setup_with_shared_repo().await;
-    let tenant_id = common::create_test_tenant(&state.pool, "dh-seg-tenant-hdr").await;
+    let tenant_id = Uuid::new_v4();
     let base = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
     let driver_id = Uuid::new_v4();

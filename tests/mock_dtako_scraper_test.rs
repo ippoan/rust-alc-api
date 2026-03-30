@@ -2,12 +2,13 @@
 mod common;
 mod mock_helpers;
 
+use uuid::Uuid;
+
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use chrono::{NaiveDate, Utc};
 use serde_json::Value;
-use uuid::Uuid;
 
 use mock_helpers::app_state::setup_mock_app_state;
 use mock_helpers::MockDtakoScraperRepository;
@@ -23,7 +24,7 @@ async fn test_get_scrape_history_success_empty() {
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockDtakoScraperRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.dtako_scraper = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -62,7 +63,7 @@ async fn test_get_scrape_history_with_data() {
 
     let mock = Arc::new(MockDtakoScraperRepository::default());
     mock.history_data.lock().unwrap().push(item);
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.dtako_scraper = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -95,7 +96,7 @@ async fn test_get_scrape_history_with_query_params() {
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockDtakoScraperRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.dtako_scraper = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -123,7 +124,7 @@ async fn test_get_scrape_history_db_error() {
 
     let mock = Arc::new(MockDtakoScraperRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.dtako_scraper = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -150,7 +151,7 @@ async fn test_get_scrape_history_unauthorized() {
     std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockDtakoScraperRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.dtako_scraper = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -176,7 +177,7 @@ async fn test_trigger_scrape_connection_refused() {
     std::env::set_var("GCP_METADATA_URL", "http://127.0.0.1:1");
 
     let mock = Arc::new(MockDtakoScraperRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.dtako_scraper = mock;
     // Use port 1 which is guaranteed to refuse connections
     let base_url = common::spawn_test_server_with_scraper(state, "http://127.0.0.1:1").await;
@@ -211,7 +212,7 @@ async fn test_trigger_scrape_with_all_fields() {
     std::env::set_var("GCP_METADATA_URL", "http://127.0.0.1:1");
 
     let mock = Arc::new(MockDtakoScraperRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.dtako_scraper = mock;
     let base_url = common::spawn_test_server_with_scraper(state, "http://127.0.0.1:1").await;
 
@@ -246,7 +247,7 @@ async fn test_trigger_scrape_empty_body() {
     std::env::set_var("GCP_METADATA_URL", "http://127.0.0.1:1");
 
     let mock = Arc::new(MockDtakoScraperRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.dtako_scraper = mock;
     let base_url = common::spawn_test_server_with_scraper(state, "http://127.0.0.1:1").await;
 
@@ -276,7 +277,7 @@ async fn test_trigger_scrape_no_body() {
     std::env::set_var("GCP_METADATA_URL", "http://127.0.0.1:1");
 
     let mock = Arc::new(MockDtakoScraperRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.dtako_scraper = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -307,7 +308,7 @@ async fn test_trigger_scrape_unauthorized() {
     std::env::set_var("GCP_METADATA_URL", "http://127.0.0.1:1");
 
     let mock = Arc::new(MockDtakoScraperRepository::default());
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.dtako_scraper = mock;
     let base_url = common::spawn_test_server(state).await;
 

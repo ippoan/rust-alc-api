@@ -1,6 +1,8 @@
 mod common;
 mod mock_helpers;
 
+use uuid::Uuid;
+
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
@@ -48,7 +50,7 @@ fn test_auth_header() -> String {
 
 #[tokio::test]
 async fn test_csv_proxy_kudguri() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let tenant_id = test_tenant_id();
     let storage = state.dtako_storage.as_ref().unwrap();
     upload_csv_to_mock_storage(
@@ -82,7 +84,7 @@ async fn test_csv_proxy_kudguri() {
 
 #[tokio::test]
 async fn test_csv_proxy_kudgivt_alias() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let tenant_id = test_tenant_id();
     let storage = state.dtako_storage.as_ref().unwrap();
     upload_csv_to_mock_storage(
@@ -107,7 +109,7 @@ async fn test_csv_proxy_kudgivt_alias() {
 
 #[tokio::test]
 async fn test_csv_proxy_events_alias() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let tenant_id = test_tenant_id();
     let storage = state.dtako_storage.as_ref().unwrap();
     upload_csv_to_mock_storage(&**storage, &tenant_id, "2002", "KUDGIVT.csv", "x\n1\n").await;
@@ -124,7 +126,7 @@ async fn test_csv_proxy_events_alias() {
 
 #[tokio::test]
 async fn test_csv_proxy_ferry_aliases() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let tenant_id = test_tenant_id();
     let storage = state.dtako_storage.as_ref().unwrap();
     upload_csv_to_mock_storage(&**storage, &tenant_id, "3001", "KUDGFRY.csv", "f1\nfv1\n").await;
@@ -148,7 +150,7 @@ async fn test_csv_proxy_ferry_aliases() {
 
 #[tokio::test]
 async fn test_csv_proxy_tolls_aliases() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let tenant_id = test_tenant_id();
     let storage = state.dtako_storage.as_ref().unwrap();
     upload_csv_to_mock_storage(&**storage, &tenant_id, "4001", "KUDGSIR.csv", "t1\ntv1\n").await;
@@ -171,7 +173,7 @@ async fn test_csv_proxy_tolls_aliases() {
 
 #[tokio::test]
 async fn test_csv_proxy_speed_aliases() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let tenant_id = test_tenant_id();
     let storage = state.dtako_storage.as_ref().unwrap();
     upload_csv_to_mock_storage(
@@ -217,7 +219,7 @@ async fn test_csv_proxy_with_r2_prefix() {
         return_prefix: std::sync::Mutex::new(Some("custom/prefix".to_string())),
     });
 
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     // Upload CSV at the key that Some(prefix) branch will construct
     let storage = state.dtako_storage.as_ref().unwrap();
     storage
@@ -250,7 +252,7 @@ async fn test_csv_proxy_with_r2_prefix() {
 
 #[tokio::test]
 async fn test_csv_proxy_empty_csv() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let tenant_id = test_tenant_id();
     let storage = state.dtako_storage.as_ref().unwrap();
     upload_csv_to_mock_storage(&**storage, &tenant_id, "6001", "KUDGURI.csv", "h1,h2\n").await;
@@ -270,7 +272,7 @@ async fn test_csv_proxy_empty_csv() {
 
 #[tokio::test]
 async fn test_csv_proxy_multirow_csv() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let tenant_id = test_tenant_id();
     let storage = state.dtako_storage.as_ref().unwrap();
     let csv = "name,age,city\nAlice,30,Tokyo\nBob,25,Osaka\nCharlie,35,Nagoya\n";
@@ -293,7 +295,7 @@ async fn test_csv_proxy_multirow_csv() {
 
 #[tokio::test]
 async fn test_csv_proxy_empty_body() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let tenant_id = test_tenant_id();
     let storage = state.dtako_storage.as_ref().unwrap();
     upload_csv_to_mock_storage(&**storage, &tenant_id, "6003", "KUDGURI.csv", "").await;
@@ -318,7 +320,7 @@ async fn test_csv_proxy_empty_body() {
 
 #[tokio::test]
 async fn test_csv_proxy_invalid_type_returns_400() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let base_url = common::spawn_test_server(state).await;
 
     let res = reqwest::Client::new()
@@ -332,7 +334,7 @@ async fn test_csv_proxy_invalid_type_returns_400() {
 
 #[tokio::test]
 async fn test_csv_proxy_file_not_found_returns_404() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     // MockStorage にファイルを配置しない → download で NotFound
     let base_url = common::spawn_test_server(state).await;
 
@@ -347,7 +349,7 @@ async fn test_csv_proxy_file_not_found_returns_404() {
 
 #[tokio::test]
 async fn test_csv_proxy_no_auth_returns_401() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let base_url = common::spawn_test_server(state).await;
 
     let res = reqwest::Client::new()
@@ -363,7 +365,7 @@ async fn test_csv_proxy_db_error_returns_500() {
     let mock_repo = Arc::new(MockDtakoCsvProxyRepository::default());
     mock_repo.fail_next.store(true, Ordering::SeqCst);
 
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.dtako_csv_proxy = mock_repo;
 
     let base_url = common::spawn_test_server(state).await;
@@ -379,7 +381,7 @@ async fn test_csv_proxy_db_error_returns_500() {
 
 #[tokio::test]
 async fn test_csv_proxy_no_dtako_storage_returns_500() {
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.dtako_storage = None;
 
     let base_url = common::spawn_test_server(state).await;
@@ -399,7 +401,7 @@ async fn test_csv_proxy_no_dtako_storage_returns_500() {
 
 #[tokio::test]
 async fn test_csv_proxy_case_insensitive() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let tenant_id = test_tenant_id();
     let storage = state.dtako_storage.as_ref().unwrap();
     upload_csv_to_mock_storage(&**storage, &tenant_id, "7001", "KUDGURI.csv", "x\n1\n").await;

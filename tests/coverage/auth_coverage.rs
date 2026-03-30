@@ -151,9 +151,9 @@ async fn test_lineworks_redirect_happy_path() {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
 
-            let tenant_id = common::create_test_tenant(&state.pool, "LW Redirect").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "LW Redirect").await;
             let encrypted = encrypt_test_secret("dummy-secret", common::TEST_JWT_SECRET);
-            insert_sso_config(&state.pool, tenant_id, "test-lw-domain", &encrypted, None).await;
+            insert_sso_config(state.pool(), tenant_id, "test-lw-domain", &encrypted, None).await;
 
             let client = reqwest::ClientBuilder::new()
                 .redirect(reqwest::redirect::Policy::none())
@@ -237,14 +237,14 @@ async fn test_lineworks_callback_happy_path() {
 
             // 前回テストの残存ユーザーを削除 (INSERT パスをカバーするため)
             sqlx::query("DELETE FROM users WHERE lineworks_id = 'lw-user-001'")
-                .execute(&state.pool)
+                .execute(state.pool())
                 .await
                 .unwrap();
 
-            let tenant_id = common::create_test_tenant(&state.pool, "LW Callback").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "LW Callback").await;
             let encrypted = encrypt_test_secret("test-client-secret", common::TEST_JWT_SECRET);
             let ext_org_id = format!("test-lw-cb-{}", Uuid::new_v4().simple());
-            insert_sso_config(&state.pool, tenant_id, &ext_org_id, &encrypted, None).await;
+            insert_sso_config(state.pool(), tenant_id, &ext_org_id, &encrypted, None).await;
 
             // 有効な HMAC state 生成 (subdomain URL for extract_parent_domain coverage)
             let state_payload = rust_alc_api::auth::lineworks::state::StatePayload {
@@ -310,11 +310,11 @@ async fn test_woff_config_happy_path() {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
 
-        let tenant_id = common::create_test_tenant(&state.pool, "WOFF Config").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "WOFF Config").await;
         let encrypted = encrypt_test_secret("dummy", common::TEST_JWT_SECRET);
         let domain = format!("woff-cfg-{}", Uuid::new_v4().simple());
         insert_sso_config(
-            &state.pool,
+            state.pool(),
             tenant_id,
             &domain,
             &encrypted,
@@ -349,10 +349,10 @@ async fn test_woff_config_no_woff_id() {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
 
-        let tenant_id = common::create_test_tenant(&state.pool, "WOFF NoId").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "WOFF NoId").await;
         let encrypted = encrypt_test_secret("dummy", common::TEST_JWT_SECRET);
         let domain = format!("woff-noid-{}", Uuid::new_v4().simple());
-        insert_sso_config(&state.pool, tenant_id, &domain, &encrypted, None).await;
+        insert_sso_config(state.pool(), tenant_id, &domain, &encrypted, None).await;
 
         let client = reqwest::Client::new();
         let res = client
@@ -403,14 +403,21 @@ async fn test_woff_auth_happy_path() {
 
         // 前回テストの残存ユーザーを削除
         sqlx::query("DELETE FROM users WHERE lineworks_id = 'woff-user-unique-001'")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
-        let tenant_id = common::create_test_tenant(&state.pool, "WOFF Auth").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "WOFF Auth").await;
         let encrypted = encrypt_test_secret("dummy", common::TEST_JWT_SECRET);
         let domain = format!("woff-auth-{}", Uuid::new_v4().simple());
-        insert_sso_config(&state.pool, tenant_id, &domain, &encrypted, Some("woff-id")).await;
+        insert_sso_config(
+            state.pool(),
+            tenant_id,
+            &domain,
+            &encrypted,
+            Some("woff-id"),
+        )
+        .await;
 
         let client = reqwest::Client::new();
         let res = client
@@ -454,10 +461,10 @@ async fn test_lineworks_redirect_no_oauth_secret() {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
 
-        let tenant_id = common::create_test_tenant(&state.pool, "LW NoSecret").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "LW NoSecret").await;
         let encrypted = encrypt_test_secret("dummy", common::TEST_JWT_SECRET);
         let domain = format!("nosecret-{}", Uuid::new_v4().simple());
-        insert_sso_config(&state.pool, tenant_id, &domain, &encrypted, None).await;
+        insert_sso_config(state.pool(), tenant_id, &domain, &encrypted, None).await;
 
         let client = reqwest::ClientBuilder::new()
             .redirect(reqwest::redirect::Policy::none())
@@ -544,11 +551,11 @@ async fn test_lineworks_callback_decrypt_error() {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
 
-        let tenant_id = common::create_test_tenant(&state.pool, "LW Decrypt Err").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "LW Decrypt Err").await;
         let ext_org_id = format!("decrypt-err-{}", Uuid::new_v4().simple());
         // 不正な暗号文を挿入
         insert_sso_config(
-            &state.pool,
+            state.pool(),
             tenant_id,
             &ext_org_id,
             "invalid-base64-not-encrypted",
@@ -615,10 +622,10 @@ async fn test_lineworks_callback_token_exchange_error() {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
 
-        let tenant_id = common::create_test_tenant(&state.pool, "LW TokExch Err").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "LW TokExch Err").await;
         let encrypted = encrypt_test_secret("test-secret", common::TEST_JWT_SECRET);
         let ext_org_id = format!("texch-err-{}", Uuid::new_v4().simple());
-        insert_sso_config(&state.pool, tenant_id, &ext_org_id, &encrypted, None).await;
+        insert_sso_config(state.pool(), tenant_id, &ext_org_id, &encrypted, None).await;
 
         let state_payload = rust_alc_api::auth::lineworks::state::StatePayload {
             redirect_uri: "https://example.com/login".into(),
@@ -692,10 +699,10 @@ async fn test_lineworks_callback_profile_error() {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
 
-        let tenant_id = common::create_test_tenant(&state.pool, "LW Prof Err").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "LW Prof Err").await;
         let encrypted = encrypt_test_secret("test-secret", common::TEST_JWT_SECRET);
         let ext_org_id = format!("prof-err-{}", Uuid::new_v4().simple());
-        insert_sso_config(&state.pool, tenant_id, &ext_org_id, &encrypted, None).await;
+        insert_sso_config(state.pool(), tenant_id, &ext_org_id, &encrypted, None).await;
 
         let state_payload = rust_alc_api::auth::lineworks::state::StatePayload {
             redirect_uri: "https://example.com/login".into(),
@@ -757,10 +764,17 @@ async fn test_woff_auth_profile_error() {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
 
-        let tenant_id = common::create_test_tenant(&state.pool, "WOFF Prof Err").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "WOFF Prof Err").await;
         let encrypted = encrypt_test_secret("dummy", common::TEST_JWT_SECRET);
         let domain = format!("woff-proferr-{}", Uuid::new_v4().simple());
-        insert_sso_config(&state.pool, tenant_id, &domain, &encrypted, Some("woff-id")).await;
+        insert_sso_config(
+            state.pool(),
+            tenant_id,
+            &domain,
+            &encrypted,
+            Some("woff-id"),
+        )
+        .await;
 
         let client = reqwest::Client::new();
         let res = client
@@ -815,14 +829,21 @@ async fn test_woff_auth_existing_user() {
 
             // 前回の残存ユーザーを削除
             sqlx::query("DELETE FROM users WHERE lineworks_id = 'woff-existing-user-002'")
-                .execute(&state.pool)
+                .execute(state.pool())
                 .await
                 .unwrap();
 
-            let tenant_id = common::create_test_tenant(&state.pool, "WOFF Exist").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "WOFF Exist").await;
             let encrypted = encrypt_test_secret("dummy", common::TEST_JWT_SECRET);
             let domain = format!("woff-exist-{}", Uuid::new_v4().simple());
-            insert_sso_config(&state.pool, tenant_id, &domain, &encrypted, Some("woff-id")).await;
+            insert_sso_config(
+                state.pool(),
+                tenant_id,
+                &domain,
+                &encrypted,
+                Some("woff-id"),
+            )
+            .await;
 
             let client = reqwest::Client::new();
             let body = serde_json::json!({
@@ -891,7 +912,7 @@ async fn test_sso_query_error_lineworks_redirect() {
 
         // 関数を DROP (コミット済み)
         sqlx::query("DROP FUNCTION IF EXISTS alc_api.resolve_sso_config(TEXT, TEXT)")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
@@ -912,7 +933,7 @@ async fn test_sso_query_error_lineworks_redirect() {
 
         // 再作成
         sqlx::query(RECREATE_RESOLVE_SSO_CONFIG)
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -930,7 +951,7 @@ async fn test_sso_query_error_woff_config() {
         let base_url = common::spawn_test_server(state.clone()).await;
 
         sqlx::query("DROP FUNCTION IF EXISTS alc_api.resolve_sso_config(TEXT, TEXT)")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
@@ -944,7 +965,7 @@ async fn test_sso_query_error_woff_config() {
         assert_eq!(res.status(), 500, "Dropped function → 500");
 
         sqlx::query(RECREATE_RESOLVE_SSO_CONFIG)
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -962,7 +983,7 @@ async fn test_sso_query_error_woff_auth() {
         let base_url = common::spawn_test_server(state.clone()).await;
 
         sqlx::query("DROP FUNCTION IF EXISTS alc_api.resolve_sso_config(TEXT, TEXT)")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
@@ -980,7 +1001,7 @@ async fn test_sso_query_error_woff_auth() {
         assert_eq!(res.status(), 500, "Dropped function → 500");
 
         sqlx::query(RECREATE_RESOLVE_SSO_CONFIG)
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -1033,7 +1054,7 @@ async fn test_upsert_lineworks_user_insert_error() {
 
         // 前回の残存ユーザーを削除
         sqlx::query("DELETE FROM users WHERE lineworks_id = 'insert-err-user-001'")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
@@ -1049,7 +1070,7 @@ async fn test_upsert_lineworks_user_insert_error() {
         .bind(format!("cli-{}", Uuid::new_v4().simple()))
         .bind(&encrypt_test_secret("test", common::TEST_JWT_SECRET))
         .bind(&ext_org_id)
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -1082,7 +1103,7 @@ async fn test_upsert_lineworks_user_insert_error() {
         // Cleanup
         sqlx::query("DELETE FROM sso_provider_configs WHERE external_org_id = $1")
             .bind(&state_payload.external_org_id)
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
         std::env::remove_var("LINEWORKS_TOKEN_URL");

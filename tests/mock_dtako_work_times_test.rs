@@ -1,6 +1,8 @@
 mod common;
 mod mock_helpers;
 
+use uuid::Uuid;
+
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
@@ -11,7 +13,7 @@ use mock_helpers::MockDtakoWorkTimesRepository;
 // Helper: build mock AppState and return a handle to the work_times mock
 // ---------------------------------------------------------------------------
 async fn setup() -> (rust_alc_api::AppState, Arc<MockDtakoWorkTimesRepository>) {
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     let mock_wt = Arc::new(MockDtakoWorkTimesRepository::default());
     state.dtako_work_times = mock_wt.clone();
     (state, mock_wt)
@@ -23,7 +25,7 @@ async fn setup() -> (rust_alc_api::AppState, Arc<MockDtakoWorkTimesRepository>) 
 #[tokio::test]
 async fn mock_list_work_times_success_empty() {
     let (state, _mock_wt) = setup().await;
-    let tenant_id = common::create_test_tenant(&state.pool, "wt-tenant-ok").await;
+    let tenant_id = Uuid::new_v4();
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let base_url = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
@@ -49,7 +51,7 @@ async fn mock_list_work_times_success_empty() {
 #[tokio::test]
 async fn mock_list_work_times_with_query_params() {
     let (state, _mock_wt) = setup().await;
-    let tenant_id = common::create_test_tenant(&state.pool, "wt-tenant-qp").await;
+    let tenant_id = Uuid::new_v4();
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let base_url = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
@@ -78,7 +80,7 @@ async fn mock_list_work_times_with_query_params() {
 #[tokio::test]
 async fn mock_list_work_times_per_page_max() {
     let (state, _mock_wt) = setup().await;
-    let tenant_id = common::create_test_tenant(&state.pool, "wt-tenant-max").await;
+    let tenant_id = Uuid::new_v4();
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let base_url = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
@@ -102,7 +104,7 @@ async fn mock_list_work_times_per_page_max() {
 #[tokio::test]
 async fn mock_list_work_times_page_min() {
     let (state, _mock_wt) = setup().await;
-    let tenant_id = common::create_test_tenant(&state.pool, "wt-tenant-pmin").await;
+    let tenant_id = Uuid::new_v4();
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let base_url = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
@@ -144,7 +146,7 @@ async fn mock_list_work_times_no_auth() {
 #[tokio::test]
 async fn mock_list_work_times_x_tenant_id() {
     let (state, _mock_wt) = setup().await;
-    let tenant_id = common::create_test_tenant(&state.pool, "wt-tenant-xt").await;
+    let tenant_id = Uuid::new_v4();
     let base_url = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
 
@@ -166,7 +168,7 @@ async fn mock_list_work_times_x_tenant_id() {
 #[tokio::test]
 async fn mock_list_work_times_count_db_error() {
     let (state, mock_wt) = setup().await;
-    let tenant_id = common::create_test_tenant(&state.pool, "wt-tenant-cerr").await;
+    let tenant_id = Uuid::new_v4();
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let base_url = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
@@ -190,7 +192,7 @@ async fn mock_list_work_times_count_db_error() {
 #[tokio::test]
 async fn mock_list_work_times_list_db_error() {
     let (state, mock_wt) = setup().await;
-    let tenant_id = common::create_test_tenant(&state.pool, "wt-tenant-lerr").await;
+    let tenant_id = Uuid::new_v4();
     let jwt = common::create_test_jwt(tenant_id, "admin");
 
     // We need count to succeed and list to fail.

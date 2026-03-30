@@ -14,7 +14,7 @@ async fn test_dtako_upload_zip() {
     test_case!("正常なZIPをアップロードして成功する", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DtakoZip").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DtakoZip").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -58,7 +58,7 @@ async fn test_dtako_upload_invalid_zip() {
     test_case!("不正なZIPで400エラーを返す", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DtakoBadZip").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DtakoBadZip").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -85,7 +85,7 @@ async fn test_dtako_upload_no_file_field() {
     test_case!("fileフィールドなしで400を返す", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DtakoNoFile").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DtakoNoFile").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
 
         let form = reqwest::multipart::Form::new().text("other_field", "value");
@@ -106,7 +106,7 @@ async fn test_dtako_internal_download_after_upload() {
     test_case!("アップロード後にダウンロードする", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DtakoDown").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DtakoDown").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -147,7 +147,7 @@ async fn test_dtako_internal_rerun() {
     test_case!("アップロード後にrerunで再処理する", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DtakoRerun").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DtakoRerun").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -187,7 +187,7 @@ async fn test_dtako_internal_rerun_not_found() {
     test_case!("存在しないIDでrerunが404を返す", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DtakoRerunNF").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DtakoRerunNF").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
 
         let fake_id = Uuid::new_v4();
@@ -207,7 +207,7 @@ async fn test_dtako_split_csv_handler() {
     test_case!("アップロード後にsplit-csvを実行する", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DtakoSplit").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DtakoSplit").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -231,7 +231,7 @@ async fn test_dtako_split_csv_handler() {
         // r2_zip_key を設定 + MockStorage に ZIP 配置
         let r2_key = format!("{}/zips/{}.zip", tenant_id, upload_id);
         {
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query(
                 "UPDATE alc_api.dtako_upload_history SET r2_zip_key = $1 WHERE id = $2::uuid",
             )
@@ -266,7 +266,7 @@ async fn test_dtako_split_csv_all_handler() {
     test_case!("split-csv-allでSSEストリームを消費する", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DtakoSplitAll").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DtakoSplitAll").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -288,7 +288,7 @@ async fn test_dtako_split_csv_all_handler() {
 
         // r2_zip_key と has_kudgivt を設定して split-csv-all が内部ループに入るようにする
         {
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                 .bind(tenant_id.to_string())
                 .execute(&mut *conn)
@@ -344,7 +344,7 @@ async fn test_dtako_list_pending_with_data() {
     test_case!("pending一覧にデータが表示される", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DtakoPending").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DtakoPending").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -380,7 +380,7 @@ async fn test_dtako_recalculate_all_with_data() {
     test_case!("実データありで全ドライバー再計算する", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DtakoRecalcAll").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DtakoRecalcAll").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -390,7 +390,7 @@ async fn test_dtako_recalculate_all_with_data() {
             common::create_test_employee(&client, &base_url, &auth, "RecalcAllDrv", "RA01").await;
         let emp_id: Uuid = emp["id"].as_str().unwrap().parse().unwrap();
         {
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                 .bind(tenant_id.to_string())
                 .execute(&mut *conn)
@@ -437,7 +437,7 @@ async fn test_dtako_recalculate_drivers_batch_with_data() {
     test_case!("実データありでバッチ再計算する", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DtakoBatchData").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DtakoBatchData").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -446,7 +446,7 @@ async fn test_dtako_recalculate_drivers_batch_with_data() {
         let emp = common::create_test_employee(&client, &base_url, &auth, "BatchDrv", "BD01").await;
         let emp_id: Uuid = emp["id"].as_str().unwrap().parse().unwrap();
         {
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                 .bind(tenant_id.to_string())
                 .execute(&mut *conn)
@@ -498,7 +498,7 @@ async fn test_dtako_recalculate_driver() {
     test_case!("ドライバー再計算SSEが200を返す", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DtakoRecalc").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DtakoRecalc").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -544,7 +544,7 @@ async fn test_dtako_drivers_list() {
     test_case!("ドライバー一覧が200を返す", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DtakoDrivers").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DtakoDrivers").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -564,7 +564,7 @@ async fn test_dtako_vehicles_list() {
     test_case!("車両一覧が200を返す", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DtakoVehicles").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DtakoVehicles").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -584,7 +584,7 @@ async fn test_dtako_operations_list() {
     test_case!("運行一覧が200を返す", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DtakoOps").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DtakoOps").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -604,7 +604,7 @@ async fn test_dtako_operations_calendar() {
     test_case!("運行カレンダーが200を返す", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DtakoCal").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DtakoCal").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -626,7 +626,7 @@ async fn test_dtako_daily_hours_list() {
     test_case!("日別時間一覧が200を返す", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DtakoDH").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DtakoDH").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -646,7 +646,7 @@ async fn test_dtako_work_times_list() {
     test_case!("作業時間一覧が200を返す", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DtakoWT").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DtakoWT").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -666,7 +666,7 @@ async fn test_dtako_event_classifications_list() {
     test_case!("イベント分類一覧が200を返す", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DtakoEC").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DtakoEC").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -690,7 +690,7 @@ async fn test_dtako_restraint_report_list() {
     test_case!("拘束時間レポート一覧を取得する", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DtakoReport").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DtakoReport").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -720,7 +720,7 @@ async fn test_dtako_list_uploads() {
     test_case!("アップロード一覧が200を返す", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DtakoUploads").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DtakoUploads").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -740,7 +740,7 @@ async fn test_dtako_list_pending_uploads() {
     test_case!("pending一覧が200を返す", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DtakoPending").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DtakoPending").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -766,7 +766,7 @@ async fn test_dtako_restraint_report_for_driver() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "DtakoRR").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "DtakoRR").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let client = reqwest::Client::new();
 
@@ -795,7 +795,7 @@ async fn test_dtako_restraint_report_json() {
     test_case!("JSONレポートを取得する", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DtakoRRJson").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DtakoRRJson").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -830,7 +830,7 @@ async fn test_dtako_restraint_report_json_with_data() {
     test_case!("実データありでJSONレポートを取得する", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DtakoRRData").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DtakoRRData").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -888,7 +888,7 @@ async fn test_dtako_compare_csv_empty() {
     test_case!("空のCSV比較で400エラーを返す", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DtakoCmpCSV").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DtakoCmpCSV").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -921,7 +921,7 @@ async fn test_dtako_recalculate_drivers_batch() {
     test_case!("空バッチ再計算が200を返す", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DtakoRecalcBatch").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DtakoRecalcBatch").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -943,7 +943,7 @@ async fn test_dtako_split_csv_all() {
     test_case!("split-csv-allが200を返す", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DtakoSplitAll").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DtakoSplitAll").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -967,7 +967,7 @@ async fn test_dtako_restraint_report_full_month() {
     test_case!("1ヶ月分のレポートを生成する", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DtakoRRFull").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DtakoRRFull").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -1034,7 +1034,7 @@ async fn test_dtako_daily_hours_with_driver_filter() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "DtakoDHF").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "DtakoDHF").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let client = reqwest::Client::new();
 
@@ -1059,7 +1059,7 @@ async fn test_dtako_get_operation_by_unko_no() {
     test_case!("unko_noで運行を取得する", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DtakoGetOp").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DtakoGetOp").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -1104,7 +1104,7 @@ async fn test_dtako_get_operation_not_found() {
     test_case!("存在しないunko_noで404を返す", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DtakoGetOpNF").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DtakoGetOpNF").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -1124,7 +1124,7 @@ async fn test_dtako_delete_operation_by_unko_no() {
     test_case!("unko_noで運行を削除する", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DtakoDelOp").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DtakoDelOp").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -1181,7 +1181,7 @@ async fn test_dtako_delete_operation_not_found() {
     test_case!("存在しないunko_noで削除が404を返す", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DtakoDelNF").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DtakoDelNF").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -1205,7 +1205,7 @@ async fn test_dtako_restraint_report_after_upload() {
     test_case!("アップロード後にレポートを取得する", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DtakoRRUp").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DtakoRRUp").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -1272,7 +1272,7 @@ async fn test_dtako_split_csv() {
     test_case!("アップロード後にsplit-csvを実行する", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DtakoSplit").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DtakoSplit").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -1322,7 +1322,7 @@ async fn test_dtako_recalculate_all() {
     test_case!("全ドライバー再計算SSEが200を返す", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DtakoRecAll").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DtakoRecAll").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -1352,7 +1352,7 @@ async fn test_dtako_internal_download() {
     test_case!("アップロード後にダウンロードする", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DtakoDL").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DtakoDL").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -1397,7 +1397,7 @@ async fn test_dtako_internal_download_not_found() {
     test_case!("存在しないIDでダウンロードが404を返す", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DtakoDLNF").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DtakoDLNF").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -1426,7 +1426,7 @@ async fn test_dtako_restraint_report_pdf() {
     test_case!("PDFレポートを生成する", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DtakoRRPdf").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DtakoRRPdf").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -1482,7 +1482,7 @@ async fn test_dtako_restraint_report_pdf_all_drivers() {
     test_case!("全ドライバーPDFを生成する", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DtakoRRPdfAll").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DtakoRRPdfAll").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -1509,7 +1509,7 @@ async fn test_dtako_restraint_report_pdf_stream() {
     test_case!("PDFストリームが200を返す", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DtakoRRStream").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DtakoRRStream").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -1534,7 +1534,7 @@ async fn test_dtako_restraint_report_pdf_not_found() {
     test_case!("存在しないドライバーでPDFが404/500を返す", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DtakoRRPdfNF").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DtakoRRPdfNF").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -1562,7 +1562,7 @@ async fn test_dtako_restraint_report_pdf_with_data() {
     test_case!("実データありでPDFを生成する", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DtakoRRPdfData").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DtakoRRPdfData").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -1573,7 +1573,7 @@ async fn test_dtako_restraint_report_pdf_with_data() {
 
         // 1週間分のデータを INSERT (dwh + segments)
         {
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                 .bind(tenant_id.to_string())
                 .execute(&mut *conn)
@@ -1688,7 +1688,7 @@ async fn test_dtako_restraint_report_pdf_stream_with_data() {
     test_case!("実データありでPDFストリームを生成する", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DtakoRRStreamData").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DtakoRRStreamData").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -1705,7 +1705,7 @@ async fn test_dtako_restraint_report_pdf_stream_with_data() {
 
         // 3日分のデータ
         {
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                 .bind(tenant_id.to_string())
                 .execute(&mut *conn)
@@ -1779,7 +1779,7 @@ async fn test_dtako_restraint_report_with_driver_id() {
     test_case!("ドライバーIDでレポートを取得する", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DtakoRRDrv").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DtakoRRDrv").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -1856,7 +1856,7 @@ async fn test_recalculate_driver_core_with_data() {
 
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "RecalcCore").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "RecalcCore").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let client = reqwest::Client::new();
 
@@ -1868,7 +1868,7 @@ async fn test_recalculate_driver_core_with_data() {
             let employee_id: Uuid = emp["id"].as_str().unwrap().parse().unwrap();
 
             {
-                let mut conn = state.pool.acquire().await.unwrap();
+                let mut conn = state.pool().acquire().await.unwrap();
                 sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                     .bind(tenant_id.to_string())
                     .execute(&mut *conn)
@@ -1909,7 +1909,7 @@ async fn test_recalculate_driver_core_with_data() {
             assert!(total >= 1, "Expected at least 1 operation, got {total}");
 
             // 4. DB に daily_work_hours が INSERT されたか確認
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                 .bind(tenant_id.to_string())
                 .execute(&mut *conn)
@@ -1941,7 +1941,7 @@ async fn test_recalculate_driver_core_no_driver() {
 
         let state = common::setup_app_state().await;
         let _base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "RecalcNoDriver").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "RecalcNoDriver").await;
 
         let fake_id = Uuid::new_v4();
         let result = recalculate_driver_core(&state, tenant_id, fake_id, 2026, 3, None).await;
@@ -1962,7 +1962,7 @@ async fn test_recalculate_driver_core_no_operations() {
 
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "RecalcNoOps").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "RecalcNoOps").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -1972,7 +1972,7 @@ async fn test_recalculate_driver_core_no_operations() {
                 .await;
         let employee_id: Uuid = emp["id"].as_str().unwrap().parse().unwrap();
         {
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                 .bind(tenant_id.to_string())
                 .execute(&mut *conn)
@@ -2007,7 +2007,7 @@ async fn test_dtako_upload_zip_rich() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "DtakoRich").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "DtakoRich").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -2022,7 +2022,7 @@ async fn test_dtako_upload_zip_rich() {
 
             // driver_cd 設定
             {
-                let mut conn = state.pool.acquire().await.unwrap();
+                let mut conn = state.pool().acquire().await.unwrap();
                 sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                     .bind(tenant_id.to_string())
                     .execute(&mut *conn)
@@ -2065,7 +2065,7 @@ async fn test_dtako_upload_zip_rich() {
             );
 
             // DB 検証: daily_work_hours
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                 .bind(tenant_id.to_string())
                 .execute(&mut *conn)
@@ -2115,7 +2115,7 @@ async fn test_dtako_upload_zip_reupload() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "DtakoReup").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "DtakoReup").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -2125,7 +2125,7 @@ async fn test_dtako_upload_zip_reupload() {
                 common::create_test_employee(&client, &base_url, &auth, "ReupDriver", "RU01").await;
             let emp_id: Uuid = emp["id"].as_str().unwrap().parse().unwrap();
             {
-                let mut conn = state.pool.acquire().await.unwrap();
+                let mut conn = state.pool().acquire().await.unwrap();
                 sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                     .bind(tenant_id.to_string())
                     .execute(&mut *conn)
@@ -2155,7 +2155,7 @@ async fn test_dtako_upload_zip_reupload() {
             assert_eq!(res.status(), 200);
 
             // 件数取得
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                 .bind(tenant_id.to_string())
                 .execute(&mut *conn)
@@ -2203,7 +2203,7 @@ async fn test_recalculate_driver_core_rich_data() {
 
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "RecalcRich").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "RecalcRich").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -2212,7 +2212,7 @@ async fn test_recalculate_driver_core_rich_data() {
                 common::create_test_employee(&client, &base_url, &auth, "運転者A", "RA01").await;
             let emp_id: Uuid = emp["id"].as_str().unwrap().parse().unwrap();
             {
-                let mut conn = state.pool.acquire().await.unwrap();
+                let mut conn = state.pool().acquire().await.unwrap();
                 sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                     .bind(tenant_id.to_string())
                     .execute(&mut *conn)
@@ -2248,7 +2248,7 @@ async fn test_recalculate_driver_core_rich_data() {
             assert!(total >= 2, "Expected 2+ operations for DR01 (2 days)");
 
             // daily_work_hours が再生成されたか確認
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                 .bind(tenant_id.to_string())
                 .execute(&mut *conn)
@@ -2275,7 +2275,7 @@ async fn test_recalculate_driver_core_with_ferry() {
 
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "RecalcFerry").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "RecalcFerry").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -2284,7 +2284,7 @@ async fn test_recalculate_driver_core_with_ferry() {
             common::create_test_employee(&client, &base_url, &auth, "FerryDriver", "FD01").await;
         let emp_id: Uuid = emp["id"].as_str().unwrap().parse().unwrap();
         {
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                 .bind(tenant_id.to_string())
                 .execute(&mut *conn)
@@ -2346,7 +2346,7 @@ async fn test_recalculate_driver_core_invalid_month() {
 
         let state = common::setup_app_state().await;
         let _base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "RecalcBadMonth").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "RecalcBadMonth").await;
 
         let fake_id = Uuid::new_v4();
         let result = recalculate_driver_core(&state, tenant_id, fake_id, 2026, 13, None).await;
@@ -2387,7 +2387,7 @@ async fn insert_dwh_and_get_report(
         i32,  // cargo_minutes
     )],
 ) -> Value {
-    let mut conn = state.pool.acquire().await.unwrap();
+    let mut conn = state.pool().acquire().await.unwrap();
     sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
         .bind(tenant_id.to_string())
         .execute(&mut *conn)
@@ -2472,7 +2472,7 @@ async fn test_restraint_report_basic_calculation() {
     test_case!("基本計算(drive/cargo/is_holiday)を検証する", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "RRBasic").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "RRBasic").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -2523,7 +2523,7 @@ async fn test_restraint_report_holiday_handling() {
     test_case!("休日と連続休日を正しく処理する", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "RRHoliday").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "RRHoliday").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -2568,7 +2568,7 @@ async fn test_restraint_report_weekly_subtotals() {
     test_case!("週次小計を正しく計算する", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "RRWeekly").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "RRWeekly").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -2650,7 +2650,7 @@ async fn test_restraint_report_overtime_calculation() {
     test_case!("時間外・深夜計算を検証する", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "RROvertime").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "RROvertime").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -2697,7 +2697,7 @@ async fn test_restraint_report_overlap_fields() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "RROverlap").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "RROverlap").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -2744,7 +2744,7 @@ async fn test_restraint_report_multiple_dwh_same_day() {
     test_case!("同日の複数DWH行を処理する", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "RRMultiDWH").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "RRMultiDWH").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -2806,7 +2806,7 @@ async fn test_restraint_report_drive_avg_before() {
     test_case!("前日運転平均を正しく計算する", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "RRDriveAvg").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "RRDriveAvg").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -2816,7 +2816,7 @@ async fn test_restraint_report_drive_avg_before() {
 
         // 前月末 (2/28) にデータ INSERT + 当月 (3/1) にデータ INSERT
         {
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                 .bind(tenant_id.to_string())
                 .execute(&mut *conn)
@@ -2878,7 +2878,7 @@ async fn test_restraint_report_fiscal_year_cumulative() {
     test_case!("年度累計を正しく計算する", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "RRFiscal").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "RRFiscal").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -2888,7 +2888,7 @@ async fn test_restraint_report_fiscal_year_cumulative() {
 
         // 前年度 (2025年4月-12月) のデータを INSERT
         {
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                 .bind(tenant_id.to_string())
                 .execute(&mut *conn)
@@ -2963,7 +2963,7 @@ async fn test_restraint_report_with_operations() {
     test_case!("operationsデータありでレポートを生成する", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "RROps").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "RROps").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -2973,7 +2973,7 @@ async fn test_restraint_report_with_operations() {
 
         // dtako_operations を直接 INSERT
         {
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                 .bind(tenant_id.to_string())
                 .execute(&mut *conn)
@@ -3114,7 +3114,7 @@ async fn test_restraint_report_after_rich_upload() {
     test_case!("リッチZIP後にレポートとPDFを生成する", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "RRRichUp").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "RRRichUp").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -3123,7 +3123,7 @@ async fn test_restraint_report_after_rich_upload() {
         let emp = common::create_test_employee(&client, &base_url, &auth, "運転者A", "RA01").await;
         let emp_id: Uuid = emp["id"].as_str().unwrap().parse().unwrap();
         {
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                 .bind(tenant_id.to_string())
                 .execute(&mut *conn)
@@ -3203,7 +3203,7 @@ async fn test_dtako_split_csv_not_found() {
     test_case!("存在しないupload_idで500を返す", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "SplitNF").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "SplitNF").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
 
         let fake_id = Uuid::new_v4();
@@ -3223,7 +3223,7 @@ async fn test_dtako_internal_download_r2_missing() {
     test_case!("R2にZIPがない場合に500を返す", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DownR2Miss").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DownR2Miss").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -3247,7 +3247,7 @@ async fn test_dtako_internal_download_r2_missing() {
 
         // r2_zip_key を設定するが MockStorage には置かない
         {
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query("UPDATE alc_api.dtako_upload_history SET r2_zip_key = 'nonexistent-key' WHERE id = $1::uuid")
                 .bind(upload_id).execute(&mut *conn).await.unwrap();
         }
@@ -3268,7 +3268,7 @@ async fn test_dtako_internal_rerun_bad_zip() {
     test_case!("壊れたZIPでrerunが400を返す", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "RerunBad").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "RerunBad").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -3293,7 +3293,7 @@ async fn test_dtako_internal_rerun_bad_zip() {
         // r2_zip_key に壊れた ZIP を配置
         let r2_key = format!("{}/bad/{}.zip", tenant_id, upload_id);
         {
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query(
                 "UPDATE alc_api.dtako_upload_history SET r2_zip_key = $1 WHERE id = $2::uuid",
             )
@@ -3329,7 +3329,7 @@ async fn test_dtako_recalculate_driver_error_event() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "RecalcErr").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "RecalcErr").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
 
             let fake_id = Uuid::new_v4();
@@ -3357,7 +3357,7 @@ async fn test_dtako_recalculate_drivers_batch_invalid_month() {
     test_case!("無効な月でSSEエラーを返す", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "BatchInvMonth").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "BatchInvMonth").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
 
         let res = reqwest::Client::new()
@@ -3382,7 +3382,7 @@ async fn test_dtako_recalculate_drivers_batch_driver_not_found() {
     test_case!("存在しないドライバーでバッチ完了する", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "BatchNoDriver").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "BatchNoDriver").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
 
         let fake_id = Uuid::new_v4();
@@ -3406,7 +3406,7 @@ async fn test_dtako_internal_rerun_r2_download_fail() {
     test_case!("R2ダウンロード失敗でrerunが500を返す", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "RerunR2Fail").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "RerunR2Fail").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -3429,7 +3429,7 @@ async fn test_dtako_internal_rerun_r2_download_fail() {
 
         // r2_zip_key を存在しないキーに設定 (MockStorage にはアップロードしない)
         {
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query("UPDATE alc_api.dtako_upload_history SET r2_zip_key = 'nonexistent-key' WHERE id = $1::uuid")
                 .bind(upload_id).execute(&mut *conn).await.unwrap();
         }
@@ -3450,7 +3450,7 @@ async fn test_dtako_internal_download_unicode_filename() {
     test_case!("Unicodeファイル名でダウンロードする", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DownUnicode").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DownUnicode").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -3475,7 +3475,7 @@ async fn test_dtako_internal_download_unicode_filename() {
         // r2_zip_key 設定 + storage に配置
         let r2_key = format!("{}/unicode/{}.zip", tenant_id, upload_id);
         {
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query(
                 "UPDATE alc_api.dtako_upload_history SET r2_zip_key = $1 WHERE id = $2::uuid",
             )
@@ -3565,7 +3565,7 @@ async fn test_dtako_mark_upload_failed_success() {
         use rust_alc_api::routes::dtako_upload::mark_upload_failed;
         let state = common::setup_app_state().await;
         let _base = common::spawn_test_server(state.clone()).await;
-        let mut conn = state.pool.acquire().await.unwrap();
+        let mut conn = state.pool().acquire().await.unwrap();
         mark_upload_failed(&mut conn, Uuid::new_v4(), "test error").await;
     });
 }
@@ -3577,7 +3577,7 @@ async fn test_dtako_mark_upload_failed_db_error() {
         use rust_alc_api::routes::dtako_upload::mark_upload_failed;
         let state = common::setup_app_state().await;
         let _base = common::spawn_test_server(state.clone()).await;
-        let mut conn = state.pool.acquire().await.unwrap();
+        let mut conn = state.pool().acquire().await.unwrap();
         // BEGIN → RENAME → テスト → ROLLBACK (PostgreSQL は DDL も ROLLBACK 可能)
         sqlx::query("BEGIN").execute(&mut *conn).await.unwrap();
         sqlx::query("ALTER TABLE alc_api.dtako_upload_history RENAME TO dtako_upload_history_bak")
@@ -3596,7 +3596,7 @@ async fn test_recalculate_all_core_invalid_month() {
         use rust_alc_api::routes::dtako_upload::recalculate_all_core;
         let state = common::setup_app_state().await;
         let _base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "RecAllInv").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "RecAllInv").await;
         let result = recalculate_all_core(&state, tenant_id, 2026, 13, None).await;
         assert!(result.is_err());
         assert!(result
@@ -3615,7 +3615,7 @@ async fn test_recalculate_all_core_no_kudgivt() {
             use rust_alc_api::routes::dtako_upload::recalculate_all_core;
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "RecAllNoKG").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "RecAllNoKG").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -3624,7 +3624,7 @@ async fn test_recalculate_all_core_no_kudgivt() {
                 common::create_test_employee(&client, &base_url, &auth, "NoKGDrv", "NK01").await;
             let emp_id: Uuid = emp["id"].as_str().unwrap().parse().unwrap();
             {
-                let mut conn = state.pool.acquire().await.unwrap();
+                let mut conn = state.pool().acquire().await.unwrap();
                 sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                     .bind(tenant_id.to_string())
                     .execute(&mut *conn)
@@ -3654,7 +3654,7 @@ async fn test_recalculate_all_core_december() {
         use rust_alc_api::routes::dtako_upload::recalculate_all_core;
         let state = common::setup_app_state().await;
         let _base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "RecAllDec").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "RecAllDec").await;
         // operations なし → 0件で成功
         let result = recalculate_all_core(&state, tenant_id, 2025, 12, None).await;
         assert!(result.is_ok());
@@ -3670,7 +3670,7 @@ async fn test_dtako_internal_download_all_japanese_filename() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "DownJP").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "DownJP").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -3694,7 +3694,7 @@ async fn test_dtako_internal_download_all_japanese_filename() {
 
             let r2_key = format!("{}/jp/{}.zip", tenant_id, upload_id);
             {
-                let mut conn = state.pool.acquire().await.unwrap();
+                let mut conn = state.pool().acquire().await.unwrap();
                 sqlx::query(
                     "UPDATE alc_api.dtako_upload_history SET r2_zip_key = $1 WHERE id = $2::uuid",
                 )
@@ -3739,7 +3739,7 @@ async fn test_dtako_recalculate_all_invalid_month() {
     test_case!("recalculate-all SSEが無効な月でエラーを返す", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "RecalcAllInv").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "RecalcAllInv").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
 
         let res = reqwest::Client::new()
@@ -3763,7 +3763,7 @@ async fn test_dtako_recalculate_drivers_batch_december() {
     test_case!("12月のバッチ再計算が成功する", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "BatchDec").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "BatchDec").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
 
         let res = reqwest::Client::new()
@@ -3787,7 +3787,7 @@ async fn test_recalculate_driver_core_december() {
 
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "RecalcDec").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "RecalcDec").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -3795,7 +3795,7 @@ async fn test_recalculate_driver_core_december() {
             common::create_test_employee(&client, &base_url, &auth, "DecDriver", "DC01").await;
         let emp_id: Uuid = emp["id"].as_str().unwrap().parse().unwrap();
         {
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                 .bind(tenant_id.to_string())
                 .execute(&mut *conn)
@@ -3821,7 +3821,7 @@ async fn test_dtako_recalculate_driver_sse_done() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "RecalcSSE").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "RecalcSSE").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -3830,7 +3830,7 @@ async fn test_dtako_recalculate_driver_sse_done() {
                 common::create_test_employee(&client, &base_url, &auth, "SSEDrv", "SD01").await;
             let emp_id: Uuid = emp["id"].as_str().unwrap().parse().unwrap();
             {
-                let mut conn = state.pool.acquire().await.unwrap();
+                let mut conn = state.pool().acquire().await.unwrap();
                 sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                     .bind(tenant_id.to_string())
                     .execute(&mut *conn)
@@ -3886,7 +3886,7 @@ async fn test_dtako_recalculate_all_no_kudgivt() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "RecalcNoKGVT").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "RecalcNoKGVT").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -3895,7 +3895,7 @@ async fn test_dtako_recalculate_all_no_kudgivt() {
                 common::create_test_employee(&client, &base_url, &auth, "NoKGVTDrv", "NK01").await;
             let emp_id: Uuid = emp["id"].as_str().unwrap().parse().unwrap();
             {
-                let mut conn = state.pool.acquire().await.unwrap();
+                let mut conn = state.pool().acquire().await.unwrap();
                 sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                     .bind(tenant_id.to_string())
                     .execute(&mut *conn)
@@ -3937,7 +3937,7 @@ async fn test_dtako_split_csv_all_empty() {
     test_case!("operationsなしでsplit-csv-allが即done返す", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "SplitAllEmpty").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "SplitAllEmpty").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
 
         // upload も operations もなし → total=0 → 即 done
@@ -3965,7 +3965,7 @@ async fn test_dtako_upload_empty_kudguri() {
 
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "EmptyKud").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "EmptyKud").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
 
@@ -4019,7 +4019,7 @@ async fn test_dtako_upload_empty_cd_fields() {
 
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "EmptyCD").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "EmptyCD").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
 
@@ -4068,7 +4068,7 @@ async fn test_dtako_upload_edge_cases_302_and_ferry_format() {
 
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "Edge302").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "Edge302").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -4077,7 +4077,7 @@ async fn test_dtako_upload_edge_cases_302_and_ferry_format() {
             common::create_test_employee(&client, &base_url, &auth, "Edge302Drv", "E302").await;
         let emp_id: Uuid = emp["id"].as_str().unwrap().parse().unwrap();
         {
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                 .bind(tenant_id.to_string())
                 .execute(&mut *conn)
@@ -4156,7 +4156,7 @@ async fn test_dtako_internal_rerun_with_r2_key() {
     test_case!("R2キーありでrerunが成功する", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "RerunR2").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "RerunR2").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -4181,7 +4181,7 @@ async fn test_dtako_internal_rerun_with_r2_key() {
         // r2_zip_key を設定 + MockStorage に ZIP 配置
         let r2_key = format!("{}/zips/{}.zip", tenant_id, upload_id);
         {
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query(
                 "UPDATE alc_api.dtako_upload_history SET r2_zip_key = $1 WHERE id = $2::uuid",
             )
@@ -4223,7 +4223,7 @@ async fn test_recalculate_drivers_batch_core_invalid_month() {
         use rust_alc_api::routes::dtako_upload::recalculate_drivers_batch_core;
         let state = common::setup_app_state().await;
         let _base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "BatchCoreInv").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "BatchCoreInv").await;
         let result = recalculate_drivers_batch_core(&state, tenant_id, 2026, 13, &[]).await;
         assert!(result.is_err());
     });
@@ -4238,7 +4238,7 @@ async fn test_recalculate_drivers_batch_core_driver_error() {
             use rust_alc_api::routes::dtako_upload::recalculate_drivers_batch_core;
             let state = common::setup_app_state().await;
             let _base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "BatchCoreErr").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "BatchCoreErr").await;
             let fake = Uuid::new_v4();
             let result = recalculate_drivers_batch_core(&state, tenant_id, 2026, 3, &[fake]).await;
             assert!(result.is_ok());
@@ -4256,7 +4256,7 @@ async fn test_split_csv_all_core_empty() {
         use rust_alc_api::routes::dtako_upload::split_csv_all_core;
         let state = common::setup_app_state().await;
         let _base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "SplitCoreEmpty").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "SplitCoreEmpty").await;
         let result = split_csv_all_core(&state, tenant_id).await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), (0, 0));
@@ -4270,7 +4270,7 @@ async fn test_split_csv_all_core_with_failures() {
         use rust_alc_api::routes::dtako_upload::split_csv_all_core;
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "SplitCoreFail").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "SplitCoreFail").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -4290,7 +4290,7 @@ async fn test_split_csv_all_core_with_failures() {
             .unwrap();
 
         {
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                 .bind(tenant_id.to_string())
                 .execute(&mut *conn)
@@ -4335,14 +4335,14 @@ async fn test_recalculate_with_zero_duration_ferry() {
         use rust_alc_api::routes::dtako_upload::recalculate_driver_core;
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "ZeroFerry").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "ZeroFerry").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
         let emp = common::create_test_employee(&client, &base_url, &auth, "ZFDrv", "ZF01").await;
         let emp_id: Uuid = emp["id"].as_str().unwrap().parse().unwrap();
         {
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                 .bind(tenant_id.to_string())
                 .execute(&mut *conn)
@@ -4395,10 +4395,10 @@ async fn test_dtako_split_csv_all_core_db_error() {
         use rust_alc_api::routes::dtako_upload::split_csv_all_core;
         let state = common::setup_app_state().await;
         let _base = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "SplitDBErr").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "SplitDBErr").await;
 
         // BEGIN → RENAME → split_csv_all_core (Err) → ROLLBACK
-        let mut conn = state.pool.acquire().await.unwrap();
+        let mut conn = state.pool().acquire().await.unwrap();
         sqlx::query("BEGIN").execute(&mut *conn).await.unwrap();
         sqlx::query("ALTER TABLE alc_api.dtako_operations RENAME TO dtako_operations_txerr")
             .execute(&mut *conn)
@@ -4423,7 +4423,7 @@ async fn test_dtako_upload_split_csv_fails_gracefully() {
         use std::io::Write;
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "SplitFail").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "SplitFail").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
 
@@ -4453,7 +4453,7 @@ async fn test_recalculate_with_corrupted_zip_in_r2() {
         use rust_alc_api::routes::dtako_upload::recalculate_driver_core;
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "CorruptZip").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "CorruptZip").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -4462,7 +4462,7 @@ async fn test_recalculate_with_corrupted_zip_in_r2() {
             common::create_test_employee(&client, &base_url, &auth, "CorruptDrv", "CZ01").await;
         let emp_id: Uuid = emp["id"].as_str().unwrap().parse().unwrap();
         {
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                 .bind(tenant_id.to_string())
                 .execute(&mut *conn)
@@ -4492,7 +4492,7 @@ async fn test_recalculate_with_corrupted_zip_in_r2() {
 
         // upload_history に壊れた ZIP の r2_zip_key を設定
         {
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                 .bind(tenant_id.to_string())
                 .execute(&mut *conn)
@@ -4524,7 +4524,7 @@ async fn test_recalculate_all_core_bad_kudgivt_csv() {
         use rust_alc_api::routes::dtako_upload::recalculate_all_core;
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "BadKGVTcsv").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "BadKGVTcsv").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -4533,7 +4533,7 @@ async fn test_recalculate_all_core_bad_kudgivt_csv() {
             common::create_test_employee(&client, &base_url, &auth, "BadCsvDrv", "BC01").await;
         let emp_id: Uuid = emp["id"].as_str().unwrap().parse().unwrap();
         {
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                 .bind(tenant_id.to_string())
                 .execute(&mut *conn)
@@ -4573,7 +4573,7 @@ async fn test_recalculate_with_bad_ferry_data() {
         use rust_alc_api::routes::dtako_upload::recalculate_driver_core;
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "BadFerry").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "BadFerry").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -4582,7 +4582,7 @@ async fn test_recalculate_with_bad_ferry_data() {
             common::create_test_employee(&client, &base_url, &auth, "BadFerryDrv", "BF01").await;
         let emp_id: Uuid = emp["id"].as_str().unwrap().parse().unwrap();
         {
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                 .bind(tenant_id.to_string())
                 .execute(&mut *conn)
@@ -4633,7 +4633,7 @@ async fn test_recalculate_with_duplicate_zip_keys() {
         use rust_alc_api::routes::dtako_upload::recalculate_driver_core;
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DupZip").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DupZip").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -4642,7 +4642,7 @@ async fn test_recalculate_with_duplicate_zip_keys() {
             common::create_test_employee(&client, &base_url, &auth, "DupZipDrv", "DZ01").await;
         let emp_id: Uuid = emp["id"].as_str().unwrap().parse().unwrap();
         {
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                 .bind(tenant_id.to_string())
                 .execute(&mut *conn)
@@ -4673,7 +4673,7 @@ async fn test_recalculate_with_duplicate_zip_keys() {
         }
         // 同じ r2_zip_key を設定
         {
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                 .bind(tenant_id.to_string())
                 .execute(&mut *conn)
@@ -4705,7 +4705,7 @@ async fn test_dtako_split_csv_all_with_bad_zip() {
     test_case!("壊れたZIPでsplit-csv-allのSSEイベントを返す", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "SplitBad").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "SplitBad").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -4727,7 +4727,7 @@ async fn test_dtako_split_csv_all_with_bad_zip() {
 
         // r2_zip_key に壊れた ZIP を配置 + has_kudgivt=false
         {
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                 .bind(tenant_id.to_string())
                 .execute(&mut *conn)
@@ -4815,7 +4815,7 @@ async fn test_upload_triggers_split_failure() {
     test_case!("split失敗でもアップロードは成功する", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "SplitFail2").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "SplitFail2").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
 
@@ -4848,7 +4848,7 @@ async fn test_load_kudgivt_error_paths() {
         use rust_alc_api::routes::dtako_upload::recalculate_driver_core;
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "KGVTErr").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "KGVTErr").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -4857,7 +4857,7 @@ async fn test_load_kudgivt_error_paths() {
             common::create_test_employee(&client, &base_url, &auth, "KGVTErrDrv", "KE01").await;
         let emp_id: Uuid = emp["id"].as_str().unwrap().parse().unwrap();
         {
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                 .bind(tenant_id.to_string())
                 .execute(&mut *conn)
@@ -4887,7 +4887,7 @@ async fn test_load_kudgivt_error_paths() {
 
         // upload_history に 3つの r2_zip_key を設定: 壊れた ZIP, 存在しないキー, KUDGIVT なし ZIP
         {
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                 .bind(tenant_id.to_string())
                 .execute(&mut *conn)
@@ -4937,7 +4937,7 @@ async fn test_split_csv_no_kudgivt_in_zip() {
         let _flock = common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "SplitNoKGVT").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "SplitNoKGVT").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -4965,7 +4965,7 @@ async fn test_split_csv_no_kudgivt_in_zip() {
         // r2_zip_key に KUDGURI のみ ZIP を配置 (KUDGIVT なし)
         let r2_key = format!("{}/nokgvt/{}.zip", tenant_id, upload_id);
         {
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query(
                 "UPDATE alc_api.dtako_upload_history SET r2_zip_key = $1 WHERE id = $2::uuid",
             )
@@ -5007,7 +5007,7 @@ async fn test_load_kudgivt_parse_error_in_valid_zip() {
             use rust_alc_api::routes::dtako_upload::recalculate_driver_core;
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "KGVTParse").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "KGVTParse").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -5017,7 +5017,7 @@ async fn test_load_kudgivt_parse_error_in_valid_zip() {
                     .await;
             let emp_id: Uuid = emp["id"].as_str().unwrap().parse().unwrap();
             {
-                let mut conn = state.pool.acquire().await.unwrap();
+                let mut conn = state.pool().acquire().await.unwrap();
                 sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                     .bind(tenant_id.to_string())
                     .execute(&mut *conn)
@@ -5051,7 +5051,7 @@ async fn test_load_kudgivt_parse_error_in_valid_zip() {
 
             // upload_history に bad_kudgivt_zip を登録
             {
-                let mut conn = state.pool.acquire().await.unwrap();
+                let mut conn = state.pool().acquire().await.unwrap();
                 sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                     .bind(tenant_id.to_string())
                     .execute(&mut *conn)
@@ -5078,7 +5078,7 @@ async fn test_classification_insert_db_error() {
             use rust_alc_api::routes::dtako_upload::recalculate_driver_core;
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "ClsInsErr").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "ClsInsErr").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -5087,7 +5087,7 @@ async fn test_classification_insert_db_error() {
                 common::create_test_employee(&client, &base_url, &auth, "ClsErrDrv", "CE01").await;
             let emp_id: Uuid = emp["id"].as_str().unwrap().parse().unwrap();
             {
-                let mut conn = state.pool.acquire().await.unwrap();
+                let mut conn = state.pool().acquire().await.unwrap();
                 sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                     .bind(tenant_id.to_string())
                     .execute(&mut *conn)
@@ -5117,7 +5117,7 @@ async fn test_classification_insert_db_error() {
 
             // 既存の分類を削除 (新イベントとして再登録させるため)
             {
-                let mut conn = state.pool.acquire().await.unwrap();
+                let mut conn = state.pool().acquire().await.unwrap();
                 sqlx::query("DELETE FROM alc_api.dtako_event_classifications WHERE tenant_id = $1")
                     .bind(tenant_id)
                     .execute(&mut *conn)
@@ -5131,12 +5131,12 @@ async fn test_classification_insert_db_error() {
                BEGIN RAISE EXCEPTION 'test: classification insert blocked'; END;
                $$ LANGUAGE plpgsql"#,
             )
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
             sqlx::query(
             "CREATE TRIGGER reject_cls_insert BEFORE INSERT ON alc_api.dtako_event_classifications FOR EACH ROW EXECUTE FUNCTION alc_api.reject_cls_insert()"
-        ).execute(&state.pool).await.unwrap();
+        ).execute(state.pool()).await.unwrap();
 
             // recalculate → load_or_init_classifications → INSERT 失敗 → error log (line 960)
             // 関数は INSERT 失敗を if let Err で捕捉してログ出力、処理は続行
@@ -5146,11 +5146,11 @@ async fn test_classification_insert_db_error() {
 
             // trigger を削除
             sqlx::query("DROP TRIGGER reject_cls_insert ON alc_api.dtako_event_classifications")
-                .execute(&state.pool)
+                .execute(state.pool())
                 .await
                 .unwrap();
             sqlx::query("DROP FUNCTION alc_api.reject_cls_insert()")
-                .execute(&state.pool)
+                .execute(state.pool())
                 .await
                 .unwrap();
         }
@@ -5163,7 +5163,7 @@ async fn test_has_kudgivt_update_error() {
     test_case!("has_kudgivt UPDATE失敗時にログ出力する", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "HasKGVTErr").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "HasKGVTErr").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -5188,7 +5188,7 @@ async fn test_has_kudgivt_update_error() {
 
         // has_kudgivt を FALSE にリセット (split-csv で TRUE に変更させるため)
         {
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                 .bind(tenant_id.to_string())
                 .execute(&mut *conn)
@@ -5214,12 +5214,12 @@ async fn test_has_kudgivt_update_error() {
                END;
                $$ LANGUAGE plpgsql"#,
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
         sqlx::query(
             "CREATE TRIGGER reject_ops_update BEFORE UPDATE ON alc_api.dtako_operations FOR EACH ROW EXECUTE FUNCTION alc_api.reject_ops_update()"
-        ).execute(&state.pool).await.unwrap();
+        ).execute(state.pool()).await.unwrap();
 
         // split-csv → KUDGIVT あり → has_kudgivt UPDATE → trigger で拒否 → error log (line 1117)
         let res = client
@@ -5233,11 +5233,11 @@ async fn test_has_kudgivt_update_error() {
 
         // trigger を削除
         sqlx::query("DROP TRIGGER reject_ops_update ON alc_api.dtako_operations")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
         sqlx::query("DROP FUNCTION alc_api.reject_ops_update()")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -5250,13 +5250,13 @@ async fn test_split_csv_all_sse_error_path() {
         "split_csv_all_coreのErrでSSEエラーイベントを返す",
         {
             let state = common::setup_app_state().await;
-            let tenant_id = common::create_test_tenant(&state.pool, "SSESplitErr").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "SSESplitErr").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let base_url = common::spawn_test_server(state.clone()).await;
 
             // pool を閉じて DB エラーを発生させる (他テストに影響しない)
-            state.pool.close().await;
+            state.pool().close().await;
 
             let client = reqwest::Client::new();
             // SSE エンドポイント呼び出し
@@ -5280,7 +5280,7 @@ async fn test_ferry_no_matching_kudgivt_events() {
         use rust_alc_api::routes::dtako_upload::recalculate_driver_core;
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "FerryNoKGVT").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "FerryNoKGVT").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -5289,7 +5289,7 @@ async fn test_ferry_no_matching_kudgivt_events() {
             common::create_test_employee(&client, &base_url, &auth, "FerryNoKDrv", "FK01").await;
         let emp_id: Uuid = emp["id"].as_str().unwrap().parse().unwrap();
         {
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                 .bind(tenant_id.to_string())
                 .execute(&mut *conn)
@@ -5319,7 +5319,7 @@ async fn test_ferry_no_matching_kudgivt_events() {
 
         // unko_no=9999 の operation を追加 (KUDGIVT にはイベントなし)
         {
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                 .bind(tenant_id.to_string())
                 .execute(&mut *conn)
@@ -5360,7 +5360,7 @@ async fn test_ferry_parse_invalid_datetime() {
         use rust_alc_api::routes::dtako_upload::recalculate_driver_core;
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "FerryBadDT").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "FerryBadDT").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -5369,7 +5369,7 @@ async fn test_ferry_parse_invalid_datetime() {
             common::create_test_employee(&client, &base_url, &auth, "FerryBadDTDrv", "FD01").await;
         let emp_id: Uuid = emp["id"].as_str().unwrap().parse().unwrap();
         {
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                 .bind(tenant_id.to_string())
                 .execute(&mut *conn)
@@ -5424,7 +5424,7 @@ async fn test_split_csv_with_kudgivt_zip() {
         let _flock = common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "SplitKGVT").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "SplitKGVT").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -5465,7 +5465,7 @@ async fn test_ferry_short_columns() {
         use rust_alc_api::routes::dtako_upload::recalculate_driver_core;
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "FerryShort").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "FerryShort").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -5474,7 +5474,7 @@ async fn test_ferry_short_columns() {
             common::create_test_employee(&client, &base_url, &auth, "FerryShortDrv", "FS01").await;
         let emp_id: Uuid = emp["id"].as_str().unwrap().parse().unwrap();
         {
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                 .bind(tenant_id.to_string())
                 .execute(&mut *conn)
@@ -5527,7 +5527,7 @@ async fn test_split_csv_with_non_csv_file_in_zip() {
         use std::io::Write;
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "SplitNonCSV").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "SplitNonCSV").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -5593,7 +5593,7 @@ async fn test_upload_split_csv_from_r2_error_via_trigger() {
             let _flock = common::db_rename_flock();
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "SplitTrig").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "SplitTrig").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -5609,12 +5609,12 @@ async fn test_upload_split_csv_from_r2_error_via_trigger() {
                END;
                $$ LANGUAGE plpgsql"#,
             )
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
             sqlx::query(
                 "CREATE TRIGGER corrupt_r2_key BEFORE UPDATE ON alc_api.dtako_upload_history FOR EACH ROW EXECUTE FUNCTION alc_api.corrupt_r2_key()"
-            ).execute(&state.pool).await.unwrap();
+            ).execute(state.pool()).await.unwrap();
 
             // upload → process_zip 成功 → status='completed' UPDATE → trigger が r2_zip_key を壊す
             // → try_split_csv 内の split_csv_from_r2 が壊れたキーで download 試行 → Err → warn log
@@ -5635,11 +5635,11 @@ async fn test_upload_split_csv_from_r2_error_via_trigger() {
 
             // trigger を削除
             sqlx::query("DROP TRIGGER corrupt_r2_key ON alc_api.dtako_upload_history")
-                .execute(&state.pool)
+                .execute(state.pool())
                 .await
                 .unwrap();
             sqlx::query("DROP FUNCTION alc_api.corrupt_r2_key()")
-                .execute(&state.pool)
+                .execute(state.pool())
                 .await
                 .unwrap();
         }
@@ -5651,7 +5651,7 @@ async fn test_upload_split_csv_from_r2_error() {
     test_case!("存在しないR2キーでsplit-csvが500を返す", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "SplitR2Err").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "SplitR2Err").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -5692,7 +5692,7 @@ async fn test_upload_split_csv_from_r2_error() {
 
         // r2_zip_key を存在しないキーに更新 → split-csv endpoint で download 失敗
         {
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query("UPDATE alc_api.dtako_upload_history SET r2_zip_key = 'nonexistent-r2-key' WHERE id = $1::uuid")
                 .bind(&upload_id).execute(&mut *conn).await.unwrap();
         }
@@ -5717,7 +5717,7 @@ async fn test_restraint_report_invalid_year_month() {
     test_case!("無効な year/month → 400 BAD_REQUEST (L221)", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "RRInvMonth").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "RRInvMonth").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -5760,7 +5760,7 @@ async fn test_restraint_report_december() {
     test_case!("month=12 → 年越し処理 (L224)", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "RRDec").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "RRDec").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -5796,7 +5796,7 @@ async fn test_restraint_report_db_error_internal_err() {
         let _flock = common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "RRDbErr").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "RRDbErr").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -5810,7 +5810,7 @@ async fn test_restraint_report_db_error_internal_err() {
         sqlx::query(
             "ALTER TABLE alc_api.dtako_daily_work_segments RENAME TO dtako_daily_work_segments_bak",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -5833,7 +5833,7 @@ async fn test_restraint_report_db_error_internal_err() {
         sqlx::query(
             "ALTER TABLE alc_api.dtako_daily_work_segments_bak RENAME TO dtako_daily_work_segments",
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
     });
@@ -5845,7 +5845,7 @@ async fn test_restraint_report_compare_csv_upload() {
     test_case!("multipart CSV アップロード (L719-731)", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "RRCmpCSV").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "RRCmpCSV").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -5903,7 +5903,7 @@ async fn test_restraint_report_compare_csv_with_driver_filter() {
     test_case!("driver_cd フィルター付き CSV 比較", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "RRCmpFilt").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "RRCmpFilt").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -5916,7 +5916,7 @@ async fn test_restraint_report_compare_csv_with_driver_filter() {
         // driver_cd を設定
         sqlx::query("UPDATE alc_api.employees SET driver_cd = 'FILT01' WHERE id = $1::uuid")
             .bind(emp_id)
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
@@ -6018,7 +6018,7 @@ async fn test_restraint_report_last_day_drive_avg_and_weekly_subtotal() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "RRLastDay").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "RRLastDay").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -6030,7 +6030,7 @@ async fn test_restraint_report_last_day_drive_avg_and_weekly_subtotal() {
             let emp_id: uuid::Uuid = emp["id"].as_str().unwrap().parse().unwrap();
 
             // 平日 (2026-03-02=月, 03=火) に直接 DB INSERT
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query(&format!(
                 "SELECT set_config('app.current_tenant_id', '{}', false)",
                 tenant_id
@@ -6128,7 +6128,7 @@ async fn test_restraint_report_empty_dwh_list() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "RRNoDwh").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "RRNoDwh").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -6142,7 +6142,7 @@ async fn test_restraint_report_empty_dwh_list() {
 
             // segments を直接 INSERT (dwh は INSERT しない) → dwh_list = None → vec![None]
             {
-                let mut conn = state.pool.acquire().await.unwrap();
+                let mut conn = state.pool().acquire().await.unwrap();
                 sqlx::query("SELECT set_config('app.current_tenant_id', $1, false)")
                     .bind(tenant_id.to_string())
                     .execute(&mut *conn)

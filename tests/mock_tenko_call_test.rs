@@ -2,11 +2,12 @@
 mod common;
 mod mock_helpers;
 
+use uuid::Uuid;
+
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use serde_json::Value;
-use uuid::Uuid;
 
 use mock_helpers::app_state::setup_mock_app_state;
 use mock_helpers::MockTenkoCallRepository;
@@ -24,7 +25,7 @@ async fn test_register_success() {
 
         let mock = Arc::new(MockTenkoCallRepository::default());
         mock.return_some.store(true, Ordering::SeqCst);
-        let mut state = setup_mock_app_state().await;
+        let mut state = setup_mock_app_state();
         state.tenko_call = mock;
         let base_url = common::spawn_test_server(state).await;
 
@@ -58,7 +59,7 @@ async fn test_register_without_employee_code() {
 
         let mock = Arc::new(MockTenkoCallRepository::default());
         mock.return_some.store(true, Ordering::SeqCst);
-        let mut state = setup_mock_app_state().await;
+        let mut state = setup_mock_app_state();
         state.tenko_call = mock;
         let base_url = common::spawn_test_server(state).await;
 
@@ -89,7 +90,7 @@ async fn test_register_unknown_call_number() {
 
         let mock = Arc::new(MockTenkoCallRepository::default());
         // return_some = false (default) → Ok(None) → BAD_REQUEST
-        let mut state = setup_mock_app_state().await;
+        let mut state = setup_mock_app_state();
         state.tenko_call = mock;
         let base_url = common::spawn_test_server(state).await;
 
@@ -121,7 +122,7 @@ async fn test_register_db_error() {
 
         let mock = Arc::new(MockTenkoCallRepository::default());
         mock.fail_next.store(true, Ordering::SeqCst);
-        let mut state = setup_mock_app_state().await;
+        let mut state = setup_mock_app_state();
         state.tenko_call = mock;
         let base_url = common::spawn_test_server(state).await;
 
@@ -156,7 +157,7 @@ async fn test_tenko_success() {
 
         let mock = Arc::new(MockTenkoCallRepository::default());
         mock.return_some.store(true, Ordering::SeqCst);
-        let mut state = setup_mock_app_state().await;
+        let mut state = setup_mock_app_state();
         state.tenko_call = mock;
         let base_url = common::spawn_test_server(state).await;
 
@@ -188,7 +189,7 @@ async fn test_tenko_driver_not_found() {
 
         let mock = Arc::new(MockTenkoCallRepository::default());
         // return_some = false (default) → Ok(None) → NOT_FOUND
-        let mut state = setup_mock_app_state().await;
+        let mut state = setup_mock_app_state();
         state.tenko_call = mock;
         let base_url = common::spawn_test_server(state).await;
 
@@ -217,7 +218,7 @@ async fn test_tenko_db_error() {
 
         let mock = Arc::new(MockTenkoCallRepository::default());
         mock.fail_next.store(true, Ordering::SeqCst);
-        let mut state = setup_mock_app_state().await;
+        let mut state = setup_mock_app_state();
         state.tenko_call = mock;
         let base_url = common::spawn_test_server(state).await;
 
@@ -249,7 +250,7 @@ async fn test_list_numbers_empty() {
         std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
         let mock = Arc::new(MockTenkoCallRepository::default());
-        let mut state = setup_mock_app_state().await;
+        let mut state = setup_mock_app_state();
         state.tenko_call = mock;
         let base_url = common::spawn_test_server(state).await;
 
@@ -278,7 +279,7 @@ async fn test_list_numbers_with_data() {
 
         let mock = Arc::new(MockTenkoCallRepository::default());
         mock.return_data.store(true, Ordering::SeqCst);
-        let mut state = setup_mock_app_state().await;
+        let mut state = setup_mock_app_state();
         state.tenko_call = mock;
         let base_url = common::spawn_test_server(state).await;
 
@@ -312,7 +313,7 @@ async fn test_list_numbers_with_x_tenant_id() {
         std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
         let mock = Arc::new(MockTenkoCallRepository::default());
-        let mut state = setup_mock_app_state().await;
+        let mut state = setup_mock_app_state();
         state.tenko_call = mock;
         let base_url = common::spawn_test_server(state).await;
 
@@ -335,7 +336,7 @@ async fn test_list_numbers_no_auth() {
         std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
         let mock = Arc::new(MockTenkoCallRepository::default());
-        let mut state = setup_mock_app_state().await;
+        let mut state = setup_mock_app_state();
         state.tenko_call = mock;
         let base_url = common::spawn_test_server(state).await;
 
@@ -358,7 +359,7 @@ async fn test_list_numbers_db_error() {
 
         let mock = Arc::new(MockTenkoCallRepository::default());
         mock.fail_next.store(true, Ordering::SeqCst);
-        let mut state = setup_mock_app_state().await;
+        let mut state = setup_mock_app_state();
         state.tenko_call = mock;
         let base_url = common::spawn_test_server(state).await;
 
@@ -388,7 +389,7 @@ async fn test_create_number_success() {
         std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
         let mock = Arc::new(MockTenkoCallRepository::default());
-        let mut state = setup_mock_app_state().await;
+        let mut state = setup_mock_app_state();
         state.tenko_call = mock;
         let base_url = common::spawn_test_server(state).await;
 
@@ -422,7 +423,7 @@ async fn test_create_number_without_tenant_id() {
         std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
         let mock = Arc::new(MockTenkoCallRepository::default());
-        let mut state = setup_mock_app_state().await;
+        let mut state = setup_mock_app_state();
         state.tenko_call = mock;
         let base_url = common::spawn_test_server(state).await;
 
@@ -454,7 +455,7 @@ async fn test_create_number_without_label() {
         std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
         let mock = Arc::new(MockTenkoCallRepository::default());
-        let mut state = setup_mock_app_state().await;
+        let mut state = setup_mock_app_state();
         state.tenko_call = mock;
         let base_url = common::spawn_test_server(state).await;
 
@@ -486,7 +487,7 @@ async fn test_create_number_no_auth() {
         std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
         let mock = Arc::new(MockTenkoCallRepository::default());
-        let mut state = setup_mock_app_state().await;
+        let mut state = setup_mock_app_state();
         state.tenko_call = mock;
         let base_url = common::spawn_test_server(state).await;
 
@@ -512,7 +513,7 @@ async fn test_create_number_db_error() {
 
         let mock = Arc::new(MockTenkoCallRepository::default());
         mock.fail_next.store(true, Ordering::SeqCst);
-        let mut state = setup_mock_app_state().await;
+        let mut state = setup_mock_app_state();
         state.tenko_call = mock;
         let base_url = common::spawn_test_server(state).await;
 
@@ -545,7 +546,7 @@ async fn test_delete_number_success() {
         std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
         let mock = Arc::new(MockTenkoCallRepository::default());
-        let mut state = setup_mock_app_state().await;
+        let mut state = setup_mock_app_state();
         state.tenko_call = mock;
         let base_url = common::spawn_test_server(state).await;
 
@@ -571,7 +572,7 @@ async fn test_delete_number_no_auth() {
         std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
         let mock = Arc::new(MockTenkoCallRepository::default());
-        let mut state = setup_mock_app_state().await;
+        let mut state = setup_mock_app_state();
         state.tenko_call = mock;
         let base_url = common::spawn_test_server(state).await;
 
@@ -594,7 +595,7 @@ async fn test_delete_number_db_error() {
 
         let mock = Arc::new(MockTenkoCallRepository::default());
         mock.fail_next.store(true, Ordering::SeqCst);
-        let mut state = setup_mock_app_state().await;
+        let mut state = setup_mock_app_state();
         state.tenko_call = mock;
         let base_url = common::spawn_test_server(state).await;
 
@@ -624,7 +625,7 @@ async fn test_list_drivers_empty() {
         std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
         let mock = Arc::new(MockTenkoCallRepository::default());
-        let mut state = setup_mock_app_state().await;
+        let mut state = setup_mock_app_state();
         state.tenko_call = mock;
         let base_url = common::spawn_test_server(state).await;
 
@@ -653,7 +654,7 @@ async fn test_list_drivers_with_data() {
 
         let mock = Arc::new(MockTenkoCallRepository::default());
         mock.return_data.store(true, Ordering::SeqCst);
-        let mut state = setup_mock_app_state().await;
+        let mut state = setup_mock_app_state();
         state.tenko_call = mock;
         let base_url = common::spawn_test_server(state).await;
 
@@ -689,7 +690,7 @@ async fn test_list_drivers_no_auth() {
         std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
 
         let mock = Arc::new(MockTenkoCallRepository::default());
-        let mut state = setup_mock_app_state().await;
+        let mut state = setup_mock_app_state();
         state.tenko_call = mock;
         let base_url = common::spawn_test_server(state).await;
 
@@ -712,7 +713,7 @@ async fn test_list_drivers_db_error() {
 
         let mock = Arc::new(MockTenkoCallRepository::default());
         mock.fail_next.store(true, Ordering::SeqCst);
-        let mut state = setup_mock_app_state().await;
+        let mut state = setup_mock_app_state();
         state.tenko_call = mock;
         let base_url = common::spawn_test_server(state).await;
 

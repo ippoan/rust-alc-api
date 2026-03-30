@@ -1,6 +1,8 @@
 mod common;
 mod mock_helpers;
 
+use uuid::Uuid;
+
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
@@ -9,7 +11,7 @@ use mock_helpers::MockSsoAdminRepository;
 /// Helper: set up mock AppState and spawn test server with admin JWT.
 /// Returns (base_url, auth_header).
 async fn setup() -> (String, String) {
-    let state = mock_helpers::app_state::setup_mock_app_state().await;
+    let state = mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = uuid::Uuid::new_v4();
     let base_url = common::spawn_test_server(state).await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
@@ -21,7 +23,7 @@ async fn setup() -> (String, String) {
 async fn setup_failing() -> (String, String) {
     let mock = Arc::new(MockSsoAdminRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
-    let mut state = mock_helpers::app_state::setup_mock_app_state().await;
+    let mut state = mock_helpers::app_state::setup_mock_app_state();
     state.sso_admin = mock;
     let tenant_id = uuid::Uuid::new_v4();
     let base_url = common::spawn_test_server(state).await;
@@ -53,7 +55,7 @@ async fn test_list_configs_success() {
 
 #[tokio::test]
 async fn test_list_configs_forbidden_for_viewer() {
-    let state = mock_helpers::app_state::setup_mock_app_state().await;
+    let state = mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = uuid::Uuid::new_v4();
     let base_url = common::spawn_test_server(state).await;
     let jwt = common::create_test_jwt(tenant_id, "viewer");
@@ -71,7 +73,7 @@ async fn test_list_configs_forbidden_for_viewer() {
 
 #[tokio::test]
 async fn test_list_configs_no_auth() {
-    let state = mock_helpers::app_state::setup_mock_app_state().await;
+    let state = mock_helpers::app_state::setup_mock_app_state();
     let base_url = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
 
@@ -210,7 +212,7 @@ async fn test_upsert_config_with_woff_id() {
 
 #[tokio::test]
 async fn test_upsert_config_forbidden_for_viewer() {
-    let state = mock_helpers::app_state::setup_mock_app_state().await;
+    let state = mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = uuid::Uuid::new_v4();
     let base_url = common::spawn_test_server(state).await;
     let jwt = common::create_test_jwt(tenant_id, "viewer");
@@ -233,7 +235,7 @@ async fn test_upsert_config_forbidden_for_viewer() {
 
 #[tokio::test]
 async fn test_upsert_config_no_auth() {
-    let state = mock_helpers::app_state::setup_mock_app_state().await;
+    let state = mock_helpers::app_state::setup_mock_app_state();
     let base_url = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
 
@@ -273,7 +275,7 @@ async fn test_upsert_config_without_secret_db_error() {
 async fn test_upsert_config_with_secret_db_error() {
     let mock = Arc::new(MockSsoAdminRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
-    let mut state = mock_helpers::app_state::setup_mock_app_state().await;
+    let mut state = mock_helpers::app_state::setup_mock_app_state();
     state.sso_admin = mock;
     let tenant_id = uuid::Uuid::new_v4();
     let base_url = common::spawn_test_server(state).await;
@@ -345,7 +347,7 @@ async fn test_delete_config_success() {
 
 #[tokio::test]
 async fn test_delete_config_forbidden_for_viewer() {
-    let state = mock_helpers::app_state::setup_mock_app_state().await;
+    let state = mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = uuid::Uuid::new_v4();
     let base_url = common::spawn_test_server(state).await;
     let jwt = common::create_test_jwt(tenant_id, "viewer");
@@ -364,7 +366,7 @@ async fn test_delete_config_forbidden_for_viewer() {
 
 #[tokio::test]
 async fn test_delete_config_no_auth() {
-    let state = mock_helpers::app_state::setup_mock_app_state().await;
+    let state = mock_helpers::app_state::setup_mock_app_state();
     let base_url = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
 

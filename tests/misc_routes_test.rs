@@ -13,7 +13,7 @@ async fn test_tenko_call_list_numbers() {
     test_case!("電話番号マスタ一覧を取得できる", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "Tenko Call").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "Tenko Call").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -39,7 +39,7 @@ async fn test_tenko_call_list_drivers() {
     test_case!("登録運転者一覧を取得できる", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "Tenko Drivers").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "Tenko Drivers").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -62,7 +62,7 @@ async fn test_tenko_call_register_driver() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "Tenko Reg").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "Tenko Reg").await;
             let client = reqwest::Client::new();
 
             // 電話番号マスタを直接 DB に INSERT (ユニーク制約のためランダム化)
@@ -74,7 +74,7 @@ async fn test_tenko_call_register_driver() {
             .bind(&call_number)
             .bind(tenant_id.to_string())
             .bind("営業所")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
@@ -110,7 +110,7 @@ async fn test_timecard_cards_crud() {
     test_case!("カードのCRUD操作ができる", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "Timecard").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "Timecard").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -192,7 +192,7 @@ async fn test_timecard_punch() {
     test_case!("カードIDで打刻できる", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "Punch").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "Punch").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -232,7 +232,7 @@ async fn test_timecard_punches_list() {
     test_case!("打刻一覧を取得できる", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "Punches List").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "Punches List").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -257,7 +257,7 @@ async fn test_tenko_schedules_list() {
     test_case!("スケジュール一覧を取得できる", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "Tenko Sched").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "Tenko Sched").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -281,7 +281,7 @@ async fn test_tenko_sessions_list() {
     test_case!("セッション一覧を取得できる", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "Tenko Sess").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "Tenko Sess").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -305,7 +305,7 @@ async fn test_tenko_records_list() {
     test_case!("点呼記録一覧を取得できる", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "Tenko Rec").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "Tenko Rec").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -329,7 +329,7 @@ async fn test_health_baselines_list() {
     test_case!("健康基準値一覧を取得できる", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "Health BL").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "Health BL").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -353,7 +353,7 @@ async fn test_equipment_failures_list() {
     test_case!("機器故障一覧を取得できる", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "Equip Fail").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "Equip Fail").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -377,7 +377,7 @@ async fn test_tenko_webhooks_list() {
     test_case!("Webhook一覧を取得できる", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "Webhooks").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "Webhooks").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -401,7 +401,7 @@ async fn test_carrying_items_crud() {
     test_case!("携行品目のCRUD操作ができる", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "Carry CRUD").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "Carry CRUD").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -447,7 +447,7 @@ async fn test_communication_items_crud() {
         let _flock = common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "Comm CRUD").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "Comm CRUD").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -508,7 +508,7 @@ async fn test_carrying_items_list() {
     test_case!("携行品目一覧を取得できる", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "Carrying").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "Carrying").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -532,7 +532,7 @@ async fn test_communication_items_list() {
     test_case!("連絡事項一覧を取得できる", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "Comms").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "Comms").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -556,7 +556,7 @@ async fn test_guidance_records_crud() {
     test_case!("指導記録のCRUD操作ができる", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "Guidance").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "Guidance").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -651,7 +651,7 @@ async fn test_guidance_records_upload_attachment() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "GuidAtt").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "GuidAtt").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -717,7 +717,7 @@ async fn test_guidance_records_list_with_date_filter() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "GuidDate").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "GuidDate").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -741,9 +741,9 @@ async fn test_tenant_users_list() {
     test_case!("テナントユーザー一覧を取得できる", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "TenantUsers").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "TenantUsers").await;
         let (user_id, _) =
-            common::create_test_user_in_db(&state.pool, tenant_id, "tu@test.com", "admin").await;
+            common::create_test_user_in_db(state.pool(), tenant_id, "tu@test.com", "admin").await;
         let jwt = common::create_test_jwt_for_user(user_id, tenant_id, "tu@test.com", "admin");
         let client = reqwest::Client::new();
 
@@ -769,9 +769,9 @@ async fn test_tenant_users_invite_and_delete() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "TUInvite").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "TUInvite").await;
             let (user_id, _) = common::create_test_user_in_db(
-                &state.pool,
+                state.pool(),
                 tenant_id,
                 "admin-tu@test.com",
                 "admin",
@@ -831,7 +831,7 @@ async fn test_tenant_users_invite_and_delete() {
             // delete user
             // 他のユーザーを作成して削除
             let (other_id, _) = common::create_test_user_in_db(
-                &state.pool,
+                state.pool(),
                 tenant_id,
                 "other-tu@test.com",
                 "viewer",
@@ -858,7 +858,7 @@ async fn test_daily_health_status() {
     test_case!("日次健康状態を取得できる", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DailyHealth").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DailyHealth").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -878,7 +878,7 @@ async fn test_daily_health_status_with_date() {
     test_case!("日付指定で日次健康状態を取得できる", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DailyHealthD").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DailyHealthD").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -904,7 +904,7 @@ async fn test_driver_info() {
     test_case!("従業員IDで運転者情報を取得できる", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "DriverInfo").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "DriverInfo").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -932,7 +932,7 @@ async fn test_timecard_punches_csv() {
     test_case!("打刻データをCSVエクスポートできる", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "CSV Punch").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "CSV Punch").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -978,7 +978,7 @@ async fn test_timecard_punches_with_filter() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "FilterPunch").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "FilterPunch").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -1013,7 +1013,7 @@ async fn test_carins_files_delete_then_download() {
     test_case!("ファイル削除後に一覧から除外される", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "CarinsDel").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "CarinsDel").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -1081,7 +1081,7 @@ async fn test_timecard_punch_nfc_fallback() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "NfcPunch").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "NfcPunch").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -1099,7 +1099,7 @@ async fn test_timecard_punch_nfc_fallback() {
             sqlx::query("UPDATE alc_api.employees SET nfc_id = $1 WHERE id = $2::uuid")
                 .bind(&nfc_id)
                 .bind(emp_id)
-                .execute(&state.pool)
+                .execute(state.pool())
                 .await
                 .unwrap();
 
@@ -1128,7 +1128,7 @@ async fn test_timecard_get_card_by_card_id_not_found() {
     test_case!("存在しないcard_idで取得すると404を返す", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "CardNotFound").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "CardNotFound").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -1157,7 +1157,7 @@ async fn test_timecard_csv_with_employee_filter() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "CsvFilter").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "CsvFilter").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -1216,7 +1216,7 @@ async fn test_communication_items_create_all_fields_and_list_active() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "CommAll").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "CommAll").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -1300,7 +1300,7 @@ async fn test_health_baselines_update_with_put() {
     test_case!("POST作成後にPUTで部分更新できる", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "HBUpdate").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "HBUpdate").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -1364,7 +1364,7 @@ async fn test_health_baselines_upsert_twice_no_duplicate() {
     test_case!("同一従業員に2回upsertしても重複しない", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "HBUpsert").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "HBUpsert").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -1432,7 +1432,7 @@ async fn test_tenko_call_tenko() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "TenkoSend").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "TenkoSend").await;
             let client = reqwest::Client::new();
 
             // 電話番号マスタ + ドライバー登録
@@ -1442,7 +1442,7 @@ async fn test_tenko_call_tenko() {
             sqlx::query("INSERT INTO tenko_call_numbers (call_number, tenant_id) VALUES ($1, $2)")
                 .bind(&call_num)
                 .bind(tenant_id.to_string())
-                .execute(&state.pool)
+                .execute(state.pool())
                 .await
                 .unwrap();
 
@@ -1482,7 +1482,7 @@ async fn test_tenko_call_delete_number() {
     test_case!("電話番号マスタを削除できる", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "TenkoDelNum").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "TenkoDelNum").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -1493,7 +1493,7 @@ async fn test_tenko_call_delete_number() {
         )
         .bind(&call_num)
         .bind(tenant_id.to_string())
-        .fetch_one(&state.pool)
+        .fetch_one(state.pool())
         .await
         .unwrap();
 
@@ -1517,7 +1517,7 @@ async fn test_car_inspections_current() {
     test_case!("有効な車検証一覧を取得できる", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "CarIns").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "CarIns").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -1537,7 +1537,7 @@ async fn test_car_inspections_expired() {
     test_case!("期限切れ車検証一覧を取得できる", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "CarInsExp").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "CarInsExp").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -1557,7 +1557,7 @@ async fn test_car_inspections_renew() {
     test_case!("更新対象の車検証一覧を取得できる", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "CarInsRen").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "CarInsRen").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -1577,7 +1577,7 @@ async fn test_car_inspections_vehicle_categories() {
     test_case!("車両カテゴリ一覧を取得できる", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "VehCat").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "VehCat").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -1601,7 +1601,7 @@ async fn test_car_inspection_files_current() {
     test_case!("有効な車検証ファイル一覧を取得できる", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "CarInsFiles").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "CarInsFiles").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -1627,7 +1627,7 @@ async fn test_guidance_records_child_record() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "GuidChild").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "GuidChild").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -1709,7 +1709,7 @@ async fn test_guidance_records_attachments_empty_after_creation() {
     test_case!("作成直後の添付ファイル一覧は空である", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "GuidAtt").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "GuidAtt").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -1764,7 +1764,7 @@ async fn test_guidance_records_filter_by_guidance_type() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "GuidType").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "GuidType").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -1870,7 +1870,7 @@ async fn test_carrying_items_with_vehicle_conditions() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "CarryVC").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "CarryVC").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -1969,7 +1969,7 @@ async fn test_car_inspections_get_by_fake_id_returns_404() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "CarIns404").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "CarIns404").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let client = reqwest::Client::new();
 
@@ -1997,9 +1997,9 @@ async fn test_bot_admin_update_config() {
         std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "BotUpd").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "BotUpd").await;
         let (user_id, _) =
-            common::create_test_user_in_db(&state.pool, tenant_id, "botupd@test.com", "admin")
+            common::create_test_user_in_db(state.pool(), tenant_id, "botupd@test.com", "admin")
                 .await;
         let jwt = common::create_test_jwt_for_user(user_id, tenant_id, "botupd@test.com", "admin");
         let auth = format!("Bearer {jwt}");
@@ -2041,7 +2041,7 @@ async fn test_nfc_tags_list() {
     test_case!("NFCタグ一覧を取得できる", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "NFC Tags").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "NFC Tags").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -2067,7 +2067,7 @@ async fn test_timecard_punches_with_date_filter() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "PunchDateF").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "PunchDateF").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -2123,7 +2123,7 @@ async fn test_timecard_csv_with_date_filter() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "CsvDateF").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "CsvDateF").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -2181,7 +2181,7 @@ async fn test_tenko_call_register_invalid_call_number() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let _tenant_id = common::create_test_tenant(&state.pool, "TenkoBadReg").await;
+            let _tenant_id = common::create_test_tenant(state.pool(), "TenkoBadReg").await;
             let client = reqwest::Client::new();
 
             // 存在しない call_number で登録 → 400
@@ -2214,7 +2214,7 @@ async fn test_tenko_call_tenko_unregistered_phone() {
     test_case!("未登録の電話番号で点呼すると404を返す", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let _tenant_id = common::create_test_tenant(&state.pool, "TenkoNoPhone").await;
+        let _tenant_id = common::create_test_tenant(state.pool(), "TenkoNoPhone").await;
         let client = reqwest::Client::new();
 
         // 未登録の電話番号で点呼 → 404
@@ -2244,7 +2244,7 @@ async fn test_tenko_webhook_deliveries() {
     test_case!("Webhook作成後にdeliveries一覧を取得できる", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "WhDeliv").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "WhDeliv").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -2302,14 +2302,14 @@ async fn test_nfc_tags_crud() {
     test_case!("NFCタグの登録・検索・削除ができる", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "NFC CRUD").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "NFC CRUD").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
 
         // car_inspection テーブルに最小行を INSERT (NFC タグの FK に必要)
         // RLS を通すために set_current_tenant してから INSERT
-        let mut conn = state.pool.acquire().await.unwrap();
+        let mut conn = state.pool().acquire().await.unwrap();
         sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
             .bind(tenant_id.to_string())
             .execute(&mut *conn)
@@ -2499,13 +2499,13 @@ async fn test_nfc_tags_upsert() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "NFC Upsert").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "NFC Upsert").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
 
             // Insert 2 car_inspection rows for the upsert test
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                 .bind(tenant_id.to_string())
                 .execute(&mut *conn)
@@ -2651,7 +2651,7 @@ async fn tenko_completed_classifications_after_upload_and_update() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "EC Update").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "EC Update").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -2742,7 +2742,7 @@ async fn test_dtako_csv_proxy_kudguri() {
     test_case!("KUDGURI CSVをJSON形式で取得できる", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "CsvProxy").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "CsvProxy").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -2790,7 +2790,7 @@ async fn test_dtako_csv_proxy_kudgivt() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "CsvProxyEvt").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "CsvProxyEvt").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
@@ -2839,10 +2839,10 @@ async fn test_webhook_deliver_connection_error() {
             use rust_alc_api::db::models::WebhookConfig;
 
             let state = common::setup_app_state().await;
-            let tenant_id = common::create_test_tenant(&state.pool, "WhConnErr").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "WhConnErr").await;
 
             // set tenant for inserts
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             rust_alc_api::db::tenant::set_current_tenant(&mut conn, &tenant_id.to_string())
                 .await
                 .unwrap();
@@ -2875,7 +2875,7 @@ async fn test_webhook_deliver_connection_error() {
 
             // deliver_webhook should retry 3 times and return Ok(()) even on failure
             let result = rust_alc_api::webhook::deliver_webhook(
-                &state.pool,
+                state.pool(),
                 &config,
                 "tenko_completed",
                 &payload,
@@ -2884,7 +2884,7 @@ async fn test_webhook_deliver_connection_error() {
             assert!(result.is_ok());
 
             // Check that delivery logs were recorded (3 attempts, all failed)
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             rust_alc_api::db::tenant::set_current_tenant(&mut conn, &tenant_id.to_string())
                 .await
                 .unwrap();
@@ -2905,10 +2905,10 @@ async fn test_webhook_fire_event_delivery_error_logged() {
     test_group!("Webhook配信");
     test_case!("fire_event でエラー時にログ記録される", {
         let state = common::setup_app_state().await;
-        let tenant_id = common::create_test_tenant(&state.pool, "WhFireErr").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "WhFireErr").await;
 
         // set tenant for inserts
-        let mut conn = state.pool.acquire().await.unwrap();
+        let mut conn = state.pool().acquire().await.unwrap();
         rust_alc_api::db::tenant::set_current_tenant(&mut conn, &tenant_id.to_string())
             .await
             .unwrap();
@@ -2930,7 +2930,7 @@ async fn test_webhook_fire_event_delivery_error_logged() {
 
         // fire_event spawns deliver_webhook in background; itself returns Ok
         let result =
-            rust_alc_api::webhook::fire_event(&state.pool, tenant_id, "tenko_overdue", payload)
+            rust_alc_api::webhook::fire_event(state.pool(), tenant_id, "tenko_overdue", payload)
                 .await;
         assert!(result.is_ok());
 
@@ -2939,7 +2939,7 @@ async fn test_webhook_fire_event_delivery_error_logged() {
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
 
         // Verify delivery attempts were logged
-        let mut conn = state.pool.acquire().await.unwrap();
+        let mut conn = state.pool().acquire().await.unwrap();
         rust_alc_api::db::tenant::set_current_tenant(&mut conn, &tenant_id.to_string())
             .await
             .unwrap();
@@ -2968,7 +2968,7 @@ async fn test_timecard_create_card_conflict() {
     test_case!("重複カードIDで409を返す", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "TC Conflict").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "TC Conflict").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -3011,7 +3011,7 @@ async fn test_timecard_list_cards_with_employee_filter() {
     test_case!("employee_idフィルター付きカード一覧", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "TC Filter").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "TC Filter").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -3061,7 +3061,7 @@ async fn test_timecard_delete_card_not_found() {
     test_case!("存在しないカード削除で404", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "TC DelNF").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "TC DelNF").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let client = reqwest::Client::new();
 
@@ -3090,7 +3090,7 @@ async fn test_communication_items_get_by_id() {
         let _flock = common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "CommGetId").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "CommGetId").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -3133,7 +3133,7 @@ async fn test_communication_items_get_by_id_not_found() {
         let _flock = common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "CommNF").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "CommNF").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -3157,7 +3157,7 @@ async fn test_communication_items_update_not_found() {
         let _flock = common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "CommUpdNF").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "CommUpdNF").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -3182,7 +3182,7 @@ async fn test_communication_items_delete_not_found() {
         let _flock = common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "CommDelNF").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "CommDelNF").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -3207,13 +3207,13 @@ async fn test_communication_items_list_db_error() {
         let _flock = common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "CommListErr").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "CommListErr").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
 
         sqlx::query("ALTER TABLE alc_api.communication_items RENAME TO communication_items_bak")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
@@ -3234,7 +3234,7 @@ async fn test_communication_items_list_db_error() {
         assert_eq!(res.status(), 500, "active should fail");
 
         sqlx::query("ALTER TABLE alc_api.communication_items_bak RENAME TO communication_items")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -3249,7 +3249,7 @@ async fn test_communication_items_create_db_error() {
         let _flock = common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "CommCreateErr").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "CommCreateErr").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -3259,11 +3259,11 @@ async fn test_communication_items_create_db_error() {
             BEGIN RAISE EXCEPTION 'test: communication_items insert blocked'; END;
             $$ LANGUAGE plpgsql"#,
         )
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
         sqlx::query("CREATE OR REPLACE TRIGGER fail_comm_insert BEFORE INSERT ON alc_api.communication_items FOR EACH ROW EXECUTE FUNCTION alc_api.fail_comm_insert()")
-            .execute(&state.pool).await.unwrap();
+            .execute(state.pool()).await.unwrap();
 
         let res = client.post(format!("{base_url}/api/communication-items"))
             .header("Authorization", &auth)
@@ -3272,11 +3272,11 @@ async fn test_communication_items_create_db_error() {
         assert_eq!(res.status(), 500);
 
         sqlx::query("DROP TRIGGER fail_comm_insert ON alc_api.communication_items")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
         sqlx::query("DROP FUNCTION alc_api.fail_comm_insert")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });

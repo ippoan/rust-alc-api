@@ -1,6 +1,8 @@
 mod common;
 mod mock_helpers;
 
+use uuid::Uuid;
+
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
@@ -13,9 +15,9 @@ use mock_helpers::MockCarInspectionRepository;
 
 #[tokio::test]
 async fn test_list_current_files_success_empty() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "MockCIFEmpty").await;
+    let tenant_id = Uuid::new_v4();
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -38,7 +40,7 @@ async fn test_list_current_files_success_empty() {
 
 #[tokio::test]
 async fn test_list_current_files_no_auth() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let base_url = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
 
@@ -57,9 +59,9 @@ async fn test_list_current_files_no_auth() {
 
 #[tokio::test]
 async fn test_list_current_files_tenant_header() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "MockCIFTenant").await;
+    let tenant_id = Uuid::new_v4();
     let client = reqwest::Client::new();
 
     let res = client
@@ -80,14 +82,14 @@ async fn test_list_current_files_tenant_header() {
 
 #[tokio::test]
 async fn test_list_current_files_db_error() {
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
 
     let mock = Arc::new(MockCarInspectionRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
     state.car_inspections = mock;
 
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "MockCIFErr").await;
+    let tenant_id = Uuid::new_v4();
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -107,9 +109,9 @@ async fn test_list_current_files_db_error() {
 
 #[tokio::test]
 async fn test_list_current_files_viewer_allowed() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "MockCIFViewer").await;
+    let tenant_id = Uuid::new_v4();
     let jwt = common::create_test_jwt(tenant_id, "viewer");
     let client = reqwest::Client::new();
 

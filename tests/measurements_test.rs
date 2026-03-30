@@ -16,7 +16,7 @@ async fn setup() -> (
 ) {
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "Meas Test").await;
+    let tenant_id = common::create_test_tenant(state.pool(), "Meas Test").await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
     (state, base_url, tenant_id, jwt, client)
@@ -405,8 +405,8 @@ async fn test_measurement_tenant_isolation() {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
 
-        let tenant_a = common::create_test_tenant(&state.pool, "Meas Iso A").await;
-        let tenant_b = common::create_test_tenant(&state.pool, "Meas Iso B").await;
+        let tenant_a = common::create_test_tenant(state.pool(), "Meas Iso A").await;
+        let tenant_b = common::create_test_tenant(state.pool(), "Meas Iso B").await;
 
         let jwt_a = common::create_test_jwt(tenant_a, "admin");
         let jwt_b = common::create_test_jwt(tenant_b, "admin");

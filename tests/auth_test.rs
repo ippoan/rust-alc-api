@@ -52,7 +52,7 @@ async fn test_valid_jwt_succeeds() {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
 
-        let tenant_id = common::create_test_tenant(&state.pool, "Auth Test Tenant").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "Auth Test Tenant").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
 
         let client = reqwest::Client::new();
@@ -100,10 +100,10 @@ async fn test_me_returns_user_info() {
     test_case!("認証済みユーザーの情報を返す", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "Me Test").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "Me Test").await;
 
         let (user_id, _) =
-            common::create_test_user_in_db(&state.pool, tenant_id, "me@test.com", "admin").await;
+            common::create_test_user_in_db(state.pool(), tenant_id, "me@test.com", "admin").await;
         let jwt = common::create_test_jwt_for_user(user_id, tenant_id, "me@test.com", "admin");
 
         let client = reqwest::Client::new();
@@ -151,11 +151,15 @@ async fn test_refresh_token_success() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "Refresh OK").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "Refresh OK").await;
 
-            let (_user_id, raw_token) =
-                common::create_test_user_in_db(&state.pool, tenant_id, "refresh@test.com", "admin")
-                    .await;
+            let (_user_id, raw_token) = common::create_test_user_in_db(
+                state.pool(),
+                tenant_id,
+                "refresh@test.com",
+                "admin",
+            )
+            .await;
 
             let client = reqwest::Client::new();
             let res = client
@@ -198,16 +202,20 @@ async fn test_refresh_token_expired() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "Refresh Exp").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "Refresh Exp").await;
 
-            let (_user_id, raw_token) =
-                common::create_test_user_in_db(&state.pool, tenant_id, "expired@test.com", "admin")
-                    .await;
+            let (_user_id, raw_token) = common::create_test_user_in_db(
+                state.pool(),
+                tenant_id,
+                "expired@test.com",
+                "admin",
+            )
+            .await;
 
             // 有効期限を過去に更新
             sqlx::query("UPDATE users SET refresh_token_expires_at = NOW() - INTERVAL '1 day' WHERE tenant_id = $1 AND email = 'expired@test.com'")
             .bind(tenant_id)
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
@@ -235,10 +243,10 @@ async fn test_logout_clears_refresh() {
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "Logout Test").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "Logout Test").await;
 
             let (user_id, raw_token) =
-                common::create_test_user_in_db(&state.pool, tenant_id, "logout@test.com", "admin")
+                common::create_test_user_in_db(state.pool(), tenant_id, "logout@test.com", "admin")
                     .await;
             let jwt =
                 common::create_test_jwt_for_user(user_id, tenant_id, "logout@test.com", "admin");
@@ -297,10 +305,10 @@ async fn test_my_orgs() {
     test_case!("所属テナント一覧を返す", {
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "MyOrgs Test").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "MyOrgs Test").await;
 
         let (user_id, _) =
-            common::create_test_user_in_db(&state.pool, tenant_id, "orgs@test.com", "admin").await;
+            common::create_test_user_in_db(state.pool(), tenant_id, "orgs@test.com", "admin").await;
         let jwt = common::create_test_jwt_for_user(user_id, tenant_id, "orgs@test.com", "admin");
 
         let client = reqwest::Client::new();
@@ -334,11 +342,11 @@ async fn test_google_login_success_new_user() {
             let client = reqwest::Client::new();
 
             // テナントを作成 (email domain でマッチさせる)
-            let tenant_id = common::create_test_tenant(&state.pool, "GoogleLogin").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "GoogleLogin").await;
             // email_domain を設定
             sqlx::query("UPDATE tenants SET email_domain = 'example.com' WHERE id = $1")
                 .bind(tenant_id)
-                .execute(&state.pool)
+                .execute(state.pool())
                 .await
                 .unwrap();
 
@@ -367,10 +375,10 @@ async fn test_google_login_existing_user() {
         let base_url = common::spawn_test_server(state.clone()).await;
         let client = reqwest::Client::new();
 
-        let tenant_id = common::create_test_tenant(&state.pool, "GoogleExist").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "GoogleExist").await;
         sqlx::query("UPDATE tenants SET email_domain = 'example.com' WHERE id = $1")
             .bind(tenant_id)
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
@@ -408,10 +416,10 @@ async fn test_google_code_login_success() {
         let base_url = common::spawn_test_server(state.clone()).await;
         let client = reqwest::Client::new();
 
-        let tenant_id = common::create_test_tenant(&state.pool, "GoogleCode").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "GoogleCode").await;
         sqlx::query("UPDATE tenants SET email_domain = 'example.com' WHERE id = $1")
             .bind(tenant_id)
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
@@ -444,10 +452,10 @@ async fn test_google_callback_success() {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
 
-            let tenant_id = common::create_test_tenant(&state.pool, "GoogleCB").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "GoogleCB").await;
             sqlx::query("UPDATE tenants SET email_domain = 'example.com' WHERE id = $1")
                 .bind(tenant_id)
-                .execute(&state.pool)
+                .execute(state.pool())
                 .await
                 .unwrap();
 
@@ -1149,11 +1157,11 @@ async fn test_google_login_with_invitation() {
             let base_url = common::spawn_test_server(state.clone()).await;
             let client = reqwest::Client::new();
 
-            let tenant_id = common::create_test_tenant(&state.pool, "InvitedTenant").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "InvitedTenant").await;
 
             // Clean up any existing user with this google_sub from previous test runs
             sqlx::query("DELETE FROM users WHERE google_sub = 'test-google-sub-12345'")
-                .execute(&state.pool)
+                .execute(state.pool())
                 .await
                 .unwrap();
 
@@ -1162,7 +1170,7 @@ async fn test_google_login_with_invitation() {
             "INSERT INTO tenant_allowed_emails (tenant_id, email, role) VALUES ($1, 'google-test@example.com', 'viewer') ON CONFLICT (email) DO UPDATE SET tenant_id = $1, role = 'viewer'",
         )
         .bind(tenant_id)
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -1189,7 +1197,7 @@ async fn test_google_login_with_invitation() {
             let count: (i64,) = sqlx::query_as(
             "SELECT COUNT(*) FROM tenant_allowed_emails WHERE email = 'google-test@example.com'",
         )
-        .fetch_one(&state.pool)
+        .fetch_one(state.pool())
         .await
         .unwrap();
             assert_eq!(count.0, 0, "Invitation should be consumed after login");
@@ -1199,7 +1207,7 @@ async fn test_google_login_with_invitation() {
                 "DELETE FROM users WHERE google_sub = 'test-google-sub-12345' AND tenant_id = $1",
             )
             .bind(tenant_id)
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
         }
@@ -1222,18 +1230,18 @@ async fn test_google_login_creates_new_tenant() {
             sqlx::query(
                 "DELETE FROM tenant_allowed_emails WHERE email = 'google-test@example.com'",
             )
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
             sqlx::query("DELETE FROM users WHERE google_sub = 'test-google-sub-12345'")
-                .execute(&state.pool)
+                .execute(state.pool())
                 .await
                 .unwrap();
             // Remove email_domain match to force new tenant creation
             sqlx::query(
                 "UPDATE tenants SET email_domain = NULL WHERE email_domain = 'example.com'",
             )
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
@@ -1254,12 +1262,12 @@ async fn test_google_login_creates_new_tenant() {
             // Cleanup
             let user_tenant_id = body["user"]["tenant_id"].as_str().unwrap();
             sqlx::query("DELETE FROM users WHERE google_sub = 'test-google-sub-12345'")
-                .execute(&state.pool)
+                .execute(state.pool())
                 .await
                 .unwrap();
             sqlx::query("DELETE FROM tenants WHERE id = $1::UUID AND name = 'example.com'")
                 .bind(user_tenant_id)
-                .execute(&state.pool)
+                .execute(state.pool())
                 .await
                 .unwrap();
         }

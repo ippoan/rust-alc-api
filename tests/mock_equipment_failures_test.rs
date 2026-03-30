@@ -1,6 +1,8 @@
 mod common;
 mod mock_helpers;
 
+use uuid::Uuid;
+
 use std::sync::Arc;
 
 use chrono::Utc;
@@ -12,8 +14,8 @@ use rust_alc_api::db::models::EquipmentFailure;
 // ---------------------------------------------------------------------------
 
 async fn setup() -> (String, String) {
-    let state = mock_helpers::app_state::setup_mock_app_state().await;
-    let tenant_id = common::create_test_tenant(&state.pool, "ef-test").await;
+    let state = mock_helpers::app_state::setup_mock_app_state();
+    let tenant_id = Uuid::new_v4();
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let base = common::spawn_test_server(state).await;
     let auth = format!("Bearer {jwt}");
@@ -22,8 +24,8 @@ async fn setup() -> (String, String) {
 
 /// spawn server with a custom equipment_failures mock
 async fn setup_with_mock(mock: Arc<MockEquipmentFailuresRepository>) -> (String, String) {
-    let mut state = mock_helpers::app_state::setup_mock_app_state().await;
-    let tenant_id = common::create_test_tenant(&state.pool, "ef-custom").await;
+    let mut state = mock_helpers::app_state::setup_mock_app_state();
+    let tenant_id = Uuid::new_v4();
     let jwt = common::create_test_jwt(tenant_id, "admin");
     state.equipment_failures = mock;
     let base = common::spawn_test_server(state).await;
@@ -53,8 +55,8 @@ async fn setup_failing() -> (String, String) {
     let mock = Arc::new(MockEquipmentFailuresRepository::default());
     mock.fail_next
         .store(true, std::sync::atomic::Ordering::SeqCst);
-    let mut state = mock_helpers::app_state::setup_mock_app_state().await;
-    let tenant_id = common::create_test_tenant(&state.pool, "ef-fail").await;
+    let mut state = mock_helpers::app_state::setup_mock_app_state();
+    let tenant_id = Uuid::new_v4();
     let jwt = common::create_test_jwt(tenant_id, "admin");
     state.equipment_failures = mock;
     let base = common::spawn_test_server(state).await;

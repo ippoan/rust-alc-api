@@ -9,7 +9,7 @@ use mock_helpers::app_state::setup_mock_app_state;
 
 #[tokio::test]
 async fn test_health_check_returns_ok() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let base_url = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
 

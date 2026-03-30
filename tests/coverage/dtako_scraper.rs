@@ -18,7 +18,7 @@ async fn test_get_scrape_history_empty() {
         let _flock = crate::common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "Scraper Hist").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "Scraper Hist").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
 
         let client = reqwest::Client::new();
@@ -44,7 +44,7 @@ async fn test_get_scrape_history_with_data() {
         let _flock = crate::common::db_rename_flock();
         let state = common::setup_app_state().await;
         let base_url = common::spawn_test_server(state.clone()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "Scraper Hist2").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "Scraper Hist2").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
 
         // テストデータ挿入
@@ -53,7 +53,7 @@ async fn test_get_scrape_history_with_data() {
                VALUES ($1, '2026-03-01', 'COMP001', 'success', 'test message')"#,
         )
         .bind(tenant_id)
-        .execute(&state.pool)
+        .execute(state.pool())
         .await
         .unwrap();
 
@@ -87,7 +87,7 @@ async fn test_trigger_scrape_connection_error() {
         let state = common::setup_app_state().await;
         let base_url =
             common::spawn_test_server_with_scraper(state.clone(), "http://127.0.0.1:19999").await;
-        let tenant_id = common::create_test_tenant(&state.pool, "Scraper Err").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "Scraper Err").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
 
         let client = reqwest::Client::new();
@@ -127,7 +127,7 @@ async fn test_trigger_scrape_scraper_error_response() {
         let state = common::setup_app_state().await;
         let base_url =
             common::spawn_test_server_with_scraper(state.clone(), &mock_server.uri()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "Scraper 500").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "Scraper 500").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
 
         let client = reqwest::Client::new();
@@ -181,7 +181,7 @@ async fn test_trigger_scrape_sse_happy_path() {
         let state = common::setup_app_state().await;
         let base_url =
             common::spawn_test_server_with_scraper(state.clone(), &mock_server.uri()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "Scraper SSE").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "Scraper SSE").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
 
         let client = reqwest::Client::new();
@@ -211,7 +211,7 @@ async fn test_trigger_scrape_sse_happy_path() {
         let count: (i64,) =
             sqlx::query_as("SELECT COUNT(*) FROM dtako_scrape_history WHERE tenant_id = $1")
                 .bind(tenant_id)
-                .fetch_one(&state.pool)
+                .fetch_one(state.pool())
                 .await
                 .unwrap();
         assert!(
@@ -253,7 +253,7 @@ async fn test_trigger_scrape_default_date() {
             let state = common::setup_app_state().await;
             let base_url =
                 common::spawn_test_server_with_scraper(state.clone(), &mock_server.uri()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "Scraper Def").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "Scraper Def").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
 
             let client = reqwest::Client::new();
@@ -301,7 +301,7 @@ async fn test_trigger_scrape_invalid_date() {
             let state = common::setup_app_state().await;
             let base_url =
                 common::spawn_test_server_with_scraper(state.clone(), &mock_server.uri()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "Scraper BadDate").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "Scraper BadDate").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
 
             let client = reqwest::Client::new();
@@ -358,7 +358,7 @@ async fn test_trigger_scrape_with_id_token() {
             let state = common::setup_app_state().await;
             let base_url =
                 common::spawn_test_server_with_scraper(state.clone(), &scraper_server.uri()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "Scraper Token").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "Scraper Token").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
 
             let client = reqwest::Client::new();
@@ -415,7 +415,7 @@ async fn test_trigger_scrape_metadata_error() {
             let state = common::setup_app_state().await;
             let base_url =
                 common::spawn_test_server_with_scraper(state.clone(), &scraper_server.uri()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "Scraper MetaErr").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "Scraper MetaErr").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
 
             let client = reqwest::Client::new();
@@ -477,7 +477,7 @@ async fn test_trigger_scrape_sse_edge_cases() {
             let state = common::setup_app_state().await;
             let base_url =
                 common::spawn_test_server_with_scraper(state.clone(), &mock_server.uri()).await;
-            let tenant_id = common::create_test_tenant(&state.pool, "Scraper Edge").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "Scraper Edge").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
 
             let client = reqwest::Client::new();
@@ -509,12 +509,12 @@ async fn test_get_scrape_history_db_error() {
             let _db = crate::common::DB_RENAME_LOCK.lock().unwrap();
             let _flock = crate::common::db_rename_flock();
             let state = common::setup_app_state().await;
-            let tenant_id = common::create_test_tenant(&state.pool, "Scraper DB Err").await;
+            let tenant_id = common::create_test_tenant(state.pool(), "Scraper DB Err").await;
             let jwt = common::create_test_jwt(tenant_id, "admin");
             let base_url = common::spawn_test_server(state.clone()).await;
 
             // pool を閉じて DB エラーを発生させる (他テストに影響しない)
-            state.pool.close().await;
+            state.pool().close().await;
 
             let client = reqwest::Client::new();
             let res = client
@@ -563,7 +563,7 @@ async fn test_trigger_scrape_client_disconnect() {
         let state = common::setup_app_state().await;
         let base_url =
             common::spawn_test_server_with_scraper(state.clone(), &mock_server.uri()).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "Scraper Disc").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "Scraper Disc").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
 
         // リクエスト送信後、レスポンスを読まずに drop → tx.send() 失敗
@@ -632,7 +632,7 @@ async fn test_trigger_scrape_stream_error() {
         let state = common::setup_app_state().await;
         let base_url =
             common::spawn_test_server_with_scraper(state.clone(), &format!("http://{addr}")).await;
-        let tenant_id = common::create_test_tenant(&state.pool, "Scraper StreamErr").await;
+        let tenant_id = common::create_test_tenant(state.pool(), "Scraper StreamErr").await;
         let jwt = common::create_test_jwt(tenant_id, "admin");
 
         let client = reqwest::Client::new();

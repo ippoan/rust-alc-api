@@ -9,13 +9,13 @@ async fn test_daily_health_db_error() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "DHErr").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "DHErr").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
 
         // employees テーブルを RENAME してクエリエラーを発生させる
         // (ENV_LOCK で他テストと直列化)
         sqlx::query("ALTER TABLE alc_api.employees RENAME TO employees_cov_bak")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
 
@@ -29,7 +29,7 @@ async fn test_daily_health_db_error() {
         assert_eq!(res.status(), 500);
 
         sqlx::query("ALTER TABLE alc_api.employees_cov_bak RENAME TO employees")
-            .execute(&state.pool)
+            .execute(state.pool())
             .await
             .unwrap();
     });
@@ -44,7 +44,7 @@ async fn test_daily_health_safety_judgment_counts() {
         let _flock = crate::common::db_rename_flock();
         let state = crate::common::setup_app_state().await;
         let base_url = crate::common::spawn_test_server(state.clone()).await;
-        let tenant_id = crate::common::create_test_tenant(&state.pool, "DHJudge").await;
+        let tenant_id = crate::common::create_test_tenant(state.pool(), "DHJudge").await;
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
         let auth = format!("Bearer {jwt}");
         let client = reqwest::Client::new();
@@ -61,7 +61,7 @@ async fn test_daily_health_safety_judgment_counts() {
             .await;
 
         {
-            let mut conn = state.pool.acquire().await.unwrap();
+            let mut conn = state.pool().acquire().await.unwrap();
             sqlx::query("SELECT set_config('app.current_tenant_id', $1, true)")
                 .bind(tenant_id.to_string())
                 .execute(&mut *conn)

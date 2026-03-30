@@ -1,11 +1,12 @@
 mod common;
 mod mock_helpers;
 
+use uuid::Uuid;
+
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use serde_json::Value;
-use uuid::Uuid;
 
 use mock_helpers::app_state::setup_mock_app_state;
 use mock_helpers::MockTenkoWebhooksRepository;
@@ -15,7 +16,7 @@ use mock_helpers::MockTenkoWebhooksRepository;
 // =========================================================================
 
 async fn setup() -> (String, String) {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
     let base_url = common::spawn_test_server(state).await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
@@ -23,7 +24,7 @@ async fn setup() -> (String, String) {
 }
 
 async fn setup_with_mock(mock: Arc<MockTenkoWebhooksRepository>) -> (String, String) {
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     state.tenko_webhooks = mock;
     let tenant_id = Uuid::new_v4();
     let base_url = common::spawn_test_server(state).await;
@@ -157,7 +158,7 @@ async fn test_upsert_webhook_invalid_event_type() {
 
 #[tokio::test]
 async fn test_upsert_webhook_no_auth() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let base_url = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
 
@@ -172,7 +173,7 @@ async fn test_upsert_webhook_no_auth() {
 
 #[tokio::test]
 async fn test_upsert_webhook_with_x_tenant_id() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let base_url = common::spawn_test_server(state).await;
     let tenant_id = Uuid::new_v4();
     let client = reqwest::Client::new();
@@ -226,7 +227,7 @@ async fn test_list_webhooks_success() {
 
 #[tokio::test]
 async fn test_list_webhooks_no_auth() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let base_url = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
 
@@ -240,7 +241,7 @@ async fn test_list_webhooks_no_auth() {
 
 #[tokio::test]
 async fn test_list_webhooks_with_x_tenant_id() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let base_url = common::spawn_test_server(state).await;
     let tenant_id = Uuid::new_v4();
     let client = reqwest::Client::new();
@@ -311,7 +312,7 @@ async fn test_get_webhook_not_found() {
 
 #[tokio::test]
 async fn test_get_webhook_no_auth() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let base_url = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
 
@@ -379,7 +380,7 @@ async fn test_delete_webhook_not_found() {
 
 #[tokio::test]
 async fn test_delete_webhook_no_auth() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let base_url = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
 
@@ -432,7 +433,7 @@ async fn test_list_deliveries_success() {
 
 #[tokio::test]
 async fn test_list_deliveries_no_auth() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let base_url = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
 
@@ -447,7 +448,7 @@ async fn test_list_deliveries_no_auth() {
 
 #[tokio::test]
 async fn test_list_deliveries_with_x_tenant_id() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let base_url = common::spawn_test_server(state).await;
     let tenant_id = Uuid::new_v4();
     let client = reqwest::Client::new();

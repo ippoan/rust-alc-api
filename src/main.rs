@@ -163,7 +163,7 @@ async fn main() -> anyhow::Result<()> {
     let timecard = Arc::new(PgTimecardRepository::new(pool.clone()));
 
     let state = AppState {
-        pool: pool.clone(),
+        pool: Some(pool.clone()),
         auth,
         bot_admin,
         car_inspections,

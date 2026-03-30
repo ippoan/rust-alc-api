@@ -1,6 +1,8 @@
 mod common;
 mod mock_helpers;
 
+use uuid::Uuid;
+
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
@@ -13,9 +15,9 @@ use mock_helpers::MockDailyHealthRepository;
 
 #[tokio::test]
 async fn test_daily_health_status_success_empty() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "MockDHEmpty").await;
+    let tenant_id = Uuid::new_v4();
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -48,9 +50,9 @@ async fn test_daily_health_status_success_empty() {
 
 #[tokio::test]
 async fn test_daily_health_status_with_date_param() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "MockDHDate").await;
+    let tenant_id = Uuid::new_v4();
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -75,7 +77,7 @@ async fn test_daily_health_status_with_date_param() {
 
 #[tokio::test]
 async fn test_daily_health_status_no_auth() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let base_url = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
 
@@ -94,9 +96,9 @@ async fn test_daily_health_status_no_auth() {
 
 #[tokio::test]
 async fn test_daily_health_status_tenant_header() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "MockDHTenant").await;
+    let tenant_id = Uuid::new_v4();
     let client = reqwest::Client::new();
 
     let res = client
@@ -118,7 +120,7 @@ async fn test_daily_health_status_tenant_header() {
 
 #[tokio::test]
 async fn test_daily_health_status_db_error() {
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
 
     // Replace daily_health with a mock that will fail on next call
     let mock = Arc::new(MockDailyHealthRepository::default());
@@ -126,7 +128,7 @@ async fn test_daily_health_status_db_error() {
     state.daily_health = mock;
 
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "MockDHErr").await;
+    let tenant_id = Uuid::new_v4();
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -148,9 +150,8 @@ async fn test_daily_health_status_db_error() {
 async fn test_daily_health_status_with_safety_judgment() {
     use rust_alc_api::routes::daily_health::DailyHealthRow;
     use serde_json::json;
-    use uuid::Uuid;
 
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
 
     // Build mock data with safety_judgment pass, fail, and a checked record without judgment
     let rows = vec![
@@ -238,7 +239,7 @@ async fn test_daily_health_status_with_safety_judgment() {
     state.daily_health = mock;
 
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "MockDHJudge").await;
+    let tenant_id = Uuid::new_v4();
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -266,9 +267,9 @@ async fn test_daily_health_status_with_safety_judgment() {
 
 #[tokio::test]
 async fn test_daily_health_status_invalid_date() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant_id = common::create_test_tenant(&state.pool, "MockDHBadDate").await;
+    let tenant_id = Uuid::new_v4();
     let jwt = common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 

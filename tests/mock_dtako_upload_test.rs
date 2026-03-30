@@ -1,17 +1,18 @@
 mod common;
 mod mock_helpers;
 
+use uuid::Uuid;
+
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use mock_helpers::app_state::setup_mock_app_state;
 use mock_helpers::MockDtakoUploadRepository;
-use uuid::Uuid;
 
 /// Helper: set up mock AppState + spawn test server + create JWT.
 /// Returns (base_url, auth_header, tenant_id, state).
 async fn setup() -> (String, String, Uuid) {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
     let base_url = common::spawn_test_server(state).await;
     let jwt = common::create_test_jwt(tenant_id, "admin");
@@ -98,7 +99,7 @@ async fn test_dtako_upload_invalid_zip() {
 
 #[tokio::test]
 async fn test_dtako_upload_db_error() {
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     let mock = Arc::new(MockDtakoUploadRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
     state.dtako_upload = mock;
@@ -173,7 +174,7 @@ async fn test_dtako_list_uploads_success() {
 
 #[tokio::test]
 async fn test_dtako_list_uploads_db_error() {
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     let mock = Arc::new(MockDtakoUploadRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
     state.dtako_upload = mock;
@@ -220,7 +221,7 @@ async fn test_dtako_list_pending_success() {
 
 #[tokio::test]
 async fn test_dtako_list_pending_db_error() {
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     let mock = Arc::new(MockDtakoUploadRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
     state.dtako_upload = mock;
@@ -268,7 +269,7 @@ async fn test_dtako_download_not_found() {
 
 #[tokio::test]
 async fn test_dtako_download_db_error() {
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     let mock = Arc::new(MockDtakoUploadRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
     state.dtako_upload = mock;
@@ -316,7 +317,7 @@ async fn test_dtako_rerun_not_found() {
 
 #[tokio::test]
 async fn test_dtako_rerun_db_error() {
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     let mock = Arc::new(MockDtakoUploadRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
     state.dtako_upload = mock;
@@ -362,7 +363,7 @@ async fn test_dtako_split_csv_not_found() {
 
 #[tokio::test]
 async fn test_dtako_split_csv_db_error() {
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     let mock = Arc::new(MockDtakoUploadRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
     state.dtako_upload = mock;
@@ -411,7 +412,7 @@ async fn test_dtako_split_csv_all_success() {
 
 #[tokio::test]
 async fn test_dtako_split_csv_all_db_error() {
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     let mock = Arc::new(MockDtakoUploadRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
     state.dtako_upload = mock;
@@ -466,7 +467,7 @@ async fn test_dtako_recalculate_driver_success() {
 
 #[tokio::test]
 async fn test_dtako_recalculate_driver_db_error() {
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     let mock = Arc::new(MockDtakoUploadRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
     state.dtako_upload = mock;
@@ -528,7 +529,7 @@ async fn test_dtako_recalculate_drivers_success() {
 
 #[tokio::test]
 async fn test_dtako_recalculate_drivers_db_error() {
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     let mock = Arc::new(MockDtakoUploadRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
     state.dtako_upload = mock;
@@ -589,7 +590,7 @@ async fn test_dtako_recalculate_success() {
 
 #[tokio::test]
 async fn test_dtako_recalculate_db_error() {
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     let mock = Arc::new(MockDtakoUploadRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
     state.dtako_upload = mock;
@@ -656,7 +657,7 @@ async fn test_dtako_upload_invalid_multipart() {
 
 #[tokio::test]
 async fn test_dtako_upload_with_tenant_header() {
-    let state = setup_mock_app_state().await;
+    let state = setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
     let base_url = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();

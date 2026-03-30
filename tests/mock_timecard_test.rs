@@ -2,12 +2,13 @@
 mod common;
 mod mock_helpers;
 
+use uuid::Uuid;
+
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use chrono::{TimeZone, Utc};
 use serde_json::Value;
-use uuid::Uuid;
 
 use rust_alc_api::db::models::TimecardCard;
 use rust_alc_api::db::repository::timecard::{TimePunchCsvRow, TimecardRepository};
@@ -20,7 +21,7 @@ async fn spawn_with_mock(mock: Arc<dyn TimecardRepository>) -> (String, String) 
     let tenant_id = Uuid::new_v4();
     let jwt = common::create_test_jwt(tenant_id, "admin");
 
-    let mut state = mock_helpers::app_state::setup_mock_app_state().await;
+    let mut state = mock_helpers::app_state::setup_mock_app_state();
     state.timecard = mock;
     let base_url = common::spawn_test_server(state).await;
 
@@ -1599,7 +1600,7 @@ async fn test_export_csv_db_error() {
 #[tokio::test]
 async fn test_no_auth_returns_401() {
     let mock = Arc::new(mock_helpers::MockTimecardRepository::default());
-    let mut state = mock_helpers::app_state::setup_mock_app_state().await;
+    let mut state = mock_helpers::app_state::setup_mock_app_state();
     state.timecard = mock;
     let base_url = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();

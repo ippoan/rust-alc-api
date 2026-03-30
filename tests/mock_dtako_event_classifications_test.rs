@@ -1,12 +1,13 @@
 mod common;
 mod mock_helpers;
 
+use uuid::Uuid;
+
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use mock_helpers::app_state::setup_mock_app_state;
 use mock_helpers::MockDtakoEventClassificationsRepository;
-use uuid::Uuid;
 
 use chrono::Utc;
 use rust_alc_api::db::models::DtakoEventClassification;
@@ -15,11 +16,11 @@ use common::{create_test_jwt, spawn_test_server};
 
 /// helper: build mock AppState with a shared mock repo reference
 async fn setup_with_mock() -> (String, String, Arc<MockDtakoEventClassificationsRepository>) {
-    let mut state = setup_mock_app_state().await;
+    let mut state = setup_mock_app_state();
     let mock_repo = Arc::new(MockDtakoEventClassificationsRepository::default());
     state.dtako_event_classifications = mock_repo.clone();
 
-    let tenant_id = common::create_test_tenant(&state.pool, "ec-test").await;
+    let tenant_id = Uuid::new_v4();
     let jwt = create_test_jwt(tenant_id, "admin");
     let base_url = spawn_test_server(state).await;
     (base_url, format!("Bearer {jwt}"), mock_repo)
@@ -200,8 +201,8 @@ async fn test_update_classification_missing_body() {
 
 #[tokio::test]
 async fn test_update_classification_success() {
-    let mut state = setup_mock_app_state().await;
-    let tenant_id = common::create_test_tenant(&state.pool, "ec-update-ok").await;
+    let mut state = setup_mock_app_state();
+    let tenant_id = Uuid::new_v4();
 
     let mock_repo = Arc::new(MockDtakoEventClassificationsRepository {
         update_result: std::sync::Mutex::new(Some(DtakoEventClassification {
