@@ -1686,8 +1686,9 @@ async fn generate_unique_code(state: &AppState) -> Result<String, StatusCode> {
             .code_exists(&code_str)
             .await
             .map_err(|e| db_err("generate_unique_code", e))?;
-        if !exists {
-            return Ok(code_str);
+        if exists {
+            continue;
         }
+        return Ok(code_str);
     }
 }
