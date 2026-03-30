@@ -202,18 +202,31 @@ async fn main() -> anyhow::Result<()> {
         carins_storage,
         dtako_storage,
         fcm,
-        webhook: Some(Arc::new(rust_alc_api::webhook::PgWebhookService::new(
-            pool.clone(),
-        ))),
+        webhook: {
+            let wh_repo: Arc<dyn rust_alc_api::db::repository::WebhookRepository> = Arc::new(
+                rust_alc_api::db::repository::PgWebhookRepository::new(pool.clone()),
+            );
+            let wh_http: Arc<dyn rust_alc_api::webhook::WebhookHttpClient> =
+                Arc::new(rust_alc_api::webhook::ReqwestWebhookClient);
+            Some(Arc::new(rust_alc_api::webhook::PgWebhookService::new(
+                wh_repo.clone(),
+                wh_http.clone(),
+            )))
+        },
     };
 
     // 点呼予定超過チェック バックグラウンドタスク
-    let overdue_pool = pool;
+    let overdue_repo: Arc<dyn rust_alc_api::db::repository::WebhookRepository> =
+        Arc::new(rust_alc_api::db::repository::PgWebhookRepository::new(pool));
+    let overdue_http: Arc<dyn rust_alc_api::webhook::WebhookHttpClient> =
+        Arc::new(rust_alc_api::webhook::ReqwestWebhookClient);
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
         loop {
             interval.tick().await;
-            if let Err(e) = rust_alc_api::webhook::check_overdue_schedules(&overdue_pool).await {
+            if let Err(e) =
+                rust_alc_api::webhook::check_overdue_schedules(&*overdue_repo, &*overdue_http).await
+            {
                 tracing::error!("Overdue check failed: {e}");
             }
         }

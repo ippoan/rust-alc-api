@@ -32,6 +32,7 @@ pub mod tenko_schedules;
 pub mod tenko_sessions;
 pub mod tenko_webhooks;
 pub mod timecard;
+pub mod webhook;
 
 pub use auth::{AuthRepository, PgAuthRepository};
 pub use bot_admin::{BotAdminRepository, PgBotAdminRepository};
@@ -73,6 +74,7 @@ pub use tenko_schedules::{PgTenkoSchedulesRepository, TenkoSchedulesRepository};
 pub use tenko_sessions::{PgTenkoSessionRepository, TenkoSessionRepository};
 pub use tenko_webhooks::{PgTenkoWebhooksRepository, TenkoWebhooksRepository};
 pub use timecard::{PgTimecardRepository, TimecardRepository};
+pub use webhook::{PgWebhookRepository, WebhookRepository};
 
 use sqlx::PgPool;
 
