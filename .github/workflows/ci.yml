@@ -108,7 +108,7 @@ jobs:
 
       - name: Run all tests + combined coverage
         run: |
-          cargo llvm-cov --test mock_tests --test integration_tests --text > /tmp/llvm-cov-output.txt 2>/tmp/llvm-cov-stderr.txt || { echo "Tests failed:"; tail -30 /tmp/llvm-cov-stderr.txt; exit 1; }
+          cargo llvm-cov --lib --test mock_tests --test integration_tests --text > /tmp/llvm-cov-output.txt 2>/tmp/llvm-cov-stderr.txt || { echo "Tests failed:"; tail -30 /tmp/llvm-cov-stderr.txt; exit 1; }
           echo "=== Test results ==="
           grep "test result:" /tmp/llvm-cov-stderr.txt || true
 
