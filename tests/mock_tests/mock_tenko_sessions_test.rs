@@ -1872,3 +1872,928 @@ async fn test_unauthorized_no_jwt() {
         );
     }
 }
+
+// =========================================================================
+// Helper for fail_on_update tests (get succeeds, write fails)
+// =========================================================================
+
+async fn setup_with_update_failing(status: &str, tenko_type: &str) -> (String, String) {
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    mock.fail_on_update.store(true, Ordering::SeqCst);
+    *mock.session_status.lock().unwrap() = status.to_string();
+    *mock.session_tenko_type.lock().unwrap() = tenko_type.to_string();
+    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
+    state.tenko_sessions = mock;
+    let tenant_id = uuid::Uuid::new_v4();
+    let base_url = crate::common::spawn_test_server(state).await;
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+    let auth_header = format!("Bearer {jwt}");
+    (base_url, auth_header)
+}
+
+async fn setup_with_update_failing_user(status: &str, tenko_type: &str) -> (String, String) {
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    mock.fail_on_update.store(true, Ordering::SeqCst);
+    *mock.session_status.lock().unwrap() = status.to_string();
+    *mock.session_tenko_type.lock().unwrap() = tenko_type.to_string();
+    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
+    state.tenko_sessions = mock;
+    let tenant_id = uuid::Uuid::new_v4();
+    let user_id = uuid::Uuid::new_v4();
+    let base_url = crate::common::spawn_test_server(state).await;
+    let jwt =
+        crate::common::create_test_jwt_for_user(user_id, tenant_id, "test@example.com", "admin");
+    let auth_header = format!("Bearer {jwt}");
+    (base_url, auth_header)
+}
+
+// =========================================================================
+// DB error on UPDATE (second repo call) — covers tracing::error branches
+// =========================================================================
+
+#[tokio::test]
+async fn test_start_session_create_session_db_error() {
+    // fail_on_update: get_schedule_unconsumed succeeds, consume_schedule fails
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    mock.fail_on_update.store(true, Ordering::SeqCst);
+    let employee_id = Uuid::new_v4();
+    *mock.session_employee_id.lock().unwrap() = employee_id;
+    *mock.schedule_employee_id.lock().unwrap() = employee_id;
+    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
+    state.tenko_sessions = mock;
+    let tenant_id = uuid::Uuid::new_v4();
+    let base_url = crate::common::spawn_test_server(state).await;
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+    let auth_header = format!("Bearer {jwt}");
+
+    let res = client()
+        .post(format!("{base_url}/api/tenko/sessions/start"))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({
+            "schedule_id": Uuid::new_v4(),
+            "employee_id": employee_id,
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 500);
+}
+
+#[tokio::test]
+async fn test_start_session_no_schedule_create_db_error() {
+    // Without schedule_id: create_session is the first write call
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    mock.fail_on_update.store(true, Ordering::SeqCst);
+    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
+    state.tenko_sessions = mock;
+    let tenant_id = uuid::Uuid::new_v4();
+    let base_url = crate::common::spawn_test_server(state).await;
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+    let auth_header = format!("Bearer {jwt}");
+
+    let res = client()
+        .post(format!("{base_url}/api/tenko/sessions/start"))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({
+            "employee_id": Uuid::new_v4(),
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 500);
+}
+
+#[tokio::test]
+async fn test_submit_alcohol_update_db_error() {
+    let (base_url, auth_header) =
+        setup_with_update_failing("identity_verified", "pre_operation").await;
+
+    let res = client()
+        .put(format!(
+            "{base_url}/api/tenko/sessions/{}/alcohol",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({
+            "alcohol_result": "pass",
+            "alcohol_value": 0.0,
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 500);
+}
+
+#[tokio::test]
+async fn test_submit_medical_update_db_error() {
+    let (base_url, auth_header) =
+        setup_with_update_failing("medical_pending", "pre_operation").await;
+
+    let res = client()
+        .put(format!(
+            "{base_url}/api/tenko/sessions/{}/medical",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({
+            "temperature": 36.5,
+            "systolic": 120,
+            "diastolic": 80,
+            "pulse": 72,
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 500);
+}
+
+#[tokio::test]
+async fn test_confirm_instruction_update_db_error() {
+    let (base_url, auth_header) =
+        setup_with_update_failing("instruction_pending", "pre_operation").await;
+
+    let res = client()
+        .put(format!(
+            "{base_url}/api/tenko/sessions/{}/instruction-confirm",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 500);
+}
+
+#[tokio::test]
+async fn test_submit_report_update_db_error() {
+    let (base_url, auth_header) =
+        setup_with_update_failing("report_pending", "post_operation").await;
+
+    let res = client()
+        .put(format!(
+            "{base_url}/api/tenko/sessions/{}/report",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({
+            "vehicle_road_status": "OK",
+            "driver_alternation": "None",
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 500);
+}
+
+#[tokio::test]
+async fn test_cancel_session_update_db_error() {
+    let (base_url, auth_header) =
+        setup_with_update_failing("identity_verified", "pre_operation").await;
+
+    let res = client()
+        .post(format!(
+            "{base_url}/api/tenko/sessions/{}/cancel",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({
+            "reason": "test cancel"
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 500);
+}
+
+#[tokio::test]
+async fn test_submit_self_declaration_update_db_error() {
+    let (base_url, auth_header) =
+        setup_with_update_failing("self_declaration_pending", "pre_operation").await;
+
+    let res = client()
+        .put(format!(
+            "{base_url}/api/tenko/sessions/{}/self-declaration",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({
+            "illness": false,
+            "fatigue": false,
+            "sleep_deprivation": false,
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 500);
+}
+
+#[tokio::test]
+async fn test_submit_daily_inspection_update_db_error() {
+    let (base_url, auth_header) =
+        setup_with_update_failing("daily_inspection_pending", "pre_operation").await;
+
+    let res = client()
+        .put(format!(
+            "{base_url}/api/tenko/sessions/{}/daily-inspection",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({
+            "brakes": "ok",
+            "tires": "ok",
+            "lights": "ok",
+            "steering": "ok",
+            "wipers": "ok",
+            "mirrors": "ok",
+            "horn": "ok",
+            "seatbelts": "ok",
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 500);
+}
+
+#[tokio::test]
+async fn test_submit_carrying_items_update_db_error() {
+    let (base_url, auth_header) =
+        setup_with_update_failing("carrying_items_pending", "pre_operation").await;
+
+    let res = client()
+        .put(format!(
+            "{base_url}/api/tenko/sessions/{}/carrying-items",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({
+            "checks": [
+                {"item_id": Uuid::new_v4(), "checked": true},
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 500);
+}
+
+#[tokio::test]
+async fn test_interrupt_session_update_db_error() {
+    let (base_url, auth_header) =
+        setup_with_update_failing("identity_verified", "pre_operation").await;
+
+    let res = client()
+        .post(format!(
+            "{base_url}/api/tenko/sessions/{}/interrupt",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({
+            "reason": "Manager"
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 500);
+}
+
+#[tokio::test]
+async fn test_resume_session_update_db_error() {
+    let (base_url, auth_header) =
+        setup_with_update_failing_user("interrupted", "pre_operation").await;
+
+    let res = client()
+        .post(format!(
+            "{base_url}/api/tenko/sessions/{}/resume",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({
+            "reason": "Retry"
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 500);
+}
+
+// =========================================================================
+// Alcohol with unknown tenko_type → 500 (line 162)
+// =========================================================================
+
+#[tokio::test]
+async fn test_submit_alcohol_pass_unknown_tenko_type() {
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_status.lock().unwrap() = "identity_verified".to_string();
+    *mock.session_tenko_type.lock().unwrap() = "unknown_type".to_string();
+    let (base_url, auth_header, _) = setup_with_mock(mock).await;
+
+    let res = client()
+        .put(format!(
+            "{base_url}/api/tenko/sessions/{}/alcohol",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({
+            "alcohol_result": "pass",
+            "alcohol_value": 0.0,
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 500);
+}
+
+// =========================================================================
+// Safety judgment — fail via vitals exceeding baseline tolerance
+// =========================================================================
+
+#[tokio::test]
+async fn test_self_declaration_safety_fail_systolic_out_of_range() {
+    use rust_alc_api::db::models::EmployeeHealthBaseline;
+
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_status.lock().unwrap() = "self_declaration_pending".to_string();
+    *mock.session_tenko_type.lock().unwrap() = "pre_operation".to_string();
+    // Session has systolic=120, diastolic=80, temperature=36.5
+    // Set baseline so systolic is out of tolerance: baseline=100, tolerance=5 → diff=20 > 5
+    *mock.health_baseline.lock().unwrap() = Some(EmployeeHealthBaseline {
+        id: Uuid::new_v4(),
+        tenant_id: Uuid::new_v4(),
+        employee_id: Uuid::new_v4(),
+        baseline_systolic: 100,
+        baseline_diastolic: 80,
+        baseline_temperature: 36.5,
+        systolic_tolerance: 5,
+        diastolic_tolerance: 10,
+        temperature_tolerance: 1.0,
+        measurement_validity_minutes: 30,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+    });
+    let (base_url, auth_header, _) = setup_with_mock(mock).await;
+
+    let res = client()
+        .put(format!(
+            "{base_url}/api/tenko/sessions/{}/self-declaration",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({
+            "illness": false,
+            "fatigue": false,
+            "sleep_deprivation": false,
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["status"], "interrupted");
+    // Check safety_judgment
+    let judgment = &body["safety_judgment"];
+    assert_eq!(judgment["status"], "fail");
+    let failed_items = judgment["failed_items"].as_array().unwrap();
+    assert!(failed_items.iter().any(|v| v == "systolic"));
+}
+
+#[tokio::test]
+async fn test_self_declaration_safety_fail_diastolic_out_of_range() {
+    use rust_alc_api::db::models::EmployeeHealthBaseline;
+
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_status.lock().unwrap() = "self_declaration_pending".to_string();
+    *mock.session_tenko_type.lock().unwrap() = "pre_operation".to_string();
+    // Session has diastolic=80; set baseline=60, tolerance=5 → diff=20 > 5
+    *mock.health_baseline.lock().unwrap() = Some(EmployeeHealthBaseline {
+        id: Uuid::new_v4(),
+        tenant_id: Uuid::new_v4(),
+        employee_id: Uuid::new_v4(),
+        baseline_systolic: 120,
+        baseline_diastolic: 60,
+        baseline_temperature: 36.5,
+        systolic_tolerance: 10,
+        diastolic_tolerance: 5,
+        temperature_tolerance: 1.0,
+        measurement_validity_minutes: 30,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+    });
+    let (base_url, auth_header, _) = setup_with_mock(mock).await;
+
+    let res = client()
+        .put(format!(
+            "{base_url}/api/tenko/sessions/{}/self-declaration",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({
+            "illness": false,
+            "fatigue": false,
+            "sleep_deprivation": false,
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["status"], "interrupted");
+    let judgment = &body["safety_judgment"];
+    assert_eq!(judgment["status"], "fail");
+    let failed_items = judgment["failed_items"].as_array().unwrap();
+    assert!(failed_items.iter().any(|v| v == "diastolic"));
+}
+
+#[tokio::test]
+async fn test_self_declaration_safety_fail_temperature_out_of_range() {
+    use rust_alc_api::db::models::EmployeeHealthBaseline;
+
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_status.lock().unwrap() = "self_declaration_pending".to_string();
+    *mock.session_tenko_type.lock().unwrap() = "pre_operation".to_string();
+    // Session has temperature=36.5; set baseline=35.0, tolerance=0.3 → diff=1.5 > 0.3
+    *mock.health_baseline.lock().unwrap() = Some(EmployeeHealthBaseline {
+        id: Uuid::new_v4(),
+        tenant_id: Uuid::new_v4(),
+        employee_id: Uuid::new_v4(),
+        baseline_systolic: 120,
+        baseline_diastolic: 80,
+        baseline_temperature: 35.0,
+        systolic_tolerance: 10,
+        diastolic_tolerance: 10,
+        temperature_tolerance: 0.3,
+        measurement_validity_minutes: 30,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+    });
+    let (base_url, auth_header, _) = setup_with_mock(mock).await;
+
+    let res = client()
+        .put(format!(
+            "{base_url}/api/tenko/sessions/{}/self-declaration",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({
+            "illness": false,
+            "fatigue": false,
+            "sleep_deprivation": false,
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["status"], "interrupted");
+    let judgment = &body["safety_judgment"];
+    assert_eq!(judgment["status"], "fail");
+    let failed_items = judgment["failed_items"].as_array().unwrap();
+    assert!(failed_items.iter().any(|v| v == "temperature"));
+}
+
+// =========================================================================
+// Safety judgment — fail via self_declaration flags
+// =========================================================================
+
+#[tokio::test]
+async fn test_self_declaration_safety_fail_illness() {
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_status.lock().unwrap() = "self_declaration_pending".to_string();
+    *mock.session_tenko_type.lock().unwrap() = "pre_operation".to_string();
+    let (base_url, auth_header, _) = setup_with_mock(mock).await;
+
+    let res = client()
+        .put(format!(
+            "{base_url}/api/tenko/sessions/{}/self-declaration",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({
+            "illness": true,
+            "fatigue": false,
+            "sleep_deprivation": false,
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["status"], "interrupted");
+    let judgment = &body["safety_judgment"];
+    assert_eq!(judgment["status"], "fail");
+    let failed_items = judgment["failed_items"].as_array().unwrap();
+    assert!(failed_items.iter().any(|v| v == "illness"));
+}
+
+#[tokio::test]
+async fn test_self_declaration_safety_fail_fatigue() {
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_status.lock().unwrap() = "self_declaration_pending".to_string();
+    *mock.session_tenko_type.lock().unwrap() = "pre_operation".to_string();
+    let (base_url, auth_header, _) = setup_with_mock(mock).await;
+
+    let res = client()
+        .put(format!(
+            "{base_url}/api/tenko/sessions/{}/self-declaration",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({
+            "illness": false,
+            "fatigue": true,
+            "sleep_deprivation": false,
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["status"], "interrupted");
+    let judgment = &body["safety_judgment"];
+    assert_eq!(judgment["status"], "fail");
+    let failed_items = judgment["failed_items"].as_array().unwrap();
+    assert!(failed_items.iter().any(|v| v == "fatigue"));
+}
+
+#[tokio::test]
+async fn test_self_declaration_safety_fail_sleep_deprivation() {
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_status.lock().unwrap() = "self_declaration_pending".to_string();
+    *mock.session_tenko_type.lock().unwrap() = "pre_operation".to_string();
+    let (base_url, auth_header, _) = setup_with_mock(mock).await;
+
+    let res = client()
+        .put(format!(
+            "{base_url}/api/tenko/sessions/{}/self-declaration",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({
+            "illness": false,
+            "fatigue": false,
+            "sleep_deprivation": true,
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["status"], "interrupted");
+    let judgment = &body["safety_judgment"];
+    assert_eq!(judgment["status"], "fail");
+    let failed_items = judgment["failed_items"].as_array().unwrap();
+    assert!(failed_items.iter().any(|v| v == "sleep_deprivation"));
+}
+
+// =========================================================================
+// Safety judgment — pass with baseline (vitals within tolerance)
+// =========================================================================
+
+#[tokio::test]
+async fn test_self_declaration_safety_pass_with_baseline() {
+    use rust_alc_api::db::models::EmployeeHealthBaseline;
+
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_status.lock().unwrap() = "self_declaration_pending".to_string();
+    *mock.session_tenko_type.lock().unwrap() = "pre_operation".to_string();
+    // Session: systolic=120, diastolic=80, temperature=36.5
+    // Baseline matches with wide tolerance
+    *mock.health_baseline.lock().unwrap() = Some(EmployeeHealthBaseline {
+        id: Uuid::new_v4(),
+        tenant_id: Uuid::new_v4(),
+        employee_id: Uuid::new_v4(),
+        baseline_systolic: 120,
+        baseline_diastolic: 80,
+        baseline_temperature: 36.5,
+        systolic_tolerance: 20,
+        diastolic_tolerance: 20,
+        temperature_tolerance: 2.0,
+        measurement_validity_minutes: 30,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+    });
+    let (base_url, auth_header, _) = setup_with_mock(mock).await;
+
+    let res = client()
+        .put(format!(
+            "{base_url}/api/tenko/sessions/{}/self-declaration",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({
+            "illness": false,
+            "fatigue": false,
+            "sleep_deprivation": false,
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["status"], "daily_inspection_pending");
+    let judgment = &body["safety_judgment"];
+    assert_eq!(judgment["status"], "pass");
+    // medical_diffs should be present
+    assert!(judgment["medical_diffs"].is_object());
+}
+
+// =========================================================================
+// Safety judgment — update_safety_judgment DB error (line 714-716)
+// =========================================================================
+
+// =========================================================================
+// create_tenko_record internal error paths (swallowed by `let _ = ...`)
+// =========================================================================
+
+#[tokio::test]
+async fn test_confirm_instruction_record_creation_fails() {
+    // get_employee_name fails inside create_tenko_record → error swallowed, still 200
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_status.lock().unwrap() = "instruction_pending".to_string();
+    mock.fail_on_record.store(true, Ordering::SeqCst);
+    let (base_url, auth_header, _) = setup_with_mock(mock).await;
+
+    let res = client()
+        .put(format!(
+            "{base_url}/api/tenko/sessions/{}/instruction-confirm",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .send()
+        .await
+        .unwrap();
+
+    // confirm_instruction itself succeeds, create_tenko_record error is swallowed
+    assert_eq!(res.status(), 200);
+}
+
+#[tokio::test]
+async fn test_cancel_session_record_creation_fails() {
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_status.lock().unwrap() = "identity_verified".to_string();
+    mock.fail_on_record.store(true, Ordering::SeqCst);
+    let (base_url, auth_header, _) = setup_with_mock(mock).await;
+
+    let res = client()
+        .post(format!(
+            "{base_url}/api/tenko/sessions/{}/cancel",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({
+            "reason": "test"
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+}
+
+#[tokio::test]
+async fn test_alcohol_fail_record_creation_fails() {
+    // alcohol fail → create_tenko_record called → get_employee_name fails
+    // But alcohol fail ALSO calls get_employee_name for the webhook payload!
+    // The webhook get_employee_name call (line 198) returns Err → returns 500.
+    // So this test will actually get 500, not 200.
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_status.lock().unwrap() = "identity_verified".to_string();
+    *mock.session_tenko_type.lock().unwrap() = "pre_operation".to_string();
+    mock.fail_on_record.store(true, Ordering::SeqCst);
+    let (base_url, auth_header, _) = setup_with_mock(mock).await;
+
+    let res = client()
+        .put(format!(
+            "{base_url}/api/tenko/sessions/{}/alcohol",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({
+            "alcohol_result": "fail",
+            "alcohol_value": 0.25,
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    // get_employee_name fails at line 198 → 500
+    assert_eq!(res.status(), 500);
+}
+
+#[tokio::test]
+async fn test_employee_name_not_found_in_record_creation() {
+    // return_employee_name=false → get_employee_name returns Ok(None)
+    // → .ok_or(INTERNAL_SERVER_ERROR) triggers line 502
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_status.lock().unwrap() = "instruction_pending".to_string();
+    mock.return_employee_name.store(false, Ordering::SeqCst);
+    let (base_url, auth_header, _) = setup_with_mock(mock).await;
+
+    let res = client()
+        .put(format!(
+            "{base_url}/api/tenko/sessions/{}/instruction-confirm",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .send()
+        .await
+        .unwrap();
+
+    // create_tenko_record error swallowed, still 200
+    assert_eq!(res.status(), 200);
+}
+
+#[tokio::test]
+async fn test_daily_inspection_ng_record_creation_fails() {
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_status.lock().unwrap() = "daily_inspection_pending".to_string();
+    *mock.session_tenko_type.lock().unwrap() = "pre_operation".to_string();
+    mock.fail_on_record.store(true, Ordering::SeqCst);
+    let (base_url, auth_header, _) = setup_with_mock(mock).await;
+
+    let res = client()
+        .put(format!(
+            "{base_url}/api/tenko/sessions/{}/daily-inspection",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({
+            "brakes": "ng",
+            "tires": "ok",
+            "lights": "ok",
+            "steering": "ok",
+            "wipers": "ok",
+            "mirrors": "ok",
+            "horn": "ok",
+            "seatbelts": "ok",
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    // Daily inspection NG → cancel, but get_employee_name fails for webhook
+    // Line 845-848: get_employee_name fails → 500
+    assert_eq!(res.status(), 500);
+}
+
+#[tokio::test]
+async fn test_report_completed_record_creation_fails() {
+    // report completed without instruction → create_tenko_record called
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_status.lock().unwrap() = "report_pending".to_string();
+    *mock.session_tenko_type.lock().unwrap() = "post_operation".to_string();
+    mock.fail_on_record.store(true, Ordering::SeqCst);
+    let (base_url, auth_header, _) = setup_with_mock(mock).await;
+
+    let res = client()
+        .put(format!(
+            "{base_url}/api/tenko/sessions/{}/report",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({
+            "vehicle_road_status": "OK",
+            "driver_alternation": "None",
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    // create_tenko_record error swallowed, still 200
+    assert_eq!(res.status(), 200);
+}
+
+#[tokio::test]
+async fn test_safety_judgment_fail_record_creation_fails() {
+    // Safety judgment fails (illness=true) → create_tenko_record called → get_employee_name fails
+    // But perform_safety_judgment also calls get_employee_name for webhook (line 725)
+    // That call returns 500.
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_status.lock().unwrap() = "self_declaration_pending".to_string();
+    *mock.session_tenko_type.lock().unwrap() = "pre_operation".to_string();
+    mock.fail_on_record.store(true, Ordering::SeqCst);
+    let (base_url, auth_header, _) = setup_with_mock(mock).await;
+
+    let res = client()
+        .put(format!(
+            "{base_url}/api/tenko/sessions/{}/self-declaration",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({
+            "illness": true,
+            "fatigue": false,
+            "sleep_deprivation": false,
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    // perform_safety_judgment: get_employee_name fails at line 725 → 500
+    assert_eq!(res.status(), 500);
+}
+
+#[tokio::test]
+async fn test_interrupt_session_employee_name_fails() {
+    // interrupt → get_employee_name for webhook → fails
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_status.lock().unwrap() = "identity_verified".to_string();
+    mock.fail_on_record.store(true, Ordering::SeqCst);
+    let (base_url, auth_header, _) = setup_with_mock(mock).await;
+
+    let res = client()
+        .post(format!(
+            "{base_url}/api/tenko/sessions/{}/interrupt",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({
+            "reason": "Manager"
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    // get_employee_name fails at line 972 → 500
+    assert_eq!(res.status(), 500);
+}
+
+// =========================================================================
+// Alcohol error result variant (line ~154, "error" in valid_results)
+// =========================================================================
+
+#[tokio::test]
+async fn test_submit_alcohol_error_result() {
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_status.lock().unwrap() = "identity_verified".to_string();
+    *mock.session_tenko_type.lock().unwrap() = "pre_operation".to_string();
+    let (base_url, auth_header, _) = setup_with_mock(mock).await;
+
+    let res = client()
+        .put(format!(
+            "{base_url}/api/tenko/sessions/{}/alcohol",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({
+            "alcohol_result": "error",
+            "alcohol_value": 0.0,
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    // "error" is in valid_results but is not "fail"/"over", so treated as pass
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["status"], "instruction_pending");
+}
+
+// =========================================================================
+// Alcohol "normal" result for pre_operation
+// =========================================================================
+
+#[tokio::test]
+async fn test_submit_alcohol_normal_pre_operation() {
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_status.lock().unwrap() = "identity_verified".to_string();
+    *mock.session_tenko_type.lock().unwrap() = "pre_operation".to_string();
+    let (base_url, auth_header, _) = setup_with_mock(mock).await;
+
+    let res = client()
+        .put(format!(
+            "{base_url}/api/tenko/sessions/{}/alcohol",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({
+            "alcohol_result": "normal",
+            "alcohol_value": 0.0,
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["status"], "instruction_pending");
+}

@@ -184,6 +184,11 @@ pub struct MockDtakoRestraintReportRepository {
     pub fail_next: AtomicBool,
     pub return_driver_name: AtomicBool,
     pub drivers_with_cd: std::sync::Mutex<Vec<(Uuid, Option<String>, String)>>,
+    pub segments: std::sync::Mutex<Vec<SegmentRow>>,
+    pub daily_work_hours: std::sync::Mutex<Vec<DailyWorkHoursRow>>,
+    pub op_times: std::sync::Mutex<Vec<OpTimesRow>>,
+    pub prev_day_drive: std::sync::Mutex<Option<i32>>,
+    pub fiscal_cumulative: std::sync::Mutex<i32>,
 }
 
 impl Default for MockDtakoRestraintReportRepository {
@@ -192,6 +197,11 @@ impl Default for MockDtakoRestraintReportRepository {
             fail_next: AtomicBool::new(false),
             return_driver_name: AtomicBool::new(false),
             drivers_with_cd: std::sync::Mutex::new(vec![]),
+            segments: std::sync::Mutex::new(vec![]),
+            daily_work_hours: std::sync::Mutex::new(vec![]),
+            op_times: std::sync::Mutex::new(vec![]),
+            prev_day_drive: std::sync::Mutex::new(None),
+            fiscal_cumulative: std::sync::Mutex::new(0),
         }
     }
 }
@@ -219,7 +229,7 @@ impl DtakoRestraintReportRepository for MockDtakoRestraintReportRepository {
         _month_end: NaiveDate,
     ) -> Result<Vec<SegmentRow>, sqlx::Error> {
         check_fail!(self);
-        Ok(vec![])
+        Ok(self.segments.lock().unwrap().clone())
     }
 
     async fn get_daily_work_hours(
@@ -230,7 +240,7 @@ impl DtakoRestraintReportRepository for MockDtakoRestraintReportRepository {
         _month_end: NaiveDate,
     ) -> Result<Vec<DailyWorkHoursRow>, sqlx::Error> {
         check_fail!(self);
-        Ok(vec![])
+        Ok(self.daily_work_hours.lock().unwrap().clone())
     }
 
     async fn get_prev_day_drive(
@@ -240,7 +250,7 @@ impl DtakoRestraintReportRepository for MockDtakoRestraintReportRepository {
         _prev_day: NaiveDate,
     ) -> Result<Option<i32>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        Ok(*self.prev_day_drive.lock().unwrap())
     }
 
     async fn get_fiscal_cumulative(
@@ -251,7 +261,7 @@ impl DtakoRestraintReportRepository for MockDtakoRestraintReportRepository {
         _prev_month_end: NaiveDate,
     ) -> Result<i32, sqlx::Error> {
         check_fail!(self);
-        Ok(0)
+        Ok(*self.fiscal_cumulative.lock().unwrap())
     }
 
     async fn get_operation_times(
@@ -262,7 +272,7 @@ impl DtakoRestraintReportRepository for MockDtakoRestraintReportRepository {
         _month_end: NaiveDate,
     ) -> Result<Vec<OpTimesRow>, sqlx::Error> {
         check_fail!(self);
-        Ok(vec![])
+        Ok(self.op_times.lock().unwrap().clone())
     }
 
     async fn list_drivers_with_cd(
@@ -359,12 +369,28 @@ impl DtakoScraperRepository for MockDtakoScraperRepository {
 
 pub struct MockDtakoUploadRepository {
     pub fail_next: AtomicBool,
+    pub upload_history: std::sync::Mutex<Option<UploadHistoryRecord>>,
+    pub tenant_and_key: std::sync::Mutex<Option<UploadTenantAndKey>>,
+    pub driver_cd: std::sync::Mutex<Option<String>>,
+    pub employee_id: std::sync::Mutex<Option<Uuid>>,
+    pub operations: std::sync::Mutex<Vec<DtakoOpRow>>,
+    pub driver_operations: std::sync::Mutex<Vec<DtakoDriverOpRow>>,
+    pub zip_keys: std::sync::Mutex<Vec<String>>,
+    pub uploads_needing_split: std::sync::Mutex<Vec<(Uuid, String)>>,
 }
 
 impl Default for MockDtakoUploadRepository {
     fn default() -> Self {
         Self {
             fail_next: AtomicBool::new(false),
+            upload_history: std::sync::Mutex::new(None),
+            tenant_and_key: std::sync::Mutex::new(None),
+            driver_cd: std::sync::Mutex::new(None),
+            employee_id: std::sync::Mutex::new(None),
+            operations: std::sync::Mutex::new(vec![]),
+            driver_operations: std::sync::Mutex::new(vec![]),
+            zip_keys: std::sync::Mutex::new(vec![]),
+            uploads_needing_split: std::sync::Mutex::new(vec![]),
         }
     }
 }
@@ -415,7 +441,7 @@ impl DtakoUploadRepository for MockDtakoUploadRepository {
         _upload_id: Uuid,
     ) -> Result<Option<UploadHistoryRecord>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        Ok(self.upload_history.lock().unwrap().clone())
     }
 
     async fn get_upload_tenant_and_key(
@@ -423,7 +449,7 @@ impl DtakoUploadRepository for MockDtakoUploadRepository {
         _upload_id: Uuid,
     ) -> Result<Option<UploadTenantAndKey>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        Ok(self.tenant_and_key.lock().unwrap().clone())
     }
 
     async fn list_uploads(&self, _tenant_id: Uuid) -> Result<Vec<serde_json::Value>, sqlx::Error> {
@@ -444,7 +470,7 @@ impl DtakoUploadRepository for MockDtakoUploadRepository {
         _tenant_id: Uuid,
     ) -> Result<Vec<(Uuid, String)>, sqlx::Error> {
         check_fail!(self);
-        Ok(vec![])
+        Ok(self.uploads_needing_split.lock().unwrap().clone())
     }
 
     async fn fetch_zip_keys(
@@ -453,7 +479,7 @@ impl DtakoUploadRepository for MockDtakoUploadRepository {
         _month_start: NaiveDate,
     ) -> Result<Vec<String>, sqlx::Error> {
         check_fail!(self);
-        Ok(vec![])
+        Ok(self.zip_keys.lock().unwrap().clone())
     }
 
     async fn upsert_office(
@@ -539,7 +565,7 @@ impl DtakoUploadRepository for MockDtakoUploadRepository {
         _driver_cd: &str,
     ) -> Result<Option<Uuid>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        Ok(*self.employee_id.lock().unwrap())
     }
 
     async fn get_driver_cd(
@@ -548,7 +574,7 @@ impl DtakoUploadRepository for MockDtakoUploadRepository {
         _driver_id: Uuid,
     ) -> Result<Option<String>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        Ok(self.driver_cd.lock().unwrap().clone())
     }
 
     async fn delete_segments_by_unko(
@@ -617,7 +643,7 @@ impl DtakoUploadRepository for MockDtakoUploadRepository {
         _fetch_end: NaiveDate,
     ) -> Result<Vec<DtakoOpRow>, sqlx::Error> {
         check_fail!(self);
-        Ok(vec![])
+        Ok(self.operations.lock().unwrap().clone())
     }
 
     async fn load_driver_operations(
@@ -628,7 +654,7 @@ impl DtakoUploadRepository for MockDtakoUploadRepository {
         _fetch_end: NaiveDate,
     ) -> Result<Vec<DtakoDriverOpRow>, sqlx::Error> {
         check_fail!(self);
-        Ok(vec![])
+        Ok(self.driver_operations.lock().unwrap().clone())
     }
 }
 

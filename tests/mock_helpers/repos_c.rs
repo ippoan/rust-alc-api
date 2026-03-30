@@ -24,6 +24,15 @@ macro_rules! check_fail {
     };
 }
 
+macro_rules! check_fail_update {
+    ($self:expr) => {
+        check_fail!($self);
+        if $self.fail_on_update.load(Ordering::SeqCst) {
+            return Err(sqlx::Error::RowNotFound);
+        }
+    };
+}
+
 // ---------------------------------------------------------------------------
 // MockNfcTagRepository
 // ---------------------------------------------------------------------------
@@ -624,6 +633,8 @@ impl TenkoSchedulesRepository for MockTenkoSchedulesRepository {
 
 pub struct MockTenkoSessionRepository {
     pub fail_next: AtomicBool,
+    /// Fails on write/update operations (not get/list/dashboard)
+    pub fail_on_update: AtomicBool,
     /// Controls the status of the session returned by get()
     pub session_status: std::sync::Mutex<String>,
     /// Controls the tenko_type of the session returned by get()
@@ -646,6 +657,10 @@ pub struct MockTenkoSessionRepository {
     pub session_has_daily_inspection: AtomicBool,
     /// Controls self_declaration on session (for resume logic)
     pub session_has_self_declaration: AtomicBool,
+    /// Optional health baseline for safety judgment tests
+    pub health_baseline: std::sync::Mutex<Option<EmployeeHealthBaseline>>,
+    /// Fails on create_tenko_record and get_employee_name (for record creation error tests)
+    pub fail_on_record: AtomicBool,
 }
 
 impl Default for MockTenkoSessionRepository {
@@ -653,6 +668,7 @@ impl Default for MockTenkoSessionRepository {
         let emp_id = Uuid::new_v4();
         Self {
             fail_next: AtomicBool::new(false),
+            fail_on_update: AtomicBool::new(false),
             session_status: std::sync::Mutex::new("identity_verified".to_string()),
             session_tenko_type: std::sync::Mutex::new("pre_operation".to_string()),
             session_employee_id: std::sync::Mutex::new(emp_id),
@@ -664,6 +680,8 @@ impl Default for MockTenkoSessionRepository {
             carrying_items_count: std::sync::Mutex::new(0),
             session_has_daily_inspection: AtomicBool::new(false),
             session_has_self_declaration: AtomicBool::new(false),
+            health_baseline: std::sync::Mutex::new(None),
+            fail_on_record: AtomicBool::new(false),
         }
     }
 }
@@ -843,7 +861,7 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
         _tenant_id: Uuid,
         _schedule_id: Uuid,
     ) -> Result<(), sqlx::Error> {
-        check_fail!(self);
+        check_fail_update!(self);
         Ok(())
     }
 
@@ -853,7 +871,7 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
         _schedule_id: Uuid,
         _session_id: Uuid,
     ) -> Result<(), sqlx::Error> {
-        check_fail!(self);
+        check_fail_update!(self);
         Ok(())
     }
 
@@ -881,7 +899,7 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
         _location: &Option<String>,
         _responsible_manager_name: &Option<String>,
     ) -> Result<TenkoSession, sqlx::Error> {
-        check_fail!(self);
+        check_fail_update!(self);
         Ok(make_mock_session(
             _tenant_id,
             Uuid::new_v4(),
@@ -905,7 +923,7 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
         _cancel_reason: &Option<String>,
         _completed_at: Option<DateTime<Utc>>,
     ) -> Result<TenkoSession, sqlx::Error> {
-        check_fail!(self);
+        check_fail_update!(self);
         let employee_id = *self.session_employee_id.lock().unwrap();
         let tenko_type = self.session_tenko_type.lock().unwrap().clone();
         let mut session = make_mock_session(
@@ -935,7 +953,7 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
         _medical_measured_at: Option<DateTime<Utc>>,
         _medical_manual_input: Option<bool>,
     ) -> Result<TenkoSession, sqlx::Error> {
-        check_fail!(self);
+        check_fail_update!(self);
         let employee_id = *self.session_employee_id.lock().unwrap();
         let mut session = make_mock_session(
             _tenant_id,
@@ -958,7 +976,7 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
         _tenant_id: Uuid,
         _id: Uuid,
     ) -> Result<TenkoSession, sqlx::Error> {
-        check_fail!(self);
+        check_fail_update!(self);
         let employee_id = *self.session_employee_id.lock().unwrap();
         let tenko_type = self.session_tenko_type.lock().unwrap().clone();
         let mut session = make_mock_session(
@@ -986,7 +1004,7 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
         _driver_alternation_audio_url: &Option<String>,
         _completed_at: Option<DateTime<Utc>>,
     ) -> Result<TenkoSession, sqlx::Error> {
-        check_fail!(self);
+        check_fail_update!(self);
         let employee_id = *self.session_employee_id.lock().unwrap();
         let mut session = make_mock_session(
             _tenant_id,
@@ -1009,7 +1027,7 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
         _id: Uuid,
         _reason: &Option<String>,
     ) -> Result<TenkoSession, sqlx::Error> {
-        check_fail!(self);
+        check_fail_update!(self);
         let employee_id = *self.session_employee_id.lock().unwrap();
         let tenko_type = self.session_tenko_type.lock().unwrap().clone();
         let mut session = make_mock_session(
@@ -1032,7 +1050,7 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
         _id: Uuid,
         _declaration_json: &serde_json::Value,
     ) -> Result<TenkoSession, sqlx::Error> {
-        check_fail!(self);
+        check_fail_update!(self);
         let employee_id = *self.session_employee_id.lock().unwrap();
         let mut session = make_mock_session(
             _tenant_id,
@@ -1055,7 +1073,7 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
         _judgment_json: &serde_json::Value,
         _interrupted_at: Option<DateTime<Utc>>,
     ) -> Result<TenkoSession, sqlx::Error> {
-        check_fail!(self);
+        check_fail_update!(self);
         let employee_id = *self.session_employee_id.lock().unwrap();
         let mut session = make_mock_session(
             _tenant_id,
@@ -1080,7 +1098,7 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
         _cancel_reason: &Option<String>,
         _completed_at: Option<DateTime<Utc>>,
     ) -> Result<TenkoSession, sqlx::Error> {
-        check_fail!(self);
+        check_fail_update!(self);
         let employee_id = *self.session_employee_id.lock().unwrap();
         let mut session = make_mock_session(
             _tenant_id,
@@ -1103,7 +1121,7 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
         _id: Uuid,
         _carrying_json: &serde_json::Value,
     ) -> Result<TenkoSession, sqlx::Error> {
-        check_fail!(self);
+        check_fail_update!(self);
         let employee_id = *self.session_employee_id.lock().unwrap();
         let mut session = make_mock_session(
             _tenant_id,
@@ -1124,7 +1142,7 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
         _id: Uuid,
         _reason: &Option<String>,
     ) -> Result<TenkoSession, sqlx::Error> {
-        check_fail!(self);
+        check_fail_update!(self);
         let employee_id = *self.session_employee_id.lock().unwrap();
         let tenko_type = self.session_tenko_type.lock().unwrap().clone();
         let mut session = make_mock_session(
@@ -1148,7 +1166,7 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
         _reason: &str,
         _resumed_by_user_id: Option<Uuid>,
     ) -> Result<TenkoSession, sqlx::Error> {
-        check_fail!(self);
+        check_fail_update!(self);
         let employee_id = *self.session_employee_id.lock().unwrap();
         let tenko_type = self.session_tenko_type.lock().unwrap().clone();
         let mut session = make_mock_session(
@@ -1184,7 +1202,7 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
         _checked: bool,
         _checked_at: Option<DateTime<Utc>>,
     ) -> Result<(), sqlx::Error> {
-        check_fail!(self);
+        check_fail_update!(self);
         Ok(())
     }
 
@@ -1199,6 +1217,9 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
         _employee_id: Uuid,
     ) -> Result<Option<String>, sqlx::Error> {
         check_fail!(self);
+        if self.fail_on_record.load(Ordering::SeqCst) {
+            return Err(sqlx::Error::RowNotFound);
+        }
         if self.return_employee_name.load(Ordering::SeqCst) {
             Ok(Some("Test Employee".to_string()))
         } else {
@@ -1212,7 +1233,7 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
         _employee_id: Uuid,
     ) -> Result<Option<EmployeeHealthBaseline>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        Ok(self.health_baseline.lock().unwrap().clone())
     }
 
     async fn create_tenko_record(
@@ -1224,7 +1245,7 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
         _record_data: &serde_json::Value,
         _record_hash: &str,
     ) -> Result<TenkoRecord, sqlx::Error> {
-        check_fail!(self);
+        check_fail_update!(self);
         Ok(make_mock_tenko_record(_tenant_id, _session))
     }
 

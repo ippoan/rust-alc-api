@@ -7,7 +7,7 @@ use super::TenantConn;
 
 // --- DB row types ---
 
-#[derive(Debug, sqlx::FromRow)]
+#[derive(Debug, Clone, sqlx::FromRow)]
 pub struct SegmentRow {
     pub work_date: NaiveDate,
     pub unko_no: String,
@@ -23,14 +23,14 @@ pub struct FiscalCumRow {
     pub total: Option<i64>,
 }
 
-#[derive(Debug, sqlx::FromRow)]
+#[derive(Debug, Clone, sqlx::FromRow)]
 pub struct OpTimesRow {
     pub operation_date: NaiveDate,
     pub first_departure: DateTime<Utc>,
     pub last_seg_end: DateTime<Utc>,
 }
 
-#[derive(Debug, sqlx::FromRow)]
+#[derive(Debug, Clone, sqlx::FromRow)]
 pub struct DailyWorkHoursRow {
     pub work_date: NaiveDate,
     pub start_time: chrono::NaiveTime,

@@ -1069,4 +1069,51 @@ mod tests {
         check_self_declaration(&Some(decl), &mut failed);
         assert!(failed.is_empty());
     }
+
+    #[test]
+    fn test_check_self_declaration_illness_true() {
+        let decl =
+            serde_json::json!({"illness": true, "fatigue": false, "sleep_deprivation": false});
+        let mut failed = Vec::new();
+        check_self_declaration(&Some(decl), &mut failed);
+        assert_eq!(failed, vec!["illness"]);
+    }
+
+    #[test]
+    fn test_check_self_declaration_fatigue_true() {
+        let decl =
+            serde_json::json!({"illness": false, "fatigue": true, "sleep_deprivation": false});
+        let mut failed = Vec::new();
+        check_self_declaration(&Some(decl), &mut failed);
+        assert_eq!(failed, vec!["fatigue"]);
+    }
+
+    #[test]
+    fn test_check_self_declaration_sleep_deprivation_true() {
+        let decl =
+            serde_json::json!({"illness": false, "fatigue": false, "sleep_deprivation": true});
+        let mut failed = Vec::new();
+        check_self_declaration(&Some(decl), &mut failed);
+        assert_eq!(failed, vec!["sleep_deprivation"]);
+    }
+
+    #[test]
+    fn test_check_self_declaration_all_true() {
+        let decl = serde_json::json!({"illness": true, "fatigue": true, "sleep_deprivation": true});
+        let mut failed = Vec::new();
+        check_self_declaration(&Some(decl), &mut failed);
+        assert_eq!(failed.len(), 3);
+        assert!(failed.contains(&"illness".to_string()));
+        assert!(failed.contains(&"fatigue".to_string()));
+        assert!(failed.contains(&"sleep_deprivation".to_string()));
+    }
+
+    #[test]
+    fn test_check_self_declaration_invalid_json() {
+        let decl = serde_json::json!({"something": "else"});
+        let mut failed = Vec::new();
+        check_self_declaration(&Some(decl), &mut failed);
+        // Deserialization fails, so no items added
+        assert!(failed.is_empty());
+    }
 }

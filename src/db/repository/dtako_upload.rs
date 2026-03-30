@@ -6,7 +6,7 @@ use uuid::Uuid;
 use super::TenantConn;
 
 /// dtako_upload_history の基本情報
-#[derive(Debug, sqlx::FromRow)]
+#[derive(Debug, Clone, sqlx::FromRow)]
 pub struct UploadHistoryRecord {
     pub tenant_id: Uuid,
     pub r2_zip_key: String,
@@ -14,14 +14,14 @@ pub struct UploadHistoryRecord {
 }
 
 /// dtako_upload_history (tenant_id, r2_zip_key) のみ
-#[derive(Debug, sqlx::FromRow)]
+#[derive(Debug, Clone, sqlx::FromRow)]
 pub struct UploadTenantAndKey {
     pub tenant_id: Uuid,
     pub r2_zip_key: String,
 }
 
 /// recalculate 用の operations 行
-#[derive(Debug, sqlx::FromRow)]
+#[derive(Debug, Clone, sqlx::FromRow)]
 pub struct DtakoOpRow {
     pub unko_no: String,
     pub reading_date: NaiveDate,
@@ -36,7 +36,7 @@ pub struct DtakoOpRow {
 }
 
 /// single-driver recalculate 用の operations 行
-#[derive(Debug, sqlx::FromRow)]
+#[derive(Debug, Clone, sqlx::FromRow)]
 pub struct DtakoDriverOpRow {
     pub unko_no: String,
     pub reading_date: NaiveDate,

@@ -8,7 +8,8 @@ use serde_json::Value;
 use crate::mock_helpers::app_state::setup_mock_app_state;
 use crate::mock_helpers::{mock_user, MockAuthRepository};
 
-use rust_alc_api::db::models::{Tenant, TenantAllowedEmail};
+use rust_alc_api::auth::lineworks;
+use rust_alc_api::db::models::{Tenant, TenantAllowedEmail, User};
 use rust_alc_api::db::repository::auth::SsoConfigRow;
 
 // ============================================================
@@ -1072,4 +1073,1125 @@ async fn test_google_redirect_missing_state_secret() {
         .unwrap();
 
     assert_eq!(res.status(), 500);
+}
+
+// ============================================================
+// Helper: encrypt a client_secret for lineworks decrypt_secret
+// ============================================================
+
+fn encrypt_secret_for_test(plaintext: &str, key_material: &str) -> String {
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+    use ring::aead::{self, Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
+    use ring::rand::{SecureRandom, SystemRandom};
+    use sha2::{Digest, Sha256};
+
+    let mut key_bytes = [0u8; 32];
+    let hash = Sha256::digest(key_material.as_bytes());
+    key_bytes.copy_from_slice(&hash);
+
+    let unbound_key = UnboundKey::new(&AES_256_GCM, &key_bytes).unwrap();
+    let key = LessSafeKey::new(unbound_key);
+
+    let rng = SystemRandom::new();
+    let mut nonce_bytes = [0u8; 12];
+    rng.fill(&mut nonce_bytes).unwrap();
+    let nonce = Nonce::assume_unique_for_key(nonce_bytes);
+
+    let mut in_out = plaintext.as_bytes().to_vec();
+    let tag_len = aead::AES_256_GCM.tag_len();
+    in_out.extend(vec![0u8; tag_len]);
+
+    let tag = key
+        .seal_in_place_separate_tag(nonce, Aad::empty(), &mut in_out[..plaintext.len()])
+        .unwrap();
+    in_out[plaintext.len()..].copy_from_slice(tag.as_ref());
+
+    let mut result = nonce_bytes.to_vec();
+    result.extend_from_slice(&in_out);
+    BASE64.encode(&result)
+}
+
+// ============================================================
+// GET /api/auth/google/callback — success (code exchange + redirect)
+// ============================================================
+
+#[tokio::test]
+async fn test_google_callback_success() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("OAUTH_STATE_SECRET", "test-state-secret");
+    std::env::set_var("API_ORIGIN", "http://localhost:0");
+
+    let tenant_id = Uuid::new_v4();
+    let user = mock_user(tenant_id);
+
+    let mock = Arc::new(MockAuthRepository::default());
+    *mock.return_user.lock().unwrap() = Some(user.clone());
+
+    let mut state = setup_mock_app_state();
+    state.auth = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    // Create a valid signed state
+    let state_payload = lineworks::state::StatePayload {
+        redirect_uri: "https://items.mtamaramu.com/callback".to_string(),
+        nonce: Uuid::new_v4().to_string(),
+        provider: "google".to_string(),
+        external_org_id: String::new(),
+    };
+    let signed_state = lineworks::state::sign(&state_payload, "test-state-secret");
+
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let res = client
+        .get(format!(
+            "{base_url}/api/auth/google/callback?code=test-valid-code&state={}",
+            urlencoding::encode(&signed_state)
+        ))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 307);
+    let location = res.headers().get("location").unwrap().to_str().unwrap();
+    assert!(location.starts_with("https://items.mtamaramu.com/callback#token="));
+    assert!(location.contains("refresh_token="));
+    assert!(location.contains("lw_callback=1"));
+
+    // Check Set-Cookie header with parent domain extraction
+    let cookie = res.headers().get("set-cookie").unwrap().to_str().unwrap();
+    assert!(cookie.contains("logi_auth_token="));
+    assert!(cookie.contains("Domain=.mtamaramu.com"));
+}
+
+// ============================================================
+// GET /api/auth/google/callback — missing OAUTH_STATE_SECRET → 500
+// ============================================================
+
+#[tokio::test]
+async fn test_google_callback_missing_state_secret() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::remove_var("OAUTH_STATE_SECRET");
+
+    let mock = Arc::new(MockAuthRepository::default());
+    let mut state = setup_mock_app_state();
+    state.auth = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let res = client
+        .get(format!(
+            "{base_url}/api/auth/google/callback?code=test-valid-code&state=invalid"
+        ))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 500);
+}
+
+// ============================================================
+// GET /api/auth/google/callback — invalid state → 400
+// ============================================================
+
+#[tokio::test]
+async fn test_google_callback_invalid_state() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("OAUTH_STATE_SECRET", "test-state-secret");
+
+    let mock = Arc::new(MockAuthRepository::default());
+    let mut state = setup_mock_app_state();
+    state.auth = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let res = client
+        .get(format!(
+            "{base_url}/api/auth/google/callback?code=test-valid-code&state=bad-state"
+        ))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 400);
+}
+
+// ============================================================
+// GET /api/auth/google/callback — invalid code → 502
+// ============================================================
+
+#[tokio::test]
+async fn test_google_callback_invalid_code() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("OAUTH_STATE_SECRET", "test-state-secret");
+
+    let mock = Arc::new(MockAuthRepository::default());
+    let mut state = setup_mock_app_state();
+    state.auth = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let state_payload = lineworks::state::StatePayload {
+        redirect_uri: "https://example.com/callback".to_string(),
+        nonce: Uuid::new_v4().to_string(),
+        provider: "google".to_string(),
+        external_org_id: String::new(),
+    };
+    let signed_state = lineworks::state::sign(&state_payload, "test-state-secret");
+
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let res = client
+        .get(format!(
+            "{base_url}/api/auth/google/callback?code=bad-code&state={}",
+            urlencoding::encode(&signed_state)
+        ))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 502);
+}
+
+// ============================================================
+// GET /api/auth/google/callback — new user (no existing user)
+// ============================================================
+
+#[tokio::test]
+async fn test_google_callback_new_user() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("OAUTH_STATE_SECRET", "test-state-secret");
+
+    // return_user = None → new user → new tenant
+    let mock = Arc::new(MockAuthRepository::default());
+    let mut state = setup_mock_app_state();
+    state.auth = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let state_payload = lineworks::state::StatePayload {
+        redirect_uri: "https://sub.example.com/callback".to_string(),
+        nonce: Uuid::new_v4().to_string(),
+        provider: "google".to_string(),
+        external_org_id: String::new(),
+    };
+    let signed_state = lineworks::state::sign(&state_payload, "test-state-secret");
+
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let res = client
+        .get(format!(
+            "{base_url}/api/auth/google/callback?code=test-valid-code&state={}",
+            urlencoding::encode(&signed_state)
+        ))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 307);
+    let location = res.headers().get("location").unwrap().to_str().unwrap();
+    assert!(location.starts_with("https://sub.example.com/callback#token="));
+
+    // extract_parent_domain: "sub.example.com" → "example.com"
+    let cookie = res.headers().get("set-cookie").unwrap().to_str().unwrap();
+    assert!(cookie.contains("Domain=.example.com"));
+}
+
+// ============================================================
+// GET /api/auth/lineworks/redirect — missing OAUTH_STATE_SECRET → 500
+// ============================================================
+
+#[tokio::test]
+async fn test_lineworks_redirect_missing_state_secret() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::remove_var("OAUTH_STATE_SECRET");
+
+    let mock = Arc::new(MockAuthRepository::default());
+    let mut state = setup_mock_app_state();
+    state.auth = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let res = client
+        .get(format!(
+            "{base_url}/api/auth/lineworks/redirect?domain=test&redirect_uri=https://example.com"
+        ))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 500);
+}
+
+// ============================================================
+// GET /api/auth/lineworks/callback — via wiremock (success, new user)
+// ============================================================
+
+#[tokio::test]
+async fn test_lineworks_callback_success() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    let oauth_secret = "test-state-secret";
+    std::env::set_var("OAUTH_STATE_SECRET", oauth_secret);
+
+    // Start wiremock server
+    let mock_server = wiremock::MockServer::start().await;
+
+    // Set LINE WORKS endpoints to wiremock
+    std::env::set_var(
+        "LINEWORKS_TOKEN_URL",
+        format!("{}/oauth2/token", mock_server.uri()),
+    );
+    std::env::set_var(
+        "LINEWORKS_USERINFO_URL",
+        format!("{}/v1.0/users/me", mock_server.uri()),
+    );
+
+    // Mock token exchange
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .and(wiremock::matchers::path("/oauth2/token"))
+        .respond_with(
+            wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "lw-access-token-123",
+                "token_type": "Bearer",
+                "expires_in": 3600,
+                "scope": "user.profile.read"
+            })),
+        )
+        .mount(&mock_server)
+        .await;
+
+    // Mock user profile
+    wiremock::Mock::given(wiremock::matchers::method("GET"))
+        .and(wiremock::matchers::path("/v1.0/users/me"))
+        .respond_with(
+            wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "userId": "lw-user-001",
+                "userName": {
+                    "lastName": "田中",
+                    "firstName": "太郎"
+                },
+                "email": "tanaka@example.com"
+            })),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let tenant_id = Uuid::new_v4();
+    let jwt_secret = crate::common::TEST_JWT_SECRET;
+
+    // Encrypt a client_secret for the SSO config
+    let encrypted_secret = encrypt_secret_for_test("test-client-secret", jwt_secret);
+
+    let mock = Arc::new(MockAuthRepository::default());
+    *mock.return_sso_config.lock().unwrap() = Some(SsoConfigRow {
+        tenant_id,
+        client_id: "lw-client-id".to_string(),
+        client_secret_encrypted: encrypted_secret,
+        external_org_id: "lw-org".to_string(),
+        woff_id: None,
+    });
+
+    let mut state = setup_mock_app_state();
+    state.auth = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    // Create valid state (provider=lineworks, external_org_id must match SSO config)
+    let state_payload = lineworks::state::StatePayload {
+        redirect_uri: "https://items.mtamaramu.com/callback".to_string(),
+        nonce: Uuid::new_v4().to_string(),
+        provider: "lineworks".to_string(),
+        external_org_id: "lw-org".to_string(),
+    };
+    let signed_state = lineworks::state::sign(&state_payload, oauth_secret);
+
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let res = client
+        .get(format!(
+            "{base_url}/api/auth/lineworks/callback?code=lw-auth-code&state={}",
+            urlencoding::encode(&signed_state)
+        ))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 307);
+    let location = res.headers().get("location").unwrap().to_str().unwrap();
+    assert!(location.starts_with("https://items.mtamaramu.com/callback#token="));
+    assert!(location.contains("refresh_token="));
+
+    let cookie = res.headers().get("set-cookie").unwrap().to_str().unwrap();
+    assert!(cookie.contains("Domain=.mtamaramu.com"));
+
+    // Cleanup env vars
+    std::env::remove_var("LINEWORKS_TOKEN_URL");
+    std::env::remove_var("LINEWORKS_USERINFO_URL");
+}
+
+// ============================================================
+// GET /api/auth/lineworks/callback — existing user (upsert path)
+// ============================================================
+
+#[tokio::test]
+async fn test_lineworks_callback_existing_user() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    let oauth_secret = "test-state-secret";
+    std::env::set_var("OAUTH_STATE_SECRET", oauth_secret);
+
+    let mock_server = wiremock::MockServer::start().await;
+    std::env::set_var(
+        "LINEWORKS_TOKEN_URL",
+        format!("{}/oauth2/token", mock_server.uri()),
+    );
+    std::env::set_var(
+        "LINEWORKS_USERINFO_URL",
+        format!("{}/v1.0/users/me", mock_server.uri()),
+    );
+
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .and(wiremock::matchers::path("/oauth2/token"))
+        .respond_with(
+            wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "lw-access-token-123",
+                "token_type": "Bearer",
+                "expires_in": 3600
+            })),
+        )
+        .mount(&mock_server)
+        .await;
+
+    wiremock::Mock::given(wiremock::matchers::method("GET"))
+        .and(wiremock::matchers::path("/v1.0/users/me"))
+        .respond_with(
+            wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "userId": "lw-user-001",
+                "userName": { "lastName": "田中", "firstName": "太郎" },
+                "email": "tanaka@example.com"
+            })),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let tenant_id = Uuid::new_v4();
+    let jwt_secret = crate::common::TEST_JWT_SECRET;
+    let encrypted_secret = encrypt_secret_for_test("test-client-secret", jwt_secret);
+
+    // Pre-set an existing lineworks user
+    let existing_user = User {
+        id: Uuid::new_v4(),
+        tenant_id,
+        google_sub: None,
+        lineworks_id: Some("lw-user-001".to_string()),
+        email: "tanaka@example.com".to_string(),
+        name: "田中太郎".to_string(),
+        role: "admin".to_string(),
+        refresh_token_hash: None,
+        refresh_token_expires_at: None,
+        created_at: chrono::Utc::now(),
+    };
+
+    let mock = Arc::new(MockAuthRepository::default());
+    *mock.return_sso_config.lock().unwrap() = Some(SsoConfigRow {
+        tenant_id,
+        client_id: "lw-client-id".to_string(),
+        client_secret_encrypted: encrypted_secret,
+        external_org_id: "lw-org".to_string(),
+        woff_id: None,
+    });
+    *mock.return_lineworks_user.lock().unwrap() = Some(existing_user);
+
+    let mut state = setup_mock_app_state();
+    state.auth = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let state_payload = lineworks::state::StatePayload {
+        redirect_uri: "https://app.example.com/cb".to_string(),
+        nonce: Uuid::new_v4().to_string(),
+        provider: "lineworks".to_string(),
+        external_org_id: "lw-org".to_string(),
+    };
+    let signed_state = lineworks::state::sign(&state_payload, oauth_secret);
+
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let res = client
+        .get(format!(
+            "{base_url}/api/auth/lineworks/callback?code=lw-auth-code&state={}",
+            urlencoding::encode(&signed_state)
+        ))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 307);
+
+    std::env::remove_var("LINEWORKS_TOKEN_URL");
+    std::env::remove_var("LINEWORKS_USERINFO_URL");
+}
+
+// ============================================================
+// GET /api/auth/lineworks/callback — missing OAUTH_STATE_SECRET → 500
+// ============================================================
+
+#[tokio::test]
+async fn test_lineworks_callback_missing_state_secret() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::remove_var("OAUTH_STATE_SECRET");
+
+    let mock = Arc::new(MockAuthRepository::default());
+    let mut state = setup_mock_app_state();
+    state.auth = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let res = client
+        .get(format!(
+            "{base_url}/api/auth/lineworks/callback?code=any&state=any"
+        ))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 500);
+}
+
+// ============================================================
+// GET /api/auth/lineworks/callback — invalid state → 400
+// ============================================================
+
+#[tokio::test]
+async fn test_lineworks_callback_invalid_state() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("OAUTH_STATE_SECRET", "test-state-secret");
+
+    let mock = Arc::new(MockAuthRepository::default());
+    let mut state = setup_mock_app_state();
+    state.auth = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let res = client
+        .get(format!(
+            "{base_url}/api/auth/lineworks/callback?code=any&state=invalid-state"
+        ))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 400);
+}
+
+// ============================================================
+// GET /api/auth/lineworks/callback — SSO config not found → 500
+// ============================================================
+
+#[tokio::test]
+async fn test_lineworks_callback_sso_not_found() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    let oauth_secret = "test-state-secret";
+    std::env::set_var("OAUTH_STATE_SECRET", oauth_secret);
+
+    // return_sso_config = None → resolve_sso_config_required fails
+    let mock = Arc::new(MockAuthRepository::default());
+    let mut state = setup_mock_app_state();
+    state.auth = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let state_payload = lineworks::state::StatePayload {
+        redirect_uri: "https://example.com/callback".to_string(),
+        nonce: Uuid::new_v4().to_string(),
+        provider: "lineworks".to_string(),
+        external_org_id: "lw-org".to_string(),
+    };
+    let signed_state = lineworks::state::sign(&state_payload, oauth_secret);
+
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let res = client
+        .get(format!(
+            "{base_url}/api/auth/lineworks/callback?code=any&state={}",
+            urlencoding::encode(&signed_state)
+        ))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 500);
+}
+
+// ============================================================
+// GET /api/auth/lineworks/callback — decrypt_secret fails → 500
+// ============================================================
+
+#[tokio::test]
+async fn test_lineworks_callback_decrypt_fails() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    let oauth_secret = "test-state-secret";
+    std::env::set_var("OAUTH_STATE_SECRET", oauth_secret);
+
+    let tenant_id = Uuid::new_v4();
+    let mock = Arc::new(MockAuthRepository::default());
+    *mock.return_sso_config.lock().unwrap() = Some(SsoConfigRow {
+        tenant_id,
+        client_id: "lw-client-id".to_string(),
+        client_secret_encrypted: "invalid-base64-not-encrypted".to_string(),
+        external_org_id: "lw-org".to_string(),
+        woff_id: None,
+    });
+
+    let mut state = setup_mock_app_state();
+    state.auth = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let state_payload = lineworks::state::StatePayload {
+        redirect_uri: "https://example.com/callback".to_string(),
+        nonce: Uuid::new_v4().to_string(),
+        provider: "lineworks".to_string(),
+        external_org_id: "lw-org".to_string(),
+    };
+    let signed_state = lineworks::state::sign(&state_payload, oauth_secret);
+
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let res = client
+        .get(format!(
+            "{base_url}/api/auth/lineworks/callback?code=any&state={}",
+            urlencoding::encode(&signed_state)
+        ))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 500);
+}
+
+// ============================================================
+// GET /api/auth/lineworks/callback — token exchange fails → 502
+// ============================================================
+
+#[tokio::test]
+async fn test_lineworks_callback_token_exchange_fails() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    let oauth_secret = "test-state-secret";
+    std::env::set_var("OAUTH_STATE_SECRET", oauth_secret);
+
+    let mock_server = wiremock::MockServer::start().await;
+    std::env::set_var(
+        "LINEWORKS_TOKEN_URL",
+        format!("{}/oauth2/token", mock_server.uri()),
+    );
+
+    // Token exchange returns 400
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .and(wiremock::matchers::path("/oauth2/token"))
+        .respond_with(
+            wiremock::ResponseTemplate::new(400).set_body_json(serde_json::json!({
+                "error": "invalid_grant"
+            })),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let tenant_id = Uuid::new_v4();
+    let jwt_secret = crate::common::TEST_JWT_SECRET;
+    let encrypted_secret = encrypt_secret_for_test("test-client-secret", jwt_secret);
+
+    let mock = Arc::new(MockAuthRepository::default());
+    *mock.return_sso_config.lock().unwrap() = Some(SsoConfigRow {
+        tenant_id,
+        client_id: "lw-client-id".to_string(),
+        client_secret_encrypted: encrypted_secret,
+        external_org_id: "lw-org".to_string(),
+        woff_id: None,
+    });
+
+    let mut state = setup_mock_app_state();
+    state.auth = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let state_payload = lineworks::state::StatePayload {
+        redirect_uri: "https://example.com/callback".to_string(),
+        nonce: Uuid::new_v4().to_string(),
+        provider: "lineworks".to_string(),
+        external_org_id: "lw-org".to_string(),
+    };
+    let signed_state = lineworks::state::sign(&state_payload, oauth_secret);
+
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let res = client
+        .get(format!(
+            "{base_url}/api/auth/lineworks/callback?code=bad-code&state={}",
+            urlencoding::encode(&signed_state)
+        ))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 502);
+
+    std::env::remove_var("LINEWORKS_TOKEN_URL");
+}
+
+// ============================================================
+// GET /api/auth/lineworks/callback — profile fetch fails → 502
+// ============================================================
+
+#[tokio::test]
+async fn test_lineworks_callback_profile_fetch_fails() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    let oauth_secret = "test-state-secret";
+    std::env::set_var("OAUTH_STATE_SECRET", oauth_secret);
+
+    let mock_server = wiremock::MockServer::start().await;
+    std::env::set_var(
+        "LINEWORKS_TOKEN_URL",
+        format!("{}/oauth2/token", mock_server.uri()),
+    );
+    std::env::set_var(
+        "LINEWORKS_USERINFO_URL",
+        format!("{}/v1.0/users/me", mock_server.uri()),
+    );
+
+    // Token exchange succeeds
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .and(wiremock::matchers::path("/oauth2/token"))
+        .respond_with(
+            wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "lw-access-token-123",
+                "token_type": "Bearer",
+                "expires_in": 3600
+            })),
+        )
+        .mount(&mock_server)
+        .await;
+
+    // Profile fetch fails
+    wiremock::Mock::given(wiremock::matchers::method("GET"))
+        .and(wiremock::matchers::path("/v1.0/users/me"))
+        .respond_with(
+            wiremock::ResponseTemplate::new(401).set_body_json(serde_json::json!({
+                "error": "unauthorized"
+            })),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let tenant_id = Uuid::new_v4();
+    let jwt_secret = crate::common::TEST_JWT_SECRET;
+    let encrypted_secret = encrypt_secret_for_test("test-client-secret", jwt_secret);
+
+    let mock = Arc::new(MockAuthRepository::default());
+    *mock.return_sso_config.lock().unwrap() = Some(SsoConfigRow {
+        tenant_id,
+        client_id: "lw-client-id".to_string(),
+        client_secret_encrypted: encrypted_secret,
+        external_org_id: "lw-org".to_string(),
+        woff_id: None,
+    });
+
+    let mut state = setup_mock_app_state();
+    state.auth = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let state_payload = lineworks::state::StatePayload {
+        redirect_uri: "https://example.com/callback".to_string(),
+        nonce: Uuid::new_v4().to_string(),
+        provider: "lineworks".to_string(),
+        external_org_id: "lw-org".to_string(),
+    };
+    let signed_state = lineworks::state::sign(&state_payload, oauth_secret);
+
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let res = client
+        .get(format!(
+            "{base_url}/api/auth/lineworks/callback?code=lw-code&state={}",
+            urlencoding::encode(&signed_state)
+        ))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 502);
+
+    std::env::remove_var("LINEWORKS_TOKEN_URL");
+    std::env::remove_var("LINEWORKS_USERINFO_URL");
+}
+
+// ============================================================
+// POST /api/auth/woff — success (new user)
+// ============================================================
+
+#[tokio::test]
+async fn test_woff_auth_success() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+
+    let mock_server = wiremock::MockServer::start().await;
+    std::env::set_var(
+        "LINEWORKS_USERINFO_URL",
+        format!("{}/v1.0/users/me", mock_server.uri()),
+    );
+
+    wiremock::Mock::given(wiremock::matchers::method("GET"))
+        .and(wiremock::matchers::path("/v1.0/users/me"))
+        .respond_with(
+            wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "userId": "woff-user-001",
+                "userName": { "lastName": "佐藤", "firstName": "花子" },
+                "email": "sato@example.com"
+            })),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let tenant_id = Uuid::new_v4();
+    let mock = Arc::new(MockAuthRepository::default());
+    *mock.return_sso_config.lock().unwrap() = Some(SsoConfigRow {
+        tenant_id,
+        client_id: "woff-client-id".to_string(),
+        client_secret_encrypted: "encrypted".to_string(),
+        external_org_id: "woff-org".to_string(),
+        woff_id: Some("woff-12345".to_string()),
+    });
+
+    let mut state = setup_mock_app_state();
+    state.auth = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/auth/woff"))
+        .json(&serde_json::json!({
+            "access_token": "woff-access-token",
+            "domain_id": "woff-org"
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    assert!(body["token"].is_string());
+    assert!(body["expiresAt"].is_string());
+    assert_eq!(body["tenantId"], tenant_id.to_string());
+
+    std::env::remove_var("LINEWORKS_USERINFO_URL");
+}
+
+// ============================================================
+// POST /api/auth/woff — existing user
+// ============================================================
+
+#[tokio::test]
+async fn test_woff_auth_existing_user() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+
+    let mock_server = wiremock::MockServer::start().await;
+    std::env::set_var(
+        "LINEWORKS_USERINFO_URL",
+        format!("{}/v1.0/users/me", mock_server.uri()),
+    );
+
+    wiremock::Mock::given(wiremock::matchers::method("GET"))
+        .and(wiremock::matchers::path("/v1.0/users/me"))
+        .respond_with(
+            wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "userId": "woff-user-001",
+                "userName": { "lastName": "佐藤", "firstName": "花子" },
+                "email": "sato@example.com"
+            })),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let tenant_id = Uuid::new_v4();
+    let existing_user = User {
+        id: Uuid::new_v4(),
+        tenant_id,
+        google_sub: None,
+        lineworks_id: Some("woff-user-001".to_string()),
+        email: "sato@example.com".to_string(),
+        name: "佐藤花子".to_string(),
+        role: "viewer".to_string(),
+        refresh_token_hash: None,
+        refresh_token_expires_at: None,
+        created_at: chrono::Utc::now(),
+    };
+
+    let mock = Arc::new(MockAuthRepository::default());
+    *mock.return_sso_config.lock().unwrap() = Some(SsoConfigRow {
+        tenant_id,
+        client_id: "woff-client-id".to_string(),
+        client_secret_encrypted: "encrypted".to_string(),
+        external_org_id: "woff-org".to_string(),
+        woff_id: Some("woff-12345".to_string()),
+    });
+    *mock.return_lineworks_user.lock().unwrap() = Some(existing_user);
+
+    let mut state = setup_mock_app_state();
+    state.auth = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/auth/woff"))
+        .json(&serde_json::json!({
+            "access_token": "woff-access-token",
+            "domain_id": "woff-org"
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+
+    std::env::remove_var("LINEWORKS_USERINFO_URL");
+}
+
+// ============================================================
+// POST /api/auth/woff — SSO config not found → 404
+// ============================================================
+
+#[tokio::test]
+async fn test_woff_auth_sso_not_found() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+
+    // return_sso_config = None → 404
+    let mock = Arc::new(MockAuthRepository::default());
+    let mut state = setup_mock_app_state();
+    state.auth = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/auth/woff"))
+        .json(&serde_json::json!({
+            "access_token": "any-token",
+            "domain_id": "unknown-domain"
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 404);
+}
+
+// ============================================================
+// POST /api/auth/woff — profile fetch fails → 401
+// ============================================================
+
+#[tokio::test]
+async fn test_woff_auth_profile_fails() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+
+    let mock_server = wiremock::MockServer::start().await;
+    std::env::set_var(
+        "LINEWORKS_USERINFO_URL",
+        format!("{}/v1.0/users/me", mock_server.uri()),
+    );
+
+    wiremock::Mock::given(wiremock::matchers::method("GET"))
+        .and(wiremock::matchers::path("/v1.0/users/me"))
+        .respond_with(
+            wiremock::ResponseTemplate::new(401).set_body_json(serde_json::json!({
+                "error": "invalid_token"
+            })),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let tenant_id = Uuid::new_v4();
+    let mock = Arc::new(MockAuthRepository::default());
+    *mock.return_sso_config.lock().unwrap() = Some(SsoConfigRow {
+        tenant_id,
+        client_id: "woff-client-id".to_string(),
+        client_secret_encrypted: "encrypted".to_string(),
+        external_org_id: "woff-org".to_string(),
+        woff_id: Some("woff-12345".to_string()),
+    });
+
+    let mut state = setup_mock_app_state();
+    state.auth = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/auth/woff"))
+        .json(&serde_json::json!({
+            "access_token": "bad-token",
+            "domain_id": "woff-org"
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 401);
+
+    std::env::remove_var("LINEWORKS_USERINFO_URL");
+}
+
+// ============================================================
+// POST /api/auth/woff — DB error on resolve_sso_config
+// ============================================================
+
+#[tokio::test]
+async fn test_woff_auth_db_error() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+
+    let mock = Arc::new(MockAuthRepository::default());
+    mock.fail_next.store(true, Ordering::SeqCst);
+    let mut state = setup_mock_app_state();
+    state.auth = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/auth/woff"))
+        .json(&serde_json::json!({
+            "access_token": "any-token",
+            "domain_id": "any-domain"
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 500);
+}
+
+// ============================================================
+// GET /api/auth/google/callback — extract_parent_domain edge cases
+// ============================================================
+
+#[tokio::test]
+async fn test_google_callback_two_part_domain() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("OAUTH_STATE_SECRET", "test-state-secret");
+
+    let mock = Arc::new(MockAuthRepository::default());
+    let mut state = setup_mock_app_state();
+    state.auth = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    // Two-part domain: "example.com" → "example.com" (no parent extraction)
+    let state_payload = lineworks::state::StatePayload {
+        redirect_uri: "https://example.com/callback".to_string(),
+        nonce: Uuid::new_v4().to_string(),
+        provider: "google".to_string(),
+        external_org_id: String::new(),
+    };
+    let signed_state = lineworks::state::sign(&state_payload, "test-state-secret");
+
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let res = client
+        .get(format!(
+            "{base_url}/api/auth/google/callback?code=test-valid-code&state={}",
+            urlencoding::encode(&signed_state)
+        ))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 307);
+    let cookie = res.headers().get("set-cookie").unwrap().to_str().unwrap();
+    // Two-part domain stays as-is
+    assert!(cookie.contains("Domain=.example.com"));
+}
+
+// ============================================================
+// GET /api/auth/google/callback — redirect_uri with http (not https)
+// ============================================================
+
+#[tokio::test]
+async fn test_google_callback_http_redirect_uri() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("OAUTH_STATE_SECRET", "test-state-secret");
+
+    let mock = Arc::new(MockAuthRepository::default());
+    let mut state = setup_mock_app_state();
+    state.auth = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let state_payload = lineworks::state::StatePayload {
+        redirect_uri: "http://localhost:3000/callback".to_string(),
+        nonce: Uuid::new_v4().to_string(),
+        provider: "google".to_string(),
+        external_org_id: String::new(),
+    };
+    let signed_state = lineworks::state::sign(&state_payload, "test-state-secret");
+
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let res = client
+        .get(format!(
+            "{base_url}/api/auth/google/callback?code=test-valid-code&state={}",
+            urlencoding::encode(&signed_state)
+        ))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 307);
+    let location = res.headers().get("location").unwrap().to_str().unwrap();
+    assert!(location.starts_with("http://localhost:3000/callback#token="));
+
+    // localhost:3000 → host=localhost (port stripped), parts=1 → "localhost"
+    let cookie = res.headers().get("set-cookie").unwrap().to_str().unwrap();
+    assert!(cookie.contains("Domain=.localhost"));
 }
