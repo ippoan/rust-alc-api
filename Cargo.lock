@@ -3058,6 +3058,7 @@ dependencies = [
  "rand 0.10.0",
  "reqwest",
  "ring",
+ "rsa",
  "rust-s3",
  "serde",
  "serde_json",
