@@ -16,6 +16,33 @@ use rust_alc_api::db::models::{Tenant, TenantAllowedEmail};
 use rust_alc_api::db::repository::auth::SsoConfigRow;
 
 // ============================================================
+// require_jwt — invalid/malformed JWT returns 401
+// ============================================================
+
+#[tokio::test]
+async fn test_require_jwt_invalid_token_returns_401() {
+    let _guard = common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
+
+    let mock = Arc::new(MockAuthRepository::default());
+    let mut state = setup_mock_app_state();
+    state.auth = mock;
+    let base_url = common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::new();
+    // Send a malformed JWT token to a require_jwt protected endpoint (auth::protected_router)
+    let res = client
+        .get(format!("{base_url}/api/auth/me"))
+        .header("Authorization", "Bearer invalid-token-here")
+        .send()
+        .await
+        .unwrap();
+
+    // verify_access_token fails → 401
+    assert_eq!(res.status(), 401);
+}
+
+// ============================================================
 // POST /api/auth/google — google_login (existing user)
 // ============================================================
 

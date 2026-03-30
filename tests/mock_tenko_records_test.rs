@@ -450,7 +450,7 @@ async fn test_export_csv_db_error() {
 async fn test_export_csv_with_ng_daily_inspection() {
     // Test that daily_inspection with an "ng" item produces "ng" in CSV
     let mock = Arc::new(MockTenkoRecordsRepository::default());
-    mock.return_data.store(true, Ordering::SeqCst);
+    mock.return_ng_data.store(true, Ordering::SeqCst);
     let mut state = mock_helpers::app_state::setup_mock_app_state();
     state.tenko_records = mock;
     let tenant_id = uuid::Uuid::new_v4();
@@ -466,11 +466,14 @@ async fn test_export_csv_with_ng_daily_inspection() {
         .unwrap();
     assert_eq!(res.status(), 200);
 
-    // The default mock data has all "ok" items, so inspection_status = "ok"
+    // The ng mock data has brakes="ng", so daily_inspection_status = "ng"
     let bytes = res.bytes().await.unwrap();
     let csv_str = std::str::from_utf8(&bytes[3..]).unwrap();
-    // Verify the daily inspection column has "ok"
-    assert!(csv_str.contains(",ok,"));
+    // Verify the daily inspection column has "ng" (not "ok")
+    assert!(
+        csv_str.contains(",ng,"),
+        "Expected 'ng' in CSV but got: {csv_str}"
+    );
 }
 
 #[tokio::test]

@@ -340,6 +340,28 @@ async fn update_face_db_error_returns_500() {
 }
 
 #[tokio::test]
+async fn update_face_without_embedding_success() {
+    let mock = Arc::new(MockEmployeeRepository::default());
+    mock.return_some.store(true, Ordering::SeqCst);
+    let (base, auth) = setup_with_mock(mock).await;
+    let id = uuid::Uuid::new_v4();
+    // Send without face_embedding field (None) to skip the embedding length check
+    let res = client()
+        .put(format!("{base}/api/employees/{id}/face"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "face_photo_url": "https://example.com/photo.jpg",
+            "face_model_version": "v1"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["name"], "Test Employee");
+}
+
+#[tokio::test]
 async fn update_face_bad_embedding_length_returns_400() {
     let (base, auth) = setup().await;
     let id = uuid::Uuid::new_v4();

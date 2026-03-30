@@ -398,6 +398,45 @@ async fn test_update_measurement_success() {
 }
 
 // =========================================================================
+// PUT /api/measurements/{id} — success without status field (200)
+// =========================================================================
+
+#[tokio::test]
+async fn test_update_measurement_without_status_success() {
+    let _guard = common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", common::TEST_JWT_SECRET);
+
+    let mock = Arc::new(MockMeasurementsRepository::default());
+    mock.return_some.store(true, Ordering::SeqCst);
+
+    let mut state = mock_helpers::app_state::setup_mock_app_state();
+    state.measurements = mock;
+
+    let tenant_id = Uuid::new_v4();
+    let base_url = common::spawn_test_server(state).await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let client = reqwest::Client::new();
+
+    let id = Uuid::new_v4();
+    // Send without status field to skip the status validation branch
+    let body = serde_json::json!({
+        "alcohol_value": 0.15,
+    });
+
+    let res = client
+        .put(format!("{base_url}/api/measurements/{id}"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    let json: Value = res.json().await.unwrap();
+    assert!(json["id"].is_string());
+}
+
+// =========================================================================
 // PUT /api/measurements/{id} — not found (404)
 // =========================================================================
 

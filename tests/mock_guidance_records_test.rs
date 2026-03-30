@@ -250,16 +250,18 @@ async fn list_records_db_error_count() {
 
 #[tokio::test]
 async fn list_records_db_error_list_tree() {
-    // We need count to succeed but list_tree to fail.
-    // fail_next is consumed by count_top_level, so we need a second fail.
-    // Since check_fail! swaps false, we manually set fail after count.
-    // Actually, check_fail! only fires once. We need 2 calls to fail on the second.
-    // Workaround: use a mock that fails on the second call.
-    // But our mock only has one AtomicBool. Let's just test with fail_next on
-    // the first call (count) which is already tested above.
-    // For list_tree error, we'd need a more complex mock. Skip this edge case
-    // as it's covered by the count error test above (same 500 path).
-    // Instead, test the no-auth case.
+    // count_top_level succeeds, but list_tree fails via dedicated flag
+    let mock = Arc::new(MockGuidanceRecordsRepository::default());
+    mock.fail_on_list_tree.store(true, Ordering::SeqCst);
+    let (base, auth, _) = setup_with_mock(mock).await;
+
+    let res = client()
+        .get(format!("{base}/api/guidance-records"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 500);
 }
 
 // ===========================================================================
