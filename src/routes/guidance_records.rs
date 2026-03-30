@@ -338,10 +338,11 @@ async fn download_attachment(
         .ok_or(StatusCode::NOT_FOUND)?;
 
     let key = state.storage.extract_key(&att.storage_url).ok_or_else(|| {
-        tracing::error!(
+        let msg = format!(
             "Failed to extract key from storage_url: {}",
             att.storage_url
         );
+        tracing::error!("{msg}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
