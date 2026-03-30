@@ -41,8 +41,38 @@ jobs:
       - name: Coverage regression check (unit files)
         run: bash scripts/check_coverage_100.sh --unit-only
 
-  full-tests:
-    name: Full Tests + Coverage (mock + RLS)
+  mock-tests:
+    name: Mock Tests + Coverage (no DB)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.92.0
+        with:
+          components: llvm-tools-preview
+      - uses: swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov@0.8.4
+
+      - name: Run mock tests + coverage
+        run: |
+          cargo llvm-cov --test mock_tests --text > /tmp/mock-cov.txt 2>/tmp/mock-cov-stderr.txt || { echo "Mock tests failed:"; tail -30 /tmp/mock-cov-stderr.txt; exit 1; }
+          echo "=== Test results ==="
+          grep "test result:" /tmp/mock-cov-stderr.txt || true
+
+      - name: Coverage regression check (mock files)
+        run: bash scripts/check_coverage_100.sh --mock-only --use-cache /tmp/mock-cov.txt
+
+      - name: Upload mock coverage data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: llvm-cov-text
+          path: /tmp/mock-cov.txt
+          retention-days: 30
+
+  integration-tests:
+    name: Integration Tests (DB required)
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -61,12 +91,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.92.0
-        with:
-          components: llvm-tools-preview
       - uses: swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-llvm-cov@0.8.4
 
       - name: Initialize test database
         run: psql -f scripts/init_local_db.sql
@@ -76,26 +101,5 @@ jobs:
           PGUSER: postgres
           PGPASSWORD: test
 
-      - name: Run mock tests (no report)
-        run: cargo llvm-cov --no-report --test mock_tests 2>&1 | tail -5
-
-      - name: Run RLS tests (no report)
-        run: |
-          cargo llvm-cov --no-report --test employees_test --test measurements_test --test devices_test 2>&1 | tail -5
-
-      - name: Generate combined coverage report
-        run: |
-          cargo llvm-cov report --text > /tmp/llvm-cov-output.txt
-          echo "=== Coverage Summary ==="
-          tail -5 /tmp/llvm-cov-output.txt
-
-      - name: Coverage regression check (mock + RLS)
-        run: bash scripts/check_coverage_100.sh --mock-only --use-cache /tmp/llvm-cov-output.txt
-
-      - name: Upload coverage data
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: llvm-cov-text
-          path: /tmp/llvm-cov-output.txt
-          retention-days: 30
+      - name: Run integration tests
+        run: cargo test --test integration_tests
