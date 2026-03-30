@@ -1487,24 +1487,41 @@ async fn test_dtako_recalculate_with_ferry_data() {
     let mut mock = MockDtakoUploadRepository::default();
     let dep = Utc.with_ymd_and_hms(2026, 3, 10, 6, 0, 0).unwrap();
     let ret = Utc.with_ymd_and_hms(2026, 3, 10, 15, 0, 0).unwrap();
-    *mock.operations.lock().unwrap() = vec![DtakoOpRow {
-        unko_no: unko_no.to_string(),
-        reading_date: NaiveDate::from_ymd_opt(2026, 3, 10).unwrap(),
-        operation_date: Some(NaiveDate::from_ymd_opt(2026, 3, 10).unwrap()),
-        departure_at: Some(dep),
-        return_at: Some(ret),
-        driver_cd: Some("DR01".to_string()),
-        total_distance: Some(180.0),
-        drive_time_general: Some(420),
-        drive_time_highway: Some(0),
-        drive_time_bypass: Some(0),
-    }];
+    // 2nd operation: has ferry data but NO KUDGIVT → covers continue at L382
+    let ferry_only_unko = "9999";
+    *mock.operations.lock().unwrap() = vec![
+        DtakoOpRow {
+            unko_no: unko_no.to_string(),
+            reading_date: NaiveDate::from_ymd_opt(2026, 3, 10).unwrap(),
+            operation_date: Some(NaiveDate::from_ymd_opt(2026, 3, 10).unwrap()),
+            departure_at: Some(dep),
+            return_at: Some(ret),
+            driver_cd: Some("DR01".to_string()),
+            total_distance: Some(180.0),
+            drive_time_general: Some(420),
+            drive_time_highway: Some(0),
+            drive_time_bypass: Some(0),
+        },
+        DtakoOpRow {
+            unko_no: ferry_only_unko.to_string(),
+            reading_date: NaiveDate::from_ymd_opt(2026, 3, 10).unwrap(),
+            operation_date: Some(NaiveDate::from_ymd_opt(2026, 3, 10).unwrap()),
+            departure_at: Some(dep),
+            return_at: Some(ret),
+            driver_cd: Some("DR02".to_string()),
+            total_distance: Some(50.0),
+            drive_time_general: Some(120),
+            drive_time_highway: Some(0),
+            drive_time_bypass: Some(0),
+        },
+    ];
 
     let dtako_storage = Arc::new(MockStorage::new("dtako-bucket"));
 
     // Per-unko KUDGIVT.csv (recalculate reads these individually)
     let kudgivt_key = format!("{}/unko/{}/KUDGIVT.csv", tenant_id, unko_no);
     dtako_storage.insert_file(&kudgivt_key, kudgivt_csv.into_bytes());
+    // NOTE: no KUDGIVT for ferry_only_unko — triggers continue at L382
 
     // Per-unko KUDGFRY.csv (ferry data)
     let ferry_csv = "c0,c1,c2,c3,c4,c5,c6,c7,c8,c9,start,end\n\
@@ -1512,6 +1529,11 @@ async fn test_dtako_recalculate_with_ferry_data() {
     let ferry_key = format!("{}/unko/{}/KUDGFRY.csv", tenant_id, unko_no);
     let (ferry_bytes, _, _) = encoding_rs::SHIFT_JIS.encode(ferry_csv);
     dtako_storage.insert_file(&ferry_key, ferry_bytes.to_vec());
+
+    // Ferry data for ferry_only_unko (no matching KUDGIVT)
+    let ferry_key2 = format!("{}/unko/{}/KUDGFRY.csv", tenant_id, ferry_only_unko);
+    let (ferry_bytes2, _, _) = encoding_rs::SHIFT_JIS.encode(ferry_csv);
+    dtako_storage.insert_file(&ferry_key2, ferry_bytes2.to_vec());
 
     let state = setup_with_storage_and_mock(mock, dtako_storage);
     let base_url = crate::common::spawn_test_server(state).await;
