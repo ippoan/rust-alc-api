@@ -985,6 +985,7 @@ impl EquipmentFailuresRepository for MockEquipmentFailuresRepository {
 
 pub struct MockGuidanceRecordsRepository {
     pub fail_next: AtomicBool,
+    pub fail_on_list_tree: AtomicBool,
     pub return_record: std::sync::Mutex<Option<GuidanceRecord>>,
     pub return_attachment: std::sync::Mutex<Option<GuidanceRecordAttachment>>,
     pub parent_depth: std::sync::Mutex<Option<i32>>,
@@ -998,6 +999,7 @@ impl Default for MockGuidanceRecordsRepository {
     fn default() -> Self {
         Self {
             fail_next: AtomicBool::new(false),
+            fail_on_list_tree: AtomicBool::new(false),
             return_record: std::sync::Mutex::new(None),
             return_attachment: std::sync::Mutex::new(None),
             parent_depth: std::sync::Mutex::new(None),
@@ -1033,6 +1035,9 @@ impl GuidanceRecordsRepository for MockGuidanceRecordsRepository {
         _limit: i64,
         _offset: i64,
     ) -> Result<Vec<GuidanceRecordWithName>, sqlx::Error> {
+        if self.fail_on_list_tree.swap(false, Ordering::SeqCst) {
+            return Err(sqlx::Error::RowNotFound);
+        }
         check_fail!(self);
         Ok(self.list_tree_result.lock().unwrap().clone())
     }

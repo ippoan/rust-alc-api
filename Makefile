@@ -49,10 +49,10 @@ cov-check-mock:
 # --- Mock テスト (DB 不要) ---
 
 mock-test:
-	cargo test --test 'mock_*'
+	cargo test --test mock_tests
 
 mock-cov:
-	cargo llvm-cov --test 'mock_*' --summary-only
+	cargo llvm-cov --test mock_tests --summary-only
 
 # --- CI カバレッジ取得 (artifact からダウンロード) ---
 

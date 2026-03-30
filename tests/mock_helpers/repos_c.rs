@@ -346,6 +346,7 @@ pub struct MockTenkoRecordsRepository {
     pub fail_next: AtomicBool,
     pub return_some: AtomicBool,
     pub return_data: AtomicBool,
+    pub return_ng_data: AtomicBool,
 }
 
 impl Default for MockTenkoRecordsRepository {
@@ -354,6 +355,7 @@ impl Default for MockTenkoRecordsRepository {
             fail_next: AtomicBool::new(false),
             return_some: AtomicBool::new(false),
             return_data: AtomicBool::new(false),
+            return_ng_data: AtomicBool::new(false),
         }
     }
 }
@@ -410,7 +412,7 @@ impl TenkoRecordsRepository for MockTenkoRecordsRepository {
         _filter: &TenkoRecordFilter,
     ) -> Result<i64, sqlx::Error> {
         check_fail!(self);
-        if self.return_data.load(Ordering::SeqCst) {
+        if self.return_data.load(Ordering::SeqCst) || self.return_ng_data.load(Ordering::SeqCst) {
             return Ok(1);
         }
         Ok(0)
@@ -424,6 +426,13 @@ impl TenkoRecordsRepository for MockTenkoRecordsRepository {
         _offset: i64,
     ) -> Result<Vec<TenkoRecord>, sqlx::Error> {
         check_fail!(self);
+        if self.return_ng_data.load(Ordering::SeqCst) {
+            let mut record = make_mock_tenko_record_for_list(_tenant_id, Uuid::new_v4());
+            record.daily_inspection = Some(
+                serde_json::json!({"brakes": "ng", "tires": "ok", "lights": "ok", "steering": "ok", "wipers": "ok", "mirrors": "ok", "horn": "ok", "seatbelts": "ok"}),
+            );
+            return Ok(vec![record]);
+        }
         if self.return_data.load(Ordering::SeqCst) {
             return Ok(vec![make_mock_tenko_record_for_list(
                 _tenant_id,
@@ -447,6 +456,13 @@ impl TenkoRecordsRepository for MockTenkoRecordsRepository {
         _filter: &TenkoRecordFilter,
     ) -> Result<Vec<TenkoRecord>, sqlx::Error> {
         check_fail!(self);
+        if self.return_ng_data.load(Ordering::SeqCst) {
+            let mut record = make_mock_tenko_record_for_list(_tenant_id, Uuid::new_v4());
+            record.daily_inspection = Some(
+                serde_json::json!({"brakes": "ng", "tires": "ok", "lights": "ok", "steering": "ok", "wipers": "ok", "mirrors": "ok", "horn": "ok", "seatbelts": "ok"}),
+            );
+            return Ok(vec![record]);
+        }
         if self.return_data.load(Ordering::SeqCst) {
             return Ok(vec![make_mock_tenko_record_for_list(
                 _tenant_id,

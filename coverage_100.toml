@@ -38,7 +38,7 @@ type = "mock"
 
 [[files]]
 path = "src/middleware/auth.rs"
-type = "integration"
+type = "mock"
 test_file = "tests/coverage_100_test.rs"
 
 [[files]]
@@ -156,7 +156,7 @@ test_file = "tests/coverage/main.rs"
 
 [[files]]
 path = "src/routes/employees.rs"
-type = "integration"
+type = "mock"
 test_file = "tests/coverage/main.rs"
 
 [[files]]
@@ -166,7 +166,7 @@ test_file = "tests/coverage/main.rs"
 
 [[files]]
 path = "src/routes/sso_admin.rs"
-type = "integration"
+type = "mock"
 test_file = "tests/coverage/main.rs"
 
 [[files]]
@@ -186,7 +186,7 @@ test_file = "tests/coverage/main.rs"
 
 [[files]]
 path = "src/routes/bot_admin.rs"
-type = "integration"
+type = "mock"
 test_file = "tests/coverage/main.rs"
 
 [[files]]
@@ -200,12 +200,12 @@ test_file = "tests/coverage/main.rs"
 
 [[files]]
 path = "src/routes/measurements.rs"
-type = "integration"
+type = "mock"
 test_file = "tests/coverage/main.rs"
 
 [[files]]
 path = "src/routes/tenko_records.rs"
-type = "integration"
+type = "mock"
 test_file = "tests/coverage/main.rs"
 
 [[files]]
@@ -223,7 +223,7 @@ test_file = "tests/coverage/main.rs"
 
 [[files]]
 path = "src/routes/guidance_records.rs"
-type = "integration"
+type = "mock"
 test_file = "tests/coverage/main.rs"
 
 [[files]]

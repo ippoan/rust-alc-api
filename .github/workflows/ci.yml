@@ -56,7 +56,7 @@ jobs:
 
       - name: Run mock tests + coverage
         run: |
-          cargo llvm-cov --test 'mock_*' --text > /tmp/mock-cov.txt 2>/tmp/mock-cov-stderr.txt || { echo "Mock tests failed:"; tail -30 /tmp/mock-cov-stderr.txt; exit 1; }
+          cargo llvm-cov --test mock_tests --text > /tmp/mock-cov.txt 2>/tmp/mock-cov-stderr.txt || { echo "Mock tests failed:"; tail -30 /tmp/mock-cov-stderr.txt; exit 1; }
           echo "=== Test results ==="
           grep "test result:" /tmp/mock-cov-stderr.txt || true
 
