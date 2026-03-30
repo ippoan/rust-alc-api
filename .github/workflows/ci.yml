@@ -19,6 +19,7 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: swatinem/rust-cache@v2
+      - run: sudo apt-get install -y mold
       - run: cargo fmt --check
       - run: cargo clippy -- -D warnings
 
@@ -34,6 +35,7 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-llvm-cov@0.8.4
+      - run: sudo apt-get install -y mold
 
       - name: Run unit tests
         run: cargo test --lib
@@ -53,6 +55,7 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-llvm-cov@0.8.4
+      - run: sudo apt-get install -y mold
 
       - name: Run mock tests + coverage
         run: |
@@ -97,6 +100,7 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-llvm-cov@0.8.4
+      - run: sudo apt-get install -y mold
 
       - name: Initialize test database
         run: psql -f scripts/init_local_db.sql
