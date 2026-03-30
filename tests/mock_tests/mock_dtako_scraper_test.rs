@@ -1059,3 +1059,117 @@ async fn test_trigger_scrape_sse_stream_with_comments() {
         .load(std::sync::atomic::Ordering::SeqCst);
     assert_eq!(count, 1);
 }
+
+/// SSE client disconnect — レスポンスを読まずに drop → tx.send() 失敗 (line 198-199)
+#[tokio::test]
+async fn test_trigger_scrape_client_disconnect() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+
+    let scraper_server = MockServer::start().await;
+    std::env::set_var("SCRAPER_BASE_URL", scraper_server.uri());
+    std::env::remove_var("METADATA_URL");
+
+    // 大量のイベントを返す
+    let mut sse_body = String::new();
+    for i in 0..100 {
+        sse_body.push_str(&format!(
+            "data:{{\"event\":\"result\",\"comp_id\":\"DISC{i:03}\",\"status\":\"success\"}}\n\n"
+        ));
+    }
+
+    Mock::given(method("POST"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(sse_body),
+        )
+        .mount(&scraper_server)
+        .await;
+
+    let mock = Arc::new(MockDtakoScraperRepository::default());
+    let mut state = setup_mock_app_state();
+    state.dtako_scraper = mock;
+    let base_url =
+        crate::common::spawn_test_server_with_scraper(state, &scraper_server.uri()).await;
+
+    let tenant_id = Uuid::new_v4();
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/scraper/trigger"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .json(&serde_json::json!({"start_date": "2026-03-20"}))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    // レスポンスを読まずに即 drop → tx.send() が Err → "client disconnected"
+    drop(res);
+
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+}
+
+/// SSE stream error — 不正な chunked encoding (line 161-163)
+#[tokio::test]
+async fn test_trigger_scrape_stream_error() {
+    use tokio::io::AsyncWriteExt;
+
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::remove_var("METADATA_URL");
+
+    // 生 TCP サーバーで不正な chunked レスポンスを返す
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    std::env::set_var("SCRAPER_BASE_URL", format!("http://{addr}"));
+
+    tokio::spawn(async move {
+        if let Ok((mut stream, _)) = listener.accept().await {
+            let mut buf = [0u8; 4096];
+            let _ = tokio::io::AsyncReadExt::read(&mut stream, &mut buf).await;
+
+            let header = "HTTP/1.1 200 OK\r\n\
+                          Content-Type: text/event-stream\r\n\
+                          Transfer-Encoding: chunked\r\n\r\n";
+            let _ = stream.write_all(header.as_bytes()).await;
+
+            // 正常なチャンク1つ
+            let chunk_data = "data:{\"event\":\"progress\",\"message\":\"ok\"}\n\n";
+            let chunk = format!("{:x}\r\n{}\r\n", chunk_data.len(), chunk_data);
+            let _ = stream.write_all(chunk.as_bytes()).await;
+            let _ = stream.flush().await;
+
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            // 不正なチャンクサイズ → bytes_stream Err
+            let _ = stream.write_all(b"FFFFFF\r\n").await;
+            let _ = stream.flush().await;
+            drop(stream);
+        }
+    });
+
+    let mock = Arc::new(MockDtakoScraperRepository::default());
+    let mut state = setup_mock_app_state();
+    state.dtako_scraper = mock;
+    let base_url =
+        crate::common::spawn_test_server_with_scraper(state, &format!("http://{addr}")).await;
+
+    let tenant_id = Uuid::new_v4();
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/scraper/trigger"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .json(&serde_json::json!({"start_date": "2026-03-20"}))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    let _body = res.text().await.unwrap_or_default();
+
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+}

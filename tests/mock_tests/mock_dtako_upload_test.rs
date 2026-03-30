@@ -2867,3 +2867,90 @@ fn create_zip_with_only_kudguri() -> Vec<u8> {
     }
     buf.into_inner()
 }
+
+/// POST /upload — multipart にファイルフィールドがない → 400 "no 'file' field found" (line 109)
+#[tokio::test]
+async fn test_dtako_upload_no_file_field() {
+    let (base_url, auth_header, _) = setup().await;
+    let client = reqwest::Client::new();
+
+    // "not_file" という名前のテキストパート
+    let form = reqwest::multipart::Form::new().text("not_file", "hello");
+
+    let res = client
+        .post(format!("{base_url}/api/upload"))
+        .header("Authorization", &auth_header)
+        .multipart(form)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 400);
+    let body = res.text().await.unwrap();
+    assert!(body.contains("no 'file' field found"));
+}
+
+/// POST /recalculate — with operations data → progress_tx Some path (line 691, 1079)
+#[tokio::test]
+async fn test_dtako_recalculate_with_operations_progress() {
+    use rust_alc_api::storage::StorageBackend;
+
+    let tenant_id = Uuid::new_v4();
+    let driver_id = Uuid::new_v4();
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+
+    let mut mock = MockDtakoUploadRepository::default();
+    // Return operations so recalculate actually processes them
+    *mock.operations.lock().unwrap() = vec![DtakoOpRow {
+        unko_no: "U001".to_string(),
+        reading_date: chrono::NaiveDate::from_ymd_opt(2026, 3, 1).unwrap(),
+        operation_date: Some(chrono::NaiveDate::from_ymd_opt(2026, 3, 1).unwrap()),
+        departure_at: Some(chrono::Utc::now()),
+        return_at: Some(chrono::Utc::now()),
+        driver_cd: Some("D001".to_string()),
+        total_distance: Some(100.0),
+        drive_time_general: Some(120),
+        drive_time_highway: Some(60),
+        drive_time_bypass: Some(0),
+    }];
+    *mock.driver_cd.lock().unwrap() = Some("D001".to_string());
+
+    // Create a mock storage with a KUDGIVT CSV
+    let storage = Arc::new(MockStorage::new("dtako-bucket"));
+    let kudgivt_csv = "運行NO,乗務員CD,イベント開始日時,イベントCD,所要時間\nU001,D001,2026/03/01 08:00:00,201,480\n";
+    let (kudgivt_bytes, _, _) = encoding_rs::SHIFT_JIS.encode(kudgivt_csv);
+    let zip_key = format!("{}/uploads/dummy/test.zip", tenant_id);
+    let zip_data = {
+        use std::io::Write;
+        let buf = std::io::Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(buf);
+        let options = zip::write::SimpleFileOptions::default();
+        zip.start_file("KUDGIVT.csv", options).unwrap();
+        zip.write_all(&kudgivt_bytes).unwrap();
+        zip.finish().unwrap().into_inner()
+    };
+    storage
+        .upload(&zip_key, &zip_data, "application/zip")
+        .await
+        .unwrap();
+    *mock.zip_keys.lock().unwrap() = vec![zip_key];
+
+    let mock = Arc::new(mock);
+    let mut state = setup_mock_app_state();
+    state.dtako_upload = mock;
+    state.dtako_storage = Some(storage);
+
+    let base_url = crate::common::spawn_test_server(state).await;
+    let client = reqwest::Client::new();
+
+    // SSE endpoint — progress_tx = Some(tx)
+    let res = client
+        .post(format!("{base_url}/api/recalculate?year=2026&month=3"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let body = res.text().await.unwrap();
+    // Should contain progress or done events
+    assert!(body.contains("done") || body.contains("progress"));
+}
