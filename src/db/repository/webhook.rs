@@ -7,6 +7,7 @@ use crate::db::models::{TenkoSchedule, WebhookConfig};
 use super::TenantConn;
 
 #[async_trait]
+#[allow(clippy::too_many_arguments)]
 pub trait WebhookRepository: Send + Sync {
     async fn find_config(
         &self,
