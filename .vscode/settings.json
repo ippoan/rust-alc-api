@@ -8,7 +8,8 @@
     "AlcoholChecker",
     "TenkoCall",
     "nuxt-dtako-admin",
-    "daiun-salary"
+    "daiun-salary",
+    "front/nuxt-pwa-carins"
   ],
   "git.autoRepositoryDetection": true
 }

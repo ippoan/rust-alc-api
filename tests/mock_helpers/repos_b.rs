@@ -280,12 +280,14 @@ impl DtakoRestraintReportRepository for MockDtakoRestraintReportRepository {
 
 pub struct MockDtakoRestraintReportPdfRepository {
     pub fail_next: AtomicBool,
+    pub drivers: std::sync::Mutex<Vec<PdfDriver>>,
 }
 
 impl Default for MockDtakoRestraintReportPdfRepository {
     fn default() -> Self {
         Self {
             fail_next: AtomicBool::new(false),
+            drivers: std::sync::Mutex::new(vec![]),
         }
     }
 }
@@ -294,16 +296,17 @@ impl Default for MockDtakoRestraintReportPdfRepository {
 impl DtakoRestraintReportPdfRepository for MockDtakoRestraintReportPdfRepository {
     async fn list_drivers(&self, _tenant_id: Uuid) -> Result<Vec<PdfDriver>, sqlx::Error> {
         check_fail!(self);
-        Ok(vec![])
+        Ok(self.drivers.lock().unwrap().clone())
     }
 
     async fn get_driver(
         &self,
         _tenant_id: Uuid,
-        _driver_id: Uuid,
+        driver_id: Uuid,
     ) -> Result<Vec<PdfDriver>, sqlx::Error> {
         check_fail!(self);
-        Ok(vec![])
+        let all = self.drivers.lock().unwrap();
+        Ok(all.iter().filter(|d| d.id == driver_id).cloned().collect())
     }
 }
 

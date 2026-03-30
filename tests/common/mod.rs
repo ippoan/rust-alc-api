@@ -14,13 +14,13 @@ use rust_alc_api::db::repository::{
     PgCarryingItemsRepository, PgCommunicationItemsRepository, PgDailyHealthRepository,
     PgDeviceRepository, PgDriverInfoRepository, PgDtakoCsvProxyRepository,
     PgDtakoDailyHoursRepository, PgDtakoDriversRepository, PgDtakoEventClassificationsRepository,
-    PgDtakoOperationsRepository, PgDtakoRestraintReportRepository, PgDtakoScraperRepository,
-    PgDtakoUploadRepository, PgDtakoVehiclesRepository, PgDtakoWorkTimesRepository,
-    PgEmployeeRepository, PgEquipmentFailuresRepository, PgGuidanceRecordsRepository,
-    PgHealthBaselinesRepository, PgMeasurementsRepository, PgNfcTagRepository,
-    PgSsoAdminRepository, PgTenantUsersRepository, PgTenkoCallRepository, PgTenkoRecordsRepository,
-    PgTenkoSchedulesRepository, PgTenkoSessionRepository, PgTenkoWebhooksRepository,
-    PgTimecardRepository,
+    PgDtakoOperationsRepository, PgDtakoRestraintReportPdfRepository,
+    PgDtakoRestraintReportRepository, PgDtakoScraperRepository, PgDtakoUploadRepository,
+    PgDtakoVehiclesRepository, PgDtakoWorkTimesRepository, PgEmployeeRepository,
+    PgEquipmentFailuresRepository, PgGuidanceRecordsRepository, PgHealthBaselinesRepository,
+    PgMeasurementsRepository, PgNfcTagRepository, PgSsoAdminRepository, PgTenantUsersRepository,
+    PgTenkoCallRepository, PgTenkoRecordsRepository, PgTenkoSchedulesRepository,
+    PgTenkoSessionRepository, PgTenkoWebhooksRepository, PgTimecardRepository,
 };
 use rust_alc_api::AppState;
 
@@ -251,6 +251,8 @@ fn build_app_state(
         Arc::new(PgDtakoEventClassificationsRepository::new(pool.clone()));
     let dtako_operations = Arc::new(PgDtakoOperationsRepository::new(pool.clone()));
     let dtako_restraint_report = Arc::new(PgDtakoRestraintReportRepository::new(pool.clone()));
+    let dtako_restraint_report_pdf =
+        Arc::new(PgDtakoRestraintReportPdfRepository::new(pool.clone()));
     let dtako_scraper = Arc::new(PgDtakoScraperRepository::new(pool.clone()));
     let dtako_upload = Arc::new(PgDtakoUploadRepository::new(pool.clone()));
     let dtako_vehicles = Arc::new(PgDtakoVehiclesRepository::new(pool.clone()));
@@ -287,6 +289,7 @@ fn build_app_state(
         dtako_event_classifications,
         dtako_operations,
         dtako_restraint_report,
+        dtako_restraint_report_pdf,
         dtako_scraper,
         dtako_upload,
         dtako_vehicles,

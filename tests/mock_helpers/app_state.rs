@@ -50,6 +50,7 @@ pub async fn setup_mock_app_state() -> AppState {
         dtako_event_classifications: Arc::new(MockDtakoEventClassificationsRepository::default()),
         dtako_operations: Arc::new(MockDtakoOperationsRepository::default()),
         dtako_restraint_report: Arc::new(MockDtakoRestraintReportRepository::default()),
+        dtako_restraint_report_pdf: Arc::new(MockDtakoRestraintReportPdfRepository::default()),
         dtako_scraper: Arc::new(MockDtakoScraperRepository::default()),
         dtako_upload: Arc::new(MockDtakoUploadRepository::default()),
         dtako_vehicles: Arc::new(MockDtakoVehiclesRepository::default()),

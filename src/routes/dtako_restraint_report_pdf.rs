@@ -16,17 +16,6 @@ use printpdf::*;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
-use uuid::Uuid;
-
-#[derive(Debug, sqlx::FromRow)]
-struct Driver {
-    id: Uuid,
-    #[allow(dead_code)]
-    tenant_id: Uuid,
-    driver_cd: Option<String>,
-    #[sqlx(rename = "name")]
-    driver_name: String,
-}
 
 pub fn tenant_router() -> Router<AppState> {
     Router::new()
@@ -152,25 +141,18 @@ async fn get_restraint_report_pdf(
 ) -> Result<Response<Body>, (StatusCode, String)> {
     let tenant_id = tenant.0 .0;
 
+    let repo = &state.dtako_restraint_report_pdf;
     let drivers = if let Some(did) = filter.driver_id {
-        sqlx::query_as::<_, Driver>(
-            "SELECT id, tenant_id, driver_cd, name FROM alc_api.employees WHERE tenant_id = $1 AND id = $2",
-        )
-        .bind(tenant_id)
-        .bind(did)
-        .fetch_all(&state.pool)
-        .await
+        repo.get_driver(tenant_id, did).await
     } else {
-        sqlx::query_as::<_, Driver>(
-            "SELECT id, tenant_id, driver_cd, name FROM alc_api.employees WHERE tenant_id = $1 ORDER BY driver_cd",
-        )
-        .bind(tenant_id)
-        .fetch_all(&state.pool)
-        .await
+        repo.list_drivers(tenant_id).await
     }
     .map_err(|e| {
         tracing::error!("fetch drivers error: {e}");
-        (StatusCode::INTERNAL_SERVER_ERROR, "internal error".to_string())
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal error".to_string(),
+        )
     })?;
 
     if drivers.is_empty() {
@@ -234,20 +216,23 @@ async fn get_restraint_report_pdf_stream(
             }
         };
 
-        let drivers = match sqlx::query_as::<_, Driver>(
-            "SELECT id, tenant_id, driver_cd, name FROM alc_api.employees WHERE tenant_id = $1 ORDER BY driver_cd",
-        )
-        .bind(tenant_id)
-        .fetch_all(&state.pool)
-        .await
+        let drivers = match state
+            .dtako_restraint_report_pdf
+            .list_drivers(tenant_id)
+            .await
         {
             Ok(d) => d,
             Err(e) => {
                 send(PdfProgressEvent {
-                    event: "error".into(), current: None, total: None,
-                    driver_name: None, step: None, data: None,
+                    event: "error".into(),
+                    current: None,
+                    total: None,
+                    driver_name: None,
+                    step: None,
+                    data: None,
                     message: Some(format!("ドライバー取得エラー: {e}")),
-                }).await;
+                })
+                .await;
                 return;
             }
         };
@@ -1534,6 +1519,7 @@ mod tests {
     use super::*;
     use crate::routes::dtako_restraint_report::{MonthlyTotal, OperationDetail};
     use chrono::NaiveDate;
+    use uuid::Uuid;
 
     fn make_workday(date: NaiveDate, drive: i32, remarks: &str) -> RestraintDayRow {
         RestraintDayRow {

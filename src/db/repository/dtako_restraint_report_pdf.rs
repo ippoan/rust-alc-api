@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use super::TenantConn;
 
-#[derive(Debug, sqlx::FromRow)]
+#[derive(Debug, Clone, sqlx::FromRow)]
 pub struct PdfDriver {
     pub id: Uuid,
     #[allow(dead_code)]

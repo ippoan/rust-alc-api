@@ -5,19 +5,24 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use mock_helpers::app_state::setup_mock_app_state;
-use mock_helpers::MockDtakoRestraintReportRepository;
+use mock_helpers::{MockDtakoRestraintReportPdfRepository, MockDtakoRestraintReportRepository};
+use rust_alc_api::db::repository::dtako_restraint_report_pdf::PdfDriver;
 use uuid::Uuid;
 
-/// Build mock AppState with a shared MockDtakoRestraintReportRepository reference
-/// so we can toggle `fail_next` from test code.
-async fn setup_with_shared_repo() -> (
+/// Build mock AppState with shared MockDtakoRestraintReportRepository and
+/// MockDtakoRestraintReportPdfRepository references so we can toggle
+/// `fail_next` and configure `drivers` from test code.
+async fn setup_with_shared_repos() -> (
     rust_alc_api::AppState,
     Arc<MockDtakoRestraintReportRepository>,
+    Arc<MockDtakoRestraintReportPdfRepository>,
 ) {
     let mut state = setup_mock_app_state().await;
-    let repo = Arc::new(MockDtakoRestraintReportRepository::default());
-    state.dtako_restraint_report = repo.clone();
-    (state, repo)
+    let report_repo = Arc::new(MockDtakoRestraintReportRepository::default());
+    let pdf_repo = Arc::new(MockDtakoRestraintReportPdfRepository::default());
+    state.dtako_restraint_report = report_repo.clone();
+    state.dtako_restraint_report_pdf = pdf_repo.clone();
+    (state, report_repo, pdf_repo)
 }
 
 fn auth_header(tenant_id: Uuid) -> String {
@@ -25,26 +30,14 @@ fn auth_header(tenant_id: Uuid) -> String {
     format!("Bearer {token}")
 }
 
-/// Insert a test employee directly into the DB (the PDF route queries alc_api.employees via pool)
-async fn insert_test_employee(
-    pool: &sqlx::PgPool,
-    tenant_id: Uuid,
-    name: &str,
-    driver_cd: Option<&str>,
-) -> Uuid {
-    let id = Uuid::new_v4();
-    sqlx::query(
-        "INSERT INTO alc_api.employees (id, tenant_id, name, code, driver_cd) VALUES ($1, $2, $3, $4, $5)",
-    )
-    .bind(id)
-    .bind(tenant_id)
-    .bind(name)
-    .bind(format!("CD-{}", &id.to_string()[..8]))
-    .bind(driver_cd)
-    .execute(pool)
-    .await
-    .expect("Failed to insert test employee");
-    id
+/// Helper: create a PdfDriver with given parameters
+fn make_driver(tenant_id: Uuid, name: &str, driver_cd: Option<&str>) -> PdfDriver {
+    PdfDriver {
+        id: Uuid::new_v4(),
+        tenant_id,
+        driver_cd: driver_cd.map(|s| s.to_string()),
+        driver_name: name.to_string(),
+    }
 }
 
 // =============================================================================
@@ -53,7 +46,7 @@ async fn insert_test_employee(
 
 #[tokio::test]
 async fn test_pdf_no_auth() {
-    let (state, _repo) = setup_with_shared_repo().await;
+    let (state, _report_repo, _pdf_repo) = setup_with_shared_repos().await;
     let base = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
 
@@ -71,8 +64,8 @@ async fn test_pdf_no_auth() {
 
 #[tokio::test]
 async fn test_pdf_missing_params() {
-    let (state, _repo) = setup_with_shared_repo().await;
-    let tenant_id = common::create_test_tenant(&state.pool, "pdf-missing-params").await;
+    let (state, _report_repo, _pdf_repo) = setup_with_shared_repos().await;
+    let tenant_id = Uuid::new_v4();
     let base = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
     let auth = auth_header(tenant_id);
@@ -106,13 +99,14 @@ async fn test_pdf_missing_params() {
 }
 
 // =============================================================================
-// GET /restraint-report/pdf — no drivers in DB → 404
+// GET /restraint-report/pdf — no drivers → 404
 // =============================================================================
 
 #[tokio::test]
 async fn test_pdf_no_drivers_returns_404() {
-    let (state, _repo) = setup_with_shared_repo().await;
-    let tenant_id = common::create_test_tenant(&state.pool, "pdf-no-drivers").await;
+    let (state, _report_repo, _pdf_repo) = setup_with_shared_repos().await;
+    // pdf_repo has empty drivers by default
+    let tenant_id = Uuid::new_v4();
     let base = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
     let auth = auth_header(tenant_id);
@@ -134,8 +128,14 @@ async fn test_pdf_no_drivers_returns_404() {
 
 #[tokio::test]
 async fn test_pdf_with_driver_id_not_found() {
-    let (state, _repo) = setup_with_shared_repo().await;
-    let tenant_id = common::create_test_tenant(&state.pool, "pdf-driver-notfound").await;
+    let (state, _report_repo, pdf_repo) = setup_with_shared_repos().await;
+    let tenant_id = Uuid::new_v4();
+    // Add a driver but query with a different driver_id
+    pdf_repo
+        .drivers
+        .lock()
+        .unwrap()
+        .push(make_driver(tenant_id, "Some Driver", Some("DR01")));
     let base = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
     let auth = auth_header(tenant_id);
@@ -158,10 +158,11 @@ async fn test_pdf_with_driver_id_not_found() {
 
 #[tokio::test]
 async fn test_pdf_single_driver_empty_report() {
-    let (state, _repo) = setup_with_shared_repo().await;
-    let tenant_id = common::create_test_tenant(&state.pool, "pdf-single-drv").await;
-    let driver_id =
-        insert_test_employee(&state.pool, tenant_id, "Test Driver", Some("DRV001")).await;
+    let (state, _report_repo, pdf_repo) = setup_with_shared_repos().await;
+    let tenant_id = Uuid::new_v4();
+    let driver = make_driver(tenant_id, "Test Driver", Some("DRV001"));
+    let driver_id = driver.id;
+    pdf_repo.drivers.lock().unwrap().push(driver);
     let base = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
     let auth = auth_header(tenant_id);
@@ -199,10 +200,18 @@ async fn test_pdf_single_driver_empty_report() {
 
 #[tokio::test]
 async fn test_pdf_all_drivers_empty_report() {
-    let (state, _repo) = setup_with_shared_repo().await;
-    let tenant_id = common::create_test_tenant(&state.pool, "pdf-all-drv").await;
-    insert_test_employee(&state.pool, tenant_id, "Driver A", Some("A001")).await;
-    insert_test_employee(&state.pool, tenant_id, "Driver B", Some("B002")).await;
+    let (state, _report_repo, pdf_repo) = setup_with_shared_repos().await;
+    let tenant_id = Uuid::new_v4();
+    pdf_repo
+        .drivers
+        .lock()
+        .unwrap()
+        .push(make_driver(tenant_id, "Driver A", Some("A001")));
+    pdf_repo
+        .drivers
+        .lock()
+        .unwrap()
+        .push(make_driver(tenant_id, "Driver B", Some("B002")));
     let base = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
     let auth = auth_header(tenant_id);
@@ -228,10 +237,12 @@ async fn test_pdf_all_drivers_empty_report() {
 
 #[tokio::test]
 async fn test_pdf_empty_name_driver_skipped() {
-    let (state, _repo) = setup_with_shared_repo().await;
-    let tenant_id = common::create_test_tenant(&state.pool, "pdf-empty-name").await;
+    let (state, _report_repo, pdf_repo) = setup_with_shared_repos().await;
+    let tenant_id = Uuid::new_v4();
     // Insert a driver with empty name — should be skipped by the handler
-    let driver_id = insert_test_employee(&state.pool, tenant_id, "", Some("EMPTY")).await;
+    let driver = make_driver(tenant_id, "", Some("EMPTY"));
+    let driver_id = driver.id;
+    pdf_repo.drivers.lock().unwrap().push(driver);
     let base = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
     let auth = auth_header(tenant_id);
@@ -262,16 +273,17 @@ async fn test_pdf_empty_name_driver_skipped() {
 
 #[tokio::test]
 async fn test_pdf_db_error_on_build_report() {
-    let (state, repo) = setup_with_shared_repo().await;
-    let tenant_id = common::create_test_tenant(&state.pool, "pdf-build-err").await;
-    let driver_id =
-        insert_test_employee(&state.pool, tenant_id, "Error Driver", Some("ERR01")).await;
+    let (state, report_repo, pdf_repo) = setup_with_shared_repos().await;
+    let tenant_id = Uuid::new_v4();
+    let driver = make_driver(tenant_id, "Error Driver", Some("ERR01"));
+    let driver_id = driver.id;
+    pdf_repo.drivers.lock().unwrap().push(driver);
     let base = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
     let auth = auth_header(tenant_id);
 
     // Set fail_next to make build_report_with_name fail
-    repo.fail_next.store(true, Ordering::SeqCst);
+    report_repo.fail_next.store(true, Ordering::SeqCst);
 
     let res = client
         .get(format!(
@@ -290,7 +302,7 @@ async fn test_pdf_db_error_on_build_report() {
 
 #[tokio::test]
 async fn test_pdf_stream_no_auth() {
-    let (state, _repo) = setup_with_shared_repo().await;
+    let (state, _report_repo, _pdf_repo) = setup_with_shared_repos().await;
     let base = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
 
@@ -310,8 +322,8 @@ async fn test_pdf_stream_no_auth() {
 
 #[tokio::test]
 async fn test_pdf_stream_missing_params() {
-    let (state, _repo) = setup_with_shared_repo().await;
-    let tenant_id = common::create_test_tenant(&state.pool, "pdfstr-missing").await;
+    let (state, _report_repo, _pdf_repo) = setup_with_shared_repos().await;
+    let tenant_id = Uuid::new_v4();
     let base = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
     let auth = auth_header(tenant_id);
@@ -331,8 +343,9 @@ async fn test_pdf_stream_missing_params() {
 
 #[tokio::test]
 async fn test_pdf_stream_no_drivers() {
-    let (state, _repo) = setup_with_shared_repo().await;
-    let tenant_id = common::create_test_tenant(&state.pool, "pdfstr-no-drv").await;
+    let (state, _report_repo, _pdf_repo) = setup_with_shared_repos().await;
+    // pdf_repo has empty drivers by default
+    let tenant_id = Uuid::new_v4();
     let base = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
     let auth = auth_header(tenant_id);
@@ -370,9 +383,13 @@ async fn test_pdf_stream_no_drivers() {
 
 #[tokio::test]
 async fn test_pdf_stream_with_drivers() {
-    let (state, _repo) = setup_with_shared_repo().await;
-    let tenant_id = common::create_test_tenant(&state.pool, "pdfstr-with-drv").await;
-    insert_test_employee(&state.pool, tenant_id, "Stream Driver", Some("STR01")).await;
+    let (state, _report_repo, pdf_repo) = setup_with_shared_repos().await;
+    let tenant_id = Uuid::new_v4();
+    pdf_repo
+        .drivers
+        .lock()
+        .unwrap()
+        .push(make_driver(tenant_id, "Stream Driver", Some("STR01")));
     let base = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
     let auth = auth_header(tenant_id);
@@ -410,15 +427,19 @@ async fn test_pdf_stream_with_drivers() {
 
 #[tokio::test]
 async fn test_pdf_stream_build_report_error_skips_driver() {
-    let (state, repo) = setup_with_shared_repo().await;
-    let tenant_id = common::create_test_tenant(&state.pool, "pdfstr-build-err").await;
-    insert_test_employee(&state.pool, tenant_id, "Fail Driver", Some("FAIL01")).await;
+    let (state, report_repo, pdf_repo) = setup_with_shared_repos().await;
+    let tenant_id = Uuid::new_v4();
+    pdf_repo
+        .drivers
+        .lock()
+        .unwrap()
+        .push(make_driver(tenant_id, "Fail Driver", Some("FAIL01")));
     let base = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
     let auth = auth_header(tenant_id);
 
     // Set fail_next — the stream handler catches build errors and skips the driver
-    repo.fail_next.store(true, Ordering::SeqCst);
+    report_repo.fail_next.store(true, Ordering::SeqCst);
 
     let res = client
         .get(format!(
@@ -445,11 +466,23 @@ async fn test_pdf_stream_build_report_error_skips_driver() {
 
 #[tokio::test]
 async fn test_pdf_stream_multiple_drivers() {
-    let (state, _repo) = setup_with_shared_repo().await;
-    let tenant_id = common::create_test_tenant(&state.pool, "pdfstr-multi").await;
-    insert_test_employee(&state.pool, tenant_id, "Driver One", Some("D001")).await;
-    insert_test_employee(&state.pool, tenant_id, "Driver Two", Some("D002")).await;
-    insert_test_employee(&state.pool, tenant_id, "", Some("D003")).await; // empty name, should be filtered
+    let (state, _report_repo, pdf_repo) = setup_with_shared_repos().await;
+    let tenant_id = Uuid::new_v4();
+    pdf_repo
+        .drivers
+        .lock()
+        .unwrap()
+        .push(make_driver(tenant_id, "Driver One", Some("D001")));
+    pdf_repo
+        .drivers
+        .lock()
+        .unwrap()
+        .push(make_driver(tenant_id, "Driver Two", Some("D002")));
+    pdf_repo
+        .drivers
+        .lock()
+        .unwrap()
+        .push(make_driver(tenant_id, "", Some("D003"))); // empty name, should be filtered
     let base = common::spawn_test_server(state).await;
     let client = reqwest::Client::new();
     let auth = auth_header(tenant_id);
