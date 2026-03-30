@@ -676,8 +676,11 @@ async fn perform_safety_judgment(
             &mut failed_items,
         );
     } else {
-        #[rustfmt::skip]
-        tracing::warn!("No health baseline for employee {}, defaulting to pass", session.employee_id);
+        let msg = format!(
+            "No health baseline for employee {}, defaulting to pass",
+            session.employee_id
+        );
+        tracing::warn!("{msg}");
     }
 
     // 自己申告チェック

@@ -337,9 +337,11 @@ async fn download_attachment(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
 
-    #[rustfmt::skip]
     let key = state.storage.extract_key(&att.storage_url).ok_or_else(|| {
-        tracing::error!("Failed to extract key from storage_url: {}", att.storage_url);
+        tracing::error!(
+            "Failed to extract key from storage_url: {}",
+            att.storage_url
+        );
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
