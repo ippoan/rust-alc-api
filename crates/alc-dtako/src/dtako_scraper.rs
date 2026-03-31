@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
-use alc_auth::middleware::TenantId;
+use alc_core::auth_middleware::TenantId;
 use alc_core::AppState;
 
 #[derive(Clone)]

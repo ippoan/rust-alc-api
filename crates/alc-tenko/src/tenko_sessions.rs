@@ -9,7 +9,7 @@ use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use uuid::Uuid;
 
-use alc_auth::middleware::{AuthUser, TenantId};
+use alc_core::auth_middleware::{AuthUser, TenantId};
 use alc_core::models::{
     CancelTenkoSession, InterruptSession, MedicalDiffs, ResumeSession, SafetyJudgment,
     SelfDeclaration, StartTenkoSession, SubmitAlcoholResult, SubmitCarryingItemChecks,

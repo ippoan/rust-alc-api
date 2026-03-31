@@ -5,7 +5,7 @@ use axum::{
     Json, Router,
 };
 
-use alc_auth::middleware::TenantId;
+use alc_core::auth_middleware::TenantId;
 use alc_core::repository::dtako_work_times::{WorkTimesFilter, WorkTimesResponse};
 use alc_core::AppState;
 

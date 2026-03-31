@@ -7,7 +7,7 @@ use axum::{
 use chrono::{NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 
-use alc_auth::middleware::TenantId;
+use alc_core::auth_middleware::TenantId;
 use alc_core::repository::daily_health::DailyHealthRow;
 use alc_core::AppState;
 

@@ -1,6 +1,6 @@
 use axum::{extract::State, http::StatusCode, routing::get, Json, Router};
 
-use alc_auth::middleware::TenantId;
+use alc_core::auth_middleware::TenantId;
 use alc_core::repository::dtako_drivers::Driver;
 use alc_core::AppState;
 

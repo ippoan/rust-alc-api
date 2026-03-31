@@ -1,7 +1,7 @@
 use axum::{extract::State, http::StatusCode, routing::get, Extension, Json, Router};
 use serde::Serialize;
 
-use alc_auth::middleware::TenantId;
+use alc_core::auth_middleware::TenantId;
 use alc_core::repository::car_inspections::CarInspectionFile;
 use alc_core::AppState;
 

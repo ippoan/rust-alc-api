@@ -8,7 +8,7 @@ use axum::{
 };
 use uuid::Uuid;
 
-use alc_auth::middleware::TenantId;
+use alc_core::auth_middleware::TenantId;
 use alc_core::models::{TenkoRecord, TenkoRecordFilter, TenkoRecordsResponse};
 use alc_core::AppState;
 

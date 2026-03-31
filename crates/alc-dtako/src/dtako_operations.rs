@@ -5,7 +5,7 @@ use axum::{
     Json, Router,
 };
 
-use alc_auth::middleware::TenantId;
+use alc_core::auth_middleware::TenantId;
 use alc_core::models::DtakoOperationFilter;
 use alc_core::AppState;
 

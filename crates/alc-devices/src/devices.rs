@@ -9,7 +9,7 @@ use rand::RngExt;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use alc_auth::middleware::{AuthUser, TenantId};
+use alc_core::auth_middleware::{AuthUser, TenantId};
 use alc_core::repository::devices::{
     DeviceRow, DeviceSettingsRow, FcmDeviceRow, RegistrationRequestRow,
 };

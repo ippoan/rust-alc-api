@@ -29,33 +29,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "alc-auth"
-version = "0.1.0"
-dependencies = [
- "alc-core",
- "axum",
- "base64 0.22.1",
- "chrono",
- "hmac",
- "jsonwebtoken",
- "reqwest",
- "ring",
- "rsa",
- "serde",
- "serde_json",
- "sha2",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
- "wiremock",
-]
-
-[[package]]
 name = "alc-carins"
 version = "0.1.0"
 dependencies = [
- "alc-auth",
  "alc-core",
  "axum",
  "base64 0.22.1",
@@ -84,12 +60,23 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "axum",
+ "base64 0.22.1",
  "chrono",
+ "hmac",
+ "jsonwebtoken",
+ "reqwest",
+ "ring",
+ "rsa",
  "serde",
  "serde_json",
+ "sha2",
  "sqlx",
  "thiserror 2.0.18",
+ "tokio",
+ "tracing",
  "uuid",
+ "wiremock",
 ]
 
 [[package]]
@@ -107,7 +94,6 @@ dependencies = [
 name = "alc-devices"
 version = "0.1.0"
 dependencies = [
- "alc-auth",
  "alc-core",
  "axum",
  "chrono",
@@ -123,7 +109,6 @@ dependencies = [
 name = "alc-dtako"
 version = "0.1.0"
 dependencies = [
- "alc-auth",
  "alc-compare",
  "alc-core",
  "alc-csv-parser",
@@ -148,7 +133,6 @@ dependencies = [
 name = "alc-misc"
 version = "0.1.0"
 dependencies = [
- "alc-auth",
  "alc-core",
  "axum",
  "base64 0.22.1",
@@ -190,7 +174,6 @@ dependencies = [
 name = "alc-tenko"
 version = "0.1.0"
 dependencies = [
- "alc-auth",
  "alc-core",
  "axum",
  "chrono",
@@ -3216,7 +3199,6 @@ dependencies = [
 name = "rust-alc-api"
 version = "0.1.0"
 dependencies = [
- "alc-auth",
  "alc-carins",
  "alc-compare",
  "alc-core",

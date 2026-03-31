@@ -8,13 +8,13 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use alc_auth::google::GoogleTokenVerifier;
-use alc_auth::jwt::{
+use alc_core::auth_google::GoogleTokenVerifier;
+use alc_core::auth_jwt::{
     self, create_access_token, create_refresh_token, hash_refresh_token, refresh_token_expires_at,
     JwtSecret,
 };
-use alc_auth::lineworks;
-use alc_auth::middleware::AuthUser;
+use alc_core::auth_lineworks;
+use alc_core::auth_middleware::AuthUser;
 use alc_core::repository::auth::AuthRepository;
 use alc_core::AppState;
 
@@ -108,7 +108,7 @@ async fn google_code_login(
 async fn issue_tokens_for_google_claims(
     repo: &dyn AuthRepository,
     jwt_secret: &JwtSecret,
-    google_claims: alc_auth::google::GoogleClaims,
+    google_claims: alc_core::auth_google::GoogleClaims,
 ) -> Result<Json<AuthResponse>, StatusCode> {
     // ユーザーを google_sub で検索
     let existing_user = repo
@@ -194,7 +194,7 @@ async fn issue_tokens_for_google_claims(
     Ok(Json(AuthResponse {
         access_token,
         refresh_token: raw_refresh,
-        expires_in: jwt::ACCESS_TOKEN_EXPIRY_SECS,
+        expires_in: auth_jwt::ACCESS_TOKEN_EXPIRY_SECS,
         user: UserResponse {
             id: user.id,
             email: user.email,
@@ -244,7 +244,7 @@ async fn refresh_token(
 
     Ok(Json(RefreshResponse {
         access_token,
-        expires_in: jwt::ACCESS_TOKEN_EXPIRY_SECS,
+        expires_in: auth_jwt::ACCESS_TOKEN_EXPIRY_SECS,
     }))
 }
 
@@ -331,13 +331,13 @@ async fn google_redirect(
     let oauth_state_secret =
         std::env::var("OAUTH_STATE_SECRET").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let state_payload = lineworks::state::StatePayload {
+    let state_payload = auth_lineworks::state::StatePayload {
         redirect_uri: params.redirect_uri,
         nonce: Uuid::new_v4().to_string(),
         provider: "google".to_string(),
         external_org_id: String::new(),
     };
-    let signed_state = lineworks::state::sign(&state_payload, &oauth_state_secret);
+    let signed_state = auth_lineworks::state::sign(&state_payload, &oauth_state_secret);
 
     let api_origin =
         std::env::var("API_ORIGIN").unwrap_or_else(|_| "https://alc-api.ippoan.org".to_string());
@@ -377,7 +377,7 @@ async fn google_callback(
         std::env::var("OAUTH_STATE_SECRET").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let state_payload =
-        lineworks::state::verify(&params.state, &oauth_state_secret).map_err(|e| {
+        auth_lineworks::state::verify(&params.state, &oauth_state_secret).map_err(|e| {
             tracing::warn!("Google state verification failed: {e}");
             StatusCode::BAD_REQUEST
         })?;
@@ -468,13 +468,13 @@ async fn lineworks_redirect(
         })?;
 
     // HMAC-signed state 生成
-    let state_payload = lineworks::state::StatePayload {
+    let state_payload = auth_lineworks::state::StatePayload {
         redirect_uri: params.redirect_uri,
         nonce: Uuid::new_v4().to_string(),
         provider: "lineworks".to_string(),
         external_org_id: config.external_org_id.clone(),
     };
-    let signed_state = lineworks::state::sign(&state_payload, &oauth_state_secret);
+    let signed_state = auth_lineworks::state::sign(&state_payload, &oauth_state_secret);
 
     // callback URL
     let api_origin =
@@ -482,7 +482,7 @@ async fn lineworks_redirect(
     let callback_uri = format!("{api_origin}/api/auth/lineworks/callback");
     let encoded_callback = urlencoding::encode(&callback_uri);
 
-    let authorize_url = lineworks::authorize_url(
+    let authorize_url = auth_lineworks::authorize_url(
         &config.client_id,
         &encoded_callback,
         &urlencoding::encode(&signed_state),
@@ -508,7 +508,7 @@ async fn lineworks_callback(
 
     // State 検証
     let state_payload =
-        lineworks::state::verify(&params.state, &oauth_state_secret).map_err(|e| {
+        auth_lineworks::state::verify(&params.state, &oauth_state_secret).map_err(|e| {
             tracing::warn!("State verification failed: {e}");
             StatusCode::BAD_REQUEST
         })?;
@@ -531,15 +531,17 @@ async fn lineworks_callback(
     // client_secret を復号（AES-256-GCM, SSO_ENCRYPTION_KEY で暗号化）
     let encryption_key =
         std::env::var("SSO_ENCRYPTION_KEY").unwrap_or_else(|_| jwt_secret.0.clone());
-    let client_secret = lineworks::decrypt_secret(&config.client_secret_encrypted, &encryption_key)
-        .map_err(|e| {
-            tracing::error!("client_secret decryption failed: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    let client_secret =
+        auth_lineworks::decrypt_secret(&config.client_secret_encrypted, &encryption_key).map_err(
+            |e| {
+                tracing::error!("client_secret decryption failed: {e}");
+                StatusCode::INTERNAL_SERVER_ERROR
+            },
+        )?;
 
     // Code → Token 交換
     let http_client = reqwest::Client::new();
-    let token_resp = lineworks::exchange_code(
+    let token_resp = auth_lineworks::exchange_code(
         &http_client,
         &config.client_id,
         &client_secret,
@@ -553,7 +555,7 @@ async fn lineworks_callback(
     })?;
 
     // User profile 取得
-    let profile = lineworks::fetch_user_profile(&http_client, &token_resp.access_token)
+    let profile = auth_lineworks::fetch_user_profile(&http_client, &token_resp.access_token)
         .await
         .map_err(|e| {
             tracing::error!("LINE WORKS user profile failed: {e}");
@@ -587,7 +589,7 @@ async fn lineworks_callback(
         state_payload.redirect_uri,
         urlencoding::encode(&access_token),
         urlencoding::encode(&raw_refresh),
-        jwt::ACCESS_TOKEN_EXPIRY_SECS,
+        auth_jwt::ACCESS_TOKEN_EXPIRY_SECS,
     );
 
     let parent_domain = extract_parent_domain(&state_payload.redirect_uri);
@@ -674,7 +676,7 @@ async fn woff_auth(
 
     // WOFF SDK は access_token を直接提供するので code exchange 不要
     let http_client = reqwest::Client::new();
-    let profile = lineworks::fetch_user_profile(&http_client, &body.access_token)
+    let profile = auth_lineworks::fetch_user_profile(&http_client, &body.access_token)
         .await
         .map_err(|e| {
             tracing::warn!("WOFF user profile fetch failed: {e}");
@@ -702,7 +704,7 @@ async fn woff_auth(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let token_expires_at = (chrono::Utc::now()
-        + chrono::Duration::seconds(jwt::ACCESS_TOKEN_EXPIRY_SECS))
+        + chrono::Duration::seconds(auth_jwt::ACCESS_TOKEN_EXPIRY_SECS))
     .to_rfc3339();
 
     Ok(Json(WoffAuthResponse {
@@ -718,7 +720,7 @@ async fn woff_auth(
 async fn upsert_lineworks_user(
     repo: &dyn AuthRepository,
     tenant_id: Uuid,
-    profile: &lineworks::UserProfile,
+    profile: &auth_lineworks::UserProfile,
 ) -> Result<alc_core::models::User, StatusCode> {
     let lineworks_id = &profile.user_id;
     let email = profile.email_or_id();

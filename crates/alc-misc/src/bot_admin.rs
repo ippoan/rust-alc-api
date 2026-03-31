@@ -8,7 +8,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use alc_auth::middleware::AuthUser;
+use alc_core::auth_middleware::AuthUser;
 use alc_core::repository::bot_admin::BotConfigRow;
 use alc_core::AppState;
 

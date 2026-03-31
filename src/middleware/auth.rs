@@ -1,1 +1,1 @@
-pub use alc_auth::middleware::*;
+pub use alc_core::auth_middleware::*;

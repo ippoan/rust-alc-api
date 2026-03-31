@@ -8,7 +8,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
-use alc_auth::middleware::AuthUser;
+use alc_core::auth_middleware::AuthUser;
 use alc_core::repository::sso_admin::SsoConfigRow;
 use alc_core::AppState;
 

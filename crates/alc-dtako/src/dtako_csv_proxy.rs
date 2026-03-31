@@ -6,7 +6,7 @@ use axum::{
 };
 use serde::Serialize;
 
-use alc_auth::middleware::TenantId;
+use alc_core::auth_middleware::TenantId;
 use alc_core::AppState;
 
 pub fn tenant_router() -> Router<AppState> {

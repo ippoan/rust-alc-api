@@ -9,7 +9,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use alc_auth::middleware::TenantId;
+use alc_core::auth_middleware::TenantId;
 use alc_core::repository::dtako_upload::{
     InsertDailyWorkHoursParams, InsertOperationParams, InsertSegmentParams,
 };

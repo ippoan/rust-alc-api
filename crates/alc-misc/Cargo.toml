@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-alc-auth = { path = "../alc-auth" }
 alc-core = { path = "../alc-core" }
 axum = { version = "0.8", features = ["multipart"] }
 base64 = "0.22"

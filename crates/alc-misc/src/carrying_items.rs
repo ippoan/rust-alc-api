@@ -7,7 +7,7 @@ use axum::{
 use serde::Serialize;
 use uuid::Uuid;
 
-use alc_auth::middleware::TenantId;
+use alc_core::auth_middleware::TenantId;
 use alc_core::models::{
     CarryingItem, CarryingItemVehicleCondition, CreateCarryingItem, UpdateCarryingItem,
 };

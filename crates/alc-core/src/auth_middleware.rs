@@ -1,9 +1,9 @@
-pub use alc_core::middleware::{AuthUser, TenantId};
+pub use crate::middleware::{AuthUser, TenantId};
 
 use axum::{extract::Request, http::StatusCode, middleware::Next, response::Response, Extension};
 use uuid::Uuid;
 
-use crate::jwt::{verify_access_token, JwtSecret};
+use crate::auth_jwt::{verify_access_token, JwtSecret};
 
 /// JWT 必須ミドルウェア — 管理ページ用
 ///

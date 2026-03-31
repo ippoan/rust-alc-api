@@ -12,10 +12,10 @@ pub use alc_pdf::types::{
     MonthlyTotal, OperationDetail, RestraintDayRow, RestraintReportResponse, WeeklySubtotal,
 };
 
-use alc_auth::middleware::TenantId;
 use alc_compare::{
     self, annotate_known_bugs, parse_restraint_csv, CsvDayRow, CsvDriverData, DiffItem,
 };
+use alc_core::auth_middleware::TenantId;
 use alc_core::repository::dtako_restraint_report::{
     DailyWorkHoursRow, DtakoRestraintReportRepository, OpTimesRow, SegmentRow,
 };
