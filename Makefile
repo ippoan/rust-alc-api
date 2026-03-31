@@ -48,11 +48,13 @@ cov-check-mock:
 
 # --- Mock テスト (DB 不要) ---
 
+MOCK_TESTS := --test mock_tenko --test mock_dtako --test mock_devices --test mock_carins --test mock_misc
+
 mock-test:
-	cargo test --test mock_tests
+	cargo test $(MOCK_TESTS)
 
 mock-cov:
-	cargo llvm-cov --test mock_tests --summary-only
+	cargo llvm-cov $(MOCK_TESTS) --summary-only
 
 # --- CI カバレッジ取得 (artifact からダウンロード) ---
 

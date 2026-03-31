@@ -69,7 +69,7 @@ else
   if [ "$UNIT_ONLY" = true ]; then
     cargo llvm-cov --lib --text > "$CACHE_FILE" 2>&1 || { echo "cargo llvm-cov failed:"; tail -50 "$CACHE_FILE"; exit 101; }
   elif [ "$MOCK_ONLY" = true ]; then
-    cargo llvm-cov --test mock_tests --text > "$CACHE_FILE" 2>&1 || { echo "cargo llvm-cov failed:"; tail -50 "$CACHE_FILE"; exit 101; }
+    cargo llvm-cov --test mock_tenko --test mock_dtako --test mock_devices --test mock_carins --test mock_misc --text > "$CACHE_FILE" 2>&1 || { echo "cargo llvm-cov failed:"; tail -50 "$CACHE_FILE"; exit 101; }
   else
     [[ -f .test-config ]] && source .test-config
     cargo llvm-cov --text > "$CACHE_FILE" 2>&1 || { echo "cargo llvm-cov failed:"; tail -50 "$CACHE_FILE"; exit 101; }
