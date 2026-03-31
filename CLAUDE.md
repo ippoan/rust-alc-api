@@ -448,6 +448,13 @@ Google OAuth 以外の端末登録フローを3種類サポート。
 
 **main に直接 merge/push してはいけない。** 複数の Claude が並行作業しているため、main を直接変更すると他の worktree や作業に影響する。
 
+### ブランチ保護ルール (GitHub)
+
+- **force push / ブランチ削除**: 禁止
+- **CI 必須**: `check`, `unit-tests`, `integration-tests` すべて通らないと merge 不可
+- **strict mode**: main が更新されたらブランチの再テストが必要
+- **管理者バイパス**: `enforce_admins: false` (緊急時は可能)
+
 ### 基本フロー
 
 1. **worktree で作業**: `isolation: "worktree"` の Agent、または手動で worktree を作成
