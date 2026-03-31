@@ -5,16 +5,7 @@ use uuid::Uuid;
 
 use super::TenantConn;
 
-use crate::routes::daily_health::DailyHealthRow;
-
-#[async_trait]
-pub trait DailyHealthRepository: Send + Sync {
-    async fn fetch_daily_health(
-        &self,
-        tenant_id: Uuid,
-        date: NaiveDate,
-    ) -> Result<Vec<DailyHealthRow>, sqlx::Error>;
-}
+pub use alc_core::repository::daily_health::*;
 
 pub struct PgDailyHealthRepository {
     pool: PgPool,

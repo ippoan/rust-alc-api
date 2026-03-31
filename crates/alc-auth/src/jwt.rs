@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::db::models::User;
+use alc_core::models::User;
 
 /// Access token の有効期限 (秒)
 pub const ACCESS_TOKEN_EXPIRY_SECS: i64 = 3600; // 1時間

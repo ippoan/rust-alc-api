@@ -29,6 +29,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "alc-auth"
+version = "0.1.0"
+dependencies = [
+ "alc-core",
+ "base64 0.22.1",
+ "chrono",
+ "hmac",
+ "jsonwebtoken",
+ "reqwest",
+ "ring",
+ "rsa",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+ "wiremock",
+]
+
+[[package]]
 name = "alc-compare"
 version = "0.1.0"
 dependencies = [
@@ -38,6 +60,20 @@ dependencies = [
  "serde",
  "serde_json",
  "zip",
+]
+
+[[package]]
+name = "alc-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror 2.0.18",
+ "uuid",
 ]
 
 [[package]]
@@ -59,6 +95,18 @@ dependencies = [
  "printpdf",
  "serde",
  "uuid",
+]
+
+[[package]]
+name = "alc-storage"
+version = "0.1.0"
+dependencies = [
+ "alc-core",
+ "async-trait",
+ "reqwest",
+ "rust-s3",
+ "serde_json",
+ "tracing",
 ]
 
 [[package]]
@@ -3074,9 +3122,12 @@ dependencies = [
 name = "rust-alc-api"
 version = "0.1.0"
 dependencies = [
+ "alc-auth",
  "alc-compare",
+ "alc-core",
  "alc-csv-parser",
  "alc-pdf",
+ "alc-storage",
  "anyhow",
  "async-trait",
  "axum",

@@ -8,7 +8,7 @@ use chrono::Utc;
 use crate::mock_helpers::app_state::setup_mock_app_state;
 use rust_alc_api::db::models::*;
 use rust_alc_api::db::repository::driver_info::DriverInfoRepository;
-use rust_alc_api::routes::driver_info::{
+use rust_alc_api::db::repository::driver_info::{
     DailyInspectionSummary, InstructionSummary, MeasurementSummary,
 };
 

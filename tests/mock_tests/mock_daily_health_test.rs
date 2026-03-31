@@ -145,7 +145,7 @@ async fn test_daily_health_status_db_error() {
 
 #[tokio::test]
 async fn test_daily_health_status_with_safety_judgment() {
-    use rust_alc_api::routes::daily_health::DailyHealthRow;
+    use rust_alc_api::db::repository::daily_health::DailyHealthRow;
     use serde_json::json;
 
     let mut state = setup_mock_app_state();

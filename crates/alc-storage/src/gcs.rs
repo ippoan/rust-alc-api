@@ -1,6 +1,5 @@
+use alc_core::storage::{StorageBackend, StorageError};
 use reqwest::Client;
-
-use super::{StorageBackend, StorageError};
 
 pub struct GcsBackend {
     client: Client,

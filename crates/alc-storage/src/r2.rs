@@ -1,8 +1,7 @@
+use alc_core::storage::{StorageBackend, StorageError};
 use s3::bucket::Bucket;
 use s3::creds::Credentials;
 use s3::Region;
-
-use super::{StorageBackend, StorageError};
 
 pub struct R2Backend {
     bucket: Box<Bucket>,

@@ -4,14 +4,7 @@ use uuid::Uuid;
 
 use super::TenantConn;
 
-#[async_trait]
-pub trait DtakoCsvProxyRepository: Send + Sync {
-    async fn get_r2_key_prefix(
-        &self,
-        tenant_id: Uuid,
-        unko_no: &str,
-    ) -> Result<Option<String>, sqlx::Error>;
-}
+pub use alc_core::repository::dtako_csv_proxy::*;
 
 pub struct PgDtakoCsvProxyRepository {
     pool: PgPool,

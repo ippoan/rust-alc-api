@@ -1,15 +1,7 @@
+pub use alc_core::fcm::{FcmError, FcmSenderTrait};
+
 use reqwest::Client;
 use serde::Serialize;
-
-/// FCM 送信 trait (テスト用モック対応)
-#[async_trait::async_trait]
-pub trait FcmSenderTrait: Send + Sync {
-    async fn send_data_message(
-        &self,
-        fcm_token: &str,
-        data: std::collections::HashMap<String, String>,
-    ) -> Result<(), FcmError>;
-}
 
 #[derive(Clone)]
 pub struct FcmSender {
@@ -108,12 +100,4 @@ impl FcmSender {
             .map(|s| s.to_string())
             .ok_or_else(|| FcmError::Auth("no access_token in metadata response".into()))
     }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum FcmError {
-    #[error("FCM auth error: {0}")]
-    Auth(String),
-    #[error("FCM send error: {0}")]
-    Send(String),
 }

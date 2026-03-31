@@ -3,9 +3,9 @@ use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::routes::carins_files::FileRow;
-
 use super::TenantConn;
+
+pub use alc_core::repository::carins_files::*;
 
 const FILE_SELECT: &str = r#"
     uuid::text, filename, type as file_type,
@@ -26,44 +26,6 @@ const FILE_SELECT_F: &str = r#"
     f.access_count_weekly, f.access_count_total,
     to_char(f.promoted_to_standard_at, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as promoted_to_standard_at
 "#;
-
-#[async_trait]
-pub trait CarinsFilesRepository: Send + Sync {
-    async fn list_files(
-        &self,
-        tenant_id: Uuid,
-        type_filter: Option<&str>,
-    ) -> Result<Vec<FileRow>, sqlx::Error>;
-
-    async fn list_recent(&self, tenant_id: Uuid) -> Result<Vec<FileRow>, sqlx::Error>;
-
-    async fn list_not_attached(&self, tenant_id: Uuid) -> Result<Vec<FileRow>, sqlx::Error>;
-
-    async fn get_file(&self, tenant_id: Uuid, uuid: &str) -> Result<Option<FileRow>, sqlx::Error>;
-
-    /// Get file metadata for download (includes blob column).
-    async fn get_file_for_download(
-        &self,
-        tenant_id: Uuid,
-        uuid: &str,
-    ) -> Result<Option<FileRow>, sqlx::Error>;
-
-    async fn create_file(
-        &self,
-        tenant_id: Uuid,
-        file_uuid: Uuid,
-        filename: &str,
-        file_type: &str,
-        gcs_key: &str,
-        now: DateTime<Utc>,
-    ) -> Result<FileRow, sqlx::Error>;
-
-    /// Soft-delete. Returns true if a row was affected.
-    async fn delete_file(&self, tenant_id: Uuid, uuid: &str) -> Result<bool, sqlx::Error>;
-
-    /// Restore soft-deleted file. Returns true if a row was affected.
-    async fn restore_file(&self, tenant_id: Uuid, uuid: &str) -> Result<bool, sqlx::Error>;
-}
 
 pub struct PgCarinsFilesRepository {
     pool: PgPool,

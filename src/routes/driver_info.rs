@@ -11,36 +11,14 @@ use crate::db::models::{
     CarryingItem, DtakoDailyWorkHours, Employee, EmployeeHealthBaseline, EquipmentFailure,
     TenkoRecord,
 };
+use crate::db::repository::driver_info::{
+    DailyInspectionSummary, InstructionSummary, MeasurementSummary,
+};
 use crate::middleware::auth::TenantId;
 use crate::AppState;
 
 pub fn tenant_router() -> Router<AppState> {
     Router::new().route("/tenko/driver-info/{employee_id}", get(get_driver_info))
-}
-
-#[derive(Debug, Serialize, sqlx::FromRow)]
-pub struct InstructionSummary {
-    session_id: Uuid,
-    instruction: String,
-    instruction_confirmed_at: Option<chrono::DateTime<chrono::Utc>>,
-    recorded_at: chrono::DateTime<chrono::Utc>,
-}
-
-#[derive(Debug, Serialize, sqlx::FromRow)]
-pub struct DailyInspectionSummary {
-    session_id: Uuid,
-    daily_inspection: serde_json::Value,
-    recorded_at: chrono::DateTime<chrono::Utc>,
-}
-
-#[derive(Debug, Serialize, sqlx::FromRow)]
-pub struct MeasurementSummary {
-    id: Uuid,
-    temperature: Option<f64>,
-    systolic: Option<i32>,
-    diastolic: Option<i32>,
-    pulse: Option<i32>,
-    measured_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Debug, Serialize)]

@@ -6,13 +6,12 @@ use axum::{
     routing::{get, post},
     Extension, Json, Router,
 };
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::NaiveDate;
 use futures::stream::Stream;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
-use uuid::Uuid;
 
 use crate::middleware::auth::TenantId;
 use crate::AppState;
@@ -52,15 +51,7 @@ struct SseEvent {
     message: Option<String>,
 }
 
-#[derive(Clone, Serialize, sqlx::FromRow)]
-pub struct ScrapeHistoryItem {
-    pub id: Uuid,
-    pub target_date: NaiveDate,
-    pub comp_id: String,
-    pub status: String,
-    pub message: Option<String>,
-    pub created_at: DateTime<Utc>,
-}
+pub use crate::db::repository::dtako_scraper::ScrapeHistoryItem;
 
 #[derive(Deserialize)]
 pub struct HistoryQuery {
