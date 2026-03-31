@@ -6,17 +6,7 @@ use crate::db::models::DtakoEventClassification;
 
 use super::TenantConn;
 
-#[async_trait]
-pub trait DtakoEventClassificationsRepository: Send + Sync {
-    async fn list(&self, tenant_id: Uuid) -> Result<Vec<DtakoEventClassification>, sqlx::Error>;
-
-    async fn update(
-        &self,
-        tenant_id: Uuid,
-        id: Uuid,
-        classification: &str,
-    ) -> Result<Option<DtakoEventClassification>, sqlx::Error>;
-}
+pub use alc_core::repository::dtako_event_classifications::*;
 
 pub struct PgDtakoEventClassificationsRepository {
     pool: PgPool,

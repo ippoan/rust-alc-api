@@ -3,28 +3,9 @@ use chrono::NaiveDate;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::routes::dtako_scraper::ScrapeHistoryItem;
-
 use super::TenantConn;
 
-#[async_trait]
-pub trait DtakoScraperRepository: Send + Sync {
-    async fn insert_scrape_history(
-        &self,
-        tenant_id: Uuid,
-        target_date: NaiveDate,
-        comp_id: &str,
-        status: &str,
-        message: Option<&str>,
-    ) -> Result<(), sqlx::Error>;
-
-    async fn list_scrape_history(
-        &self,
-        tenant_id: Uuid,
-        limit: i64,
-        offset: i64,
-    ) -> Result<Vec<ScrapeHistoryItem>, sqlx::Error>;
-}
+pub use alc_core::repository::dtako_scraper::*;
 
 pub struct PgDtakoScraperRepository {
     pool: PgPool,

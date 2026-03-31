@@ -41,6 +41,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "alc-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
 name = "alc-csv-parser"
 version = "0.1.0"
 dependencies = [
@@ -3075,6 +3089,7 @@ name = "rust-alc-api"
 version = "0.1.0"
 dependencies = [
  "alc-compare",
+ "alc-core",
  "alc-csv-parser",
  "alc-pdf",
  "anyhow",

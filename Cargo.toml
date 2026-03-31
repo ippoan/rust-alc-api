@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/alc-csv-parser", "crates/alc-compare", "crates/alc-pdf"]
+members = [".", "crates/alc-core", "crates/alc-csv-parser", "crates/alc-compare", "crates/alc-pdf"]
 resolver = "2"
 
 [package]
@@ -11,6 +11,7 @@ edition = "2021"
 unexpected_cfgs = { level = "allow", check-cfg = ['cfg(coverage)'] }
 
 [dependencies]
+alc-core = { path = "crates/alc-core" }
 alc-csv-parser = { path = "crates/alc-csv-parser" }
 alc-compare = { path = "crates/alc-compare" }
 alc-pdf = { path = "crates/alc-pdf" }

@@ -34,60 +34,56 @@ pub mod tenko_webhooks;
 pub mod timecard;
 pub mod webhook;
 
-pub use auth::{AuthRepository, PgAuthRepository};
-pub use bot_admin::{BotAdminRepository, PgBotAdminRepository};
-pub use car_inspections::{CarInspectionRepository, PgCarInspectionRepository};
-pub use carins_files::{CarinsFilesRepository, PgCarinsFilesRepository};
-pub use carrying_items::{CarryingItemsRepository, PgCarryingItemsRepository};
-pub use communication_items::{CommunicationItemsRepository, PgCommunicationItemsRepository};
-pub use daily_health::{DailyHealthRepository, PgDailyHealthRepository};
-pub use devices::{DeviceRepository, PgDeviceRepository};
-pub use driver_info::{DriverInfoRepository, PgDriverInfoRepository};
-pub use dtako_csv_proxy::{DtakoCsvProxyRepository, PgDtakoCsvProxyRepository};
-pub use dtako_daily_hours::{DtakoDailyHoursRepository, PgDtakoDailyHoursRepository};
-pub use dtako_drivers::{DtakoDriversRepository, PgDtakoDriversRepository};
-pub use dtako_event_classifications::{
-    DtakoEventClassificationsRepository, PgDtakoEventClassificationsRepository,
+// Re-export traits from alc-core
+pub use alc_core::repository::{
+    AuthRepository, BotAdminRepository, CarInspectionRepository, CarinsFilesRepository,
+    CarryingItemsRepository, CommunicationItemsRepository, DailyHealthRepository, DeviceRepository,
+    DriverInfoRepository, DtakoCsvProxyRepository, DtakoDailyHoursRepository,
+    DtakoDriversRepository, DtakoEventClassificationsRepository, DtakoOperationsRepository,
+    DtakoRestraintReportPdfRepository, DtakoRestraintReportRepository, DtakoScraperRepository,
+    DtakoUploadRepository, DtakoVehiclesRepository, DtakoWorkTimesRepository, EmployeeRepository,
+    EquipmentFailuresRepository, GuidanceRecordsRepository, HealthBaselinesRepository,
+    MeasurementsRepository, NfcTagRepository, SsoAdminRepository, TenantUsersRepository,
+    TenkoCallRepository, TenkoRecordsRepository, TenkoSchedulesRepository, TenkoSessionRepository,
+    TenkoWebhooksRepository, TimecardRepository, WebhookRepository,
 };
-pub use dtako_operations::{DtakoOperationsRepository, PgDtakoOperationsRepository};
-pub use dtako_restraint_report::{
-    DtakoRestraintReportRepository, PgDtakoRestraintReportRepository,
-};
-pub use dtako_restraint_report_pdf::{
-    DtakoRestraintReportPdfRepository, PgDtakoRestraintReportPdfRepository,
-};
-pub use dtako_scraper::{DtakoScraperRepository, PgDtakoScraperRepository};
-pub use dtako_upload::{DtakoUploadRepository, PgDtakoUploadRepository};
-pub use dtako_vehicles::{DtakoVehiclesRepository, PgDtakoVehiclesRepository};
-pub use dtako_work_times::{DtakoWorkTimesRepository, PgDtakoWorkTimesRepository};
-pub use employees::{EmployeeRepository, PgEmployeeRepository};
-pub use equipment_failures::{EquipmentFailuresRepository, PgEquipmentFailuresRepository};
-pub use guidance_records::{GuidanceRecordsRepository, PgGuidanceRecordsRepository};
-pub use health_baselines::{HealthBaselinesRepository, PgHealthBaselinesRepository};
-pub use measurements::{MeasurementsRepository, PgMeasurementsRepository};
-pub use nfc_tags::{NfcTagRepository, PgNfcTagRepository};
-pub use sso_admin::{PgSsoAdminRepository, SsoAdminRepository};
-pub use tenant_users::{PgTenantUsersRepository, TenantUsersRepository};
-pub use tenko_call::{PgTenkoCallRepository, TenkoCallRepository};
-pub use tenko_records::{PgTenkoRecordsRepository, TenkoRecordsRepository};
-pub use tenko_schedules::{PgTenkoSchedulesRepository, TenkoSchedulesRepository};
-pub use tenko_sessions::{PgTenkoSessionRepository, TenkoSessionRepository};
-pub use tenko_webhooks::{PgTenkoWebhooksRepository, TenkoWebhooksRepository};
-pub use timecard::{PgTimecardRepository, TimecardRepository};
-pub use webhook::{PgWebhookRepository, WebhookRepository};
 
-use sqlx::PgPool;
+// Re-export TenantConn from alc-core
+pub use alc_core::tenant::TenantConn;
 
-/// テナントスコープの DB コネクション
-/// acquire 時に set_current_tenant を自動呼び出しする
-pub struct TenantConn {
-    pub conn: sqlx::pool::PoolConnection<sqlx::Postgres>,
-}
-
-impl TenantConn {
-    pub async fn acquire(pool: &PgPool, tenant_id: &str) -> Result<Self, sqlx::Error> {
-        let mut conn = pool.acquire().await?;
-        super::tenant::set_current_tenant(&mut conn, tenant_id).await?;
-        Ok(Self { conn })
-    }
-}
+// Re-export Pg implementations
+pub use auth::PgAuthRepository;
+pub use bot_admin::PgBotAdminRepository;
+pub use car_inspections::PgCarInspectionRepository;
+pub use carins_files::PgCarinsFilesRepository;
+pub use carrying_items::PgCarryingItemsRepository;
+pub use communication_items::PgCommunicationItemsRepository;
+pub use daily_health::PgDailyHealthRepository;
+pub use devices::PgDeviceRepository;
+pub use driver_info::PgDriverInfoRepository;
+pub use dtako_csv_proxy::PgDtakoCsvProxyRepository;
+pub use dtako_daily_hours::PgDtakoDailyHoursRepository;
+pub use dtako_drivers::PgDtakoDriversRepository;
+pub use dtako_event_classifications::PgDtakoEventClassificationsRepository;
+pub use dtako_operations::PgDtakoOperationsRepository;
+pub use dtako_restraint_report::PgDtakoRestraintReportRepository;
+pub use dtako_restraint_report_pdf::PgDtakoRestraintReportPdfRepository;
+pub use dtako_scraper::PgDtakoScraperRepository;
+pub use dtako_upload::PgDtakoUploadRepository;
+pub use dtako_vehicles::PgDtakoVehiclesRepository;
+pub use dtako_work_times::PgDtakoWorkTimesRepository;
+pub use employees::PgEmployeeRepository;
+pub use equipment_failures::PgEquipmentFailuresRepository;
+pub use guidance_records::PgGuidanceRecordsRepository;
+pub use health_baselines::PgHealthBaselinesRepository;
+pub use measurements::PgMeasurementsRepository;
+pub use nfc_tags::PgNfcTagRepository;
+pub use sso_admin::PgSsoAdminRepository;
+pub use tenant_users::PgTenantUsersRepository;
+pub use tenko_call::PgTenkoCallRepository;
+pub use tenko_records::PgTenkoRecordsRepository;
+pub use tenko_schedules::PgTenkoSchedulesRepository;
+pub use tenko_sessions::PgTenkoSessionRepository;
+pub use tenko_webhooks::PgTenkoWebhooksRepository;
+pub use timecard::PgTimecardRepository;
+pub use webhook::PgWebhookRepository;

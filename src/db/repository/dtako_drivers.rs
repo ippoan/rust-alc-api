@@ -1,25 +1,10 @@
 use async_trait::async_trait;
-use serde::Serialize;
 use sqlx::PgPool;
 use uuid::Uuid;
 
 use super::TenantConn;
 
-/// daiun-salary 互換の Driver レスポンス
-#[derive(Debug, Serialize, sqlx::FromRow)]
-pub struct Driver {
-    pub id: Uuid,
-    pub tenant_id: Uuid,
-    pub driver_cd: Option<String>,
-    #[sqlx(rename = "name")]
-    #[serde(rename = "driver_name")]
-    pub driver_name: String,
-}
-
-#[async_trait]
-pub trait DtakoDriversRepository: Send + Sync {
-    async fn list(&self, tenant_id: Uuid) -> Result<Vec<Driver>, sqlx::Error>;
-}
+pub use alc_core::repository::dtako_drivers::*;
 
 pub struct PgDtakoDriversRepository {
     pool: PgPool,

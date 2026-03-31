@@ -4,26 +4,7 @@ use uuid::Uuid;
 
 use super::TenantConn;
 
-#[derive(Debug, Clone, sqlx::FromRow)]
-pub struct PdfDriver {
-    pub id: Uuid,
-    #[allow(dead_code)]
-    pub tenant_id: Uuid,
-    pub driver_cd: Option<String>,
-    #[sqlx(rename = "name")]
-    pub driver_name: String,
-}
-
-#[async_trait]
-pub trait DtakoRestraintReportPdfRepository: Send + Sync {
-    async fn list_drivers(&self, tenant_id: Uuid) -> Result<Vec<PdfDriver>, sqlx::Error>;
-
-    async fn get_driver(
-        &self,
-        tenant_id: Uuid,
-        driver_id: Uuid,
-    ) -> Result<Vec<PdfDriver>, sqlx::Error>;
-}
+pub use alc_core::repository::dtako_restraint_report_pdf::*;
 
 pub struct PgDtakoRestraintReportPdfRepository {
     pool: PgPool,

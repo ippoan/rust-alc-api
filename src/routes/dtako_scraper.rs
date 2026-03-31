@@ -52,15 +52,7 @@ struct SseEvent {
     message: Option<String>,
 }
 
-#[derive(Clone, Serialize, sqlx::FromRow)]
-pub struct ScrapeHistoryItem {
-    pub id: Uuid,
-    pub target_date: NaiveDate,
-    pub comp_id: String,
-    pub status: String,
-    pub message: Option<String>,
-    pub created_at: DateTime<Utc>,
-}
+pub use crate::db::repository::dtako_scraper::ScrapeHistoryItem;
 
 #[derive(Deserialize)]
 pub struct HistoryQuery {

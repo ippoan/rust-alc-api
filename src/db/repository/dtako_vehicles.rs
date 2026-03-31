@@ -6,10 +6,7 @@ use crate::db::models::DtakoVehicle;
 
 use super::TenantConn;
 
-#[async_trait]
-pub trait DtakoVehiclesRepository: Send + Sync {
-    async fn list(&self, tenant_id: Uuid) -> Result<Vec<DtakoVehicle>, sqlx::Error>;
-}
+pub use alc_core::repository::dtako_vehicles::*;
 
 pub struct PgDtakoVehiclesRepository {
     pool: PgPool,

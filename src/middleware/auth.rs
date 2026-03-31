@@ -1,21 +1,9 @@
+pub use alc_core::middleware::{AuthUser, TenantId};
+
 use axum::{extract::Request, http::StatusCode, middleware::Next, response::Response, Extension};
 use uuid::Uuid;
 
 use crate::auth::jwt::{verify_access_token, JwtSecret};
-
-/// 認証済みユーザー情報 (JWT から抽出)
-#[derive(Debug, Clone)]
-pub struct AuthUser {
-    pub user_id: Uuid,
-    pub email: String,
-    pub name: String,
-    pub tenant_id: Uuid,
-    pub role: String,
-}
-
-/// テナント ID (後方互換)
-#[derive(Debug, Clone, Copy)]
-pub struct TenantId(pub Uuid);
 
 /// JWT 必須ミドルウェア — 管理ページ用
 ///

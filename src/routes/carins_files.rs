@@ -6,9 +6,9 @@ use axum::{
     Extension, Json, Router,
 };
 use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
 use uuid::Uuid;
 
+use crate::db::repository::carins_files::FileRow;
 use crate::middleware::auth::TenantId;
 use crate::AppState;
 
@@ -21,23 +21,6 @@ pub fn tenant_router() -> Router<AppState> {
         .route("/files/{uuid}/download", get(download_file))
         .route("/files/{uuid}/delete", post(delete_file))
         .route("/files/{uuid}/restore", post(restore_file))
-}
-
-#[derive(Debug, Clone, FromRow, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FileRow {
-    pub uuid: String,
-    pub filename: String,
-    pub file_type: String,
-    pub created: String,
-    pub deleted: Option<String>,
-    pub blob: Option<String>,
-    pub s3_key: Option<String>,
-    pub storage_class: Option<String>,
-    pub last_accessed_at: Option<String>,
-    pub access_count_weekly: Option<i32>,
-    pub access_count_total: Option<i32>,
-    pub promoted_to_standard_at: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

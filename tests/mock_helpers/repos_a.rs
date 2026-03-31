@@ -10,25 +10,25 @@ use rust_alc_api::db::repository::car_inspections::{
     CarInspectionFile, CarInspectionRepository, VehicleCategories,
 };
 use rust_alc_api::db::repository::carins_files::CarinsFilesRepository;
+use rust_alc_api::db::repository::carins_files::FileRow;
 use rust_alc_api::db::repository::carrying_items::CarryingItemsRepository;
 use rust_alc_api::db::repository::communication_items::{
     CommunicationItemWithName, CommunicationItemsRepository,
 };
 use rust_alc_api::db::repository::daily_health::DailyHealthRepository;
+use rust_alc_api::db::repository::daily_health::DailyHealthRow;
 use rust_alc_api::db::repository::devices::{
     ApproveLookupRow, ClaimLookupRow, CreateRegistrationResult, DeviceRepository, DeviceRow,
     DeviceSettingsRow, DeviceTenantRow, FcmDeviceRow, FcmTestDeviceRow, OtaDeviceRow,
     RegistrationRequestRow, RegistrationStatusRow,
 };
 use rust_alc_api::db::repository::driver_info::DriverInfoRepository;
+use rust_alc_api::db::repository::driver_info::{
+    DailyInspectionSummary, InstructionSummary, MeasurementSummary,
+};
 use rust_alc_api::db::repository::dtako_csv_proxy::DtakoCsvProxyRepository;
 use rust_alc_api::db::repository::dtako_daily_hours::DtakoDailyHoursRepository;
 use rust_alc_api::db::repository::dtako_drivers::{Driver, DtakoDriversRepository};
-use rust_alc_api::routes::carins_files::FileRow;
-use rust_alc_api::routes::daily_health::DailyHealthRow;
-use rust_alc_api::routes::driver_info::{
-    DailyInspectionSummary, InstructionSummary, MeasurementSummary,
-};
 
 macro_rules! check_fail {
     ($self:expr) => {
