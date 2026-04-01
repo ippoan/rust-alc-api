@@ -17,16 +17,21 @@ impl R2Backend {
         secret_key: String,
         public_url_base: Option<String>,
     ) -> Result<Self, StorageError> {
+        let endpoint = std::env::var("R2_ENDPOINT")
+            .unwrap_or_else(|_| format!("https://{}.r2.cloudflarestorage.com", account_id));
         let region = Region::Custom {
             region: "auto".to_string(),
-            endpoint: format!("https://{}.r2.cloudflarestorage.com", account_id),
+            endpoint,
         };
 
         let credentials = Credentials::new(Some(&access_key), Some(&secret_key), None, None, None)
             .map_err(|e| StorageError::Config(format!("R2 credentials: {e}")))?;
 
-        let bucket = Bucket::new(&bucket_name, region, credentials)
+        let mut bucket = Bucket::new(&bucket_name, region, credentials)
             .map_err(|e| StorageError::Config(format!("R2 bucket: {e}")))?;
+        if std::env::var("R2_PATH_STYLE").is_ok() {
+            bucket = bucket.with_path_style();
+        }
 
         let public_url_base = public_url_base
             .unwrap_or_else(|| format!("https://{}.r2.dev/{}", account_id, bucket_name));
