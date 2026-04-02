@@ -75,27 +75,6 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-        id: setup-buildx
-
-      - name: Cache sccache + cargo
-        uses: actions/cache@v4
-        id: cache
-        with:
-          path: cache-mount
-          key: docker-sccache-${{ hashFiles('Cargo.lock') }}
-          restore-keys: docker-sccache-
-
-      - name: Inject sccache cache into Docker
-        uses: reproducible-containers/buildkit-cache-dance@v3
-        with:
-          builder: ${{ steps.setup-buildx.outputs.name }}
-          cache-map: |
-            {
-              "sccache": "/sccache",
-              "cargo-registry": "/usr/local/cargo/registry",
-              "cargo-git": "/usr/local/cargo/git"
-            }
-          skip-extraction: ${{ steps.cache.outputs.cache-hit }}
 
       - name: Build and push (sha tag)
         uses: docker/build-push-action@v6
