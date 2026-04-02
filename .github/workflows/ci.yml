@@ -66,6 +66,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Restore file timestamps from git
+        run: |
+          git ls-files -z | while IFS= read -r -d '' f; do
+            t=$(git log -1 --format=%ct -- "$f" 2>/dev/null) && [ -n "$t" ] && touch -d @"$t" "$f"
+          done
+
       - uses: dtolnay/rust-toolchain@1.92.0
       - uses: swatinem/rust-cache@v2
 
