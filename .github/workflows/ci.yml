@@ -77,10 +77,12 @@ jobs:
 
       - name: Debug cache state
         run: |
-          echo "=== target/release .fingerprint ==="
-          ls target/release/.fingerprint/ 2>/dev/null | head -20 || echo "NO FINGERPRINTS"
-          echo "=== target/release deps ==="
-          ls target/release/deps/ 2>/dev/null | wc -l || echo "NO DEPS"
+          echo "=== workspace crate fingerprints ==="
+          ls -la target/release/.fingerprint/ | grep -E "alc-|rust-alc" || echo "NO WORKSPACE FINGERPRINTS"
+          echo "=== CARGO_INCREMENTAL ==="
+          echo "$CARGO_INCREMENTAL"
+          echo "=== sample fingerprint content ==="
+          cat target/release/.fingerprint/alc-core-*/lib-alc_core.json 2>/dev/null || echo "NO alc-core fingerprint"
 
       - name: Build release binaries
         run: cargo build --release
