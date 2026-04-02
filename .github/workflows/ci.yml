@@ -63,6 +63,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.92.0
+      - uses: swatinem/rust-cache@v2
       - uses: mozilla-actions/sccache-action@v0.0.9
       - name: Generate TypeScript bindings
         env:
