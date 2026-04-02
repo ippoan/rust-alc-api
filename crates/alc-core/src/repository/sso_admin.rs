@@ -1,8 +1,10 @@
 use async_trait::async_trait;
+use ts_rs::TS;
 use uuid::Uuid;
 
 /// SSO Provider Config の DB 行 (client_secret_encrypted は除外)
-#[derive(Debug, serde::Serialize, Clone, sqlx::FromRow)]
+#[derive(Debug, serde::Serialize, Clone, sqlx::FromRow, TS)]
+#[ts(export)]
 pub struct SsoConfigRow {
     pub provider: String,
     pub client_id: String,

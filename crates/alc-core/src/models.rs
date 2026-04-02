@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
+use ts_rs::TS;
 use uuid::Uuid;
 
 // --- Tenant ---
@@ -16,7 +17,8 @@ pub struct Tenant {
 
 // --- Tenant Allowed Email (招待) ---
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, TS)]
+#[ts(export)]
 pub struct TenantAllowedEmail {
     pub id: Uuid,
     pub tenant_id: Uuid,

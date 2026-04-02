@@ -56,6 +56,25 @@ jobs:
           path: /tmp/llvm-cov-output.txt
           retention-days: 30
 
+
+  ts-bindings:
+    name: TypeScript Bindings
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.92.0
+      - uses: mozilla-actions/sccache-action@v0.0.9
+      - name: Generate TypeScript bindings
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+          RUSTC_WRAPPER: "sccache"
+        run: cargo test export_bindings --workspace
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ts-bindings-${{ github.sha }}
+          path: crates/*/bindings/*.ts
+          retention-days: 90
+
   docker-push:
     name: Docker Image → GHCR
     runs-on: ubuntu-latest
