@@ -75,6 +75,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.92.0
       - uses: swatinem/rust-cache@v2
 
+      - name: Debug cache state
+        run: |
+          echo "=== target/release .fingerprint ==="
+          ls target/release/.fingerprint/ 2>/dev/null | head -20 || echo "NO FINGERPRINTS"
+          echo "=== target/release deps ==="
+          ls target/release/deps/ 2>/dev/null | wc -l || echo "NO DEPS"
+
       - name: Build release binaries
         run: cargo build --release
 
