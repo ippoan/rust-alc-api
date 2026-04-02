@@ -195,8 +195,8 @@ jobs:
 
       - name: Deploy to Cloud Run (multi-container)
         run: |
-          sed -e "s|PLACEHOLDER_APP_IMAGE|ghcr.io/${{ github.repository }}-staging:${{ github.sha }}|" \
-              -e "s|PLACEHOLDER_DB_IMAGE|ghcr.io/${{ github.repository }}-staging-db:latest|" \
+          sed -e "s|PLACEHOLDER_APP_IMAGE|asia-northeast1-docker.pkg.dev/cloudsql-sv/ghcr/${{ github.repository }}-staging:${{ github.sha }}|" \
+              -e "s|PLACEHOLDER_DB_IMAGE|asia-northeast1-docker.pkg.dev/cloudsql-sv/ghcr/${{ github.repository }}-staging-db:latest|" \
               staging/cloudrun-staging.yaml > /tmp/staging-deploy.yaml
 
           gcloud run services replace /tmp/staging-deploy.yaml \
