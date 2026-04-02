@@ -8,5 +8,5 @@ pub fn router() -> Router<AppState> {
 }
 
 async fn health_check() -> Json<Value> {
-    Json(json!({ "status": "ok", "version": env!("CARGO_PKG_VERSION"), "service": "alc-api" }))
+    Json(json!({ "status": "ok", "version": env!("CARGO_PKG_VERSION"), "service": "rust-alc-api" }))
 }
