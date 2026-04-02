@@ -38,8 +38,6 @@ spec:
               value: "ohishi-dtako-staging"
             - name: FCM_PROJECT_ID
               value: "alc-fcm"
-            - name: PORT
-              value: "8080"
             - name: RUST_LOG
               value: "info"
             # Secrets — secretKeyRef で Secret Manager から注入
