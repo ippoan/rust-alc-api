@@ -1,0 +1,47 @@
+name: Cache Cleanup
+
+on:
+  pull_request:
+    types: [closed]
+  schedule:
+    - cron: '0 3 * * 0' # 毎週日曜 03:00 UTC
+
+jobs:
+  cleanup-branch-cache:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Delete caches for closed branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH="refs/pull/${{ github.event.pull_request.number }}/merge"
+          echo "Deleting caches for: $BRANCH"
+          gh cache list --ref "$BRANCH" --json id -q '.[].id' | while read id; do
+            gh cache delete "$id" || true
+          done
+          HEAD_REF="refs/heads/${{ github.event.pull_request.head.ref }}"
+          echo "Deleting caches for: $HEAD_REF"
+          gh cache list --ref "$HEAD_REF" --json id -q '.[].id' | while read id; do
+            gh cache delete "$id" || true
+          done
+
+  cleanup-stale-cache:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Keep only 10 newest caches
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh cache list --json id --sort last_used --order desc --limit 1000 -q '.[].id' \
+            | tail -n +11 | while read id; do
+            echo "Deleting cache: $id"
+            gh cache delete "$id" || true
+          done
