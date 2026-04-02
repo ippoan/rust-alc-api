@@ -73,12 +73,15 @@ jobs:
           done
 
       - uses: dtolnay/rust-toolchain@1.92.0
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-04-01
       - uses: swatinem/rust-cache@v2
         with:
           cache-all-crates: "true"
 
       - name: Build release binaries
-        run: cargo build --release
+        run: cargo +nightly-2026-04-01 -Z checksum-freshness build --release
 
       - name: Prepare Docker context
         run: |
