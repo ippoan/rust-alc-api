@@ -17,6 +17,18 @@ pub struct CarInspectionFile {
     pub deleted_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
+/// car_inspection_files_a/b リンク作成パラメータ
+pub struct CreateFileLinkParams<'a> {
+    pub tenant_id: Uuid,
+    pub file_uuid: Uuid,
+    pub file_type: &'a str,
+    pub elect_cert_mg_no: &'a str,
+    pub grantdate_e: &'a str,
+    pub grantdate_y: &'a str,
+    pub grantdate_m: &'a str,
+    pub grantdate_d: &'a str,
+}
+
 /// 車両カテゴリ集計
 #[derive(Debug, serde::Serialize, sqlx::FromRow)]
 pub struct VehicleCategories {
@@ -52,4 +64,15 @@ pub trait CarInspectionRepository: Send + Sync {
         &self,
         tenant_id: Uuid,
     ) -> Result<Vec<CarInspectionFile>, sqlx::Error>;
+
+    /// 車検証 JSON から UPSERT (95 カラム)
+    async fn upsert_from_json(
+        &self,
+        tenant_id: Uuid,
+        cert_info: &serde_json::Value,
+        cert_info_import_file_version: &str,
+    ) -> Result<(), sqlx::Error>;
+
+    /// car_inspection_files_a/b にリンクレコード挿入
+    async fn create_file_link(&self, params: &CreateFileLinkParams<'_>) -> Result<(), sqlx::Error>;
 }

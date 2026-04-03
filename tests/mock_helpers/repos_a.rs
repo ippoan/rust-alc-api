@@ -431,6 +431,24 @@ impl CarInspectionRepository for MockCarInspectionRepository {
         check_fail!(self);
         Ok(vec![])
     }
+
+    async fn upsert_from_json(
+        &self,
+        _tenant_id: Uuid,
+        _cert_info: &serde_json::Value,
+        _cert_info_import_file_version: &str,
+    ) -> Result<(), sqlx::Error> {
+        check_fail!(self);
+        Ok(())
+    }
+
+    async fn create_file_link(
+        &self,
+        _params: &alc_core::repository::car_inspections::CreateFileLinkParams<'_>,
+    ) -> Result<(), sqlx::Error> {
+        check_fail!(self);
+        Ok(())
+    }
 }
 
 // ============================================================

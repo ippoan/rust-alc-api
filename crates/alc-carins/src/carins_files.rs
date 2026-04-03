@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use alc_core::auth_middleware::TenantId;
+use alc_core::repository::car_inspections::{CarInspectionRepository, CreateFileLinkParams};
 use alc_core::repository::carins_files::FileRow;
 use alc_core::AppState;
 
@@ -213,7 +214,78 @@ async fn create_file(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
+    // JSON ファイルの場合、車検証データをパースして UPSERT + ファイルリンク作成
+    if body.file_type == "application/json" {
+        if let Err(e) = try_parse_car_inspection(
+            state.car_inspections.as_ref(),
+            tenant_id.0,
+            file_uuid,
+            &data,
+            &body.file_type,
+        )
+        .await
+        {
+            tracing::warn!("car inspection parse skipped for {file_uuid}: {e}");
+        }
+    }
+
     Ok((StatusCode::CREATED, Json(row)))
+}
+
+/// 車検証 JSON をパースして car_inspection UPSERT + car_inspection_files_a リンク作成
+async fn try_parse_car_inspection(
+    repo: &dyn CarInspectionRepository,
+    tenant_id: Uuid,
+    file_uuid: Uuid,
+    data: &[u8],
+    file_type: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let json: serde_json::Value = serde_json::from_slice(data)?;
+
+    let cert_info = json.get("CertInfo").ok_or("missing CertInfo")?;
+
+    let elect_cert_mg_no = cert_info
+        .get("ElectCertMgNo")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .ok_or("missing or empty ElectCertMgNo")?;
+
+    let version = json
+        .get("CertInfoImportFileVersion")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    // GrantdateE/Y/M/D をスペース除去して取得
+    let grantdate_e = strip_spaces_field(cert_info, "GrantdateE");
+    let grantdate_y = strip_spaces_field(cert_info, "GrantdateY");
+    let grantdate_m = strip_spaces_field(cert_info, "GrantdateM");
+    let grantdate_d = strip_spaces_field(cert_info, "GrantdateD");
+
+    repo.upsert_from_json(tenant_id, cert_info, version).await?;
+
+    repo.create_file_link(&CreateFileLinkParams {
+        tenant_id,
+        file_uuid,
+        file_type,
+        elect_cert_mg_no,
+        grantdate_e: &grantdate_e,
+        grantdate_y: &grantdate_y,
+        grantdate_m: &grantdate_m,
+        grantdate_d: &grantdate_d,
+    })
+    .await?;
+
+    tracing::info!(
+        "car inspection parsed: ElectCertMgNo={}, file={}",
+        elect_cert_mg_no,
+        file_uuid
+    );
+    Ok(())
+}
+
+fn strip_spaces_field(v: &serde_json::Value, key: &str) -> String {
+    let s = v.get(key).and_then(|v| v.as_str()).unwrap_or("");
+    s.replace([' ', '\u{3000}'], "")
 }
 
 async fn delete_file(
