@@ -116,10 +116,28 @@ jobs:
 
       - uses: swatinem/rust-cache@v2
 
+      - name: Resolve git info
+        id: git-info
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          SHA="${{ github.sha }}"
+          echo "sha=${SHA:0:7}" >> "$GITHUB_OUTPUT"
+          # PR title if available
+          REF=""
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            REF="${{ github.event.pull_request.title }}"
+          else
+            REF=$(gh api "repos/${{ github.repository }}/commits/$SHA/pulls" -q '.[0].title // ""' 2>/dev/null || echo "")
+          fi
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+
       - name: Build release binaries
         env:
           SCCACHE_GHA_ENABLED: "true"
           RUSTC_WRAPPER: "sccache"
+          GIT_SHA: ${{ steps.git-info.outputs.sha }}
+          GIT_REF: ${{ steps.git-info.outputs.ref }}
         run: cargo build --release
 
       - name: Prepare Docker context
