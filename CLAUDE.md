@@ -540,6 +540,124 @@ gh pr merge <PR番号> --squash
 - 完了後の worktree クリーンアップ: `git worktree remove .claude/worktrees/<name>` + `git branch -d fix/test_<name>`
 - **worktree 削除前に必ず `cd /home/yhonda/rust/rust-alc-api`** すること — シェルの cwd が worktree 内だと削除時に `getcwd` が失敗しセッションが切断される
 
+## ステージング環境
+
+PR を main に向けると CI が自動で staging 環境にデプロイする。本番とは独立したインフラ。
+
+### インフラ構成
+
+| コンポーネント | staging | 本番 |
+|---|---|---|
+| **API** | Cloud Run `rust-alc-api-staging` (multi-container + PostgreSQL sidecar) | Cloud Run `rust-alc-api` |
+| **DB** | CloudSQL Postgres (staging スキーマ) | Supabase PostgreSQL |
+| **Frontend (alc-app)** | Cloudflare Workers `alc-app-staging` | Cloudflare Workers `alc-app` |
+| **Auth** | Cloudflare Workers `auth-worker-staging` | Cloudflare Workers `auth-worker` |
+| **ストレージ** | Cloudflare R2 (staging バケット) | Cloudflare R2 (本番バケット) |
+
+### URL
+
+| サービス | URL |
+|---|---|
+| API (staging) | `https://rust-alc-api-staging-566bls5vfq-an.a.run.app` |
+| Frontend (staging) | `https://alc-app-staging.m-tama-ramu.workers.dev` |
+| Auth Worker (staging) | `https://auth-worker-staging.m-tama-ramu.workers.dev` |
+
+### 認証フロー (staging)
+
+staging の alc-app は2つの認証モードをサポート:
+
+1. **Auth バイパスモード** (デフォルト): `NUXT_PUBLIC_STAGING_TENANT_ID` で固定 tenant_id を設定。ログイン不要で X-Tenant-ID ヘッダーで直接アクセス
+2. **Google OAuth モード**: ログイン画面の Google ログインボタンで認証。auth-worker-staging → Google OAuth → rust-alc-api-staging
+
+```
+[alc-app-staging]
+  ├── Auth バイパス: X-Tenant-ID ヘッダーで直接 API アクセス
+  └── Google OAuth: accounts.google.com → /auth/callback → rust-alc-api-staging /api/auth/google/code
+```
+
+### データ永続性
+
+staging の PostgreSQL は Cloud Run sidecar コンテナ + `emptyDir` ボリューム。**データは揮発性**。
+- `minScale: "0"` → アイドル約15分でインスタンス停止 → DB データ消失
+- 次のリクエストでコールドスタート → マイグレーションで DB スキーマは再作成されるが、ユーザーデータ（テナント、ユーザー登録等）は消える
+- OAuth で登録したユーザーも消える
+- テスト環境としてはベスト: 毎回クリーンな DB から始まるので汚れたデータが残らない
+- 永続データが必要な場合のみ `minScale: "1"` や Cloud SQL を検討
+
+### Staging Export/Import API
+
+揮発性 DB のデータ復元用 API。`STAGING_MODE=true` 環境変数でガード（本番では 404）。
+
+| エンドポイント | 用途 |
+|---|---|
+| `GET /api/staging/export?tenant_id=<uuid>` | テナントデータを JSON ダンプ |
+| `POST /api/staging/import` | JSON からリストア (べき等、ON CONFLICT DO UPDATE) |
+
+**Export 対象テーブル:** tenants, users, employees (face_embedding 含む), devices, tenko_schedules, webhook_configs, tenant_allowed_emails, sso_provider_configs, tenko_call_numbers, tenko_call_drivers
+
+**対象外:** measurements, tenko_sessions, tenko_records, time_punches, file_access_logs（履歴データ）
+
+- 実装: `crates/alc-misc/src/staging.rs`
+- テストデータ: `staging/test-data.json` (tenant_id `11111111-...`)
+- Import はトランザクション内で tenant → set_current_tenant → 残りテーブルの順で実行
+- 認証不要 (public route)、環境変数ガードのみ
+
+### Auth バイパスモード (alc-app)
+
+`NUXT_PUBLIC_STAGING_TENANT_ID` が設定されている場合、OAuth なしでキオスクモード (`activateDevice`) を自動有効化。
+
+- `useAuth.ts` の `init()` で stagingTenantId があれば `activateDevice()` を呼ぶ
+- `auth.global.ts` ミドルウェアで stagingTenantId 設定時は認証スキップ
+- API リクエストは `X-Tenant-ID` ヘッダー経由（JWT 不要）
+
+### StagingFooter 共有コンポーネント
+
+`@yhonda-ohishi-pub-dev/auth-client` パッケージ (`auth-worker/packages/auth-client/`) に `StagingFooter.vue` を追加。
+alc-app の `app.vue` で使用。staging 時のみ黄色バーを表示し、Export/Import ボタンを提供。
+
+### Playwright E2E テスト (alc-app)
+
+staging 環境に対する E2E テスト。CLI でローカル実行（CI ジョブなし）。
+
+```bash
+cd /home/yhonda/js/alc-app/web
+npx playwright test
+```
+
+- 設定: `web/playwright.config.ts`
+- テスト: `web/tests/e2e/staging-bootstrap.spec.ts`
+- ヘルパー: `web/tests/e2e/helpers/staging.ts` (wakeUpStaging, importTestData)
+- テストデータ: `web/tests/e2e/fixtures/test-data.json`
+- フロー: staging wake up → import → auth バイパスでページ表示確認
+
+### CI 自動デプロイ
+
+- **rust-alc-api**: PR to main → `ci.yml` の `deploy-staging` ジョブ → Cloud Run staging
+  - Docker イメージは GHCR に push → Artifact Registry リモートリポジトリ (`asia-northeast1-docker.pkg.dev/cloudsql-sv/ghcr/`) 経由で Cloud Run が pull
+- **alc-app**: PR to main → `test.yml` の `deploy-staging` ジョブ → `wrangler deploy --env staging`
+
+### Secrets / 環境変数
+
+**rust-alc-api staging** (Cloud Run → Secret Manager):
+- `alc-api-staging-jwt-secret`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
+- `alc-r2-access-key`, `alc-r2-secret-key`, `alc-oauth-state-secret`
+- `carins-r2-access-key`, `carins-r2-secret-key`, `dtako-r2-access-key`, `dtako-r2-secret-key`
+- SA `747065218280-compute@developer.gserviceaccount.com` に `secretmanager.secretAccessor` 付与済み
+- SA `staging-deploy@cloudsql-sv.iam.gserviceaccount.com` に Artifact Registry `artifactregistry.reader` 付与済み
+
+**alc-app staging** (Cloudflare Workers → wrangler.jsonc `env.staging.vars`):
+- `NUXT_PUBLIC_API_BASE`: staging Cloud Run URL
+- `NUXT_PUBLIC_AUTH_WORKER_URL`: auth-worker-staging URL
+- `NUXT_PUBLIC_STAGING_TENANT_ID`: auth バイパス用固定 tenant_id
+- `NUXT_PUBLIC_GOOGLE_CLIENT_ID`: Google OAuth Client ID
+
+**auth-worker staging** (Cloudflare Workers → `wrangler secret`):
+- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `OAUTH_STATE_SECRET` (本番と同一値)
+
+**Google OAuth**: 承認済みリダイレクト URI に以下を追加済み:
+- `https://auth-worker-staging.m-tama-ramu.workers.dev/oauth/google/callback`
+- `https://alc-app-staging.m-tama-ramu.workers.dev/auth/callback`
+
 ## デプロイルール
 
 - コードの修正・変更が完了したら、デプロイするかどうかを **AskUserQuestion ツールの選択肢形式** で確認すること

@@ -25,6 +25,7 @@ pub use alc_misc::guidance_records;
 pub use alc_misc::health;
 pub use alc_misc::measurements;
 pub use alc_misc::sso_admin;
+pub use alc_misc::staging;
 pub use alc_misc::tenant_users;
 pub use alc_misc::timecard;
 pub use alc_misc::upload;
@@ -93,7 +94,8 @@ pub fn router() -> Router<AppState> {
         .merge(health::router())
         .merge(auth::public_router())
         .merge(tenko_call::public_router())
-        .merge(devices::public_router());
+        .merge(devices::public_router())
+        .merge(staging::router());
 
     Router::new()
         .merge(public_routes)

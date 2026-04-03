@@ -9,6 +9,7 @@ pub mod health;
 pub mod measurements;
 pub mod repo;
 pub mod sso_admin;
+pub mod staging;
 pub mod tenant_users;
 pub mod timecard;
 pub mod upload;

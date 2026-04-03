@@ -1,0 +1,130 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: rust-alc-api-staging
+  labels:
+    cloud.googleapis.com/location: asia-northeast1
+  annotations:
+    run.googleapis.com/launch-stage: BETA
+spec:
+  template:
+    metadata:
+      annotations:
+        run.googleapis.com/container-dependencies: '{"app":["postgres"]}'
+        autoscaling.knative.dev/maxScale: "1"
+        autoscaling.knative.dev/minScale: "0"
+    spec:
+      containerConcurrency: 80
+      timeoutSeconds: 300
+      containers:
+        - name: app
+          image: PLACEHOLDER_APP_IMAGE
+          ports:
+            - containerPort: 8080
+          env:
+            - name: DATABASE_URL
+              value: "postgresql://postgres:staging@localhost:5432/postgres?options=-c search_path=alc_api"
+            - name: STORAGE_BACKEND
+              value: "r2"
+            - name: R2_BUCKET
+              value: "alc-face-photos-staging"
+            - name: R2_ACCOUNT_ID
+              value: "24b45709d060d957340180e995f0d373"
+            - name: API_ORIGIN
+              value: "PLACEHOLDER_STAGING_URL"
+            - name: CARINS_R2_BUCKET
+              value: "carins-files-staging"
+            - name: DTAKO_R2_BUCKET
+              value: "ohishi-dtako-staging"
+            - name: FCM_PROJECT_ID
+              value: "alc-fcm"
+            - name: STAGING_MODE
+              value: "true"
+            - name: RUST_LOG
+              value: "info"
+            # Secrets — secretKeyRef で Secret Manager から注入
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: alc-api-staging-jwt-secret
+            - name: GOOGLE_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: GOOGLE_CLIENT_ID
+            - name: GOOGLE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: GOOGLE_CLIENT_SECRET
+            - name: R2_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: alc-r2-access-key
+            - name: R2_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: alc-r2-secret-key
+            - name: OAUTH_STATE_SECRET
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: alc-oauth-state-secret
+            - name: CARINS_R2_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: carins-r2-access-key
+            - name: CARINS_R2_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: carins-r2-secret-key
+            - name: DTAKO_R2_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: dtako-r2-access-key
+            - name: DTAKO_R2_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: dtako-r2-secret-key
+          resources:
+            limits:
+              memory: 512Mi
+              cpu: "1"
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 3
+            failureThreshold: 20
+        - name: postgres
+          image: PLACEHOLDER_DB_IMAGE
+          env:
+            - name: POSTGRES_PASSWORD
+              value: "staging"
+            - name: POSTGRES_HOST_AUTH_METHOD
+              value: "trust"
+          resources:
+            limits:
+              memory: 512Mi
+              cpu: "1"
+          startupProbe:
+            tcpSocket:
+              port: 5432
+            initialDelaySeconds: 2
+            periodSeconds: 2
+            failureThreshold: 15
+          volumeMounts:
+            - name: pg-data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: pg-data
+          emptyDir:
+            sizeLimit: 1Gi
