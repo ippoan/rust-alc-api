@@ -263,8 +263,11 @@ jobs:
           APP_IMAGE="${AR_PREFIX}/ghcr.io/${{ github.repository }}-staging:${{ github.sha }}"
           DB_IMAGE="${AR_PREFIX}/ghcr.io/${{ github.repository }}-staging-db:latest"
 
+          STAGING_URL="${{ vars.STAGING_API_URL }}"
+
           sed -e "s|PLACEHOLDER_APP_IMAGE|${APP_IMAGE}|" \
               -e "s|PLACEHOLDER_DB_IMAGE|${DB_IMAGE}|" \
+              -e "s|PLACEHOLDER_STAGING_URL|${STAGING_URL}|" \
               staging/cloudrun-staging.yaml > /tmp/staging-deploy.yaml
 
           gcloud run services replace /tmp/staging-deploy.yaml \
