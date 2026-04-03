@@ -26,7 +26,8 @@ struct SearchQuery {
     uuid: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ts_rs::TS)]
+#[ts(export, rename = "NfcTagSearchResponse")]
 struct SearchResponse {
     nfc_tag: NfcTag,
     car_inspection: Option<serde_json::Value>,

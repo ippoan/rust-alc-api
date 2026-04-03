@@ -23,7 +23,8 @@ pub fn tenant_router() -> Router<AppState> {
         .route("/files/{uuid}/restore", post(restore_file))
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ts_rs::TS)]
+#[ts(export, rename = "FileListResponse")]
 struct ListResponse {
     files: Vec<FileRow>,
 }

@@ -907,7 +907,8 @@ pub struct DtakoSegmentsResponse {
 
 // --- NFC Tag ---
 
-#[derive(Debug, Clone, sqlx::FromRow, serde::Serialize)]
+#[derive(Debug, Clone, sqlx::FromRow, serde::Serialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct NfcTag {
     pub id: i32,

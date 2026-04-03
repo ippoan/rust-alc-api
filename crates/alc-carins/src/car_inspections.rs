@@ -21,7 +21,8 @@ pub fn tenant_router() -> Router<AppState> {
         .route("/car-inspections/{id}", get(get_by_id))
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ts_rs::TS)]
+#[ts(export, rename = "CarInspectionListResponse")]
 struct ListResponse {
     #[serde(rename = "carInspections")]
     car_inspections: Vec<serde_json::Value>,
