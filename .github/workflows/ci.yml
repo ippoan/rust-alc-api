@@ -15,18 +15,7 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - name: Check open PRs by same author
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          AUTHOR="${{ github.event.pull_request.user.login }}"
-          THIS_PR="${{ github.event.pull_request.number }}"
-          COUNT=$(gh pr list --repo "${{ github.repository }}" --state open --author "$AUTHOR" --json number -q "[ .[] | select(.number != $THIS_PR) ] | length")
-          if [ "$COUNT" -gt 0 ]; then
-            echo "::error::$AUTHOR has $COUNT other open PR(s). Close or merge them before creating a new one."
-            gh pr list --repo "${{ github.repository }}" --state open --author "$AUTHOR" --json number,title -q ".[] | select(.number != $THIS_PR) | \"  #\\(.number) \\(.title)\""
-            exit 1
-          fi
+      - uses: yhonda-ohishi-alc/alc-app/.github/actions/pr-limit@main
 
   check:
     name: Format & Lint
