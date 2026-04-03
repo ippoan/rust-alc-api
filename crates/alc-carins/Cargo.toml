@@ -15,3 +15,5 @@ serde_json = "1"
 tracing = "0.1"
 ts-rs = { version = "10", features = ["chrono-impl", "uuid-impl", "serde-json-impl"] }
 uuid = { version = "1", features = ["v4", "serde"] }
+pdf-extract = "0.7"
+regex = "1"
