@@ -429,7 +429,8 @@ impl DtakoLogsRepository for PgDtakoLogsRepository {
         let sql = format!(
             r#"SELECT {SELECT_COLS_SIMPLE}
                FROM alc_api.dtakologs
-               WHERE data_date_time >= $1 AND data_date_time <= $2
+               WHERE data_date_time::timestamptz >= $1::timestamptz
+                 AND data_date_time::timestamptz <= $2::timestamptz
                  AND ($3::INTEGER IS NULL OR vehicle_cd = $3)
                ORDER BY data_date_time DESC"#
         );
