@@ -18,6 +18,13 @@ impl PgDtakoLogsRepository {
 }
 
 const SELECT_COLS: &str = r#"
+    d.gps_direction, d.gps_latitude, d.gps_longitude, d.vehicle_cd,
+    d.vehicle_name, d.driver_name, d.address_disp_c, d.data_date_time,
+    d.address_disp_p, d.sub_driver_cd, d.all_state, d.recive_type_color_name,
+    d.all_state_ex, d.state2, d.all_state_font_color, d.speed
+"#;
+
+const SELECT_COLS_SIMPLE: &str = r#"
     gps_direction, gps_latitude, gps_longitude, vehicle_cd,
     vehicle_name, driver_name, address_disp_c, data_date_time,
     address_disp_p, sub_driver_cd, all_state, recive_type_color_name,
@@ -53,7 +60,7 @@ impl DtakoLogsRepository for PgDtakoLogsRepository {
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
         if let Some(vc) = vehicle_cd {
             let sql = format!(
-                r#"SELECT {SELECT_COLS}
+                r#"SELECT {SELECT_COLS_SIMPLE}
                    FROM alc_api.dtakologs
                    WHERE data_date_time = $1 AND vehicle_cd = $2
                    ORDER BY data_date_time DESC"#
@@ -65,7 +72,7 @@ impl DtakoLogsRepository for PgDtakoLogsRepository {
                 .await
         } else {
             let sql = format!(
-                r#"SELECT {SELECT_COLS}
+                r#"SELECT {SELECT_COLS_SIMPLE}
                    FROM alc_api.dtakologs
                    WHERE data_date_time = $1
                    ORDER BY data_date_time DESC"#
@@ -121,7 +128,7 @@ impl DtakoLogsRepository for PgDtakoLogsRepository {
     ) -> Result<Vec<DtakologRow>, sqlx::Error> {
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
         let sql = format!(
-            r#"SELECT {SELECT_COLS}
+            r#"SELECT {SELECT_COLS_SIMPLE}
                FROM alc_api.dtakologs
                WHERE data_date_time >= $1 AND data_date_time <= $2
                  AND ($3::INTEGER IS NULL OR vehicle_cd = $3)
