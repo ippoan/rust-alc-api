@@ -340,3 +340,130 @@ async fn get_by_date_range_db_error_returns_500() {
 
     assert_eq!(res.status(), 500);
 }
+
+// =============================================================================
+// POST /api/dtako-logs/bulk
+// =============================================================================
+
+fn sample_bulk_body() -> serde_json::Value {
+    serde_json::json!([{
+        "DataDateTime": "2024-11-28T10:37:00+09:00",
+        "VehicleCD": 1,
+        "__type": "Vehicle",
+        "VehicleName": "Truck-1",
+        "DriverName": "Driver A",
+        "GPSDirection": 180,
+        "GPSLatitude": 35123456,
+        "GPSLongitude": 139123456,
+        "Speed": 60.5,
+        "AllState": "Drive",
+        "AddressDispP": "Shibuya"
+    }])
+}
+
+#[tokio::test]
+async fn bulk_upsert_success() {
+    let state = setup_mock_app_state();
+    let base_url = crate::common::spawn_test_server(state).await;
+    let client = reqwest::Client::new();
+    let tenant_id = uuid::Uuid::new_v4();
+    let token = crate::common::create_test_jwt(tenant_id, "admin");
+
+    let res = client
+        .post(format!("{base_url}/api/dtako-logs/bulk"))
+        .header("Authorization", format!("Bearer {token}"))
+        .json(&sample_bulk_body())
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["success"], true);
+    assert_eq!(body["records_added"], 1);
+    assert_eq!(body["total_records"], 1);
+}
+
+#[tokio::test]
+async fn bulk_upsert_empty_array() {
+    let state = setup_mock_app_state();
+    let base_url = crate::common::spawn_test_server(state).await;
+    let client = reqwest::Client::new();
+    let tenant_id = uuid::Uuid::new_v4();
+    let token = crate::common::create_test_jwt(tenant_id, "admin");
+
+    let res = client
+        .post(format!("{base_url}/api/dtako-logs/bulk"))
+        .header("Authorization", format!("Bearer {token}"))
+        .json(&serde_json::json!([]))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["success"], true);
+    assert_eq!(body["records_added"], 0);
+    assert_eq!(body["total_records"], 0);
+}
+
+#[tokio::test]
+async fn bulk_upsert_no_auth_returns_401() {
+    let state = setup_mock_app_state();
+    let base_url = crate::common::spawn_test_server(state).await;
+    let client = reqwest::Client::new();
+
+    let res = client
+        .post(format!("{base_url}/api/dtako-logs/bulk"))
+        .json(&sample_bulk_body())
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 401);
+}
+
+#[tokio::test]
+async fn bulk_upsert_db_error_returns_500() {
+    let mock = Arc::new(MockDtakoLogsRepository::default());
+    mock.fail_next.store(true, Ordering::SeqCst);
+
+    let mut state = setup_mock_app_state();
+    state.dtako_logs = mock;
+
+    let base_url = crate::common::spawn_test_server(state).await;
+    let client = reqwest::Client::new();
+    let tenant_id = uuid::Uuid::new_v4();
+    let token = crate::common::create_test_jwt(tenant_id, "admin");
+
+    let res = client
+        .post(format!("{base_url}/api/dtako-logs/bulk"))
+        .header("Authorization", format!("Bearer {token}"))
+        .json(&sample_bulk_body())
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 500);
+}
+
+#[tokio::test]
+async fn bulk_upsert_with_tenant_header_returns_200() {
+    let state = setup_mock_app_state();
+    let base_url = crate::common::spawn_test_server(state).await;
+    let client = reqwest::Client::new();
+    let tenant_id = uuid::Uuid::new_v4();
+
+    let res = client
+        .post(format!("{base_url}/api/dtako-logs/bulk"))
+        .header("X-Tenant-ID", tenant_id.to_string())
+        .json(&sample_bulk_body())
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["success"], true);
+    assert_eq!(body["records_added"], 1);
+}
