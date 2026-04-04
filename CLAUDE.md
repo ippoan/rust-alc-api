@@ -374,19 +374,10 @@ Google OAuth 以外の端末登録フローを3種類サポート。
 
 ## 既知の RLS / 権限問題
 
-### devices テーブル: SELECT ポリシーがテナント分離を無効化
+いずれも修正済み。
 
-- `migrations/040_devices_select_by_id_policy.sql` で `device_select_by_id ON alc_api.devices FOR SELECT USING (true)` を追加
-- これにより `tenant_isolation_devices` (`USING (tenant_id = current_setting(...))`) が SELECT で無効化される
-- PostgreSQL は同一コマンドの複数ポリシーを OR で評価するため、`true` があると全行が見える
-- **影響**: `list_devices` が全テナントのデバイスを返す。UPDATE/DELETE も `device_select_by_id` の USING(true) で行が見つかるため、他テナントのデバイスを変更可能
-- **対策案**: `device_select_by_id` を `FOR SELECT USING (id = ANY(...))` に制限するか、`list_devices` クエリに `WHERE tenant_id = $1` を明示追加
-
-### tenko_call_numbers テーブル: INSERT/DELETE 権限なし
-
-- `migrations/031_tenko_call_numbers.sql` で `GRANT SELECT` のみ付与、INSERT/UPDATE/DELETE なし
-- `create_number` / `delete_number` エンドポイントが本番で 500 になる
-- **対策**: `GRANT INSERT, UPDATE, DELETE ON tenko_call_numbers TO alc_api_app` + SEQUENCE 権限追加
+- **devices テーブル SELECT ポリシー**: `migrations/063_fix_devices_select_policy.sql` で `USING(true)` を DROP し、SECURITY DEFINER 関数 (`lookup_device_tenant`, `get_device_settings_by_id`) に置換済み
+- **tenko_call_numbers INSERT/DELETE 権限**: `migrations/064_fix_tenko_call_numbers_grants.sql` で GRANT 追加済み
 
 ## テスト
 
