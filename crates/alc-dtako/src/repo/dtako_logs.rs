@@ -58,10 +58,10 @@ impl DtakoLogsRepository for PgDtakoLogsRepository {
             let mut data_filter_type: Vec<i32> = Vec::with_capacity(chunk.len());
             let mut disp_flag: Vec<i32> = Vec::with_capacity(chunk.len());
             let mut driver_cd: Vec<i32> = Vec::with_capacity(chunk.len());
-            let mut gps_direction: Vec<i32> = Vec::with_capacity(chunk.len());
+            let mut gps_direction: Vec<f64> = Vec::with_capacity(chunk.len());
             let mut gps_enable: Vec<i32> = Vec::with_capacity(chunk.len());
-            let mut gps_latitude: Vec<i32> = Vec::with_capacity(chunk.len());
-            let mut gps_longitude: Vec<i32> = Vec::with_capacity(chunk.len());
+            let mut gps_latitude: Vec<f64> = Vec::with_capacity(chunk.len());
+            let mut gps_longitude: Vec<f64> = Vec::with_capacity(chunk.len());
             let mut gps_satellite_num: Vec<i32> = Vec::with_capacity(chunk.len());
             let mut operation_state: Vec<i32> = Vec::with_capacity(chunk.len());
             let mut recive_event_type: Vec<i32> = Vec::with_capacity(chunk.len());
