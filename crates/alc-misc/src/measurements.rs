@@ -60,15 +60,8 @@ async fn update_measurement(
     State(state): State<AppState>,
     tenant: axum::Extension<TenantId>,
     Path(id): Path<Uuid>,
-    raw_body: String,
+    Json(body): Json<UpdateMeasurement>,
 ) -> Result<Json<Measurement>, StatusCode> {
-    let body: UpdateMeasurement = match serde_json::from_str(&raw_body) {
-        Ok(b) => b,
-        Err(e) => {
-            tracing::error!("update_measurement deserialize error: {e}, body: {raw_body}");
-            return Err(StatusCode::UNPROCESSABLE_ENTITY);
-        }
-    };
     let tenant_id = tenant.0 .0;
 
     if let Some(ref rt) = body.result_type {
@@ -102,15 +95,8 @@ async fn update_measurement(
 async fn create_measurement(
     State(state): State<AppState>,
     tenant: axum::Extension<TenantId>,
-    raw_body: String,
+    Json(body): Json<CreateMeasurement>,
 ) -> Result<(StatusCode, Json<Measurement>), StatusCode> {
-    let body: CreateMeasurement = match serde_json::from_str(&raw_body) {
-        Ok(b) => b,
-        Err(e) => {
-            tracing::error!("create_measurement deserialize error: {e}, body: {raw_body}");
-            return Err(StatusCode::UNPROCESSABLE_ENTITY);
-        }
-    };
     let tenant_id = tenant.0 .0;
 
     let valid_results = ["pass", "fail", "normal", "over", "error"];
