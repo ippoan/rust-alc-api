@@ -111,7 +111,7 @@ async fn test_create_measurement_invalid_result_type() {
 }
 
 // =========================================================================
-// POST /api/measurements — invalid JSON (422)
+// POST /api/measurements — invalid JSON (400)
 // =========================================================================
 
 #[tokio::test]
@@ -134,7 +134,7 @@ async fn test_create_measurement_invalid_json() {
         .await
         .unwrap();
 
-    assert_eq!(res.status(), 422);
+    assert_eq!(res.status(), 400);
 }
 
 // =========================================================================
@@ -564,7 +564,7 @@ async fn test_update_measurement_invalid_status() {
 }
 
 // =========================================================================
-// PUT /api/measurements/{id} — invalid JSON (422)
+// PUT /api/measurements/{id} — invalid JSON (400)
 // =========================================================================
 
 #[tokio::test]
@@ -588,7 +588,7 @@ async fn test_update_measurement_invalid_json() {
         .await
         .unwrap();
 
-    assert_eq!(res.status(), 422);
+    assert_eq!(res.status(), 400);
 }
 
 // =========================================================================
