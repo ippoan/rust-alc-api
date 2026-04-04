@@ -1074,9 +1074,9 @@ pub struct UpdateCommunicationItem {
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
 pub struct DtakologRow {
-    pub gps_direction: i32,
-    pub gps_latitude: i32,
-    pub gps_longitude: i32,
+    pub gps_direction: f64,
+    pub gps_latitude: f64,
+    pub gps_longitude: f64,
     pub vehicle_cd: i32,
     pub vehicle_name: String,
     pub driver_name: Option<String>,
@@ -1097,11 +1097,11 @@ pub struct DtakologRow {
 #[serde(rename_all = "PascalCase")]
 pub struct DtakologView {
     #[serde(rename = "GPSDirection")]
-    pub gps_direction: i32,
+    pub gps_direction: f64,
     #[serde(rename = "GPSLatitude")]
-    pub gps_latitude: i32,
+    pub gps_latitude: f64,
     #[serde(rename = "GPSLongitude")]
-    pub gps_longitude: i32,
+    pub gps_longitude: f64,
     #[serde(rename = "VehicleCD")]
     pub vehicle_cd: i32,
     pub vehicle_name: String,
@@ -1204,13 +1204,13 @@ pub struct DtakologInput {
     #[serde(rename = "DriverCD", default)]
     pub driver_cd: i32,
     #[serde(rename = "GPSDirection", default)]
-    pub gps_direction: i32,
+    pub gps_direction: f64,
     #[serde(rename = "GPSEnable", default)]
     pub gps_enable: i32,
     #[serde(rename = "GPSLatitude", default)]
-    pub gps_latitude: i32,
+    pub gps_latitude: f64,
     #[serde(rename = "GPSLongitude", default)]
-    pub gps_longitude: i32,
+    pub gps_longitude: f64,
     #[serde(rename = "GPSSatelliteNum", default)]
     pub gps_satellite_num: i32,
     #[serde(default)]
@@ -1293,9 +1293,9 @@ mod dtakolog_tests {
 
     fn make_row(all_state: Option<&str>, state2: Option<&str>, speed: f32) -> DtakologRow {
         DtakologRow {
-            gps_direction: 180,
-            gps_latitude: 35123456,
-            gps_longitude: 139123456,
+            gps_direction: 180.0,
+            gps_latitude: 35123456.0,
+            gps_longitude: 139123456.0,
             vehicle_cd: 1,
             vehicle_name: "Truck-1".into(),
             driver_name: Some("Driver A".into()),
