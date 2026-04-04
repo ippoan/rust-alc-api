@@ -339,7 +339,7 @@ impl DtakoLogsRepository for PgDtakoLogsRepository {
                    GROUP BY vehicle_cd
                ) latest ON d.vehicle_cd = latest.vehicle_cd
                        AND d.data_date_time = latest.max_dt
-               ORDER BY d.data_date_time DESC"#
+               ORDER BY d.vehicle_cd"#
         );
         sqlx::query_as::<_, DtakologRow>(&sql)
             .fetch_all(&mut *tc.conn)
@@ -399,7 +399,7 @@ impl DtakoLogsRepository for PgDtakoLogsRepository {
                WHERE ($1::TEXT IS NULL OR d.address_disp_p = $1)
                  AND ($2::INTEGER IS NULL OR d.branch_cd = $2)
                  AND ($3::INTEGER[] IS NULL OR array_length($3, 1) IS NULL OR d.vehicle_cd = ANY($3))
-               ORDER BY d.data_date_time DESC"#
+               ORDER BY d.vehicle_cd"#
         );
         let vehicle_cds_param: Option<&[i32]> = if vehicle_cds.is_empty() {
             None
