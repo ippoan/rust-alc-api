@@ -1,10 +1,16 @@
 use async_trait::async_trait;
 use uuid::Uuid;
 
-use crate::models::DtakologRow;
+use crate::models::{DtakologInput, DtakologRow};
 
 #[async_trait]
 pub trait DtakoLogsRepository: Send + Sync {
+    async fn bulk_upsert(
+        &self,
+        tenant_id: Uuid,
+        records: &[DtakologInput],
+    ) -> Result<u64, sqlx::Error>;
+
     async fn current_list_all(&self, tenant_id: Uuid) -> Result<Vec<DtakologRow>, sqlx::Error>;
 
     async fn get_date(
