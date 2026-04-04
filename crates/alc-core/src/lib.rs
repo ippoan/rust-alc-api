@@ -23,13 +23,13 @@ use repository::{
     AuthRepository, BotAdminRepository, CarInspectionRepository, CarinsFilesRepository,
     CarryingItemsRepository, CommunicationItemsRepository, DailyHealthRepository, DeviceRepository,
     DriverInfoRepository, DtakoCsvProxyRepository, DtakoDailyHoursRepository,
-    DtakoDriversRepository, DtakoEventClassificationsRepository, DtakoOperationsRepository,
-    DtakoRestraintReportPdfRepository, DtakoRestraintReportRepository, DtakoScraperRepository,
-    DtakoUploadRepository, DtakoVehiclesRepository, DtakoWorkTimesRepository, EmployeeRepository,
-    EquipmentFailuresRepository, GuidanceRecordsRepository, HealthBaselinesRepository,
-    MeasurementsRepository, NfcTagRepository, SsoAdminRepository, TenantUsersRepository,
-    TenkoCallRepository, TenkoRecordsRepository, TenkoSchedulesRepository, TenkoSessionRepository,
-    TenkoWebhooksRepository, TimecardRepository,
+    DtakoDriversRepository, DtakoEventClassificationsRepository, DtakoLogsRepository,
+    DtakoOperationsRepository, DtakoRestraintReportPdfRepository, DtakoRestraintReportRepository,
+    DtakoScraperRepository, DtakoUploadRepository, DtakoVehiclesRepository,
+    DtakoWorkTimesRepository, EmployeeRepository, EquipmentFailuresRepository,
+    GuidanceRecordsRepository, HealthBaselinesRepository, MeasurementsRepository, NfcTagRepository,
+    SsoAdminRepository, TenantUsersRepository, TenkoCallRepository, TenkoRecordsRepository,
+    TenkoSchedulesRepository, TenkoSessionRepository, TenkoWebhooksRepository, TimecardRepository,
 };
 use storage::StorageBackend;
 
@@ -47,6 +47,7 @@ pub struct AppState {
     pub driver_info: Arc<dyn DriverInfoRepository>,
     pub dtako_csv_proxy: Arc<dyn DtakoCsvProxyRepository>,
     pub dtako_daily_hours: Arc<dyn DtakoDailyHoursRepository>,
+    pub dtako_logs: Arc<dyn DtakoLogsRepository>,
     pub dtako_drivers: Arc<dyn DtakoDriversRepository>,
     pub dtako_event_classifications: Arc<dyn DtakoEventClassificationsRepository>,
     pub dtako_operations: Arc<dyn DtakoOperationsRepository>,

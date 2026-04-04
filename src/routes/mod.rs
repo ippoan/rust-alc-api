@@ -8,6 +8,7 @@ pub use alc_dtako::dtako_csv_proxy;
 pub use alc_dtako::dtako_daily_hours;
 pub use alc_dtako::dtako_drivers;
 pub use alc_dtako::dtako_event_classifications;
+pub use alc_dtako::dtako_logs;
 pub use alc_dtako::dtako_operations;
 pub use alc_dtako::dtako_restraint_report;
 pub use alc_dtako::dtako_restraint_report_pdf;
@@ -87,6 +88,7 @@ pub fn router() -> Router<AppState> {
         .merge(dtako_upload::tenant_router())
         .merge(dtako_vehicles::tenant_router())
         .merge(dtako_event_classifications::tenant_router())
+        .nest("/dtako-logs", dtako_logs::tenant_router())
         .layer(axum_middleware::from_fn(require_tenant));
 
     // 公開ルート (認証不要)

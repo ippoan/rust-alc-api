@@ -1069,3 +1069,200 @@ pub struct UpdateCommunicationItem {
     pub effective_from: Option<DateTime<Utc>>,
     pub effective_until: Option<DateTime<Utc>>,
 }
+
+// --- Dtako Logs (リアルタイム車両GPS) ---
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct DtakologRow {
+    pub gps_direction: i32,
+    pub gps_latitude: i32,
+    pub gps_longitude: i32,
+    pub vehicle_cd: i32,
+    pub vehicle_name: String,
+    pub driver_name: Option<String>,
+    pub address_disp_c: Option<String>,
+    pub data_date_time: String,
+    pub address_disp_p: Option<String>,
+    pub sub_driver_cd: i32,
+    pub all_state: Option<String>,
+    pub recive_type_color_name: Option<String>,
+    pub all_state_ex: Option<String>,
+    pub state2: Option<String>,
+    pub all_state_font_color: Option<String>,
+    pub speed: f32,
+}
+
+/// フロントエンド互換の PascalCase JSON レスポンス
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct DtakologView {
+    #[serde(rename = "GPSDirection")]
+    pub gps_direction: i32,
+    #[serde(rename = "GPSLatitude")]
+    pub gps_latitude: i32,
+    #[serde(rename = "GPSLongitude")]
+    pub gps_longitude: i32,
+    #[serde(rename = "VehicleCD")]
+    pub vehicle_cd: i32,
+    pub vehicle_name: String,
+    pub driver_name: Option<String>,
+    #[serde(rename = "AddressDispC")]
+    pub address_disp_c: Option<String>,
+    pub data_date_time: String,
+    #[serde(rename = "AddressDispP")]
+    pub address_disp_p: Option<String>,
+    #[serde(rename = "SubDriverCD")]
+    pub sub_driver_cd: i32,
+    pub all_state: String,
+    pub recive_type_color_name: Option<String>,
+    pub all_state_ex: Option<String>,
+    pub state2: String,
+    pub all_state_font_color: Option<String>,
+    pub speed: serde_json::Value,
+}
+
+impl From<DtakologRow> for DtakologView {
+    fn from(r: DtakologRow) -> Self {
+        let all_state = r.all_state.unwrap_or_default();
+        let state2 = if ["Drive", "Rest", "Break"].contains(&all_state.as_str()) {
+            r.state2.unwrap_or_default()
+        } else {
+            String::new()
+        };
+        let speed: serde_json::Value = if r.speed == 0.0 {
+            serde_json::Value::String(String::new())
+        } else {
+            serde_json::json!(r.speed)
+        };
+        Self {
+            gps_direction: r.gps_direction,
+            gps_latitude: r.gps_latitude,
+            gps_longitude: r.gps_longitude,
+            vehicle_cd: r.vehicle_cd,
+            vehicle_name: r.vehicle_name,
+            driver_name: r.driver_name,
+            address_disp_c: r.address_disp_c,
+            data_date_time: r.data_date_time,
+            address_disp_p: r.address_disp_p,
+            sub_driver_cd: r.sub_driver_cd,
+            all_state,
+            recive_type_color_name: r.recive_type_color_name,
+            all_state_ex: r.all_state_ex,
+            state2,
+            all_state_font_color: r.all_state_font_color,
+            speed,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DtakologDateQuery {
+    pub date_time: String,
+    pub vehicle_cd: Option<i32>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DtakologDateRangeQuery {
+    pub start_date_time: String,
+    pub end_date_time: String,
+    pub vehicle_cd: Option<i32>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DtakologSelectQuery {
+    pub address_disp_p: Option<String>,
+    pub branch_cd: Option<i32>,
+    pub vehicle_cds: Option<String>,
+}
+
+#[cfg(test)]
+mod dtakolog_tests {
+    use super::*;
+
+    fn make_row(all_state: Option<&str>, state2: Option<&str>, speed: f32) -> DtakologRow {
+        DtakologRow {
+            gps_direction: 180,
+            gps_latitude: 35123456,
+            gps_longitude: 139123456,
+            vehicle_cd: 1,
+            vehicle_name: "Truck-1".into(),
+            driver_name: Some("Driver A".into()),
+            address_disp_c: Some("Tokyo".into()),
+            data_date_time: "26/04/04 10:00".into(),
+            address_disp_p: Some("Shibuya".into()),
+            sub_driver_cd: 0,
+            all_state: all_state.map(String::from),
+            recive_type_color_name: None,
+            all_state_ex: None,
+            state2: state2.map(String::from),
+            all_state_font_color: None,
+            speed,
+        }
+    }
+
+    #[test]
+    fn speed_zero_becomes_empty_string() {
+        let view = DtakologView::from(make_row(Some("Drive"), None, 0.0));
+        assert_eq!(view.speed, serde_json::Value::String(String::new()));
+    }
+
+    #[test]
+    fn speed_nonzero_becomes_number() {
+        let view = DtakologView::from(make_row(Some("Drive"), None, 60.5));
+        assert_eq!(view.speed, serde_json::json!(60.5));
+    }
+
+    #[test]
+    fn state2_populated_when_drive() {
+        let view = DtakologView::from(make_row(Some("Drive"), Some("SubState"), 0.0));
+        assert_eq!(view.state2, "SubState");
+    }
+
+    #[test]
+    fn state2_populated_when_rest() {
+        let view = DtakologView::from(make_row(Some("Rest"), Some("Resting"), 0.0));
+        assert_eq!(view.state2, "Resting");
+    }
+
+    #[test]
+    fn state2_populated_when_break() {
+        let view = DtakologView::from(make_row(Some("Break"), Some("OnBreak"), 0.0));
+        assert_eq!(view.state2, "OnBreak");
+    }
+
+    #[test]
+    fn state2_empty_when_other_state() {
+        let view = DtakologView::from(make_row(Some("End"), Some("ShouldNotAppear"), 0.0));
+        assert_eq!(view.state2, "");
+    }
+
+    #[test]
+    fn state2_empty_when_no_all_state() {
+        let view = DtakologView::from(make_row(None, Some("ShouldNotAppear"), 0.0));
+        assert_eq!(view.state2, "");
+    }
+
+    #[test]
+    fn all_state_defaults_to_empty_when_none() {
+        let view = DtakologView::from(make_row(None, None, 0.0));
+        assert_eq!(view.all_state, "");
+    }
+
+    #[test]
+    fn json_keys_are_pascal_case() {
+        let view = DtakologView::from(make_row(Some("Drive"), None, 50.0));
+        let json = serde_json::to_value(&view).unwrap();
+        assert!(json.get("GPSDirection").is_some());
+        assert!(json.get("GPSLatitude").is_some());
+        assert!(json.get("GPSLongitude").is_some());
+        assert!(json.get("VehicleCD").is_some());
+        assert!(json.get("VehicleName").is_some());
+        assert!(json.get("DataDateTime").is_some());
+        assert!(json.get("SubDriverCD").is_some());
+        assert!(json.get("AddressDispC").is_some());
+        assert!(json.get("AddressDispP").is_some());
+        assert!(json.get("AllState").is_some());
+        assert!(json.get("State2").is_some());
+        assert!(json.get("Speed").is_some());
+    }
+}
