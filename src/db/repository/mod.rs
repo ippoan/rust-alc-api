@@ -3,13 +3,14 @@ pub use alc_core::repository::{
     AuthRepository, BotAdminRepository, CarInspectionRepository, CarinsFilesRepository,
     CarryingItemsRepository, CommunicationItemsRepository, DailyHealthRepository, DeviceRepository,
     DriverInfoRepository, DtakoCsvProxyRepository, DtakoDailyHoursRepository,
-    DtakoDriversRepository, DtakoEventClassificationsRepository, DtakoOperationsRepository,
-    DtakoRestraintReportPdfRepository, DtakoRestraintReportRepository, DtakoScraperRepository,
-    DtakoUploadRepository, DtakoVehiclesRepository, DtakoWorkTimesRepository, EmployeeRepository,
-    EquipmentFailuresRepository, GuidanceRecordsRepository, HealthBaselinesRepository,
-    MeasurementsRepository, NfcTagRepository, SsoAdminRepository, TenantUsersRepository,
-    TenkoCallRepository, TenkoRecordsRepository, TenkoSchedulesRepository, TenkoSessionRepository,
-    TenkoWebhooksRepository, TimecardRepository, WebhookRepository,
+    DtakoDriversRepository, DtakoEventClassificationsRepository, DtakoLogsRepository,
+    DtakoOperationsRepository, DtakoRestraintReportPdfRepository, DtakoRestraintReportRepository,
+    DtakoScraperRepository, DtakoUploadRepository, DtakoVehiclesRepository,
+    DtakoWorkTimesRepository, EmployeeRepository, EquipmentFailuresRepository,
+    GuidanceRecordsRepository, HealthBaselinesRepository, MeasurementsRepository, NfcTagRepository,
+    SsoAdminRepository, TenantUsersRepository, TenkoCallRepository, TenkoRecordsRepository,
+    TenkoSchedulesRepository, TenkoSessionRepository, TenkoWebhooksRepository, TimecardRepository,
+    WebhookRepository,
 };
 
 // Re-export TenantConn from alc-core
@@ -20,7 +21,7 @@ pub use alc_carins::repo::{car_inspections, carins_files, nfc_tags};
 pub use alc_core::repo::auth;
 pub use alc_devices::repo::devices;
 pub use alc_dtako::repo::{
-    dtako_csv_proxy, dtako_daily_hours, dtako_drivers, dtako_event_classifications,
+    dtako_csv_proxy, dtako_daily_hours, dtako_drivers, dtako_event_classifications, dtako_logs,
     dtako_operations, dtako_restraint_report, dtako_restraint_report_pdf, dtako_scraper,
     dtako_upload, dtako_vehicles, dtako_work_times,
 };
@@ -41,7 +42,7 @@ pub use alc_core::repo::PgAuthRepository;
 pub use alc_devices::repo::PgDeviceRepository;
 pub use alc_dtako::repo::{
     PgDtakoCsvProxyRepository, PgDtakoDailyHoursRepository, PgDtakoDriversRepository,
-    PgDtakoEventClassificationsRepository, PgDtakoOperationsRepository,
+    PgDtakoEventClassificationsRepository, PgDtakoLogsRepository, PgDtakoOperationsRepository,
     PgDtakoRestraintReportPdfRepository, PgDtakoRestraintReportRepository,
     PgDtakoScraperRepository, PgDtakoUploadRepository, PgDtakoVehiclesRepository,
     PgDtakoWorkTimesRepository,

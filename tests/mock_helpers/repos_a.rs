@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use chrono::{DateTime, NaiveDate, Utc};
 use uuid::Uuid;
 
+use rust_alc_api::db::models::DtakologRow;
 use rust_alc_api::db::models::*;
 use rust_alc_api::db::repository::auth::{AuthRepository, SsoConfigRow};
 use rust_alc_api::db::repository::bot_admin::{BotAdminRepository, BotConfigRow};
@@ -29,6 +30,7 @@ use rust_alc_api::db::repository::driver_info::{
 use rust_alc_api::db::repository::dtako_csv_proxy::DtakoCsvProxyRepository;
 use rust_alc_api::db::repository::dtako_daily_hours::DtakoDailyHoursRepository;
 use rust_alc_api::db::repository::dtako_drivers::{Driver, DtakoDriversRepository};
+use rust_alc_api::db::repository::dtako_logs::DtakoLogsRepository;
 
 macro_rules! check_fail {
     ($self:expr) => {
@@ -1672,6 +1674,62 @@ impl Default for MockDtakoDriversRepository {
 #[async_trait::async_trait]
 impl DtakoDriversRepository for MockDtakoDriversRepository {
     async fn list(&self, _tenant_id: Uuid) -> Result<Vec<Driver>, sqlx::Error> {
+        check_fail!(self);
+        Ok(vec![])
+    }
+}
+
+// ============================================================
+// MockDtakoLogsRepository
+// ============================================================
+
+pub struct MockDtakoLogsRepository {
+    pub fail_next: AtomicBool,
+}
+
+impl Default for MockDtakoLogsRepository {
+    fn default() -> Self {
+        Self {
+            fail_next: AtomicBool::new(false),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl DtakoLogsRepository for MockDtakoLogsRepository {
+    async fn current_list_all(&self, _tenant_id: Uuid) -> Result<Vec<DtakologRow>, sqlx::Error> {
+        check_fail!(self);
+        Ok(vec![])
+    }
+
+    async fn get_date(
+        &self,
+        _tenant_id: Uuid,
+        _date_time: &str,
+        _vehicle_cd: Option<i32>,
+    ) -> Result<Vec<DtakologRow>, sqlx::Error> {
+        check_fail!(self);
+        Ok(vec![])
+    }
+
+    async fn current_list_select(
+        &self,
+        _tenant_id: Uuid,
+        _address_disp_p: Option<&str>,
+        _branch_cd: Option<i32>,
+        _vehicle_cds: &[i32],
+    ) -> Result<Vec<DtakologRow>, sqlx::Error> {
+        check_fail!(self);
+        Ok(vec![])
+    }
+
+    async fn get_date_range(
+        &self,
+        _tenant_id: Uuid,
+        _start: &str,
+        _end: &str,
+        _vehicle_cd: Option<i32>,
+    ) -> Result<Vec<DtakologRow>, sqlx::Error> {
         check_fail!(self);
         Ok(vec![])
     }

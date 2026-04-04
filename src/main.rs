@@ -13,7 +13,7 @@ use rust_alc_api::db::repository::{
     PgCarryingItemsRepository, PgCommunicationItemsRepository, PgDailyHealthRepository,
     PgDeviceRepository, PgDriverInfoRepository, PgDtakoCsvProxyRepository,
     PgDtakoDailyHoursRepository, PgDtakoDriversRepository, PgDtakoEventClassificationsRepository,
-    PgDtakoOperationsRepository, PgDtakoRestraintReportPdfRepository,
+    PgDtakoLogsRepository, PgDtakoOperationsRepository, PgDtakoRestraintReportPdfRepository,
     PgDtakoRestraintReportRepository, PgDtakoScraperRepository, PgDtakoUploadRepository,
     PgDtakoVehiclesRepository, PgDtakoWorkTimesRepository, PgEmployeeRepository,
     PgEquipmentFailuresRepository, PgGuidanceRecordsRepository, PgHealthBaselinesRepository,
@@ -136,6 +136,7 @@ async fn main() -> anyhow::Result<()> {
     let driver_info = Arc::new(PgDriverInfoRepository::new(pool.clone()));
     let dtako_csv_proxy = Arc::new(PgDtakoCsvProxyRepository::new(pool.clone()));
     let dtako_daily_hours = Arc::new(PgDtakoDailyHoursRepository::new(pool.clone()));
+    let dtako_logs = Arc::new(PgDtakoLogsRepository::new(pool.clone()));
     let dtako_drivers = Arc::new(PgDtakoDriversRepository::new(pool.clone()));
     let dtako_event_classifications =
         Arc::new(PgDtakoEventClassificationsRepository::new(pool.clone()));
@@ -175,6 +176,7 @@ async fn main() -> anyhow::Result<()> {
         driver_info,
         dtako_csv_proxy,
         dtako_daily_hours,
+        dtako_logs,
         dtako_drivers,
         dtako_event_classifications,
         dtako_operations,

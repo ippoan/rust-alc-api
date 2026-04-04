@@ -34,6 +34,7 @@ pub fn setup_mock_app_state() -> AppState {
         driver_info: Arc::new(MockDriverInfoRepository::default()),
         dtako_csv_proxy: Arc::new(MockDtakoCsvProxyRepository::default()),
         dtako_daily_hours: Arc::new(MockDtakoDailyHoursRepository::default()),
+        dtako_logs: Arc::new(MockDtakoLogsRepository::default()),
         dtako_drivers: Arc::new(MockDtakoDriversRepository::default()),
         dtako_event_classifications: Arc::new(MockDtakoEventClassificationsRepository::default()),
         dtako_operations: Arc::new(MockDtakoOperationsRepository::default()),

@@ -84,6 +84,10 @@ path = "src/routes/dtako_drivers.rs"
 type = "mock"
 
 [[files]]
+path = "src/routes/dtako_logs.rs"
+type = "mock"
+
+[[files]]
 path = "src/routes/dtako_event_classifications.rs"
 type = "mock"
 
