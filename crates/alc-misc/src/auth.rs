@@ -35,6 +35,7 @@ pub fn public_router() -> Router<AppState> {
         .route("/auth/line/select-tenant", post(line_select_tenant))
         .route("/auth/woff-config", get(woff_config))
         .route("/auth/woff", post(woff_auth))
+        .route("/auth/login", post(password_login))
 }
 
 /// 保護ルート (JWT 必須、require_jwt ミドルウェアの後ろに配置)
@@ -42,6 +43,7 @@ pub fn protected_router() -> Router<AppState> {
     Router::new()
         .route("/auth/me", get(me))
         .route("/auth/logout", post(logout))
+        .route("/auth/switch-org", post(switch_org))
         .route("/my-orgs", post(my_orgs))
 }
 
@@ -280,6 +282,59 @@ async fn logout(
 }
 
 // --- My Organizations ---
+
+// --- Switch org ---
+
+#[derive(Debug, Deserialize)]
+struct SwitchOrgRequest {
+    organization_id: String,
+}
+
+#[derive(Debug, Serialize)]
+struct SwitchOrgResponse {
+    token: String,
+    expires_at: String,
+    organization_id: String,
+}
+
+async fn switch_org(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    Extension(jwt_secret): Extension<JwtSecret>,
+    Json(body): Json<SwitchOrgRequest>,
+) -> Result<Json<SwitchOrgResponse>, StatusCode> {
+    let target_tenant_id =
+        Uuid::parse_str(&body.organization_id).map_err(|_| StatusCode::BAD_REQUEST)?;
+
+    // ターゲットテナントで同一ユーザーを検索 (email でフォールバック)
+    // 現在の JWT から email を取得し、ターゲットテナントのユーザーを探す
+    let target_user = state
+        .auth
+        .find_user_in_tenant(target_tenant_id, None, None, None, &auth_user.email)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::FORBIDDEN)?;
+
+    // 新しい JWT を発行
+    let slug = state
+        .auth
+        .get_tenant_slug(target_user.tenant_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let access_token = create_access_token(&target_user, &jwt_secret, slug)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let expires_at = chrono::Utc::now().timestamp() + auth_jwt::ACCESS_TOKEN_EXPIRY_SECS;
+
+    Ok(Json(SwitchOrgResponse {
+        token: access_token,
+        expires_at: expires_at.to_string(),
+        organization_id: target_tenant_id.to_string(),
+    }))
+}
+
+// --- My orgs ---
 
 #[derive(Debug, Serialize)]
 struct MyOrgsResponse {
@@ -1114,4 +1169,78 @@ async fn create_tenant(
             name: tenant.name,
         }),
     ))
+}
+
+// --- Password login ---
+
+#[derive(Debug, Deserialize)]
+pub struct PasswordLoginRequest {
+    pub organization_id: Option<String>,
+    pub username: String,
+    pub password: String,
+}
+
+async fn password_login(
+    State(state): State<AppState>,
+    Extension(jwt_secret): Extension<JwtSecret>,
+    Json(body): Json<PasswordLoginRequest>,
+) -> Result<Json<AuthResponse>, StatusCode> {
+    use argon2::{Argon2, PasswordHash, PasswordVerifier};
+
+    // organization_id (tenant_id) が必須
+    let tenant_id_str = body.organization_id.as_deref().unwrap_or("");
+    let tenant_id = Uuid::parse_str(tenant_id_str).map_err(|_| StatusCode::BAD_REQUEST)?;
+
+    // username でユーザーを検索
+    let user = state
+        .auth
+        .find_user_by_username(tenant_id, &body.username)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    // password_hash が設定されていない場合は認証失敗
+    let stored_hash = user
+        .password_hash
+        .as_deref()
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    // argon2 でパスワード検証
+    let parsed_hash =
+        PasswordHash::new(stored_hash).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Argon2::default()
+        .verify_password(body.password.as_bytes(), &parsed_hash)
+        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+
+    // JWT + Refresh token 発行
+    let slug = state
+        .auth
+        .get_tenant_slug(user.tenant_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let access_token = create_access_token(&user, &jwt_secret, slug)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let (raw_refresh, refresh_hash) = create_refresh_token();
+    let expires_at = refresh_token_expires_at();
+
+    state
+        .auth
+        .save_refresh_token(user.id, &refresh_hash, expires_at)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(AuthResponse {
+        access_token,
+        refresh_token: raw_refresh,
+        expires_in: auth_jwt::ACCESS_TOKEN_EXPIRY_SECS,
+        user: UserResponse {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            tenant_id: user.tenant_id,
+            role: user.role,
+        },
+    }))
 }

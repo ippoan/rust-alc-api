@@ -1,3 +1,4 @@
+pub mod access_requests;
 pub mod auth;
 pub mod bot_admin;
 pub mod carrying_items;
