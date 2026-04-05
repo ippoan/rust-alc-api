@@ -8,9 +8,10 @@ pub use alc_core::repository::{
     DtakoScraperRepository, DtakoUploadRepository, DtakoVehiclesRepository,
     DtakoWorkTimesRepository, EmployeeRepository, EquipmentFailuresRepository,
     GuidanceRecordsRepository, HealthBaselinesRepository, MeasurementsRepository, NfcTagRepository,
-    SsoAdminRepository, TenantUsersRepository, TenkoCallRepository, TenkoRecordsRepository,
-    TenkoSchedulesRepository, TenkoSessionRepository, TenkoWebhooksRepository, TimecardRepository,
-    WebhookRepository,
+    NotifyDeliveryRepository, NotifyDocumentRepository, NotifyLineConfigRepository,
+    NotifyRecipientRepository, SsoAdminRepository, TenantUsersRepository, TenkoCallRepository,
+    TenkoRecordsRepository, TenkoSchedulesRepository, TenkoSessionRepository,
+    TenkoWebhooksRepository, TimecardRepository, WebhookRepository,
 };
 
 // Re-export TenantConn from alc-core
@@ -32,6 +33,15 @@ pub use alc_misc::repo::{
 pub use alc_tenko::repo::{
     daily_health, equipment_failures, health_baselines, tenko_call, tenko_records, tenko_schedules,
     tenko_sessions, tenko_webhooks,
+};
+
+// Re-export notify submodules and Pg implementations
+pub use alc_core::repository::{
+    notify_deliveries, notify_documents, notify_line_config, notify_recipients,
+};
+pub use alc_notify::repo::{
+    PgNotifyDeliveryRepository, PgNotifyDocumentRepository, PgNotifyLineConfigRepository,
+    PgNotifyRecipientRepository,
 };
 
 // Re-export Pg implementations

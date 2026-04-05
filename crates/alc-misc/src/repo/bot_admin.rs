@@ -126,6 +126,24 @@ impl BotAdminRepository for PgBotAdminRepository {
         .await
     }
 
+    async fn get_config_with_secrets(
+        &self,
+        tenant_id: Uuid,
+        id: Uuid,
+    ) -> Result<Option<BotConfigWithSecrets>, sqlx::Error> {
+        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
+        sqlx::query_as::<_, BotConfigWithSecrets>(
+            r#"
+            SELECT id, provider, name, client_id, client_secret_encrypted,
+                   service_account, private_key_encrypted, bot_id, enabled
+            FROM bot_configs WHERE id = $1
+            "#,
+        )
+        .bind(id)
+        .fetch_optional(&mut *tc.conn)
+        .await
+    }
+
     async fn delete_config(&self, tenant_id: Uuid, id: Uuid) -> Result<(), sqlx::Error> {
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
         sqlx::query("DELETE FROM bot_configs WHERE id = $1")

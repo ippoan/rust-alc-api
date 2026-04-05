@@ -10,6 +10,8 @@ mod repos_a;
 mod repos_b;
 #[macro_use]
 mod repos_c;
+#[macro_use]
+mod repos_d;
 pub mod app_state;
 pub mod webhook;
 
@@ -17,3 +19,4 @@ pub use app_state::*;
 pub use repos_a::*;
 pub use repos_b::*;
 pub use repos_c::*;
+pub use repos_d::*;

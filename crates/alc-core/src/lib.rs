@@ -28,8 +28,10 @@ use repository::{
     DtakoScraperRepository, DtakoUploadRepository, DtakoVehiclesRepository,
     DtakoWorkTimesRepository, EmployeeRepository, EquipmentFailuresRepository,
     GuidanceRecordsRepository, HealthBaselinesRepository, MeasurementsRepository, NfcTagRepository,
-    SsoAdminRepository, TenantUsersRepository, TenkoCallRepository, TenkoRecordsRepository,
-    TenkoSchedulesRepository, TenkoSessionRepository, TenkoWebhooksRepository, TimecardRepository,
+    NotifyDeliveryRepository, NotifyDocumentRepository, NotifyLineConfigRepository,
+    NotifyRecipientRepository, SsoAdminRepository, TenantUsersRepository, TenkoCallRepository,
+    TenkoRecordsRepository, TenkoSchedulesRepository, TenkoSessionRepository,
+    TenkoWebhooksRepository, TimecardRepository,
 };
 use storage::StorageBackend;
 
@@ -76,6 +78,11 @@ pub struct AppState {
     pub dtako_storage: Option<Arc<dyn StorageBackend>>,
     pub fcm: Option<Arc<dyn fcm::FcmSenderTrait>>,
     pub webhook: Option<Arc<dyn webhook::WebhookService>>,
+    pub notify_recipients: Arc<dyn NotifyRecipientRepository>,
+    pub notify_documents: Arc<dyn NotifyDocumentRepository>,
+    pub notify_deliveries: Arc<dyn NotifyDeliveryRepository>,
+    pub notify_line_config: Arc<dyn NotifyLineConfigRepository>,
+    pub notify_storage: Option<Arc<dyn StorageBackend>>,
 }
 
 impl AppState {

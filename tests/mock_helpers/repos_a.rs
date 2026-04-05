@@ -6,7 +6,9 @@ use uuid::Uuid;
 use rust_alc_api::db::models::DtakologRow;
 use rust_alc_api::db::models::*;
 use rust_alc_api::db::repository::auth::{AuthRepository, SsoConfigRow};
-use rust_alc_api::db::repository::bot_admin::{BotAdminRepository, BotConfigRow};
+use rust_alc_api::db::repository::bot_admin::{
+    BotAdminRepository, BotConfigRow, BotConfigWithSecrets,
+};
 use rust_alc_api::db::repository::car_inspections::{
     CarInspectionFile, CarInspectionRepository, VehicleCategories,
 };
@@ -366,6 +368,15 @@ impl BotAdminRepository for MockBotAdminRepository {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         })
+    }
+
+    async fn get_config_with_secrets(
+        &self,
+        _tenant_id: Uuid,
+        _id: Uuid,
+    ) -> Result<Option<BotConfigWithSecrets>, sqlx::Error> {
+        check_fail!(self);
+        Ok(None)
     }
 
     async fn delete_config(&self, _tenant_id: Uuid, _id: Uuid) -> Result<(), sqlx::Error> {

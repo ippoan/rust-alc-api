@@ -18,9 +18,11 @@ use rust_alc_api::db::repository::{
     PgDtakoRestraintReportRepository, PgDtakoScraperRepository, PgDtakoUploadRepository,
     PgDtakoVehiclesRepository, PgDtakoWorkTimesRepository, PgEmployeeRepository,
     PgEquipmentFailuresRepository, PgGuidanceRecordsRepository, PgHealthBaselinesRepository,
-    PgMeasurementsRepository, PgNfcTagRepository, PgSsoAdminRepository, PgTenantUsersRepository,
-    PgTenkoCallRepository, PgTenkoRecordsRepository, PgTenkoSchedulesRepository,
-    PgTenkoSessionRepository, PgTenkoWebhooksRepository, PgTimecardRepository,
+    PgMeasurementsRepository, PgNfcTagRepository, PgNotifyDeliveryRepository,
+    PgNotifyDocumentRepository, PgNotifyLineConfigRepository, PgNotifyRecipientRepository,
+    PgSsoAdminRepository, PgTenantUsersRepository, PgTenkoCallRepository, PgTenkoRecordsRepository,
+    PgTenkoSchedulesRepository, PgTenkoSessionRepository, PgTenkoWebhooksRepository,
+    PgTimecardRepository,
 };
 use rust_alc_api::AppState;
 
@@ -272,6 +274,10 @@ fn build_app_state(
     let tenko_sessions = Arc::new(PgTenkoSessionRepository::new(pool.clone()));
     let tenko_webhooks = Arc::new(PgTenkoWebhooksRepository::new(pool.clone()));
     let timecard = Arc::new(PgTimecardRepository::new(pool.clone()));
+    let notify_recipients = Arc::new(PgNotifyRecipientRepository::new(pool.clone()));
+    let notify_documents = Arc::new(PgNotifyDocumentRepository::new(pool.clone()));
+    let notify_deliveries = Arc::new(PgNotifyDeliveryRepository::new(pool.clone()));
+    let notify_line_config = Arc::new(PgNotifyLineConfigRepository::new(pool.clone()));
 
     AppState {
         pool: Some(pool),
@@ -314,6 +320,11 @@ fn build_app_state(
         carins_storage: None,
         dtako_storage,
         fcm,
+        notify_recipients,
+        notify_documents,
+        notify_deliveries,
+        notify_line_config,
+        notify_storage: None,
         webhook: None,
     }
 }

@@ -1,6 +1,20 @@
 use async_trait::async_trait;
 use uuid::Uuid;
 
+/// bot_configs 行 (暗号化フィールド付き、メッセージ送信用)
+#[derive(Debug, sqlx::FromRow)]
+pub struct BotConfigWithSecrets {
+    pub id: Uuid,
+    pub provider: String,
+    pub name: String,
+    pub client_id: String,
+    pub client_secret_encrypted: String,
+    pub service_account: String,
+    pub private_key_encrypted: String,
+    pub bot_id: String,
+    pub enabled: bool,
+}
+
 /// bot_configs 行 (secret 列を除外した公開用)
 #[derive(Debug, sqlx::FromRow)]
 pub struct BotConfigRow {
@@ -20,6 +34,13 @@ pub struct BotConfigRow {
 pub trait BotAdminRepository: Send + Sync {
     /// bot_configs 一覧取得
     async fn list_configs(&self, tenant_id: Uuid) -> Result<Vec<BotConfigRow>, sqlx::Error>;
+
+    /// bot_config を暗号化フィールド付きで取得 (メッセージ送信用)
+    async fn get_config_with_secrets(
+        &self,
+        tenant_id: Uuid,
+        id: Uuid,
+    ) -> Result<Option<BotConfigWithSecrets>, sqlx::Error>;
 
     /// client_secret_encrypted 更新
     async fn update_client_secret(

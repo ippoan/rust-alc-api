@@ -62,6 +62,11 @@ pub fn setup_mock_app_state() -> AppState {
         carins_storage: None,
         dtako_storage: Some(dtako_storage),
         fcm: None,
+        notify_recipients: Arc::new(MockNotifyRecipientRepository::default()),
+        notify_documents: Arc::new(MockNotifyDocumentRepository::default()),
+        notify_deliveries: Arc::new(MockNotifyDeliveryRepository::default()),
+        notify_line_config: Arc::new(MockNotifyLineConfigRepository::default()),
+        notify_storage: None,
         webhook: None,
     }
 }

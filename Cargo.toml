@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/alc-carins", "crates/alc-core", "crates/alc-csv-parser", "crates/alc-compare", "crates/alc-devices", "crates/alc-dtako", "crates/alc-misc", "crates/alc-pdf", "crates/alc-storage", "crates/alc-tenko"]
+members = [".", "crates/alc-carins", "crates/alc-core", "crates/alc-csv-parser", "crates/alc-compare", "crates/alc-devices", "crates/alc-dtako", "crates/alc-misc", "crates/alc-notify", "crates/alc-pdf", "crates/alc-storage", "crates/alc-tenko"]
 resolver = "2"
 
 [package]
@@ -16,6 +16,7 @@ alc-core = { path = "crates/alc-core" }
 alc-devices = { path = "crates/alc-devices" }
 alc-dtako = { path = "crates/alc-dtako" }
 alc-misc = { path = "crates/alc-misc" }
+alc-notify = { path = "crates/alc-notify" }
 alc-tenko = { path = "crates/alc-tenko" }
 alc-storage = { path = "crates/alc-storage" }
 alc-csv-parser = { path = "crates/alc-csv-parser" }

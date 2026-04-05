@@ -6,6 +6,10 @@ use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
+use alc_notify::repo::{
+    PgNotifyDeliveryRepository, PgNotifyDocumentRepository, PgNotifyLineConfigRepository,
+    PgNotifyRecipientRepository,
+};
 use rust_alc_api::auth::google::GoogleTokenVerifier;
 use rust_alc_api::auth::jwt::JwtSecret;
 use rust_alc_api::db::repository::{
@@ -162,6 +166,28 @@ async fn main() -> anyhow::Result<()> {
     let tenko_sessions = Arc::new(PgTenkoSessionRepository::new(pool.clone()));
     let tenko_webhooks = Arc::new(PgTenkoWebhooksRepository::new(pool.clone()));
     let timecard = Arc::new(PgTimecardRepository::new(pool.clone()));
+    let notify_recipients = Arc::new(PgNotifyRecipientRepository::new(pool.clone()));
+    let notify_documents = Arc::new(PgNotifyDocumentRepository::new(pool.clone()));
+    let notify_deliveries = Arc::new(PgNotifyDeliveryRepository::new(pool.clone()));
+    let notify_line_config = Arc::new(PgNotifyLineConfigRepository::new(pool.clone()));
+
+    // notify 用 R2 (optional)
+    let notify_storage: Option<Arc<dyn StorageBackend>> =
+        std::env::var("NOTIFY_R2_BUCKET").ok().map(|bucket| {
+            let account_id = std::env::var("R2_ACCOUNT_ID")
+                .expect("R2_ACCOUNT_ID required for NOTIFY_R2_BUCKET");
+            let access_key =
+                std::env::var("NOTIFY_R2_ACCESS_KEY").expect("NOTIFY_R2_ACCESS_KEY required");
+            let secret_key =
+                std::env::var("NOTIFY_R2_SECRET_KEY").expect("NOTIFY_R2_SECRET_KEY required");
+            tracing::info!("Notify storage: R2 (bucket={})", bucket);
+            Arc::new(
+                rust_alc_api::storage::R2Backend::new(
+                    bucket, account_id, access_key, secret_key, None,
+                )
+                .expect("Failed to init notify R2 backend"),
+            ) as Arc<dyn StorageBackend>
+        });
 
     let state = AppState {
         pool: Some(pool.clone()),
@@ -204,6 +230,11 @@ async fn main() -> anyhow::Result<()> {
         carins_storage,
         dtako_storage,
         fcm,
+        notify_recipients,
+        notify_documents,
+        notify_deliveries,
+        notify_line_config,
+        notify_storage,
         webhook: {
             let wh_repo: Arc<dyn rust_alc_api::db::repository::WebhookRepository> = Arc::new(
                 rust_alc_api::db::repository::PgWebhookRepository::new(pool.clone()),

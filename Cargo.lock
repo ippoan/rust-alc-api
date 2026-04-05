@@ -171,6 +171,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "alc-notify"
+version = "0.1.0"
+dependencies = [
+ "alc-core",
+ "async-trait",
+ "axum",
+ "base64 0.22.1",
+ "chrono",
+ "hmac",
+ "jsonwebtoken",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sqlx",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "alc-pdf"
 version = "0.1.0"
 dependencies = [
@@ -3284,6 +3306,7 @@ dependencies = [
  "alc-devices",
  "alc-dtako",
  "alc-misc",
+ "alc-notify",
  "alc-pdf",
  "alc-storage",
  "alc-tenko",

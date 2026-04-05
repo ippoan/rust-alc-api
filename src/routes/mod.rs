@@ -30,6 +30,11 @@ pub use alc_misc::staging;
 pub use alc_misc::tenant_users;
 pub use alc_misc::timecard;
 pub use alc_misc::upload;
+pub use alc_notify::distribute as notify_distribute;
+pub use alc_notify::documents as notify_documents;
+pub use alc_notify::line_webhook as notify_line_webhook;
+pub use alc_notify::read_tracker as notify_read_tracker;
+pub use alc_notify::recipients as notify_recipients;
 pub use alc_tenko::daily_health;
 pub use alc_tenko::equipment_failures;
 pub use alc_tenko::health_baselines;
@@ -89,6 +94,9 @@ pub fn router() -> Router<AppState> {
         .merge(dtako_vehicles::tenant_router())
         .merge(dtako_event_classifications::tenant_router())
         .nest("/dtako-logs", dtako_logs::tenant_router())
+        .merge(notify_recipients::tenant_router())
+        .merge(notify_documents::tenant_router())
+        .merge(notify_distribute::tenant_router())
         .layer(axum_middleware::from_fn(require_tenant));
 
     // 公開ルート (認証不要)
@@ -97,7 +105,9 @@ pub fn router() -> Router<AppState> {
         .merge(auth::public_router())
         .merge(tenko_call::public_router())
         .merge(devices::public_router())
-        .merge(staging::router());
+        .merge(staging::router())
+        .merge(notify_line_webhook::public_router())
+        .merge(notify_read_tracker::public_router());
 
     Router::new()
         .merge(public_routes)
