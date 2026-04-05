@@ -730,9 +730,15 @@ async fn line_callback(
     match tenants.len() {
         0 => {
             // 未登録 → エラーリダイレクト
+            let sep = if state_payload.redirect_uri.contains('?') {
+                "&"
+            } else {
+                "?"
+            };
             let redirect_url = format!(
-                "{}?error={}",
+                "{}{}error={}",
                 state_payload.redirect_uri,
+                sep,
                 urlencoding::encode("LINE Bot を友だち追加してからログインしてください"),
             );
             Ok((
