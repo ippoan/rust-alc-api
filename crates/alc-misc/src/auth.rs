@@ -616,6 +616,8 @@ async fn lineworks_callback(
 #[derive(Debug, Deserialize)]
 struct LineRedirectParams {
     redirect_uri: String,
+    /// QR 招待時にテナント指定 (省略時は callback で recipients 検索)
+    tenant_id: Option<String>,
 }
 
 /// LINE Login OAuth 開始: グローバル LINE Login チャネル (env var) で LINE authorize URL にリダイレクト
@@ -635,7 +637,7 @@ async fn line_redirect(
         redirect_uri: params.redirect_uri,
         nonce: Uuid::new_v4().to_string(),
         provider: "line".to_string(),
-        external_org_id: String::new(),
+        external_org_id: params.tenant_id.unwrap_or_default(),
     };
     let signed_state = auth_lineworks::state::sign(&state_payload, &oauth_state_secret);
 
@@ -720,6 +722,34 @@ async fn line_callback(
             .await;
     }
 
+    // QR 招待で tenant_id が指定されている場合 → recipient 自動登録 + ユーザー作成
+    if !state_payload.external_org_id.is_empty() {
+        let tenant_id: Uuid = state_payload
+            .external_org_id
+            .parse()
+            .map_err(|_| StatusCode::BAD_REQUEST)?;
+
+        // recipient 自動登録 (既存なら無視)
+        let _ = sqlx::query(
+            "INSERT INTO alc_api.notify_recipients (tenant_id, name, provider, line_user_id) \
+             VALUES ($1, $2, 'line', $3) \
+             ON CONFLICT (tenant_id, line_user_id) WHERE line_user_id IS NOT NULL DO NOTHING",
+        )
+        .bind(tenant_id)
+        .bind(&profile.display_name)
+        .bind(line_user_id)
+        .execute(state.pool())
+        .await;
+
+        let user = state
+            .auth
+            .create_user_line(tenant_id, line_user_id, &profile.display_name)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        return issue_line_jwt_redirect(&state, &jwt_secret, user, &state_payload.redirect_uri)
+            .await;
+    }
+
     // notify_recipients から tenant_id を逆引き (複数テナント対応)
     let tenants = state
         .auth
@@ -729,7 +759,7 @@ async fn line_callback(
 
     match tenants.len() {
         0 => {
-            // 未登録 → エラーリダイレクト
+            // 未登録かつ tenant_id 未指定 → エラーリダイレクト
             let sep = if state_payload.redirect_uri.contains('?') {
                 "&"
             } else {
@@ -739,7 +769,7 @@ async fn line_callback(
                 "{}{}error={}",
                 state_payload.redirect_uri,
                 sep,
-                urlencoding::encode("LINE Bot を友だち追加してからログインしてください"),
+                urlencoding::encode("招待 QR コードからログインしてください"),
             );
             Ok((
                 StatusCode::TEMPORARY_REDIRECT,
