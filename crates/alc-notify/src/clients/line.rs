@@ -71,7 +71,7 @@ impl LineClient {
         }
     }
 
-    async fn get_access_token(&self, config: &LineConfig) -> Result<String, LineError> {
+    pub async fn get_access_token(&self, config: &LineConfig) -> Result<String, LineError> {
         // キャッシュチェック
         {
             let cache = self.cache.read().await;
