@@ -5,6 +5,10 @@ ALTER TABLE alc_api.notify_line_configs
     ADD COLUMN key_id TEXT,
     ADD COLUMN private_key_encrypted TEXT;
 
+-- JWT 方式では channel_access_token_encrypted は不要 → nullable に変更
+ALTER TABLE alc_api.notify_line_configs
+    ALTER COLUMN channel_access_token_encrypted DROP NOT NULL;
+
 -- channel_access_token_encrypted は不要になるが、既存データ保護のため残す (nullable)
 -- 新規登録では key_id + private_key_encrypted を使う
 
