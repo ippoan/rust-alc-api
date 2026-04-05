@@ -107,6 +107,7 @@ pub struct User {
     pub tenant_id: Uuid,
     pub google_sub: Option<String>,
     pub lineworks_id: Option<String>,
+    pub line_user_id: Option<String>,
     pub email: String,
     pub name: String,
     pub role: String,

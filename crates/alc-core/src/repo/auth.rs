@@ -156,6 +156,47 @@ impl AuthRepository for PgAuthRepository {
         .await
     }
 
+    // --- LINE Login ---
+
+    async fn find_user_by_line_user_id(
+        &self,
+        line_user_id: &str,
+    ) -> Result<Option<User>, sqlx::Error> {
+        sqlx::query_as::<_, User>("SELECT * FROM users WHERE line_user_id = $1")
+            .bind(line_user_id)
+            .fetch_optional(&self.pool)
+            .await
+    }
+
+    async fn find_recipient_by_line_user_id(
+        &self,
+        line_user_id: &str,
+    ) -> Result<Option<(Uuid, String)>, sqlx::Error> {
+        sqlx::query_as::<_, (Uuid, String)>(
+            "SELECT tenant_id, recipient_name FROM find_recipient_by_line_user_id($1)",
+        )
+        .bind(line_user_id)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
+    async fn create_user_line(
+        &self,
+        tenant_id: Uuid,
+        line_user_id: &str,
+        name: &str,
+    ) -> Result<User, sqlx::Error> {
+        sqlx::query_as::<_, User>(
+            r#"INSERT INTO users (tenant_id, line_user_id, email, name, role)
+               VALUES ($1, $2, $2, $3, 'viewer') RETURNING *"#,
+        )
+        .bind(tenant_id)
+        .bind(line_user_id)
+        .bind(name)
+        .fetch_one(&self.pool)
+        .await
+    }
+
     async fn save_refresh_token(
         &self,
         user_id: Uuid,

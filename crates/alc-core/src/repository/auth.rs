@@ -85,6 +85,26 @@ pub trait AuthRepository: Send + Sync {
 
     async fn clear_refresh_token(&self, user_id: Uuid) -> Result<(), sqlx::Error>;
 
+    // --- LINE Login ---
+
+    async fn find_user_by_line_user_id(
+        &self,
+        line_user_id: &str,
+    ) -> Result<Option<User>, sqlx::Error>;
+
+    /// notify_recipients から line_user_id で tenant_id を逆引き (SECURITY DEFINER)
+    async fn find_recipient_by_line_user_id(
+        &self,
+        line_user_id: &str,
+    ) -> Result<Option<(Uuid, String)>, sqlx::Error>;
+
+    async fn create_user_line(
+        &self,
+        tenant_id: Uuid,
+        line_user_id: &str,
+        name: &str,
+    ) -> Result<User, sqlx::Error>;
+
     // --- SSO config ---
 
     async fn resolve_sso_config(

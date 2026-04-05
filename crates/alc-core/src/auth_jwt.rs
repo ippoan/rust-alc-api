@@ -100,6 +100,7 @@ mod tests {
             tenant_id: Uuid::new_v4(),
             google_sub: Some("google-sub-123".to_string()),
             lineworks_id: None,
+            line_user_id: None,
             email: "test@example.com".to_string(),
             name: "Test User".to_string(),
             role: "admin".to_string(),

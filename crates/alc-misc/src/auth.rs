@@ -13,6 +13,7 @@ use alc_core::auth_jwt::{
     self, create_access_token, create_refresh_token, hash_refresh_token, refresh_token_expires_at,
     JwtSecret,
 };
+use alc_core::auth_line;
 use alc_core::auth_lineworks;
 use alc_core::auth_middleware::AuthUser;
 use alc_core::repository::auth::AuthRepository;
@@ -29,6 +30,8 @@ pub fn public_router() -> Router<AppState> {
         .route("/auth/lineworks/callback", get(lineworks_callback))
         .route("/auth/google/redirect", get(google_redirect))
         .route("/auth/google/callback", get(google_callback))
+        .route("/auth/line/redirect", get(line_redirect))
+        .route("/auth/line/callback", get(line_callback))
         .route("/auth/woff-config", get(woff_config))
         .route("/auth/woff", post(woff_auth))
 }
@@ -605,6 +608,192 @@ async fn lineworks_callback(
             (header::SET_COOKIE, cookie),
         ],
     ))
+}
+
+// --- LINE Login ---
+
+#[derive(Debug, Deserialize)]
+struct LineRedirectParams {
+    redirect_uri: String,
+}
+
+/// LINE Login OAuth 開始: LINE authorize URL にリダイレクト
+async fn line_redirect(
+    Query(params): Query<LineRedirectParams>,
+) -> Result<impl IntoResponse, StatusCode> {
+    let oauth_state_secret = std::env::var("OAUTH_STATE_SECRET").map_err(|_| {
+        tracing::error!("OAUTH_STATE_SECRET not set");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    let channel_id = std::env::var("LINE_LOGIN_CHANNEL_ID").map_err(|_| {
+        tracing::error!("LINE_LOGIN_CHANNEL_ID not set");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let state_payload = auth_lineworks::state::StatePayload {
+        redirect_uri: params.redirect_uri,
+        nonce: Uuid::new_v4().to_string(),
+        provider: "line".to_string(),
+        external_org_id: String::new(),
+    };
+    let signed_state = auth_lineworks::state::sign(&state_payload, &oauth_state_secret);
+
+    let api_origin =
+        std::env::var("API_ORIGIN").unwrap_or_else(|_| "https://alc-api.ippoan.org".to_string());
+    let callback_uri = format!("{api_origin}/api/auth/line/callback");
+
+    let authorize_url = auth_line::authorize_url(
+        &channel_id,
+        &urlencoding::encode(&callback_uri),
+        &urlencoding::encode(&signed_state),
+    );
+
+    Ok(Redirect::temporary(&authorize_url))
+}
+
+#[derive(Debug, Deserialize)]
+struct LineCallbackParams {
+    code: String,
+    state: String,
+}
+
+/// LINE Login OAuth コールバック: code → token → profile → JWT 発行 → リダイレクト
+async fn line_callback(
+    State(state): State<AppState>,
+    Extension(jwt_secret): Extension<JwtSecret>,
+    Query(params): Query<LineCallbackParams>,
+) -> Result<impl IntoResponse, StatusCode> {
+    let oauth_state_secret =
+        std::env::var("OAUTH_STATE_SECRET").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let state_payload =
+        auth_lineworks::state::verify(&params.state, &oauth_state_secret).map_err(|e| {
+            tracing::warn!("LINE state verification failed: {e}");
+            StatusCode::BAD_REQUEST
+        })?;
+
+    let channel_id = std::env::var("LINE_LOGIN_CHANNEL_ID").map_err(|_| {
+        tracing::error!("LINE_LOGIN_CHANNEL_ID not set");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    let channel_secret = std::env::var("LINE_LOGIN_CHANNEL_SECRET").map_err(|_| {
+        tracing::error!("LINE_LOGIN_CHANNEL_SECRET not set");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let api_origin =
+        std::env::var("API_ORIGIN").unwrap_or_else(|_| "https://alc-api.ippoan.org".to_string());
+    let callback_uri = format!("{api_origin}/api/auth/line/callback");
+
+    let http_client = reqwest::Client::new();
+    let token_resp = auth_line::exchange_code(
+        &http_client,
+        &channel_id,
+        &channel_secret,
+        &params.code,
+        &callback_uri,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("LINE token exchange failed: {e}");
+        StatusCode::BAD_GATEWAY
+    })?;
+
+    let profile = auth_line::fetch_profile(&http_client, &token_resp.access_token)
+        .await
+        .map_err(|e| {
+            tracing::error!("LINE profile fetch failed: {e}");
+            StatusCode::BAD_GATEWAY
+        })?;
+
+    // ユーザー解決: users → notify_recipients → 新規作成
+    let user = match upsert_line_user(&*state.auth, &profile).await {
+        Ok(u) => u,
+        Err(err_msg) => {
+            tracing::warn!("LINE Login user resolution failed: {err_msg}");
+            let redirect_url = format!(
+                "{}?error={}",
+                state_payload.redirect_uri,
+                urlencoding::encode(&err_msg),
+            );
+            return Ok((
+                StatusCode::TEMPORARY_REDIRECT,
+                [
+                    (header::LOCATION, redirect_url),
+                    (header::SET_COOKIE, String::new()),
+                ],
+            ));
+        }
+    };
+
+    let slug = state
+        .auth
+        .get_tenant_slug(user.tenant_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let access_token = create_access_token(&user, &jwt_secret, slug)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let (raw_refresh, refresh_hash) = create_refresh_token();
+    let expires_at = refresh_token_expires_at();
+
+    state
+        .auth
+        .save_refresh_token(user.id, &refresh_hash, expires_at)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let redirect_url = format!(
+        "{}#token={}&refresh_token={}&expires_in={}&lw_callback=1",
+        state_payload.redirect_uri,
+        urlencoding::encode(&access_token),
+        urlencoding::encode(&raw_refresh),
+        auth_jwt::ACCESS_TOKEN_EXPIRY_SECS,
+    );
+
+    let parent_domain = extract_parent_domain(&state_payload.redirect_uri);
+    let cookie = format!(
+        "logi_auth_token={}; Domain=.{}; Path=/; Max-Age=86400; Secure; SameSite=Lax",
+        access_token, parent_domain
+    );
+
+    Ok((
+        StatusCode::TEMPORARY_REDIRECT,
+        [
+            (header::LOCATION, redirect_url),
+            (header::SET_COOKIE, cookie),
+        ],
+    ))
+}
+
+/// LINE Login ユーザー解決: users → notify_recipients → 新規作成
+async fn upsert_line_user(
+    repo: &dyn AuthRepository,
+    profile: &auth_line::LineProfile,
+) -> Result<alc_core::models::User, String> {
+    let line_user_id = &profile.user_id;
+
+    // 1. 既存ユーザーを検索
+    if let Some(user) = repo
+        .find_user_by_line_user_id(line_user_id)
+        .await
+        .map_err(|e| format!("DB error: {e}"))?
+    {
+        return Ok(user);
+    }
+
+    // 2. notify_recipients から tenant_id を逆引き
+    let (tenant_id, _recipient_name) = repo
+        .find_recipient_by_line_user_id(line_user_id)
+        .await
+        .map_err(|e| format!("DB error: {e}"))?
+        .ok_or_else(|| "LINE Bot を友だち追加してからログインしてください".to_string())?;
+
+    // 3. 新規ユーザー作成
+    repo.create_user_line(tenant_id, line_user_id, &profile.display_name)
+        .await
+        .map_err(|e| format!("User creation failed: {e}"))
 }
 
 // --- WOFF SDK ---
