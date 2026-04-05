@@ -16,6 +16,7 @@ pub use alc_dtako::dtako_scraper;
 pub use alc_dtako::dtako_upload;
 pub use alc_dtako::dtako_vehicles;
 pub use alc_dtako::dtako_work_times;
+pub use alc_misc::access_requests;
 pub use alc_misc::auth;
 pub use alc_misc::bot_admin;
 pub use alc_misc::carrying_items;
@@ -54,6 +55,7 @@ pub fn router() -> Router<AppState> {
     // JWT 必須ルート
     let jwt_protected = Router::new()
         .merge(auth::protected_router())
+        .merge(access_requests::protected_router())
         .merge(sso_admin::router())
         .merge(bot_admin::router())
         .merge(tenant_users::router())
@@ -109,7 +111,8 @@ pub fn router() -> Router<AppState> {
         .merge(devices::public_router())
         .merge(staging::router())
         .merge(notify_line_webhook::public_router())
-        .merge(notify_read_tracker::public_router());
+        .merge(notify_read_tracker::public_router())
+        .merge(access_requests::public_router());
 
     Router::new()
         .merge(public_routes)

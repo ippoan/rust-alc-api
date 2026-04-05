@@ -57,6 +57,8 @@ pub fn mock_user(tenant_id: Uuid) -> User {
         email: "google-test@example.com".to_string(),
         name: "Google Test User".to_string(),
         role: "admin".to_string(),
+        username: None,
+        password_hash: None,
         refresh_token_hash: None,
         refresh_token_expires_at: None,
         created_at: Utc::now(),
@@ -215,6 +217,8 @@ impl AuthRepository for MockAuthRepository {
             email: email.to_string(),
             name: name.to_string(),
             role: role.to_string(),
+            username: None,
+            password_hash: None,
             refresh_token_hash: None,
             refresh_token_expires_at: None,
             created_at: Utc::now(),
@@ -241,10 +245,37 @@ impl AuthRepository for MockAuthRepository {
             email: email.to_string(),
             name: name.to_string(),
             role: "admin".to_string(),
+            username: None,
+            password_hash: None,
             refresh_token_hash: None,
             refresh_token_expires_at: None,
             created_at: Utc::now(),
         })
+    }
+
+    // --- Switch org ---
+
+    async fn find_user_in_tenant(
+        &self,
+        _target_tenant_id: Uuid,
+        _google_sub: Option<&str>,
+        _lineworks_id: Option<&str>,
+        _line_user_id: Option<&str>,
+        _email: &str,
+    ) -> Result<Option<User>, sqlx::Error> {
+        check_fail!(self);
+        Ok(None)
+    }
+
+    // --- Password login ---
+
+    async fn find_user_by_username(
+        &self,
+        _tenant_id: Uuid,
+        _username: &str,
+    ) -> Result<Option<User>, sqlx::Error> {
+        check_fail!(self);
+        Ok(None)
     }
 
     // --- LINE Login ---
@@ -281,6 +312,8 @@ impl AuthRepository for MockAuthRepository {
             email: line_user_id.to_string(),
             name: name.to_string(),
             role: "viewer".to_string(),
+            username: None,
+            password_hash: None,
             refresh_token_hash: None,
             refresh_token_expires_at: None,
             created_at: Utc::now(),

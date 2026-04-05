@@ -111,6 +111,8 @@ pub struct User {
     pub email: String,
     pub name: String,
     pub role: String,
+    pub username: Option<String>,
+    pub password_hash: Option<String>,
     pub refresh_token_hash: Option<String>,
     pub refresh_token_expires_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,

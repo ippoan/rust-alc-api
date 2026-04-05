@@ -104,6 +104,8 @@ mod tests {
             email: "test@example.com".to_string(),
             name: "Test User".to_string(),
             role: "admin".to_string(),
+            username: None,
+            password_hash: None,
             refresh_token_hash: None,
             refresh_token_expires_at: None,
             created_at: Utc::now(),

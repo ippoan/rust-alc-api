@@ -35,6 +35,7 @@ pub fn public_router() -> Router<AppState> {
         .route("/auth/line/select-tenant", post(line_select_tenant))
         .route("/auth/woff-config", get(woff_config))
         .route("/auth/woff", post(woff_auth))
+        .route("/auth/login", post(password_login))
 }
 
 /// 保護ルート (JWT 必須、require_jwt ミドルウェアの後ろに配置)
@@ -42,6 +43,7 @@ pub fn protected_router() -> Router<AppState> {
     Router::new()
         .route("/auth/me", get(me))
         .route("/auth/logout", post(logout))
+        .route("/auth/switch-org", post(switch_org))
         .route("/my-orgs", post(my_orgs))
 }
 
@@ -280,6 +282,59 @@ async fn logout(
 }
 
 // --- My Organizations ---
+
+// --- Switch org ---
+
+#[derive(Debug, Deserialize)]
+struct SwitchOrgRequest {
+    organization_id: String,
+}
+
+#[derive(Debug, Serialize)]
+struct SwitchOrgResponse {
+    token: String,
+    expires_at: String,
+    organization_id: String,
+}
+
+async fn switch_org(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    Extension(jwt_secret): Extension<JwtSecret>,
+    Json(body): Json<SwitchOrgRequest>,
+) -> Result<Json<SwitchOrgResponse>, StatusCode> {
+    let target_tenant_id =
+        Uuid::parse_str(&body.organization_id).map_err(|_| StatusCode::BAD_REQUEST)?;
+
+    // ターゲットテナントで同一ユーザーを検索 (email でフォールバック)
+    // 現在の JWT から email を取得し、ターゲットテナントのユーザーを探す
+    let target_user = state
+        .auth
+        .find_user_in_tenant(target_tenant_id, None, None, None, &auth_user.email)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::FORBIDDEN)?;
+
+    // 新しい JWT を発行
+    let slug = state
+        .auth
+        .get_tenant_slug(target_user.tenant_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let access_token = create_access_token(&target_user, &jwt_secret, slug)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let expires_at = chrono::Utc::now().timestamp() + auth_jwt::ACCESS_TOKEN_EXPIRY_SECS;
+
+    Ok(Json(SwitchOrgResponse {
+        token: access_token,
+        expires_at: expires_at.to_string(),
+        organization_id: target_tenant_id.to_string(),
+    }))
+}
+
+// --- My orgs ---
 
 #[derive(Debug, Serialize)]
 struct MyOrgsResponse {
@@ -616,6 +671,8 @@ async fn lineworks_callback(
 #[derive(Debug, Deserialize)]
 struct LineRedirectParams {
     redirect_uri: String,
+    /// QR 招待時にテナント指定 (省略時は callback で recipients 検索)
+    tenant_id: Option<String>,
 }
 
 /// LINE Login OAuth 開始: グローバル LINE Login チャネル (env var) で LINE authorize URL にリダイレクト
@@ -635,7 +692,7 @@ async fn line_redirect(
         redirect_uri: params.redirect_uri,
         nonce: Uuid::new_v4().to_string(),
         provider: "line".to_string(),
-        external_org_id: String::new(),
+        external_org_id: params.tenant_id.unwrap_or_default(),
     };
     let signed_state = auth_lineworks::state::sign(&state_payload, &oauth_state_secret);
 
@@ -720,6 +777,34 @@ async fn line_callback(
             .await;
     }
 
+    // QR 招待で tenant_id が指定されている場合 → recipient 自動登録 + ユーザー作成
+    if !state_payload.external_org_id.is_empty() {
+        let tenant_id: Uuid = state_payload
+            .external_org_id
+            .parse()
+            .map_err(|_| StatusCode::BAD_REQUEST)?;
+
+        // recipient 自動登録 (既存なら無視)
+        let _ = sqlx::query(
+            "INSERT INTO alc_api.notify_recipients (tenant_id, name, provider, line_user_id) \
+             VALUES ($1, $2, 'line', $3) \
+             ON CONFLICT (tenant_id, line_user_id) WHERE line_user_id IS NOT NULL DO NOTHING",
+        )
+        .bind(tenant_id)
+        .bind(&profile.display_name)
+        .bind(line_user_id)
+        .execute(state.pool())
+        .await;
+
+        let user = state
+            .auth
+            .create_user_line(tenant_id, line_user_id, &profile.display_name)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        return issue_line_jwt_redirect(&state, &jwt_secret, user, &state_payload.redirect_uri)
+            .await;
+    }
+
     // notify_recipients から tenant_id を逆引き (複数テナント対応)
     let tenants = state
         .auth
@@ -729,7 +814,7 @@ async fn line_callback(
 
     match tenants.len() {
         0 => {
-            // 未登録 → エラーリダイレクト
+            // 未登録かつ tenant_id 未指定 → エラーリダイレクト
             let sep = if state_payload.redirect_uri.contains('?') {
                 "&"
             } else {
@@ -739,7 +824,7 @@ async fn line_callback(
                 "{}{}error={}",
                 state_payload.redirect_uri,
                 sep,
-                urlencoding::encode("LINE Bot を友だち追加してからログインしてください"),
+                urlencoding::encode("招待 QR コードからログインしてください"),
             );
             Ok((
                 StatusCode::TEMPORARY_REDIRECT,
@@ -1084,4 +1169,78 @@ async fn create_tenant(
             name: tenant.name,
         }),
     ))
+}
+
+// --- Password login ---
+
+#[derive(Debug, Deserialize)]
+pub struct PasswordLoginRequest {
+    pub organization_id: Option<String>,
+    pub username: String,
+    pub password: String,
+}
+
+async fn password_login(
+    State(state): State<AppState>,
+    Extension(jwt_secret): Extension<JwtSecret>,
+    Json(body): Json<PasswordLoginRequest>,
+) -> Result<Json<AuthResponse>, StatusCode> {
+    use argon2::{Argon2, PasswordHash, PasswordVerifier};
+
+    // organization_id (tenant_id) が必須
+    let tenant_id_str = body.organization_id.as_deref().unwrap_or("");
+    let tenant_id = Uuid::parse_str(tenant_id_str).map_err(|_| StatusCode::BAD_REQUEST)?;
+
+    // username でユーザーを検索
+    let user = state
+        .auth
+        .find_user_by_username(tenant_id, &body.username)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    // password_hash が設定されていない場合は認証失敗
+    let stored_hash = user
+        .password_hash
+        .as_deref()
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    // argon2 でパスワード検証
+    let parsed_hash =
+        PasswordHash::new(stored_hash).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Argon2::default()
+        .verify_password(body.password.as_bytes(), &parsed_hash)
+        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+
+    // JWT + Refresh token 発行
+    let slug = state
+        .auth
+        .get_tenant_slug(user.tenant_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let access_token = create_access_token(&user, &jwt_secret, slug)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let (raw_refresh, refresh_hash) = create_refresh_token();
+    let expires_at = refresh_token_expires_at();
+
+    state
+        .auth
+        .save_refresh_token(user.id, &refresh_hash, expires_at)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(AuthResponse {
+        access_token,
+        refresh_token: raw_refresh,
+        expires_in: auth_jwt::ACCESS_TOKEN_EXPIRY_SECS,
+        user: UserResponse {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            tenant_id: user.tenant_id,
+            role: user.role,
+        },
+    }))
 }

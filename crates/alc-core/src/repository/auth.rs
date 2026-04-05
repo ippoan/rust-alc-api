@@ -105,6 +105,25 @@ pub trait AuthRepository: Send + Sync {
         name: &str,
     ) -> Result<User, sqlx::Error>;
 
+    // --- Switch org ---
+
+    async fn find_user_in_tenant(
+        &self,
+        target_tenant_id: Uuid,
+        google_sub: Option<&str>,
+        lineworks_id: Option<&str>,
+        line_user_id: Option<&str>,
+        email: &str,
+    ) -> Result<Option<User>, sqlx::Error>;
+
+    // --- Password login ---
+
+    async fn find_user_by_username(
+        &self,
+        tenant_id: Uuid,
+        username: &str,
+    ) -> Result<Option<User>, sqlx::Error>;
+
     // --- SSO config ---
 
     async fn resolve_sso_config(

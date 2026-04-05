@@ -156,6 +156,50 @@ impl AuthRepository for PgAuthRepository {
         .await
     }
 
+    // --- Switch org ---
+
+    async fn find_user_in_tenant(
+        &self,
+        target_tenant_id: Uuid,
+        google_sub: Option<&str>,
+        lineworks_id: Option<&str>,
+        line_user_id: Option<&str>,
+        email: &str,
+    ) -> Result<Option<User>, sqlx::Error> {
+        // google_sub, lineworks_id, line_user_id のいずれかでマッチ、またはメールでフォールバック
+        sqlx::query_as::<_, User>(
+            r#"SELECT * FROM users WHERE tenant_id = $1
+               AND (
+                 (google_sub IS NOT NULL AND google_sub = $2)
+                 OR (lineworks_id IS NOT NULL AND lineworks_id = $3)
+                 OR (line_user_id IS NOT NULL AND line_user_id = $4)
+                 OR email = $5
+               )
+               LIMIT 1"#,
+        )
+        .bind(target_tenant_id)
+        .bind(google_sub.unwrap_or(""))
+        .bind(lineworks_id.unwrap_or(""))
+        .bind(line_user_id.unwrap_or(""))
+        .bind(email)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
+    // --- Password login ---
+
+    async fn find_user_by_username(
+        &self,
+        tenant_id: Uuid,
+        username: &str,
+    ) -> Result<Option<User>, sqlx::Error> {
+        sqlx::query_as::<_, User>("SELECT * FROM users WHERE tenant_id = $1 AND username = $2")
+            .bind(tenant_id)
+            .bind(username)
+            .fetch_optional(&self.pool)
+            .await
+    }
+
     // --- LINE Login ---
 
     async fn find_user_by_line_user_id(
