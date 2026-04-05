@@ -334,6 +334,7 @@ impl NotifyLineConfigRepository for MockNotifyLineConfigRepository {
         _key_id: &str,
         _private_key: &str,
         _bot_basic_id: Option<&str>,
+        _public_key_jwk: Option<&str>,
         _login_channel_id: Option<&str>,
         _login_key_id: Option<&str>,
     ) -> Result<NotifyLineConfig, sqlx::Error> {
@@ -344,6 +345,9 @@ impl NotifyLineConfigRepository for MockNotifyLineConfigRepository {
             name: name.into(),
             channel_id: channel_id.into(),
             bot_basic_id: None,
+            public_key_jwk: None,
+            login_channel_id: None,
+            login_key_id: None,
             enabled: true,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
