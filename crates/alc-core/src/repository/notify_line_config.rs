@@ -8,6 +8,9 @@ pub struct NotifyLineConfig {
     pub name: String,
     pub channel_id: String,
     pub bot_basic_id: Option<String>,
+    pub public_key_jwk: Option<String>,
+    pub login_channel_id: Option<String>,
+    pub login_key_id: Option<String>,
     pub enabled: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
@@ -35,6 +38,7 @@ pub struct UpsertLineConfig {
     pub key_id: String,
     pub private_key: String,
     pub bot_basic_id: Option<String>,
+    pub public_key_jwk: Option<String>,
     pub login_channel_id: Option<String>,
     pub login_key_id: Option<String>,
 }
@@ -56,6 +60,7 @@ pub trait NotifyLineConfigRepository: Send + Sync {
         key_id: &str,
         private_key_encrypted: &str,
         bot_basic_id: Option<&str>,
+        public_key_jwk: Option<&str>,
         login_channel_id: Option<&str>,
         login_key_id: Option<&str>,
     ) -> Result<NotifyLineConfig, sqlx::Error>;
