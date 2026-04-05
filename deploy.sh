@@ -43,7 +43,7 @@ gcloud run deploy $SERVICE_NAME \
   --region $REGION \
   --platform managed \
   --allow-unauthenticated \
-  --set-secrets "DATABASE_URL=alc-app-database-url:latest,GOOGLE_CLIENT_ID=GOOGLE_CLIENT_ID:latest,GOOGLE_CLIENT_SECRET=GOOGLE_CLIENT_SECRET:latest,JWT_SECRET=JWT_SECRET:latest,R2_ACCESS_KEY=alc-r2-access-key:latest,R2_SECRET_KEY=alc-r2-secret-key:latest,OAUTH_STATE_SECRET=alc-oauth-state-secret:latest,CARINS_R2_ACCESS_KEY=carins-r2-access-key:latest,CARINS_R2_SECRET_KEY=carins-r2-secret-key:latest,DTAKO_R2_ACCESS_KEY=dtako-r2-access-key:latest,DTAKO_R2_SECRET_KEY=dtako-r2-secret-key:latest" \
+  --set-secrets "DATABASE_URL=alc-app-database-url:latest,GOOGLE_CLIENT_ID=GOOGLE_CLIENT_ID:latest,GOOGLE_CLIENT_SECRET=GOOGLE_CLIENT_SECRET:latest,JWT_SECRET=JWT_SECRET:latest,R2_ACCESS_KEY=alc-r2-access-key:latest,R2_SECRET_KEY=alc-r2-secret-key:latest,OAUTH_STATE_SECRET=alc-oauth-state-secret:latest,CARINS_R2_ACCESS_KEY=carins-r2-access-key:latest,CARINS_R2_SECRET_KEY=carins-r2-secret-key:latest,DTAKO_R2_ACCESS_KEY=dtako-r2-access-key:latest,DTAKO_R2_SECRET_KEY=dtako-r2-secret-key:latest,LINE_LOGIN_CHANNEL_ID=line-login-channel-id:latest,LINE_LOGIN_CHANNEL_SECRET=line-login-channel-secret:latest" \
   --set-env-vars "STORAGE_BACKEND=r2,R2_BUCKET=alc-face-photos,R2_ACCOUNT_ID=24b45709d060d957340180e995f0d373,FCM_PROJECT_ID=alc-fcm,API_ORIGIN=https://alc-api.ippoan.org,CARINS_R2_BUCKET=carins-files,DTAKO_R2_BUCKET=ohishi-dtako,SCRAPER_URL=https://dtako-scraper-566bls5vfq-an.a.run.app" \
   --port 8080 \
   --memory 1Gi \
