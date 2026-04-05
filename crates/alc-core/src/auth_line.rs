@@ -11,12 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// `redirect_uri` と `state` は呼び出し元で URL エンコード済みの前提。
 pub fn authorize_url(channel_id: &str, encoded_redirect_uri: &str, encoded_state: &str) -> String {
     format!(
-        "https://access-line.me/oauth2/v2.1/authorize?\
-         response_type=code\
-         &client_id={channel_id}\
-         &redirect_uri={encoded_redirect_uri}\
-         &state={encoded_state}\
-         &scope=profile%20openid",
+        "https://access-line.me/oauth2/v2.1/authorize?response_type=code&client_id={channel_id}&redirect_uri={encoded_redirect_uri}&state={encoded_state}&scope=profile%20openid",
     )
 }
 
