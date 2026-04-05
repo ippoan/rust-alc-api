@@ -154,6 +154,42 @@ pub async fn fetch_user_profile(
         .map_err(|e| format!("User profile parse error: {e}"))
 }
 
+/// Encrypt plaintext with AES-256-GCM. Key is SHA-256 hash of key_material.
+/// Output: base64(nonce[12] + ciphertext + tag[16])
+pub fn encrypt_secret(plaintext: &str, key_material: &str) -> Result<String, String> {
+    use ring::rand::{SecureRandom, SystemRandom};
+
+    let mut key_bytes = [0u8; 32];
+    let hash = Sha256::digest(key_material.as_bytes());
+    key_bytes.copy_from_slice(&hash);
+
+    let unbound_key =
+        UnboundKey::new(&AES_256_GCM, &key_bytes).map_err(|e| format!("Key error: {e}"))?;
+    let key = LessSafeKey::new(unbound_key);
+
+    let rng = SystemRandom::new();
+    let mut nonce_bytes = [0u8; 12];
+    rng.fill(&mut nonce_bytes)
+        .map_err(|e| format!("RNG error: {e}"))?;
+    let nonce = Nonce::assume_unique_for_key(nonce_bytes);
+
+    let mut in_out = plaintext.as_bytes().to_vec();
+    let tag_len = aead::AES_256_GCM.tag_len();
+    in_out.extend(vec![0u8; tag_len]);
+
+    key.seal_in_place_separate_tag(nonce, Aad::empty(), &mut in_out[..plaintext.len()])
+        .map(|tag| {
+            in_out[plaintext.len()..].copy_from_slice(tag.as_ref());
+        })
+        .map_err(|e| format!("Encryption error: {e}"))?;
+
+    let mut result = Vec::with_capacity(12 + in_out.len());
+    result.extend_from_slice(&nonce_bytes);
+    result.extend_from_slice(&in_out);
+
+    Ok(BASE64.encode(&result))
+}
+
 /// Decrypt client_secret stored as AES-256-GCM(base64(nonce + ciphertext + tag))
 /// Key is SHA-256 hash of JWT_SECRET (same as rust-logi)
 pub fn decrypt_secret(ciphertext_b64: &str, key_material: &str) -> Result<String, String> {

@@ -73,6 +73,7 @@ pub struct StagingUser {
     pub tenant_id: Uuid,
     pub google_sub: Option<String>,
     pub lineworks_id: Option<String>,
+    pub line_user_id: Option<String>,
     pub email: String,
     pub name: String,
     pub role: String,
@@ -265,7 +266,7 @@ async fn export_handler(
 
 async fn export_users(pool: &PgPool, tid: Uuid) -> Result<Vec<StagingUser>, StatusCode> {
     sqlx::query_as::<_, StagingUser>(
-        "SELECT id, tenant_id, google_sub, lineworks_id, email, name, role, created_at
+        "SELECT id, tenant_id, google_sub, lineworks_id, line_user_id, email, name, role, created_at
          FROM users WHERE tenant_id = $1",
     )
     .bind(tid)
@@ -471,11 +472,12 @@ async fn import_tenant(tx: &mut Tx<'_>, t: &StagingTenant) -> Result<(), StatusC
 async fn import_users(tx: &mut Tx<'_>, users: &[StagingUser]) -> Result<usize, StatusCode> {
     for u in users {
         sqlx::query(
-            "INSERT INTO users (id, tenant_id, google_sub, lineworks_id, email, name, role, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            "INSERT INTO users (id, tenant_id, google_sub, lineworks_id, line_user_id, email, name, role, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
              ON CONFLICT (id) DO UPDATE SET
                google_sub = EXCLUDED.google_sub,
                lineworks_id = EXCLUDED.lineworks_id,
+               line_user_id = EXCLUDED.line_user_id,
                email = EXCLUDED.email,
                name = EXCLUDED.name,
                role = EXCLUDED.role",
@@ -484,6 +486,7 @@ async fn import_users(tx: &mut Tx<'_>, users: &[StagingUser]) -> Result<usize, S
         .bind(u.tenant_id)
         .bind(&u.google_sub)
         .bind(&u.lineworks_id)
+        .bind(&u.line_user_id)
         .bind(&u.email)
         .bind(&u.name)
         .bind(&u.role)

@@ -45,14 +45,22 @@ async fn resolve_line_config(state: &AppState, tenant_id: Uuid) -> Result<LineCo
         .ok_or_else(|| "LINE config not found".to_string())?;
 
     let key = encryption_key().map_err(|_| "Encryption key not set".to_string())?;
-    let access_token = decrypt_secret(&config.channel_access_token_encrypted, &key)
-        .map_err(|e| format!("decrypt access_token: {e}"))?;
-    let secret = decrypt_secret(&config.channel_secret_encrypted, &key)
+    let channel_secret = decrypt_secret(&config.channel_secret_encrypted, &key)
         .map_err(|e| format!("decrypt channel_secret: {e}"))?;
+    let key_id = config
+        .key_id
+        .ok_or_else(|| "LINE config missing key_id".to_string())?;
+    let private_key_enc = config
+        .private_key_encrypted
+        .ok_or_else(|| "LINE config missing private_key".to_string())?;
+    let private_key =
+        decrypt_secret(&private_key_enc, &key).map_err(|e| format!("decrypt private_key: {e}"))?;
 
     Ok(LineConfig {
-        channel_access_token: access_token,
-        channel_secret: secret,
+        channel_id: config.channel_id,
+        channel_secret,
+        key_id,
+        private_key,
     })
 }
 

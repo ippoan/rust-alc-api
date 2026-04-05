@@ -53,6 +53,7 @@ pub fn mock_user(tenant_id: Uuid) -> User {
         tenant_id,
         google_sub: Some("test-google-sub-12345".to_string()),
         lineworks_id: None,
+        line_user_id: None,
         email: "google-test@example.com".to_string(),
         name: "Google Test User".to_string(),
         role: "admin".to_string(),
@@ -82,6 +83,10 @@ pub struct MockAuthRepository {
     pub return_lineworks_user: std::sync::Mutex<Option<User>>,
     /// If true, create_user_lineworks returns error
     pub fail_on_create_user: AtomicBool,
+    /// If Some, find_user_by_line_user_id returns this user
+    pub return_line_user: std::sync::Mutex<Option<User>>,
+    /// If Some, find_recipient_by_line_user_id returns (tenant_id, name)
+    pub return_line_recipient: std::sync::Mutex<Option<(Uuid, String)>>,
 }
 
 impl Default for MockAuthRepository {
@@ -97,6 +102,8 @@ impl Default for MockAuthRepository {
             auto_tenant_id: std::sync::Mutex::new(None),
             return_lineworks_user: std::sync::Mutex::new(None),
             fail_on_create_user: AtomicBool::new(false),
+            return_line_user: std::sync::Mutex::new(None),
+            return_line_recipient: std::sync::Mutex::new(None),
         }
     }
 }
@@ -204,6 +211,7 @@ impl AuthRepository for MockAuthRepository {
             tenant_id,
             google_sub: Some(google_sub.to_string()),
             lineworks_id: None,
+            line_user_id: None,
             email: email.to_string(),
             name: name.to_string(),
             role: role.to_string(),
@@ -229,9 +237,50 @@ impl AuthRepository for MockAuthRepository {
             tenant_id,
             google_sub: None,
             lineworks_id: Some(lineworks_id.to_string()),
+            line_user_id: None,
             email: email.to_string(),
             name: name.to_string(),
             role: "admin".to_string(),
+            refresh_token_hash: None,
+            refresh_token_expires_at: None,
+            created_at: Utc::now(),
+        })
+    }
+
+    // --- LINE Login ---
+
+    async fn find_user_by_line_user_id(
+        &self,
+        _line_user_id: &str,
+    ) -> Result<Option<User>, sqlx::Error> {
+        check_fail!(self);
+        Ok(self.return_line_user.lock().unwrap().clone())
+    }
+
+    async fn find_recipient_by_line_user_id(
+        &self,
+        _line_user_id: &str,
+    ) -> Result<Option<(Uuid, String)>, sqlx::Error> {
+        check_fail!(self);
+        Ok(self.return_line_recipient.lock().unwrap().clone())
+    }
+
+    async fn create_user_line(
+        &self,
+        tenant_id: Uuid,
+        line_user_id: &str,
+        name: &str,
+    ) -> Result<User, sqlx::Error> {
+        check_fail!(self);
+        Ok(User {
+            id: Uuid::new_v4(),
+            tenant_id,
+            google_sub: None,
+            lineworks_id: None,
+            line_user_id: Some(line_user_id.to_string()),
+            email: line_user_id.to_string(),
+            name: name.to_string(),
+            role: "viewer".to_string(),
             refresh_token_hash: None,
             refresh_token_expires_at: None,
             created_at: Utc::now(),

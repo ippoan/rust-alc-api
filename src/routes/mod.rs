@@ -32,6 +32,7 @@ pub use alc_misc::timecard;
 pub use alc_misc::upload;
 pub use alc_notify::distribute as notify_distribute;
 pub use alc_notify::documents as notify_documents;
+pub use alc_notify::line_config as notify_line_config;
 pub use alc_notify::line_webhook as notify_line_webhook;
 pub use alc_notify::read_tracker as notify_read_tracker;
 pub use alc_notify::recipients as notify_recipients;
@@ -97,6 +98,7 @@ pub fn router() -> Router<AppState> {
         .merge(notify_recipients::tenant_router())
         .merge(notify_documents::tenant_router())
         .merge(notify_distribute::tenant_router())
+        .merge(notify_line_config::tenant_router())
         .layer(axum_middleware::from_fn(require_tenant));
 
     // 公開ルート (認証不要)
