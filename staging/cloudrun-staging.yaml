@@ -93,6 +93,16 @@ spec:
                 secretKeyRef:
                   key: latest
                   name: dtako-r2-secret-key
+            - name: LINE_LOGIN_CHANNEL_ID
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: line-login-channel-id
+            - name: LINE_LOGIN_CHANNEL_SECRET
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: line-login-channel-secret
           resources:
             limits:
               memory: 512Mi
