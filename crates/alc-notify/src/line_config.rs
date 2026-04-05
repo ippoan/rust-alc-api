@@ -59,8 +59,6 @@ async fn upsert_config(
             &private_key_encrypted,
             input.bot_basic_id.as_deref(),
             input.public_key_jwk.as_deref(),
-            input.login_channel_id.as_deref(),
-            input.login_key_id.as_deref(),
         )
         .await
         .map_err(|e| {

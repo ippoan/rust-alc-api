@@ -9,14 +9,12 @@ pub struct NotifyLineConfig {
     pub channel_id: String,
     pub bot_basic_id: Option<String>,
     pub public_key_jwk: Option<String>,
-    pub login_channel_id: Option<String>,
-    pub login_key_id: Option<String>,
     pub enabled: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
-/// 暗号化フィールド含む完全版 (内��利用のみ)
+/// 暗号化フィールド含む完全版 (内部利用のみ)
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct NotifyLineConfigFull {
     pub id: Uuid,
@@ -26,8 +24,6 @@ pub struct NotifyLineConfigFull {
     pub channel_access_token_encrypted: Option<String>,
     pub key_id: Option<String>,
     pub private_key_encrypted: Option<String>,
-    pub login_channel_id: Option<String>,
-    pub login_key_id: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -39,8 +35,6 @@ pub struct UpsertLineConfig {
     pub private_key: String,
     pub bot_basic_id: Option<String>,
     pub public_key_jwk: Option<String>,
-    pub login_channel_id: Option<String>,
-    pub login_key_id: Option<String>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -61,13 +55,11 @@ pub trait NotifyLineConfigRepository: Send + Sync {
         private_key_encrypted: &str,
         bot_basic_id: Option<&str>,
         public_key_jwk: Option<&str>,
-        login_channel_id: Option<&str>,
-        login_key_id: Option<&str>,
     ) -> Result<NotifyLineConfig, sqlx::Error>;
 
     async fn delete(&self, tenant_id: Uuid) -> Result<(), sqlx::Error>;
 
-    /// LINE webhook: channel_id からテナン���特定 (SECURITY DEFINER, テナント不要)
+    /// LINE webhook: channel_id からテナント特定 (SECURITY DEFINER, テナント不要)
     async fn lookup_by_channel(
         &self,
         channel_id: &str,

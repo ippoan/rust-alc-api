@@ -25,6 +25,37 @@ pub struct TokenResponse {
     pub access_token: String,
 }
 
+/// Code → Token 交換 (channel_secret 方式)
+pub async fn exchange_code(
+    client: &reqwest::Client,
+    channel_id: &str,
+    channel_secret: &str,
+    code: &str,
+    redirect_uri: &str,
+) -> Result<TokenResponse, String> {
+    let resp = client
+        .post("https://api.line.me/oauth2/v2.1/token")
+        .form(&[
+            ("grant_type", "authorization_code"),
+            ("code", code),
+            ("redirect_uri", redirect_uri),
+            ("client_id", channel_id),
+            ("client_secret", channel_secret),
+        ])
+        .send()
+        .await
+        .map_err(|e| format!("LINE token request failed: {e}"))?;
+
+    if !resp.status().is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("LINE token exchange failed: {body}"));
+    }
+
+    resp.json::<TokenResponse>()
+        .await
+        .map_err(|e| format!("LINE token parse failed: {e}"))
+}
+
 #[derive(Debug, Serialize)]
 struct JwtClaims {
     iss: String,
