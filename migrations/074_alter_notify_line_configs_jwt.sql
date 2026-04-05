@@ -8,7 +8,8 @@ ALTER TABLE alc_api.notify_line_configs
 -- channel_access_token_encrypted は不要になるが、既存データ保護のため残す (nullable)
 -- 新規登録では key_id + private_key_encrypted を使う
 
--- lookup 関数を更新 (key_id, private_key_encrypted を返す)
+-- lookup 関数を更新 (戻り値型が変わるため DROP → CREATE)
+DROP FUNCTION IF EXISTS alc_api.lookup_line_config_by_channel(TEXT);
 CREATE OR REPLACE FUNCTION alc_api.lookup_line_config_by_channel(p_channel_id TEXT)
 RETURNS TABLE(id UUID, tenant_id UUID, channel_secret_encrypted TEXT, channel_access_token_encrypted TEXT, key_id TEXT, private_key_encrypted TEXT)
 LANGUAGE sql SECURITY DEFINER SET search_path = alc_api
