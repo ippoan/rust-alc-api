@@ -1,4 +1,5 @@
 use alc_core::storage::StorageBackend;
+use rust_alc_api::archive::repo::PgArchiveDb;
 use sqlx::postgres::PgPoolOptions;
 use std::sync::Arc;
 
@@ -28,11 +29,9 @@ async fn main() -> anyhow::Result<()> {
     let command = args[1].as_str();
     let dry_run = args.iter().any(|a| a == "--dry-run");
 
-    // Connect to DB (superuser for cross-tenant access, no search_path restriction)
     let database_url =
         std::env::var("ARCHIVE_DATABASE_URL").or_else(|_| std::env::var("DATABASE_URL"))?;
 
-    // Strip search_path option if present (archive needs cross-schema access)
     let clean_url = if let Some(pos) = database_url.find("?options=") {
         database_url[..pos].to_string()
     } else {
@@ -44,22 +43,22 @@ async fn main() -> anyhow::Result<()> {
         .connect(&clean_url)
         .await?;
 
-    // Init R2 storage (ohishi-dtako bucket)
+    let db = PgArchiveDb::new(pool);
     let storage = init_r2_storage()?;
 
     match command {
         "logi-dump" => {
-            rust_alc_api::archive::logi::logi_dump(&pool, storage.as_ref(), dry_run).await?;
+            rust_alc_api::archive::logi::logi_dump(&db, storage.as_ref(), dry_run).await?;
         }
         "dtako-archive" => {
-            rust_alc_api::archive::dtako::dtako_archive(&pool, storage.as_ref(), dry_run).await?;
+            rust_alc_api::archive::dtako::dtako_archive(&db, storage.as_ref(), dry_run).await?;
         }
         "dtako-restore" => {
             let tenant_id = get_arg(&args, "--tenant-id")
                 .ok_or_else(|| anyhow::anyhow!("--tenant-id required"))?;
             let date = get_arg(&args, "--date")
                 .ok_or_else(|| anyhow::anyhow!("--date required (YYYY-MM-DD)"))?;
-            rust_alc_api::archive::dtako::dtako_restore(&pool, storage.as_ref(), &tenant_id, &date)
+            rust_alc_api::archive::dtako::dtako_restore(&db, storage.as_ref(), &tenant_id, &date)
                 .await?;
         }
         _ => {
