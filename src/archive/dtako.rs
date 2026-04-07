@@ -394,6 +394,132 @@ async fn upsert_batch(pool: &PgPool, rows: &[String]) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// R2 から指定 tenant_id + 日付範囲の dtakologs を読み込み、DtakologRow に変換して返す。
+/// フロントエンドの by-date-range エンドポイントから呼ばれる。
+pub async fn fetch_from_r2(
+    storage: &dyn StorageBackend,
+    tenant_id: &str,
+    start_date: &str,
+    end_date: &str,
+    vehicle_cd: Option<i32>,
+) -> anyhow::Result<Vec<alc_core::models::DtakologRow>> {
+    let manifest = load_manifest(storage).await;
+    let tenant_dates = match manifest.archived_dates.get(tenant_id) {
+        Some(dates) => dates,
+        None => return Ok(vec![]),
+    };
+
+    let mut all_rows = Vec::new();
+
+    for (date_str, info) in tenant_dates {
+        // Filter by date range
+        if date_str.as_str() < start_date || date_str.as_str() > end_date {
+            continue;
+        }
+
+        // Download and decompress
+        let data = match download_decompressed(storage, &info.r2_key).await {
+            Ok(d) => d,
+            Err(e) => {
+                tracing::warn!("Failed to download archive {}: {}", info.r2_key, e);
+                continue;
+            }
+        };
+
+        let content = String::from_utf8_lossy(&data);
+        for line in content.lines() {
+            if line.is_empty() {
+                continue;
+            }
+            let value: serde_json::Value = match serde_json::from_str(line) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            // Skip header lines
+            if value.get("_archive_header").is_some() {
+                continue;
+            }
+
+            // Filter by vehicle_cd if specified
+            if let Some(vc) = vehicle_cd {
+                if value.get("vehicle_cd").and_then(|v| v.as_i64()) != Some(vc as i64) {
+                    continue;
+                }
+            }
+
+            let row = json_to_dtakolog_row(&value);
+            all_rows.push(row);
+        }
+    }
+
+    // Sort by data_date_time
+    all_rows.sort_by(|a, b| a.data_date_time.cmp(&b.data_date_time));
+
+    Ok(all_rows)
+}
+
+fn json_to_dtakolog_row(v: &serde_json::Value) -> alc_core::models::DtakologRow {
+    alc_core::models::DtakologRow {
+        gps_direction: v
+            .get("gps_direction")
+            .and_then(|x| x.as_f64())
+            .unwrap_or(0.0),
+        gps_latitude: v
+            .get("gps_latitude")
+            .and_then(|x| x.as_f64())
+            .unwrap_or(0.0),
+        gps_longitude: v
+            .get("gps_longitude")
+            .and_then(|x| x.as_f64())
+            .unwrap_or(0.0),
+        vehicle_cd: v.get("vehicle_cd").and_then(|x| x.as_i64()).unwrap_or(0) as i32,
+        vehicle_name: v
+            .get("vehicle_name")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string(),
+        driver_name: v
+            .get("driver_name")
+            .and_then(|x| x.as_str())
+            .map(|s| s.to_string()),
+        address_disp_c: v
+            .get("address_disp_c")
+            .and_then(|x| x.as_str())
+            .map(|s| s.to_string()),
+        data_date_time: v
+            .get("data_date_time")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string(),
+        address_disp_p: v
+            .get("address_disp_p")
+            .and_then(|x| x.as_str())
+            .map(|s| s.to_string()),
+        sub_driver_cd: v.get("sub_driver_cd").and_then(|x| x.as_i64()).unwrap_or(0) as i32,
+        all_state: v
+            .get("all_state")
+            .and_then(|x| x.as_str())
+            .map(|s| s.to_string()),
+        recive_type_color_name: v
+            .get("recive_type_color_name")
+            .and_then(|x| x.as_str())
+            .map(|s| s.to_string()),
+        all_state_ex: v
+            .get("all_state_ex")
+            .and_then(|x| x.as_str())
+            .map(|s| s.to_string()),
+        state2: v
+            .get("state2")
+            .and_then(|x| x.as_str())
+            .map(|s| s.to_string()),
+        all_state_font_color: v
+            .get("all_state_font_color")
+            .and_then(|x| x.as_str())
+            .map(|s| s.to_string()),
+        speed: v.get("speed").and_then(|x| x.as_f64()).unwrap_or(0.0) as f32,
+    }
+}
+
 fn compare_schemas(archived: &SchemaMetadata, current: &SchemaMetadata) {
     let archived_cols: std::collections::HashSet<&str> =
         archived.columns.iter().map(|c| c.name.as_str()).collect();

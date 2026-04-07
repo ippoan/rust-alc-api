@@ -2,6 +2,7 @@
 #[macro_use]
 mod test_macros;
 
+pub mod archive_reader;
 pub mod repo;
 
 pub mod dtako_csv_proxy;

@@ -76,7 +76,8 @@ async fn get_by_date_range(
     tenant: axum::Extension<TenantId>,
     Query(q): Query<DtakologDateRangeQuery>,
 ) -> Result<Json<Vec<DtakologView>>, StatusCode> {
-    let rows = state
+    // DB から取得 (直近7日分)
+    let mut rows = state
         .dtako_logs
         .get_date_range(
             tenant.0 .0,
@@ -86,7 +87,55 @@ async fn get_by_date_range(
         )
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    // R2 アーカイブからも取得 (dtako_storage が設定されている場合)
+    if let Some(ref storage) = state.dtako_storage {
+        let start_date = extract_date(&q.start_date_time);
+        let end_date = extract_date(&q.end_date_time);
+        let tenant_str = tenant.0 .0.to_string();
+        match crate::archive_reader::fetch_from_r2(
+            storage.as_ref(),
+            &tenant_str,
+            &start_date,
+            &end_date,
+            q.vehicle_cd,
+        )
+        .await
+        {
+            Ok(r2_rows) => {
+                rows.extend(r2_rows);
+                // data_date_time でソート
+                rows.sort_by(|a, b| a.data_date_time.cmp(&b.data_date_time));
+                // 重複除去 (DB と R2 の重複期間)
+                rows.dedup_by(|a, b| {
+                    a.data_date_time == b.data_date_time && a.vehicle_cd == b.vehicle_cd
+                });
+            }
+            Err(e) => {
+                tracing::warn!("R2 archive fetch failed (continuing with DB only): {}", e);
+            }
+        }
+    }
+
     Ok(Json(rows.into_iter().map(DtakologView::from).collect()))
+}
+
+/// 日時文字列から YYYY-MM-DD 部分を抽出
+fn extract_date(datetime_str: &str) -> String {
+    // ISO8601: "2026-04-07T12:00:00" → "2026-04-07"
+    // Locale: "26/04/07 12:00" → "2026-04-07" (best effort)
+    if datetime_str.len() >= 10 && datetime_str.as_bytes()[4] == b'-' {
+        return datetime_str[..10].to_string();
+    }
+    // Try chrono parse for flexible formats
+    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(datetime_str, "%Y-%m-%dT%H:%M:%S") {
+        return dt.format("%Y-%m-%d").to_string();
+    }
+    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(datetime_str, "%Y-%m-%d %H:%M:%S") {
+        return dt.format("%Y-%m-%d").to_string();
+    }
+    // Fallback: return as-is (first 10 chars)
+    datetime_str.chars().take(10).collect()
 }
 
 async fn bulk_upsert(
