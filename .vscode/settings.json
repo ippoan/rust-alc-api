@@ -9,6 +9,7 @@
     "TenkoCall",
     "nuxt-dtako-admin",
     "daiun-salary",
+    "ci-dashboard",
     "front/nuxt-pwa-carins"
   ],
   "git.autoRepositoryDetection": true

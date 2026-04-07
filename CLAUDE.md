@@ -449,8 +449,12 @@ Google OAuth 以外の端末登録フローを3種類サポート。
 ### Worktree 作成ルール
 
 - **`git checkout main` は禁止** — PreToolUse hook (`branch-switch-guard.sh`) でブロックされる
+- **メインワークツリーのソースファイル編集は禁止** — PreToolUse hook (`worktree-edit-guard.sh`) が Write/Edit をブロック
+  - `src/`, `tests/`, `migrations/`, `Cargo.toml` 等のコード変更は必ず worktree 内で行う
+  - 例外（メインワークツリーで編集可）: `CLAUDE.md`, `.claude/*`, `.gitignore`, `docs/*`, ルート直下 `.md`, `coverage_100.toml`, `.github/*`
 - 新しいブランチが必要な場合は **必ず worktree を使う**
 - **`origin/main` をベースにすること** — ローカル main は古い可能性がある。hook (`worktree-fetch-guard.sh`) で強制
+- **マージ済み worktree の削除**: `bash ~/.claude/hooks/worktree-cleanup.sh` で一括クリーンアップ
 
 ```bash
 # 正しい方法
