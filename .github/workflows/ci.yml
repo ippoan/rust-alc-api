@@ -146,6 +146,7 @@ jobs:
           mkdir -p docker-context
           cp target/release/rust-alc-api docker-context/
           cp target/release/migrate docker-context/
+          cp target/release/archive docker-context/
           cp -r migrations docker-context/
           cp Dockerfile docker-context/
 
@@ -242,6 +243,7 @@ jobs:
           docker create --name extract ghcr.io/${{ github.repository }}:${{ github.sha }}
           docker cp extract:/usr/local/bin/rust-alc-api staging-context/
           docker cp extract:/usr/local/bin/migrate staging-context/
+          docker cp extract:/usr/local/bin/archive staging-context/
           docker cp extract:/app/migrations staging-context/
           docker rm extract
           cp staging/Dockerfile.app staging-context/Dockerfile
