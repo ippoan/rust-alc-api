@@ -4,6 +4,7 @@ RUN apt-get update && apt-get install -y ca-certificates postgresql-client && rm
 
 COPY rust-alc-api /usr/local/bin/
 COPY migrate /usr/local/bin/
+COPY archive /usr/local/bin/
 COPY migrations /app/migrations
 COPY staging/entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh

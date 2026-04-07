@@ -2,6 +2,7 @@
 #[macro_use]
 mod test_macros;
 
+pub mod archive;
 pub mod auth;
 pub use alc_compare as compare;
 pub use alc_csv_parser as csv_parser;
