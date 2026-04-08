@@ -42,12 +42,29 @@ jobs:
       - uses: swatinem/rust-cache@v2
       - run: cargo fmt --check --all
       - run: cargo clippy --workspace -- -D warnings
+      - name: Generate TypeScript bindings
+        run: cargo test export_bindings --workspace
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ts-bindings-${{ github.sha }}
+          path: crates/*/bindings/*.ts
+          retention-days: 90
 
-  full-tests:
-    name: Full Tests + Coverage
+  test-matrix:
+    name: Tests (${{ matrix.group.name }})
     needs: [pr-limit]
     if: "always() && !startsWith(github.ref, 'refs/tags/') && (needs.pr-limit.result == 'success' || needs.pr-limit.result == 'skipped')"
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        group:
+          - { name: "lib", cmd: "--lib --workspace" }
+          - { name: "mock-tenko", cmd: "--test mock_tenko" }
+          - { name: "mock-dtako", cmd: "--test mock_dtako" }
+          - { name: "mock-devices", cmd: "--test mock_devices" }
+          - { name: "mock-carins", cmd: "--test mock_carins" }
+          - { name: "mock-misc", cmd: "--test mock_misc --test archive_repo_test" }
     services:
       postgres:
         image: postgres:16
@@ -67,55 +84,71 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.92.0
         with:
           components: llvm-tools-preview
-      - uses: swatinem/rust-cache@v2
-        with:
-          workspaces: ". -> target/llvm-cov-target"
+      - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-llvm-cov@0.8.4,cargo-nextest
 
-      - name: Init DB (migrations run inside tests via sqlx::migrate!)
+      - name: Init DB
         run: psql "postgresql://postgres:test@localhost:5432/postgres" -f scripts/init_local_db.sql
 
-      - name: Run lib + mock tests with coverage (single compile)
+      - name: Run tests with coverage
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+          RUSTC_WRAPPER: "sccache"
         run: |
-          cargo llvm-cov nextest --no-report --lib --workspace --test mock_tenko --test mock_dtako --test mock_devices --test mock_carins --test mock_misc --test archive_repo_test
+          cargo llvm-cov nextest --no-report ${{ matrix.group.cmd }}
           PKGS=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name' | sed 's/^/-p /' | tr '\n' ' ')
           cargo llvm-cov report $PKGS --text > /tmp/llvm-cov-output.txt
           echo "=== Coverage Summary ==="
           tail -5 /tmp/llvm-cov-output.txt
 
-      - name: Coverage regression check (all 100% files)
-        run: bash scripts/check_coverage_100.sh --combined --use-cache /tmp/llvm-cov-output.txt
-
-      - name: Upload coverage data
+      - uses: actions/upload-artifact@v4
         if: always()
-        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.group.name }}
+          path: /tmp/llvm-cov-output.txt
+          retention-days: 1
+
+  coverage-check:
+    name: Coverage Check
+    needs: [test-matrix]
+    if: "always() && !startsWith(github.ref, 'refs/tags/') && needs.test-matrix.result == 'success'"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*
+          path: /tmp/coverage-parts
+      - name: Merge coverage and check
+        run: |
+          python3 scripts/merge_coverage.py /tmp/coverage-parts/*/llvm-cov-output.txt > /tmp/llvm-cov-output.txt
+          echo "=== Merged Coverage Summary ==="
+          # Count totals from merged output
+          python3 -c "
+          import re, sys
+          total_lines = 0; total_miss = 0
+          current = None
+          with open('/tmp/llvm-cov-output.txt') as f:
+              for line in f:
+                  if re.match(r'^/.*\.rs:$', line.strip()):
+                      current = True
+                  elif current and re.match(r'^\s*\d+\|\s*0\|', line):
+                      total_lines += 1; total_miss += 1
+                  elif current and re.match(r'^\s*\d+\|\s*[1-9]', line):
+                      total_lines += 1
+          covered = total_lines - total_miss
+          pct = covered / total_lines * 100 if total_lines else 0
+          print(f'Lines: {total_lines}, Covered: {covered}, Missed: {total_miss}, Coverage: {pct:.1f}%')
+          "
+          bash scripts/check_coverage_100.sh --combined --use-cache /tmp/llvm-cov-output.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: llvm-cov-text
           path: /tmp/llvm-cov-output.txt
           retention-days: 30
-
-
-  ts-bindings:
-    name: TypeScript Bindings
-    needs: [pr-limit]
-    if: "always() && !startsWith(github.ref, 'refs/tags/') && (needs.pr-limit.result == 'success' || needs.pr-limit.result == 'skipped')"
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.92.0
-      - uses: mozilla-actions/sccache-action@v0.0.9
-      - name: Generate TypeScript bindings
-        env:
-          SCCACHE_GHA_ENABLED: "true"
-          RUSTC_WRAPPER: "sccache"
-        run: cargo test export_bindings --workspace
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ts-bindings-${{ github.sha }}
-          path: crates/*/bindings/*.ts
-          retention-days: 90
 
   docker-push:
     name: Docker Image → GHCR
@@ -210,7 +243,7 @@ jobs:
   docker-latest:
     name: Tag latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    needs: [check, full-tests, docker-push]
+    needs: [check, coverage-check, docker-push]
     runs-on: ubuntu-latest
     permissions:
       packages: write
@@ -231,7 +264,7 @@ jobs:
   deploy-staging:
     name: Deploy Staging
     if: github.event_name == 'pull_request'
-    needs: [check, full-tests, docker-push]
+    needs: [docker-push]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -414,13 +447,12 @@ jobs:
 
   auto-merge:
     name: Auto Merge
-    needs: [check, full-tests, deploy-staging]
+    needs: [check, coverage-check]
     if: >-
       always() &&
       github.event_name == 'pull_request' &&
       needs.check.result == 'success' &&
-      needs.full-tests.result == 'success' &&
-      (needs.deploy-staging.result == 'success' || needs.deploy-staging.result == 'skipped')
+      needs.coverage-check.result == 'success'
     uses: ippoan/ci-workflows/.github/workflows/auto-merge.yml@main
     permissions:
       contents: write
