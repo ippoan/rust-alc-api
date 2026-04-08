@@ -761,6 +761,102 @@ async fn test_restore_file_db_error() {
 }
 
 // =========================================================================
+// POST /api/files — JSON auto-parse (car inspection JSON)
+// =========================================================================
+
+#[tokio::test]
+async fn test_create_file_json_auto_parse() {
+    let state = setup_mock_app_state();
+    let base_url = crate::common::spawn_test_server(state).await;
+    let client = reqwest::Client::new();
+
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    let json_data = serde_json::json!({
+        "CertInfo": {
+            "ElectCertMgNo": "123456789012",
+            "GrantdateE": "令和",
+            "GrantdateY": "8",
+            "GrantdateM": "2",
+            "GrantdateD": "13"
+        },
+        "CertInfoImportFileVersion": "1.0"
+    });
+    let content = STANDARD.encode(serde_json::to_vec(&json_data).unwrap());
+
+    let res = client
+        .post(format!("{base_url}/api/files"))
+        .header("Authorization", test_auth_header())
+        .json(&serde_json::json!({
+            "filename": "cert.json",
+            "type": "application/json",
+            "content": content
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 201);
+}
+
+// =========================================================================
+// POST /api/files — JSON auto-parse error (invalid car inspection JSON)
+// =========================================================================
+
+#[tokio::test]
+async fn test_create_file_json_parse_error() {
+    let state = setup_mock_app_state();
+    let base_url = crate::common::spawn_test_server(state).await;
+    let client = reqwest::Client::new();
+
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    let content = STANDARD.encode(b"{}"); // missing CertInfo
+
+    let res = client
+        .post(format!("{base_url}/api/files"))
+        .header("Authorization", test_auth_header())
+        .json(&serde_json::json!({
+            "filename": "bad.json",
+            "type": "application/json",
+            "content": content
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    // still 201 — parse error is logged, not returned
+    assert_eq!(res.status(), 201);
+}
+
+// =========================================================================
+// POST /api/files — PDF auto-parse error (non-PDF data)
+// =========================================================================
+
+#[tokio::test]
+async fn test_create_file_pdf_parse_error() {
+    let state = setup_mock_app_state();
+    let base_url = crate::common::spawn_test_server(state).await;
+    let client = reqwest::Client::new();
+
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    let content = STANDARD.encode(b"not a pdf file");
+
+    let res = client
+        .post(format!("{base_url}/api/files"))
+        .header("Authorization", test_auth_header())
+        .json(&serde_json::json!({
+            "filename": "test.pdf",
+            "type": "application/pdf",
+            "content": content
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    // still 201 — parse error is logged, not returned
+    assert_eq!(res.status(), 201);
+}
+
+// =========================================================================
 // Unauthorized — no JWT → 401
 // =========================================================================
 

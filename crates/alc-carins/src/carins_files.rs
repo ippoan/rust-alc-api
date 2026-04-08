@@ -363,25 +363,34 @@ async fn try_parse_car_inspection_pdf(
     file_uuid: Uuid,
     data: &[u8],
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // 1. PDF テキスト抽出 (1ページ目のみ)
     let pages = pdf_extract::extract_text_from_mem_by_pages(data)?;
+    process_car_inspection_pages(repo, tenant_id, file_uuid, &pages).await
+}
+
+/// PDF テキストページから車検証情報を抽出してリンク
+async fn process_car_inspection_pages(
+    repo: &dyn CarInspectionRepository,
+    tenant_id: Uuid,
+    file_uuid: Uuid,
+    pages: &[String],
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let page1 = pages.first().ok_or("PDF has no pages")?;
     if page1.is_empty() {
         return Err("PDF page 1 has no text".into());
     }
 
-    // 2. 車検証 PDF 判定
+    // 車検証 PDF 判定
     if !RE_CAR_INSPECTION.is_match(page1) {
         return Ok(()); // 車検証ではない PDF → スキップ
     }
 
-    // 3. ElectCertMgNo 抽出 (12桁数字)
+    // ElectCertMgNo 抽出 (12桁数字)
     let elect_cert_mg_no = RE_ELECT_CERT_MG_NO
         .find(page1)
         .ok_or("car inspection PDF but no ElectCertMgNo found")?
         .as_str();
 
-    // 4. Grantdate 抽出 (3パターンのフォールバック)
+    // Grantdate 抽出 (3パターンのフォールバック)
     let caps = RE_GRANTDATE_HEADER
         .captures(page1)
         .or_else(|| RE_GRANTDATE_STANDARD.captures(page1))
@@ -414,7 +423,7 @@ async fn try_parse_car_inspection_pdf(
         grantdate_d: &grantdate_d,
     };
 
-    // 5. JSON が既に存在するか確認
+    // JSON が既に存在するか確認
     let json_exists = repo
         .json_file_exists(
             tenant_id,
@@ -490,4 +499,336 @@ async fn restore_file(
     }
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    struct MockRepo {
+        pending_pdf_uuid: Mutex<Option<String>>,
+        json_exists: Mutex<bool>,
+    }
+
+    impl MockRepo {
+        fn new() -> Self {
+            Self {
+                pending_pdf_uuid: Mutex::new(None),
+                json_exists: Mutex::new(false),
+            }
+        }
+        fn with_pending_pdf(self, uuid: &str) -> Self {
+            *self.pending_pdf_uuid.lock().unwrap() = Some(uuid.to_string());
+            self
+        }
+        fn with_json_exists(self) -> Self {
+            *self.json_exists.lock().unwrap() = true;
+            self
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl CarInspectionRepository for MockRepo {
+        async fn list_current(&self, _: Uuid) -> Result<Vec<serde_json::Value>, sqlx::Error> {
+            Ok(vec![])
+        }
+        async fn list_expired(&self, _: Uuid) -> Result<Vec<serde_json::Value>, sqlx::Error> {
+            Ok(vec![])
+        }
+        async fn list_renew(&self, _: Uuid) -> Result<Vec<serde_json::Value>, sqlx::Error> {
+            Ok(vec![])
+        }
+        async fn get_by_id(
+            &self,
+            _: Uuid,
+            _: i32,
+        ) -> Result<Option<serde_json::Value>, sqlx::Error> {
+            Ok(None)
+        }
+        async fn vehicle_categories(
+            &self,
+            _: Uuid,
+        ) -> Result<alc_core::repository::car_inspections::VehicleCategories, sqlx::Error> {
+            Ok(alc_core::repository::car_inspections::VehicleCategories {
+                car_kinds: vec![],
+                uses: vec![],
+                car_shapes: vec![],
+                private_businesses: vec![],
+            })
+        }
+        async fn list_current_files(
+            &self,
+            _: Uuid,
+        ) -> Result<Vec<alc_core::repository::car_inspections::CarInspectionFile>, sqlx::Error>
+        {
+            Ok(vec![])
+        }
+        async fn upsert_from_json(
+            &self,
+            _: Uuid,
+            _: &serde_json::Value,
+            _: &str,
+        ) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+        async fn create_file_link(&self, _: &CreateFileLinkParams<'_>) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+        async fn find_pending_pdf(&self, _: Uuid, _: &str) -> Result<Option<String>, sqlx::Error> {
+            Ok(self.pending_pdf_uuid.lock().unwrap().clone())
+        }
+        async fn delete_pending_pdf(&self, _: Uuid, _: &str) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+        async fn upsert_pending_pdf(
+            &self,
+            _: &CreateFileLinkParams<'_>,
+        ) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+        async fn json_file_exists(
+            &self,
+            _: Uuid,
+            _: &str,
+            _: &str,
+            _: &str,
+            _: &str,
+            _: &str,
+        ) -> Result<bool, sqlx::Error> {
+            Ok(*self.json_exists.lock().unwrap())
+        }
+    }
+
+    #[test]
+    fn test_strip_spaces_field() {
+        let v = serde_json::json!({"key": "令　和"});
+        assert_eq!(strip_spaces_field(&v, "key"), "令和");
+        assert_eq!(strip_spaces_field(&v, "missing"), "");
+    }
+
+    #[test]
+    fn test_strip_spaces_str() {
+        assert_eq!(strip_spaces_str("令 和"), "令和");
+        assert_eq!(strip_spaces_str("令　和"), "令和");
+        assert_eq!(strip_spaces_str("abc"), "abc");
+    }
+
+    #[test]
+    fn test_regex_car_inspection() {
+        assert!(RE_CAR_INSPECTION.is_match("自動車検査証記録事項"));
+        assert!(RE_CAR_INSPECTION.is_match("自 動 車 検 査 証 記 録 事 項"));
+        assert!(!RE_CAR_INSPECTION.is_match("普通の文書"));
+    }
+
+    #[test]
+    fn test_regex_elect_cert_mg_no() {
+        assert_eq!(
+            RE_ELECT_CERT_MG_NO
+                .find("ID=123456789012 です")
+                .unwrap()
+                .as_str(),
+            "123456789012"
+        );
+    }
+
+    #[test]
+    fn test_regex_grantdate_header() {
+        let caps = RE_GRANTDATE_HEADER
+            .captures("記録年月日 令和 8 2 13")
+            .unwrap();
+        assert_eq!(strip_spaces_str(&caps[1]), "令和");
+        assert_eq!(&caps[2], "8");
+        assert_eq!(&caps[3], "2");
+        assert_eq!(&caps[4], "13");
+    }
+
+    #[test]
+    fn test_regex_grantdate_standard() {
+        let caps = RE_GRANTDATE_STANDARD
+            .captures("記録年月日 令和8年2月13日")
+            .unwrap();
+        assert_eq!(strip_spaces_str(&caps[1]), "令和");
+    }
+
+    #[test]
+    fn test_regex_grantdate_biko() {
+        let caps = RE_GRANTDATE_BIKO.captures("４．備考 令和 8 2 13").unwrap();
+        assert_eq!(strip_spaces_str(&caps[1]), "令和");
+    }
+
+    #[tokio::test]
+    async fn test_parse_json_success() {
+        let repo = MockRepo::new();
+        let data = serde_json::json!({
+            "CertInfo": { "ElectCertMgNo": "123456789012", "GrantdateE": "令　和", "GrantdateY": "8", "GrantdateM": "2", "GrantdateD": "13" },
+            "CertInfoImportFileVersion": "1.0"
+        });
+        let bytes = serde_json::to_vec(&data).unwrap();
+        assert!(
+            try_parse_car_inspection_json(&repo, Uuid::nil(), Uuid::new_v4(), &bytes)
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_parse_json_with_pending_pdf() {
+        let repo = MockRepo::new().with_pending_pdf(&Uuid::new_v4().to_string());
+        let data = serde_json::json!({
+            "CertInfo": { "ElectCertMgNo": "123456789012", "GrantdateE": "令和", "GrantdateY": "8", "GrantdateM": "2", "GrantdateD": "13" }
+        });
+        let bytes = serde_json::to_vec(&data).unwrap();
+        assert!(
+            try_parse_car_inspection_json(&repo, Uuid::nil(), Uuid::new_v4(), &bytes)
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_parse_json_missing_cert_info() {
+        let repo = MockRepo::new();
+        assert!(
+            try_parse_car_inspection_json(&repo, Uuid::nil(), Uuid::new_v4(), b"{}")
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_parse_json_missing_elect_cert() {
+        let repo = MockRepo::new();
+        let bytes = serde_json::to_vec(&serde_json::json!({"CertInfo": {}})).unwrap();
+        assert!(
+            try_parse_car_inspection_json(&repo, Uuid::nil(), Uuid::new_v4(), &bytes)
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_parse_json_invalid() {
+        let repo = MockRepo::new();
+        assert!(
+            try_parse_car_inspection_json(&repo, Uuid::nil(), Uuid::new_v4(), b"not json")
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_process_pages_no_pages() {
+        let repo = MockRepo::new();
+        assert!(
+            process_car_inspection_pages(&repo, Uuid::nil(), Uuid::new_v4(), &[])
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("no pages")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_process_pages_empty_page() {
+        let repo = MockRepo::new();
+        assert!(
+            process_car_inspection_pages(&repo, Uuid::nil(), Uuid::new_v4(), &[String::new()])
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("no text")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_process_pages_not_car_inspection() {
+        let repo = MockRepo::new();
+        assert!(process_car_inspection_pages(
+            &repo,
+            Uuid::nil(),
+            Uuid::new_v4(),
+            &["普通の書類".into()]
+        )
+        .await
+        .is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_process_pages_no_elect_cert() {
+        let repo = MockRepo::new();
+        assert!(process_car_inspection_pages(
+            &repo,
+            Uuid::nil(),
+            Uuid::new_v4(),
+            &["自動車検査証記録事項 短い".into()]
+        )
+        .await
+        .is_err());
+    }
+
+    #[tokio::test]
+    async fn test_process_pages_no_grantdate() {
+        let repo = MockRepo::new();
+        assert!(process_car_inspection_pages(
+            &repo,
+            Uuid::nil(),
+            Uuid::new_v4(),
+            &["自動車検査証記録事項 123456789012".into()]
+        )
+        .await
+        .is_err());
+    }
+
+    #[tokio::test]
+    async fn test_process_pages_json_exists() {
+        let repo = MockRepo::new().with_json_exists();
+        assert!(process_car_inspection_pages(
+            &repo,
+            Uuid::nil(),
+            Uuid::new_v4(),
+            &["自動車検査証記録事項 123456789012 記録年月日 令和 8 2 13".into()]
+        )
+        .await
+        .is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_process_pages_pending() {
+        let repo = MockRepo::new();
+        assert!(process_car_inspection_pages(
+            &repo,
+            Uuid::nil(),
+            Uuid::new_v4(),
+            &["自動車検査証記録事項 123456789012 記録年月日 令和 8 2 13".into()]
+        )
+        .await
+        .is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_process_pages_standard_date() {
+        let repo = MockRepo::new();
+        assert!(process_car_inspection_pages(
+            &repo,
+            Uuid::nil(),
+            Uuid::new_v4(),
+            &["自動車検査証記録事項 123456789012 記録年月日 令和8年2月13日".into()]
+        )
+        .await
+        .is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_process_pages_biko_date() {
+        let repo = MockRepo::new();
+        assert!(process_car_inspection_pages(
+            &repo,
+            Uuid::nil(),
+            Uuid::new_v4(),
+            &["自動車検査証記録事項 123456789012 ４．備考 令和 8 2 13".into()]
+        )
+        .await
+        .is_ok());
+    }
 }

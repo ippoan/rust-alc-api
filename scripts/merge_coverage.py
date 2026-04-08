@@ -13,6 +13,16 @@ import sys
 from collections import defaultdict
 
 
+def parse_count(s):
+    """Parse LLVM coverage count like '5', '1.19k', '2.50M'."""
+    s = s.strip()
+    if s.endswith(("k", "K")):
+        return int(float(s[:-1]) * 1000)
+    if s.endswith(("m", "M")):
+        return int(float(s[:-1]) * 1_000_000)
+    return int(s)
+
+
 def parse_text_output(filepath):
     """Parse a cargo llvm-cov --text output file.
 
@@ -35,10 +45,11 @@ def parse_text_output(filepath):
                 continue
 
             # Executable line with count: "    1|      5| source code"
-            m = re.match(r"^(\s*\d+)\|\s*(\d+)\|(.*)$", line)
+            # Count may have k/M suffix: "   99|  1.19k| ..."
+            m = re.match(r"^(\s*\d+)\|\s*([0-9][0-9.]*[kKmM]?)\|(.*)$", line)
             if m:
                 ln = int(m.group(1).strip())
-                count = int(m.group(2))
+                count = parse_count(m.group(2))
                 source = m.group(3)
                 if ln in result[current_file]:
                     old_count, _ = result[current_file][ln]

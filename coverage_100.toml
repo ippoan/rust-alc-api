@@ -7,7 +7,7 @@
 # 新しいファイルが 100% に到達したら追加する。
 # カバレッジ確認: bash scripts/check_coverage_100.sh
 
-# --- Unit test files (DB 不要) ---
+# --- alc-csv-parser ---
 
 [[files]]
 path = "crates/alc-csv-parser/src/lib.rs"
@@ -25,197 +25,211 @@ type = "unit"
 path = "crates/alc-csv-parser/src/work_segments.rs"
 type = "unit"
 
-[[files]]
-path = "src/auth/jwt.rs"
-type = "mock"
-
-# --- Mock test files (DB 不要) ---
+# --- alc-core ---
 
 [[files]]
-path = "src/db/models.rs"
+path = "crates/alc-core/src/auth_jwt.rs"
 type = "mock"
 
 [[files]]
-path = "src/middleware/auth.rs"
+path = "crates/alc-core/src/models.rs"
 type = "mock"
 
 [[files]]
-path = "src/routes/bot_admin.rs"
+path = "crates/alc-core/src/auth_middleware.rs"
 type = "mock"
 
 [[files]]
-path = "src/routes/car_inspection_files.rs"
-type = "mock"
-
-[[files]]
-path = "src/routes/car_inspections.rs"
-type = "mock"
-
-[[files]]
-path = "src/routes/carins_files.rs"
-type = "mock"
-
-[[files]]
-path = "src/routes/carrying_items.rs"
-type = "mock"
-
-[[files]]
-path = "src/routes/communication_items.rs"
-type = "mock"
-
-[[files]]
-path = "src/routes/daily_health.rs"
-type = "mock"
-
-[[files]]
-path = "src/routes/driver_info.rs"
-type = "mock"
-
-[[files]]
-path = "src/routes/dtako_csv_proxy.rs"
-type = "mock"
-
-[[files]]
-path = "src/routes/dtako_daily_hours.rs"
-type = "mock"
-
-[[files]]
-path = "src/routes/dtako_drivers.rs"
-type = "mock"
-
-[[files]]
-path = "src/routes/dtako_logs.rs"
-type = "mock"
-
-[[files]]
-path = "src/routes/dtako_event_classifications.rs"
-type = "mock"
-
-[[files]]
-path = "src/routes/dtako_operations.rs"
-type = "mock"
-
-[[files]]
-path = "src/routes/dtako_vehicles.rs"
-type = "mock"
-
-[[files]]
-path = "src/routes/dtako_work_times.rs"
-type = "mock"
-
-[[files]]
-path = "src/routes/employees.rs"
-type = "mock"
-
-[[files]]
-path = "src/routes/equipment_failures.rs"
-type = "mock"
-
-[[files]]
-path = "src/routes/guidance_records.rs"
-type = "mock"
-
-[[files]]
-path = "src/routes/health.rs"
-type = "mock"
-
-[[files]]
-path = "src/routes/health_baselines.rs"
-type = "mock"
-
-[[files]]
-path = "src/routes/measurements.rs"
-type = "mock"
-
-[[files]]
-path = "src/routes/mod.rs"
-type = "mock"
-
-[[files]]
-path = "src/routes/nfc_tags.rs"
-type = "mock"
-
-[[files]]
-path = "src/routes/sso_admin.rs"
-type = "mock"
-
-[[files]]
-path = "src/routes/tenko_call.rs"
-type = "mock"
-
-[[files]]
-path = "src/routes/tenko_records.rs"
-type = "mock"
-
-[[files]]
-path = "src/routes/tenko_schedules.rs"
-type = "mock"
-
-[[files]]
-path = "src/routes/tenko_webhooks.rs"
-type = "mock"
-
-[[files]]
-path = "src/routes/tenant_users.rs"
-type = "mock"
-
-[[files]]
-path = "src/routes/timecard.rs"
-type = "mock"
-
-[[files]]
-path = "src/routes/upload.rs"
-type = "mock"
-
-# --- Combined test files (lib + mock で 100%) ---
-
-[[files]]
-path = "src/auth/google.rs"
+path = "crates/alc-core/src/auth_google.rs"
 type = "combined"
 
 [[files]]
-path = "src/auth/lineworks.rs"
+path = "crates/alc-core/src/auth_lineworks.rs"
 type = "combined"
+
+[[files]]
+path = "crates/alc-core/src/webhook.rs"
+type = "combined"
+
+# --- alc-carins ---
+
+[[files]]
+path = "crates/alc-carins/src/car_inspection_files.rs"
+type = "mock"
+
+[[files]]
+path = "crates/alc-carins/src/car_inspections.rs"
+type = "mock"
+
+[[files]]
+path = "crates/alc-carins/src/carins_files.rs"
+type = "mock"
+
+[[files]]
+path = "crates/alc-carins/src/nfc_tags.rs"
+type = "mock"
+
+# --- alc-devices ---
+
+[[files]]
+path = "crates/alc-devices/src/devices.rs"
+type = "combined"
+
+# --- alc-dtako ---
+
+[[files]]
+path = "crates/alc-dtako/src/dtako_csv_proxy.rs"
+type = "mock"
+
+[[files]]
+path = "crates/alc-dtako/src/dtako_daily_hours.rs"
+type = "mock"
+
+[[files]]
+path = "crates/alc-dtako/src/dtako_drivers.rs"
+type = "mock"
+
+[[files]]
+path = "crates/alc-dtako/src/dtako_event_classifications.rs"
+type = "mock"
+
+[[files]]
+path = "crates/alc-dtako/src/dtako_logs.rs"
+type = "mock"
+
+[[files]]
+path = "crates/alc-dtako/src/dtako_operations.rs"
+type = "mock"
+
+[[files]]
+path = "crates/alc-dtako/src/dtako_vehicles.rs"
+type = "mock"
+
+[[files]]
+path = "crates/alc-dtako/src/dtako_work_times.rs"
+type = "mock"
+
+[[files]]
+path = "crates/alc-dtako/src/dtako_restraint_report.rs"
+type = "combined"
+
+[[files]]
+path = "crates/alc-dtako/src/dtako_restraint_report_pdf.rs"
+type = "combined"
+
+[[files]]
+path = "crates/alc-dtako/src/dtako_scraper.rs"
+type = "combined"
+
+[[files]]
+path = "crates/alc-dtako/src/dtako_upload.rs"
+type = "combined"
+
+# --- alc-tenko ---
+
+[[files]]
+path = "crates/alc-tenko/src/daily_health.rs"
+type = "mock"
+
+[[files]]
+path = "crates/alc-tenko/src/equipment_failures.rs"
+type = "mock"
+
+[[files]]
+path = "crates/alc-tenko/src/health_baselines.rs"
+type = "mock"
+
+[[files]]
+path = "crates/alc-tenko/src/tenko_call.rs"
+type = "mock"
+
+[[files]]
+path = "crates/alc-tenko/src/tenko_records.rs"
+type = "mock"
+
+[[files]]
+path = "crates/alc-tenko/src/tenko_schedules.rs"
+type = "mock"
+
+[[files]]
+path = "crates/alc-tenko/src/tenko_webhooks.rs"
+type = "mock"
+
+[[files]]
+path = "crates/alc-tenko/src/tenko_sessions.rs"
+type = "combined"
+
+# --- alc-misc ---
+
+[[files]]
+path = "crates/alc-misc/src/bot_admin.rs"
+type = "mock"
+
+[[files]]
+path = "crates/alc-misc/src/carrying_items.rs"
+type = "mock"
+
+[[files]]
+path = "crates/alc-misc/src/communication_items.rs"
+type = "mock"
+
+[[files]]
+path = "crates/alc-misc/src/driver_info.rs"
+type = "mock"
+
+[[files]]
+path = "crates/alc-misc/src/employees.rs"
+type = "mock"
+
+[[files]]
+path = "crates/alc-misc/src/guidance_records.rs"
+type = "mock"
+
+[[files]]
+path = "crates/alc-misc/src/health.rs"
+type = "mock"
+
+[[files]]
+path = "crates/alc-misc/src/measurements.rs"
+type = "mock"
+
+[[files]]
+path = "crates/alc-misc/src/sso_admin.rs"
+type = "mock"
+
+[[files]]
+path = "crates/alc-misc/src/tenant_users.rs"
+type = "mock"
+
+[[files]]
+path = "crates/alc-misc/src/timecard.rs"
+type = "mock"
+
+[[files]]
+path = "crates/alc-misc/src/upload.rs"
+type = "mock"
+
+[[files]]
+path = "crates/alc-misc/src/auth.rs"
+type = "combined"
+
+# --- alc-compare ---
 
 [[files]]
 path = "crates/alc-compare/src/lib.rs"
 type = "combined"
 
-[[files]]
-path = "src/routes/auth.rs"
-type = "combined"
-
-[[files]]
-path = "src/routes/devices.rs"
-type = "combined"
-
-[[files]]
-path = "src/routes/dtako_restraint_report.rs"
-type = "combined"
-
-[[files]]
-path = "src/routes/dtako_restraint_report_pdf.rs"
-type = "combined"
+# --- alc-pdf ---
 
 [[files]]
 path = "crates/alc-pdf/src/render.rs"
 type = "combined"
 
-[[files]]
-path = "src/routes/dtako_scraper.rs"
-type = "combined"
+# --- root package ---
 
 [[files]]
-path = "src/routes/dtako_upload.rs"
-type = "combined"
-
-[[files]]
-path = "src/routes/tenko_sessions.rs"
-type = "combined"
-
-[[files]]
-path = "src/webhook.rs"
-type = "combined"
+path = "src/routes/mod.rs"
+type = "mock"
 
 [[files]]
 path = "src/archive/compress.rs"
