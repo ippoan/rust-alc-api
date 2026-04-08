@@ -179,63 +179,6 @@ pub async fn dtako_archive_range(
     }
     println!("Phase A: {} rows archived", archived_count);
 
-    println!("\n=== Phase B: DELETE old rows from DB ===");
-
-    let cutoff = (chrono::Utc::now() - chrono::Duration::days(7))
-        .format("%Y-%m-%d")
-        .to_string();
-
-    let old_dates = db.list_old_dtako_dates(&cutoff).await?;
-
-    let mut deleted_count = 0i64;
-    for (tenant_id, date_str, count) in &old_dates {
-        if let Some(sd) = start_date {
-            if date_str.as_str() < sd {
-                continue;
-            }
-        }
-        if let Some(ed) = end_date {
-            if date_str.as_str() > ed {
-                continue;
-            }
-        }
-
-        let in_manifest = manifest
-            .archived_dates
-            .get(tenant_id)
-            .and_then(|dates| dates.get(date_str))
-            .is_some();
-
-        if !in_manifest {
-            println!(
-                "  SKIP tenant={} date={} ({} rows) — not in manifest",
-                tenant_id, date_str, count
-            );
-            continue;
-        }
-
-        if dry_run {
-            println!(
-                "  [dry-run] Would DELETE {} rows for tenant={} date={}",
-                count, tenant_id, date_str
-            );
-            deleted_count += count;
-            continue;
-        }
-
-        let affected = db.delete_dtako_date(tenant_id, date_str).await?;
-        println!(
-            "  DELETE {} rows for tenant={} date={}",
-            affected, tenant_id, date_str
-        );
-        deleted_count += affected as i64;
-    }
-
-    println!(
-        "Phase B: {} rows deleted (cutoff={})",
-        deleted_count, cutoff
-    );
-
     Ok(())
 }
 
@@ -648,48 +591,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_dtako_archive_phase_b_delete() {
-        let db = MockArchiveDb::default();
-        // No new dates to archive
-        *db.dtako_dates.lock().unwrap() = vec![];
-        // Old dates to delete
-        *db.old_dates.lock().unwrap() = vec![("t1".into(), "2026-03-01".into(), 50)];
-        *db.deleted_count.lock().unwrap() = 50;
-        *db.columns.lock().unwrap() = vec![("col".into(), "TEXT".into(), "NO".into(), None)];
-
-        // Manifest has the old date
-        let mut manifest = Manifest::default();
-        manifest
-            .archived_dates
-            .entry("t1".into())
-            .or_default()
-            .insert(
-                "2026-03-01".into(),
-                ArchivedDateInfo {
-                    row_count: 50,
-                    archived_at: "prev".into(),
-                    r2_key: "key".into(),
-                },
-            );
-        let storage = TestStorage::new();
-        storage.put(MANIFEST_KEY, serde_json::to_vec(&manifest).unwrap());
-
-        dtako_archive(&db, &storage, false).await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn test_dtako_archive_phase_b_skip_not_in_manifest() {
-        let db = MockArchiveDb::default();
-        *db.dtako_dates.lock().unwrap() = vec![];
-        *db.old_dates.lock().unwrap() = vec![("t1".into(), "2026-03-01".into(), 50)];
-        *db.columns.lock().unwrap() = vec![("col".into(), "TEXT".into(), "NO".into(), None)];
-        // No manifest → should skip delete
-        let storage = TestStorage::new();
-
-        dtako_archive(&db, &storage, false).await.unwrap();
-    }
-
-    #[tokio::test]
     async fn test_dtako_restore_success() {
         let db = MockArchiveDb::default();
         *db.columns.lock().unwrap() = vec![("col".into(), "TEXT".into(), "NO".into(), None)];
@@ -900,32 +801,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_dtako_archive_dry_run_with_old_dates() {
-        // Covers: dry_run DELETE path (lines 187-192)
-        let db = MockArchiveDb::default();
-        *db.dtako_dates.lock().unwrap() = vec![("t1".into(), "2026-04-01".into(), 10)];
-        *db.old_dates.lock().unwrap() = vec![("t1".into(), "2026-03-01".into(), 50)];
-
-        let mut manifest = Manifest::default();
-        manifest
-            .archived_dates
-            .entry("t1".into())
-            .or_default()
-            .insert(
-                "2026-03-01".into(),
-                ArchivedDateInfo {
-                    row_count: 50,
-                    archived_at: "prev".into(),
-                    r2_key: "key".into(),
-                },
-            );
-        let storage = TestStorage::new();
-        storage.put(MANIFEST_KEY, serde_json::to_vec(&manifest).unwrap());
-
-        dtako_archive(&db, &storage, true).await.unwrap();
-    }
-
-    #[tokio::test]
     async fn test_dtako_restore_empty_lines_and_batch() {
         // Covers: empty lines skip + batch < 500 flush
         let db = MockArchiveDb::default();
@@ -1095,52 +970,5 @@ mod tests {
             .collect();
         assert_eq!(data_keys.len(), 1);
         assert!(data_keys[0].contains("2026/03/01"));
-    }
-
-    #[tokio::test]
-    async fn test_dtako_archive_range_phase_b_filters() {
-        // Phase B: delete old dates should also respect date range
-        let db = MockArchiveDb::default();
-        *db.dtako_dates.lock().unwrap() = vec![];
-        *db.old_dates.lock().unwrap() = vec![
-            ("t1".into(), "2026-02-01".into(), 50),
-            ("t1".into(), "2026-03-01".into(), 50),
-            ("t1".into(), "2026-04-01".into(), 50),
-        ];
-        *db.deleted_count.lock().unwrap() = 50;
-        *db.columns.lock().unwrap() = vec![("col".into(), "TEXT".into(), "NO".into(), None)];
-
-        let mut manifest = Manifest::default();
-        manifest
-            .archived_dates
-            .entry("t1".into())
-            .or_default()
-            .insert(
-                "2026-02-01".into(),
-                ArchivedDateInfo {
-                    row_count: 50,
-                    archived_at: "prev".into(),
-                    r2_key: "k".into(),
-                },
-            );
-        manifest
-            .archived_dates
-            .entry("t1".into())
-            .or_default()
-            .insert(
-                "2026-03-01".into(),
-                ArchivedDateInfo {
-                    row_count: 50,
-                    archived_at: "prev".into(),
-                    r2_key: "k".into(),
-                },
-            );
-        let storage = TestStorage::new();
-        storage.put(MANIFEST_KEY, serde_json::to_vec(&manifest).unwrap());
-
-        // Only delete March, skip February
-        dtako_archive_range(&db, &storage, false, Some("2026-03-01"), Some("2026-03-01"))
-            .await
-            .unwrap();
     }
 }
