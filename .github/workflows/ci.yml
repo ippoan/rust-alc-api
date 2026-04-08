@@ -32,7 +32,7 @@ jobs:
   check:
     name: Format & Lint
     needs: [pr-limit]
-    if: "always() && !startsWith(github.ref, 'refs/tags/') && (needs.pr-limit.result == 'success' || needs.pr-limit.result == 'skipped')"
+    if: "always() && (needs.pr-limit.result == 'success' || needs.pr-limit.result == 'skipped')"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -53,7 +53,7 @@ jobs:
   test-matrix:
     name: Tests (${{ matrix.group.name }})
     needs: [pr-limit]
-    if: "always() && !startsWith(github.ref, 'refs/tags/') && (needs.pr-limit.result == 'success' || needs.pr-limit.result == 'skipped')"
+    if: "always() && (needs.pr-limit.result == 'success' || needs.pr-limit.result == 'skipped')"
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -116,7 +116,7 @@ jobs:
   coverage-check:
     name: Coverage Check
     needs: [test-matrix]
-    if: "always() && !startsWith(github.ref, 'refs/tags/') && needs.test-matrix.result == 'success'"
+    if: "always() && needs.test-matrix.result == 'success'"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
