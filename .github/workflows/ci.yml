@@ -48,6 +48,20 @@ jobs:
     needs: [pr-limit]
     if: "always() && !startsWith(github.ref, 'refs/tags/') && (needs.pr-limit.result == 'success' || needs.pr-limit.result == 'skipped')"
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: test
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    env:
+      TEST_DATABASE_URL: "postgresql://postgres:test@localhost:5432/postgres?options=-c search_path=alc_api"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.92.0
@@ -60,9 +74,14 @@ jobs:
         with:
           tool: cargo-llvm-cov@0.8.4,cargo-nextest
 
+      - name: Apply migrations
+        run: |
+          psql "postgresql://postgres:test@localhost:5432/postgres" -f scripts/init_local_db.sql
+          DATABASE_URL="$TEST_DATABASE_URL" cargo run --bin migrate
+
       - name: Run lib + mock tests with coverage (single compile)
         run: |
-          cargo llvm-cov nextest --no-report --lib --workspace --test mock_tenko --test mock_dtako --test mock_devices --test mock_carins --test mock_misc
+          cargo llvm-cov nextest --no-report --lib --workspace --test mock_tenko --test mock_dtako --test mock_devices --test mock_carins --test mock_misc --test archive_repo_test
           PKGS=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name' | sed 's/^/-p /' | tr '\n' ' ')
           cargo llvm-cov report $PKGS --text > /tmp/llvm-cov-output.txt
           echo "=== Coverage Summary ==="
