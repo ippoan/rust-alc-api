@@ -942,4 +942,56 @@ mod tests {
             .unwrap();
         assert_eq!(rows.len(), 1); // invalid JSON skipped, valid row parsed
     }
+
+    #[tokio::test]
+    async fn test_dtako_restore_large_batch_flush() {
+        // Covers: batch_values.len() >= 500 flush path (lines 253-254)
+        // and batch_values empty after exact multiple (line 260 false branch)
+        let db = MockArchiveDb::default();
+        *db.columns.lock().unwrap() = vec![("col".into(), "TEXT".into(), "NO".into(), None)];
+
+        let storage = TestStorage::new();
+        let mut content = String::from("{\"_archive_header\":true}\n");
+        // 500 rows exactly → triggers batch flush, then empty remainder
+        for i in 0..500 {
+            content.push_str(&format!("{{\"vehicle_cd\":{}}}\n", i));
+        }
+        let compressed = gzip_compress(content.as_bytes()).unwrap();
+        storage.put(&make_r2_key("t1", "2026-04-01"), compressed);
+
+        dtako_restore(&db, &storage, "t1", "2026-04-01")
+            .await
+            .unwrap();
+        assert_eq!(db.upserted.lock().unwrap().len(), 500);
+    }
+
+    #[tokio::test]
+    async fn test_fetch_from_r2_empty_lines_in_archive() {
+        // Covers: empty line continue in fetch_from_r2 (line 297)
+        let storage = TestStorage::new();
+        let r2_key = "k.jsonl.gz";
+        let mut manifest = Manifest::default();
+        manifest
+            .archived_dates
+            .entry("t1".into())
+            .or_default()
+            .insert(
+                "2026-04-01".into(),
+                ArchivedDateInfo {
+                    row_count: 1,
+                    archived_at: "now".into(),
+                    r2_key: r2_key.into(),
+                },
+            );
+        storage.put(MANIFEST_KEY, serde_json::to_vec(&manifest).unwrap());
+
+        // Archive data with empty lines between rows
+        let content = "{\"_archive_header\":true}\n\n{\"vehicle_cd\":1,\"data_date_time\":\"d\",\"vehicle_name\":\"\",\"speed\":0,\"gps_direction\":0,\"gps_latitude\":0,\"gps_longitude\":0,\"sub_driver_cd\":0}\n\n";
+        storage.put(r2_key, gzip_compress(content.as_bytes()).unwrap());
+
+        let rows = fetch_from_r2(&storage, "t1", "2026-04-01", "2026-04-01", None)
+            .await
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+    }
 }
