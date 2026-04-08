@@ -29,10 +29,27 @@ jobs:
             exit 1
           fi
 
+  cache-warm:
+    name: Cache Warm
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.92.0
+      - uses: mozilla-actions/sccache-action@v0.0.9
+      - uses: swatinem/rust-cache@v2
+        with:
+          shared-key: release-build
+      - name: Build release (cache warm)
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+          RUSTC_WRAPPER: "sccache"
+        run: cargo build --release
+
   check:
     name: Format & Lint
     needs: [pr-limit]
-    if: "always() && (needs.pr-limit.result == 'success' || needs.pr-limit.result == 'skipped')"
+    if: "always() && !(github.ref == 'refs/heads/main' && github.event_name == 'push') && (needs.pr-limit.result == 'success' || needs.pr-limit.result == 'skipped')"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -53,7 +70,7 @@ jobs:
   test-matrix:
     name: Tests (${{ matrix.group.name }})
     needs: [pr-limit]
-    if: "always() && (needs.pr-limit.result == 'success' || needs.pr-limit.result == 'skipped')"
+    if: "always() && !(github.ref == 'refs/heads/main' && github.event_name == 'push') && (needs.pr-limit.result == 'success' || needs.pr-limit.result == 'skipped')"
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
