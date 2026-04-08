@@ -11,6 +11,15 @@ pub async fn logi_dump(
     storage: &dyn StorageBackend,
     dry_run: bool,
 ) -> anyhow::Result<()> {
+    logi_dump_inner(db, storage, dry_run, MAX_ROWS_PER_FILE).await
+}
+
+async fn logi_dump_inner(
+    db: &dyn ArchiveDb,
+    storage: &dyn StorageBackend,
+    dry_run: bool,
+    max_rows_per_file: usize,
+) -> anyhow::Result<()> {
     let tables = db.list_tables("logi").await?;
 
     if tables.is_empty() {
@@ -70,8 +79,8 @@ pub async fn logi_dump(
                 buffer.push(b'\n');
                 file_rows += 1;
 
-                if file_rows >= MAX_ROWS_PER_FILE {
-                    let suffix = if total > MAX_ROWS_PER_FILE {
+                if file_rows >= max_rows_per_file {
+                    let suffix = if total > max_rows_per_file {
                         format!("_part{}", file_idx)
                     } else {
                         String::new()
@@ -194,6 +203,63 @@ mod tests {
 
         let result = logi_dump(&db, &storage, false).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_logi_dump_split_files() {
+        let db = MockArchiveDb::default();
+        *db.tables.lock().unwrap() = vec!["big_table".into()];
+        db.row_counts.lock().unwrap().insert("big_table".into(), 5);
+        *db.columns.lock().unwrap() = vec![("id".into(), "INTEGER".into(), "NO".into(), None)];
+        *db.primary_key.lock().unwrap() = vec!["id".into()];
+        *db.rows.lock().unwrap() = (1..=5).map(|i| serde_json::json!({"id": i})).collect();
+        let storage = TestStorage::new();
+
+        // max_rows_per_file=2 → 3 files: part0(2), part1(2), part2(1)
+        let result = logi_dump_inner(&db, &storage, false, 2).await;
+        assert!(result.is_ok());
+
+        let data_keys: Vec<String> = storage
+            .keys()
+            .into_iter()
+            .filter(|k| k.ends_with(".jsonl.gz"))
+            .collect();
+        assert_eq!(data_keys.len(), 3);
+
+        assert!(data_keys.iter().any(|k| k.contains("_part0")));
+        assert!(data_keys.iter().any(|k| k.contains("_part1")));
+        assert!(data_keys.iter().any(|k| k.contains("_part2")));
+
+        // Verify each file has header + data rows
+        for key in &data_keys {
+            let compressed = storage.get(key).unwrap();
+            let data = gzip_decompress(&compressed).unwrap();
+            let lines: Vec<&str> = std::str::from_utf8(&data).unwrap().lines().collect();
+            assert!(lines.len() >= 2); // header + at least 1 row
+        }
+    }
+
+    #[tokio::test]
+    async fn test_logi_dump_exact_boundary() {
+        let db = MockArchiveDb::default();
+        *db.tables.lock().unwrap() = vec!["t".into()];
+        db.row_counts.lock().unwrap().insert("t".into(), 2);
+        *db.columns.lock().unwrap() = vec![("id".into(), "INTEGER".into(), "NO".into(), None)];
+        *db.primary_key.lock().unwrap() = vec!["id".into()];
+        *db.rows.lock().unwrap() = vec![serde_json::json!({"id": 1}), serde_json::json!({"id": 2})];
+        let storage = TestStorage::new();
+
+        // total == max_rows_per_file: split triggers but no _part suffix
+        let result = logi_dump_inner(&db, &storage, false, 2).await;
+        assert!(result.is_ok());
+
+        let data_keys: Vec<String> = storage
+            .keys()
+            .into_iter()
+            .filter(|k| k.ends_with(".jsonl.gz"))
+            .collect();
+        assert_eq!(data_keys.len(), 1);
+        assert!(!data_keys[0].contains("_part"));
     }
 
     #[tokio::test]

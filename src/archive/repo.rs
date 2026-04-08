@@ -335,14 +335,17 @@ pub mod mock {
             &self,
             _schema: &str,
             _table: &str,
-            _limit: i64,
+            limit: i64,
             offset: i64,
         ) -> anyhow::Result<Vec<serde_json::Value>> {
             self.check_fail()?;
-            if offset > 0 {
+            let rows = self.rows.lock().unwrap();
+            let start = offset as usize;
+            if start >= rows.len() {
                 return Ok(vec![]);
             }
-            Ok(self.rows.lock().unwrap().clone())
+            let end = std::cmp::min(start + limit as usize, rows.len());
+            Ok(rows[start..end].to_vec())
         }
 
         async fn list_dtako_dates(&self) -> anyhow::Result<Vec<(String, String, i64)>> {
@@ -354,14 +357,17 @@ pub mod mock {
             &self,
             _tenant_id: &str,
             _date: &str,
-            _limit: i64,
+            limit: i64,
             offset: i64,
         ) -> anyhow::Result<Vec<serde_json::Value>> {
             self.check_fail()?;
-            if offset > 0 {
+            let rows = self.rows.lock().unwrap();
+            let start = offset as usize;
+            if start >= rows.len() {
                 return Ok(vec![]);
             }
-            Ok(self.rows.lock().unwrap().clone())
+            let end = std::cmp::min(start + limit as usize, rows.len());
+            Ok(rows[start..end].to_vec())
         }
 
         async fn list_old_dtako_dates(
