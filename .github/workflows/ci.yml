@@ -6,6 +6,7 @@ on:
     tags: ['v*']
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -156,7 +157,7 @@ jobs:
   docker-push:
     name: Docker Image → GHCR
     needs: [pr-limit]
-    if: "always() && github.event_name == 'pull_request' && (needs.pr-limit.result == 'success' || needs.pr-limit.result == 'skipped')"
+    if: "always() && (needs.pr-limit.result == 'success' || needs.pr-limit.result == 'skipped')"
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -247,8 +248,14 @@ jobs:
 
   docker-latest:
     name: Tag latest
-    if: "always() && github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.check.result == 'success' && needs.coverage-check.result == 'success'"
-    needs: [check, coverage-check]
+    if: >-
+      always() &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      needs.docker-push.result == 'success' &&
+      needs.check.result == 'success' &&
+      needs.coverage-check.result == 'success'
+    needs: [docker-push, check, coverage-check]
     runs-on: ubuntu-latest
     permissions:
       packages: write
@@ -260,12 +267,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Retag dev → sha + latest (no rebuild)
+      - name: Tag sha → latest
         run: |
-          docker pull ghcr.io/${{ github.repository }}:dev
-          docker tag ghcr.io/${{ github.repository }}:dev ghcr.io/${{ github.repository }}:${{ github.sha }}
-          docker tag ghcr.io/${{ github.repository }}:dev ghcr.io/${{ github.repository }}:latest
-          docker push ghcr.io/${{ github.repository }}:${{ github.sha }}
+          docker pull ghcr.io/${{ github.repository }}:${{ github.sha }}
+          docker tag ghcr.io/${{ github.repository }}:${{ github.sha }} ghcr.io/${{ github.repository }}:latest
           docker push ghcr.io/${{ github.repository }}:latest
 
   deploy-staging:
@@ -349,7 +354,8 @@ jobs:
 
   migrate:
     name: Migrate
-    if: startsWith(github.ref, 'refs/tags/v') && github.event_name == 'push'
+    needs: [docker-push]
+    if: "always() && startsWith(github.ref, 'refs/tags/v') && github.event_name == 'push' && needs.docker-push.result == 'success'"
     runs-on: ubuntu-latest
     permissions:
       contents: read
