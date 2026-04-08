@@ -38,12 +38,12 @@ jobs:
       matrix:
         target:
           - { name: "release", key: "release-build", cmd: "cargo build --release" }
-          - { name: "test", key: "test-lib", cmd: "cargo llvm-cov nextest --no-report --no-run --lib --workspace" }
-          - { name: "mock-tenko", key: "test-mock-tenko", cmd: "cargo llvm-cov nextest --no-report --no-run --test mock_tenko" }
-          - { name: "mock-dtako", key: "test-mock-dtako", cmd: "cargo llvm-cov nextest --no-report --no-run --test mock_dtako" }
-          - { name: "mock-devices", key: "test-mock-devices", cmd: "cargo llvm-cov nextest --no-report --no-run --test mock_devices" }
-          - { name: "mock-carins", key: "test-mock-carins", cmd: "cargo llvm-cov nextest --no-report --no-run --test mock_carins" }
-          - { name: "mock-misc", key: "test-mock-misc", cmd: "cargo llvm-cov nextest --no-report --no-run --test mock_misc --test archive_repo_test" }
+          - { name: "test", key: "test-lib", cmd: "cargo llvm-cov nextest --no-report --ignore-run-fail --lib --workspace" }
+          - { name: "mock-tenko", key: "test-mock-tenko", cmd: "cargo llvm-cov nextest --no-report --ignore-run-fail --test mock_tenko" }
+          - { name: "mock-dtako", key: "test-mock-dtako", cmd: "cargo llvm-cov nextest --no-report --ignore-run-fail --test mock_dtako" }
+          - { name: "mock-devices", key: "test-mock-devices", cmd: "cargo llvm-cov nextest --no-report --ignore-run-fail --test mock_devices" }
+          - { name: "mock-carins", key: "test-mock-carins", cmd: "cargo llvm-cov nextest --no-report --ignore-run-fail --test mock_carins" }
+          - { name: "mock-misc", key: "test-mock-misc", cmd: "cargo llvm-cov nextest --no-report --ignore-run-fail --test mock_misc --test archive_repo_test" }
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.92.0
