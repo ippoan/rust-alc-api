@@ -1106,6 +1106,7 @@ mod tests {
         *db.old_dates.lock().unwrap() = vec![
             ("t1".into(), "2026-02-01".into(), 50),
             ("t1".into(), "2026-03-01".into(), 50),
+            ("t1".into(), "2026-04-01".into(), 50),
         ];
         *db.deleted_count.lock().unwrap() = 50;
         *db.columns.lock().unwrap() = vec![("col".into(), "TEXT".into(), "NO".into(), None)];
