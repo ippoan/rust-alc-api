@@ -228,3 +228,11 @@ type = "unit"
 [[files]]
 path = "src/archive/test_helpers.rs"
 type = "unit"
+
+[[files]]
+path = "src/archive/logi.rs"
+type = "unit"
+
+[[files]]
+path = "src/archive/dtako.rs"
+type = "unit"
