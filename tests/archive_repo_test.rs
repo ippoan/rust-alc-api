@@ -145,18 +145,6 @@ async fn test_dtako_lifecycle() {
         .unwrap();
     assert!(empty.is_empty());
 
-    // list_old_dtako_dates (cutoff after the date)
-    let old = db.list_old_dtako_dates("2020-02-01").await.unwrap();
-    let found_old = old
-        .iter()
-        .any(|(tid, date, _)| tid == &tenant_str && date == "2020-01-15");
-    assert!(found_old);
-
-    // list_old_dtako_dates (cutoff before the date)
-    let not_old = db.list_old_dtako_dates("2020-01-01").await.unwrap();
-    let found_not_old = not_old.iter().any(|(tid, _, _)| tid == &tenant_str);
-    assert!(!found_not_old);
-
     // upsert again (ON CONFLICT UPDATE)
     let row_json2 = format!(
         r#"{{"tenant_id":"{}","data_date_time":"2020-01-15 10:00:00","vehicle_cd":99,"type":"updated","speed":80.0}}"#,
@@ -170,19 +158,12 @@ async fn test_dtako_lifecycle() {
     assert_eq!(rows2.len(), 1);
     assert_eq!(rows2[0]["speed"], 80.0);
 
-    // delete_dtako_date
-    let deleted = db
-        .delete_dtako_date(&tenant_str, "2020-01-15")
+    // Cleanup
+    sqlx::query("DELETE FROM alc_api.dtakologs WHERE tenant_id = $1::UUID")
+        .bind(&tenant_str)
+        .execute(&pool)
         .await
         .unwrap();
-    assert_eq!(deleted, 1);
-
-    // Verify deleted
-    let after = db
-        .fetch_dtako_rows_json(&tenant_str, "2020-01-15", 100, 0)
-        .await
-        .unwrap();
-    assert!(after.is_empty());
 
     // Cleanup tenant
     sqlx::query("DELETE FROM alc_api.tenants WHERE id = $1")

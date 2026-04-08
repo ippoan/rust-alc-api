@@ -31,12 +31,6 @@ pub trait ArchiveDb: Send + Sync {
         limit: i64,
         offset: i64,
     ) -> anyhow::Result<Vec<serde_json::Value>>;
-    async fn list_old_dtako_dates(
-        &self,
-        cutoff: &str,
-    ) -> anyhow::Result<Vec<(String, String, i64)>>;
-    async fn delete_dtako_date(&self, tenant_id: &str, date: &str) -> anyhow::Result<u64>;
-
     // dtako restore
     async fn upsert_dtako_batch(&self, rows_json: &[String]) -> anyhow::Result<()>;
 }
@@ -151,28 +145,6 @@ impl ArchiveDb for PgArchiveDb {
         Ok(rows.into_iter().map(|(v,)| v).collect())
     }
 
-    async fn list_old_dtako_dates(
-        &self,
-        cutoff: &str,
-    ) -> anyhow::Result<Vec<(String, String, i64)>> {
-        let rows = sqlx::query_as::<_, (String, String, i64)>(
-            "SELECT * FROM alc_api.archive_list_old_dtako_dates($1)",
-        )
-        .bind(cutoff)
-        .fetch_all(&self.pool)
-        .await?;
-        Ok(rows)
-    }
-
-    async fn delete_dtako_date(&self, tenant_id: &str, date: &str) -> anyhow::Result<u64> {
-        let row: (i64,) = sqlx::query_as("SELECT alc_api.archive_delete_dtako_date($1, $2)")
-            .bind(tenant_id)
-            .bind(date)
-            .fetch_one(&self.pool)
-            .await?;
-        Ok(row.0 as u64)
-    }
-
     async fn upsert_dtako_batch(&self, rows_json: &[String]) -> anyhow::Result<()> {
         for row_json in rows_json {
             let v: serde_json::Value = serde_json::from_str(row_json)?;
@@ -201,8 +173,6 @@ pub mod mock {
         pub columns: Mutex<Vec<(String, String, String, Option<String>)>>,
         pub primary_key: Mutex<Vec<String>>,
         pub dtako_dates: Mutex<Vec<(String, String, i64)>>,
-        pub old_dates: Mutex<Vec<(String, String, i64)>>,
-        pub deleted_count: Mutex<u64>,
         pub upserted: Mutex<Vec<String>>,
     }
 
@@ -216,8 +186,6 @@ pub mod mock {
                 columns: Mutex::new(vec![]),
                 primary_key: Mutex::new(vec![]),
                 dtako_dates: Mutex::new(vec![]),
-                old_dates: Mutex::new(vec![]),
-                deleted_count: Mutex::new(0),
                 upserted: Mutex::new(vec![]),
             }
         }
@@ -299,19 +267,6 @@ pub mod mock {
             }
             let end = std::cmp::min(start + limit as usize, rows.len());
             Ok(rows[start..end].to_vec())
-        }
-
-        async fn list_old_dtako_dates(
-            &self,
-            _cutoff: &str,
-        ) -> anyhow::Result<Vec<(String, String, i64)>> {
-            self.check_fail()?;
-            Ok(self.old_dates.lock().unwrap().clone())
-        }
-
-        async fn delete_dtako_date(&self, _tenant_id: &str, _date: &str) -> anyhow::Result<u64> {
-            self.check_fail()?;
-            Ok(*self.deleted_count.lock().unwrap())
         }
 
         async fn upsert_dtako_batch(&self, rows_json: &[String]) -> anyhow::Result<()> {
