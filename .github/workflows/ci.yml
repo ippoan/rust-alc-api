@@ -169,6 +169,8 @@ jobs:
       - uses: mozilla-actions/sccache-action@v0.0.9
 
       - uses: swatinem/rust-cache@v2
+        with:
+          shared-key: release-build
 
       - name: Resolve git info
         id: git-info
