@@ -245,7 +245,7 @@ jobs:
 
   docker-latest:
     name: Tag latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: "always() && github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.check.result == 'success' && needs.coverage-check.result == 'success'"
     needs: [check, coverage-check]
     runs-on: ubuntu-latest
     permissions:
