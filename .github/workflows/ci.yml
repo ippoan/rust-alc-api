@@ -62,7 +62,7 @@ jobs:
 
       - name: Run lib + mock tests with coverage (single compile)
         run: |
-          cargo llvm-cov nextest --no-report --lib --workspace --test mock_tenko --test mock_dtako --test mock_devices --test mock_carins --test mock_misc
+          cargo llvm-cov nextest --no-report --lib --workspace --test mock_tenko --test mock_dtako --test mock_devices --test mock_carins --test mock_misc --test archive_repo_test
           PKGS=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name' | sed 's/^/-p /' | tr '\n' ' ')
           cargo llvm-cov report $PKGS --text > /tmp/llvm-cov-output.txt
           echo "=== Coverage Summary ==="
