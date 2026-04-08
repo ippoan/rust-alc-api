@@ -236,3 +236,7 @@ type = "unit"
 [[files]]
 path = "src/archive/dtako.rs"
 type = "unit"
+
+[[files]]
+path = "src/archive/repo.rs"
+type = "combined"
