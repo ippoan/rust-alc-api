@@ -799,6 +799,49 @@ async fn test_create_file_json_auto_parse() {
 }
 
 // =========================================================================
+// POST /api/files — JSON auto-parse with pending PDF match
+// =========================================================================
+
+#[tokio::test]
+async fn test_create_file_json_auto_parse_with_pending_pdf() {
+    let mock_car_inspections =
+        Arc::new(crate::mock_helpers::MockCarInspectionRepository::default());
+    *mock_car_inspections.pending_pdf_uuid.lock().unwrap() = Some(Uuid::new_v4().to_string());
+
+    let mut state = setup_mock_app_state();
+    state.car_inspections = mock_car_inspections;
+
+    let base_url = crate::common::spawn_test_server(state).await;
+    let client = reqwest::Client::new();
+
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    let json_data = serde_json::json!({
+        "CertInfo": {
+            "ElectCertMgNo": "123456789012",
+            "GrantdateE": "令和",
+            "GrantdateY": "8",
+            "GrantdateM": "2",
+            "GrantdateD": "13"
+        }
+    });
+    let content = STANDARD.encode(serde_json::to_vec(&json_data).unwrap());
+
+    let res = client
+        .post(format!("{base_url}/api/files"))
+        .header("Authorization", test_auth_header())
+        .json(&serde_json::json!({
+            "filename": "cert.json",
+            "type": "application/json",
+            "content": content
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 201);
+}
+
+// =========================================================================
 // POST /api/files — JSON auto-parse error (invalid car inspection JSON)
 // =========================================================================
 

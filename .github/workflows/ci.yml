@@ -264,7 +264,7 @@ jobs:
   deploy-staging:
     name: Deploy Staging
     if: github.event_name == 'pull_request'
-    needs: [docker-push]
+    needs: [docker-push, coverage-check]
     runs-on: ubuntu-latest
     permissions:
       contents: read

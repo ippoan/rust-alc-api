@@ -166,3 +166,40 @@ async fn bulk_upsert(
         message: format!("Upserted {} records", affected),
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_date_iso_datetime() {
+        assert_eq!(extract_date("2026-04-07T12:00:00"), "2026-04-07");
+    }
+
+    #[test]
+    fn extract_date_space_datetime() {
+        assert_eq!(extract_date("2026-04-07 12:00:00"), "2026-04-07");
+    }
+
+    #[test]
+    fn extract_date_already_date() {
+        assert_eq!(extract_date("2026-04-07"), "2026-04-07");
+    }
+
+    #[test]
+    fn extract_date_short_input() {
+        assert_eq!(extract_date("abc"), "abc");
+    }
+
+    #[test]
+    fn extract_date_non_dash_format_short() {
+        // Less than 10 chars, non-standard format → fallback to take(10)
+        assert_eq!(extract_date("26/04/07"), "26/04/07");
+    }
+
+    #[test]
+    fn extract_date_long_non_iso() {
+        // 10+ chars but byte[4] != '-' → chrono parse fails → take(10) fallback
+        assert_eq!(extract_date("26/04/07 12:00:00"), "26/04/07 1");
+    }
+}

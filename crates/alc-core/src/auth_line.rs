@@ -20,6 +20,10 @@ pub struct TokenResponse {
     pub access_token: String,
 }
 
+fn line_api_base() -> String {
+    std::env::var("LINE_API_BASE").unwrap_or_else(|_| "https://api.line.me".to_string())
+}
+
 /// Code → Token 交換 (channel_secret 方式)
 pub async fn exchange_code(
     client: &reqwest::Client,
@@ -28,8 +32,9 @@ pub async fn exchange_code(
     code: &str,
     redirect_uri: &str,
 ) -> Result<TokenResponse, String> {
+    let base = line_api_base();
     let resp = client
-        .post("https://api.line.me/oauth2/v2.1/token")
+        .post(format!("{base}/oauth2/v2.1/token"))
         .form(&[
             ("grant_type", "authorization_code"),
             ("code", code),
@@ -92,8 +97,9 @@ pub async fn exchange_code_jwt(
         .map_err(|e| format!("RSA key parse failed: {e}"))?;
     let jwt = encode(&header, &claims, &key).map_err(|e| format!("JWT encode failed: {e}"))?;
 
+    let base = line_api_base();
     let resp = client
-        .post("https://api.line.me/oauth2/v2.1/token")
+        .post(format!("{base}/oauth2/v2.1/token"))
         .form(&[
             ("grant_type", "authorization_code"),
             ("code", code),
@@ -134,8 +140,9 @@ pub async fn fetch_profile(
     client: &reqwest::Client,
     access_token: &str,
 ) -> Result<LineProfile, String> {
+    let base = line_api_base();
     let resp = client
-        .get("https://api.line.me/v2/profile")
+        .get(format!("{base}/v2/profile"))
         .bearer_auth(access_token)
         .send()
         .await
