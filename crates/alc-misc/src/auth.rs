@@ -785,16 +785,10 @@ async fn line_callback(
             .map_err(|_| StatusCode::BAD_REQUEST)?;
 
         // recipient 自動登録 (既存なら無視)
-        let _ = sqlx::query(
-            "INSERT INTO alc_api.notify_recipients (tenant_id, name, provider, line_user_id) \
-             VALUES ($1, $2, 'line', $3) \
-             ON CONFLICT (tenant_id, line_user_id) WHERE line_user_id IS NOT NULL DO NOTHING",
-        )
-        .bind(tenant_id)
-        .bind(&profile.display_name)
-        .bind(line_user_id)
-        .execute(state.pool())
-        .await;
+        let _ = state
+            .auth
+            .register_line_recipient(tenant_id, &profile.display_name, line_user_id)
+            .await;
 
         let user = state
             .auth

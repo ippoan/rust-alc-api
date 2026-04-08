@@ -3447,3 +3447,109 @@ async fn test_line_callback_profile_fetch_fails() {
     assert_eq!(res.status(), 502);
     std::env::remove_var("LINE_API_BASE");
 }
+
+// ============================================================
+// line_callback — missing LINE_LOGIN_CHANNEL_ID → 500
+// ============================================================
+
+#[tokio::test]
+async fn test_line_callback_missing_channel_id() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    let ss = "ss-ch-missing";
+    std::env::set_var("OAUTH_STATE_SECRET", ss);
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::remove_var("LINE_LOGIN_CHANNEL_ID");
+    std::env::remove_var("LINE_LOGIN_CHANNEL_SECRET");
+
+    let state = setup_mock_app_state();
+    let base_url = crate::common::spawn_test_server(state).await;
+    let p = lineworks::state::StatePayload {
+        redirect_uri: "https://e.com/cb".into(),
+        nonce: "n".into(),
+        provider: "line".into(),
+        external_org_id: String::new(),
+    };
+    let signed = lineworks::state::sign(&p, ss);
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let res = client
+        .get(format!(
+            "{base_url}/api/auth/line/callback?code=c&state={}",
+            urlencoding::encode(&signed)
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 500);
+}
+
+// ============================================================
+// line_callback — QR invite with external_org_id → redirect
+// ============================================================
+
+#[tokio::test]
+async fn test_line_callback_qr_invite() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    let mock_server = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .and(wiremock::matchers::path("/oauth2/v2.1/token"))
+        .respond_with(
+            wiremock::ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"access_token": "t"})),
+        )
+        .mount(&mock_server)
+        .await;
+    wiremock::Mock::given(wiremock::matchers::method("GET"))
+        .and(wiremock::matchers::path("/v2/profile"))
+        .respond_with(
+            wiremock::ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"userId": "qr-user", "displayName": "QR"})),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let tid = Uuid::new_v4();
+    let mock_auth = Arc::new(MockAuthRepository::default());
+    *mock_auth.return_slug.lock().unwrap() = Some("s".into());
+    let mut state = setup_mock_app_state();
+    state.auth = mock_auth;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let ss = "ss-qr";
+    std::env::set_var("OAUTH_STATE_SECRET", ss);
+    std::env::set_var("LINE_LOGIN_CHANNEL_ID", "c");
+    std::env::set_var("LINE_LOGIN_CHANNEL_SECRET", "s");
+    std::env::set_var("LINE_API_BASE", mock_server.uri());
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+
+    let p = lineworks::state::StatePayload {
+        redirect_uri: "https://e.com/cb".into(),
+        nonce: "n".into(),
+        provider: "line".into(),
+        external_org_id: tid.to_string(),
+    };
+    let signed = lineworks::state::sign(&p, ss);
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let res = client
+        .get(format!(
+            "{base_url}/api/auth/line/callback?code=c&state={}",
+            urlencoding::encode(&signed)
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 307);
+    assert!(res
+        .headers()
+        .get("location")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .contains("token="));
+    std::env::remove_var("LINE_API_BASE");
+}

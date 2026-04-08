@@ -305,6 +305,16 @@ impl AuthRepository for MockAuthRepository {
         Ok(self.return_line_recipients.lock().unwrap().clone())
     }
 
+    async fn register_line_recipient(
+        &self,
+        _tenant_id: Uuid,
+        _name: &str,
+        _line_user_id: &str,
+    ) -> Result<(), sqlx::Error> {
+        check_fail!(self);
+        Ok(())
+    }
+
     async fn create_user_line(
         &self,
         tenant_id: Uuid,
