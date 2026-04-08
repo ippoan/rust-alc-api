@@ -17,3 +17,6 @@ ts-rs = { version = "10", features = ["chrono-impl", "uuid-impl", "serde-json-im
 uuid = { version = "1", features = ["v4", "serde"] }
 pdf-extract = "0.7"
 regex = "1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }

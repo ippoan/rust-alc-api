@@ -89,6 +89,12 @@ pub struct MockAuthRepository {
     pub return_line_user: std::sync::Mutex<Option<User>>,
     /// find_recipients_by_line_user_id returns Vec<(tenant_id, name)>
     pub return_line_recipients: std::sync::Mutex<Vec<(Uuid, String)>>,
+    /// If Some, find_user_in_tenant returns this user
+    pub return_switch_user: std::sync::Mutex<Option<User>>,
+    /// If Some, find_user_by_username returns this user
+    pub return_username_user: std::sync::Mutex<Option<User>>,
+    /// If Some, get_tenant_slug returns this slug
+    pub return_slug: std::sync::Mutex<Option<String>>,
 }
 
 impl Default for MockAuthRepository {
@@ -106,6 +112,9 @@ impl Default for MockAuthRepository {
             fail_on_create_user: AtomicBool::new(false),
             return_line_user: std::sync::Mutex::new(None),
             return_line_recipients: std::sync::Mutex::new(Vec::new()),
+            return_switch_user: std::sync::Mutex::new(None),
+            return_username_user: std::sync::Mutex::new(None),
+            return_slug: std::sync::Mutex::new(None),
         }
     }
 }
@@ -196,7 +205,7 @@ impl AuthRepository for MockAuthRepository {
 
     async fn get_tenant_slug(&self, _tenant_id: Uuid) -> Result<Option<String>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        Ok(self.return_slug.lock().unwrap().clone())
     }
 
     async fn create_user_google(
@@ -264,7 +273,7 @@ impl AuthRepository for MockAuthRepository {
         _email: &str,
     ) -> Result<Option<User>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        Ok(self.return_switch_user.lock().unwrap().clone())
     }
 
     // --- Password login ---
@@ -275,7 +284,7 @@ impl AuthRepository for MockAuthRepository {
         _username: &str,
     ) -> Result<Option<User>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        Ok(self.return_username_user.lock().unwrap().clone())
     }
 
     // --- LINE Login ---
@@ -294,6 +303,16 @@ impl AuthRepository for MockAuthRepository {
     ) -> Result<Vec<(Uuid, String)>, sqlx::Error> {
         check_fail!(self);
         Ok(self.return_line_recipients.lock().unwrap().clone())
+    }
+
+    async fn register_line_recipient(
+        &self,
+        _tenant_id: Uuid,
+        _name: &str,
+        _line_user_id: &str,
+    ) -> Result<(), sqlx::Error> {
+        check_fail!(self);
+        Ok(())
     }
 
     async fn create_user_line(
@@ -364,12 +383,14 @@ impl AuthRepository for MockAuthRepository {
 
 pub struct MockBotAdminRepository {
     pub fail_next: AtomicBool,
+    pub return_config_with_secrets: std::sync::Mutex<Option<BotConfigWithSecrets>>,
 }
 
 impl Default for MockBotAdminRepository {
     fn default() -> Self {
         Self {
             fail_next: AtomicBool::new(false),
+            return_config_with_secrets: std::sync::Mutex::new(None),
         }
     }
 }
@@ -458,7 +479,7 @@ impl BotAdminRepository for MockBotAdminRepository {
         _id: Uuid,
     ) -> Result<Option<BotConfigWithSecrets>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        Ok(self.return_config_with_secrets.lock().unwrap().take())
     }
 
     async fn delete_config(&self, _tenant_id: Uuid, _id: Uuid) -> Result<(), sqlx::Error> {
@@ -473,12 +494,14 @@ impl BotAdminRepository for MockBotAdminRepository {
 
 pub struct MockCarInspectionRepository {
     pub fail_next: AtomicBool,
+    pub pending_pdf_uuid: std::sync::Mutex<Option<String>>,
 }
 
 impl Default for MockCarInspectionRepository {
     fn default() -> Self {
         Self {
             fail_next: AtomicBool::new(false),
+            pending_pdf_uuid: std::sync::Mutex::new(None),
         }
     }
 }
@@ -551,7 +574,7 @@ impl CarInspectionRepository for MockCarInspectionRepository {
         _elect_cert_mg_no: &str,
     ) -> Result<Option<String>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        Ok(self.pending_pdf_uuid.lock().unwrap().clone())
     }
 
     async fn delete_pending_pdf(
@@ -1778,12 +1801,14 @@ impl DtakoDriversRepository for MockDtakoDriversRepository {
 
 pub struct MockDtakoLogsRepository {
     pub fail_next: AtomicBool,
+    pub return_date_range: std::sync::Mutex<Vec<DtakologRow>>,
 }
 
 impl Default for MockDtakoLogsRepository {
     fn default() -> Self {
         Self {
             fail_next: AtomicBool::new(false),
+            return_date_range: std::sync::Mutex::new(vec![]),
         }
     }
 }
@@ -1833,6 +1858,7 @@ impl DtakoLogsRepository for MockDtakoLogsRepository {
         _vehicle_cd: Option<i32>,
     ) -> Result<Vec<DtakologRow>, sqlx::Error> {
         check_fail!(self);
-        Ok(vec![])
+        let rows = std::mem::take(&mut *self.return_date_range.lock().unwrap());
+        Ok(rows)
     }
 }

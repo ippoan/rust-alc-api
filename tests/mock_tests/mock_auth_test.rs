@@ -2300,3 +2300,1256 @@ async fn test_google_callback_http_redirect_uri() {
     let cookie = res.headers().get("set-cookie").unwrap().to_str().unwrap();
     assert!(cookie.contains("Domain=.localhost"));
 }
+
+// ============================================================
+// POST /api/auth/switch-org — success
+// ============================================================
+
+#[tokio::test]
+async fn test_switch_org_success() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+
+    let current_tenant_id = Uuid::new_v4();
+    let target_tenant_id = Uuid::new_v4();
+
+    // The user in the target tenant
+    let target_user = User {
+        id: Uuid::new_v4(),
+        tenant_id: target_tenant_id,
+        google_sub: Some("test-google-sub".to_string()),
+        lineworks_id: None,
+        line_user_id: None,
+        email: "test@example.com".to_string(),
+        name: "Test User".to_string(),
+        role: "admin".to_string(),
+        username: None,
+        password_hash: None,
+        refresh_token_hash: None,
+        refresh_token_expires_at: None,
+        created_at: chrono::Utc::now(),
+    };
+
+    let mock = Arc::new(MockAuthRepository::default());
+    *mock.return_switch_user.lock().unwrap() = Some(target_user);
+    *mock.return_slug.lock().unwrap() = Some("target-org".to_string());
+
+    let mut state = setup_mock_app_state();
+    state.auth = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let jwt = crate::common::create_test_jwt(current_tenant_id, "admin");
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/auth/switch-org"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .json(&serde_json::json!({ "organization_id": target_tenant_id.to_string() }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    assert!(body["token"].is_string());
+    assert!(body["expires_at"].is_string());
+    assert_eq!(body["organization_id"], target_tenant_id.to_string());
+}
+
+// ============================================================
+// POST /api/auth/switch-org — user not found in target tenant → 403
+// ============================================================
+
+#[tokio::test]
+async fn test_switch_org_user_not_found() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+
+    let current_tenant_id = Uuid::new_v4();
+    let target_tenant_id = Uuid::new_v4();
+
+    // return_switch_user = None → user not found → 403
+    let mock = Arc::new(MockAuthRepository::default());
+    let mut state = setup_mock_app_state();
+    state.auth = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let jwt = crate::common::create_test_jwt(current_tenant_id, "admin");
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/auth/switch-org"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .json(&serde_json::json!({ "organization_id": target_tenant_id.to_string() }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 403);
+}
+
+// ============================================================
+// POST /api/auth/switch-org — invalid UUID → 400
+// ============================================================
+
+#[tokio::test]
+async fn test_switch_org_invalid_uuid() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+
+    let tenant_id = Uuid::new_v4();
+    let mock = Arc::new(MockAuthRepository::default());
+    let mut state = setup_mock_app_state();
+    state.auth = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/auth/switch-org"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .json(&serde_json::json!({ "organization_id": "not-a-uuid" }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 400);
+}
+
+// ============================================================
+// POST /api/auth/switch-org — DB error on find_user_in_tenant
+// ============================================================
+
+#[tokio::test]
+async fn test_switch_org_db_error() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+
+    let tenant_id = Uuid::new_v4();
+    let target_tenant_id = Uuid::new_v4();
+
+    let mock = Arc::new(MockAuthRepository::default());
+    mock.fail_next.store(true, Ordering::SeqCst);
+    let mut state = setup_mock_app_state();
+    state.auth = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/auth/switch-org"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .json(&serde_json::json!({ "organization_id": target_tenant_id.to_string() }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 500);
+}
+
+// ============================================================
+// POST /api/auth/switch-org — unauthorized (no JWT)
+// ============================================================
+
+#[tokio::test]
+async fn test_switch_org_unauthorized() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+
+    let mock = Arc::new(MockAuthRepository::default());
+    let mut state = setup_mock_app_state();
+    state.auth = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/auth/switch-org"))
+        .json(&serde_json::json!({ "organization_id": Uuid::new_v4().to_string() }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 401);
+}
+
+// ============================================================
+// GET /api/auth/line/redirect — success (redirect to LINE)
+// ============================================================
+
+#[tokio::test]
+async fn test_line_redirect_success() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("OAUTH_STATE_SECRET", "test-state-secret");
+    std::env::set_var("LINE_LOGIN_CHANNEL_ID", "test-line-channel-id");
+    std::env::set_var("API_ORIGIN", "http://localhost:0");
+
+    let mock = Arc::new(MockAuthRepository::default());
+    let mut state = setup_mock_app_state();
+    state.auth = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let res = client
+        .get(format!(
+            "{base_url}/api/auth/line/redirect?redirect_uri=https://example.com/callback"
+        ))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 307);
+    let location = res.headers().get("location").unwrap().to_str().unwrap();
+    assert!(location.contains("access.line.me"));
+    assert!(location.contains("test-line-channel-id"));
+
+    std::env::remove_var("LINE_LOGIN_CHANNEL_ID");
+}
+
+// ============================================================
+// GET /api/auth/line/redirect — with tenant_id param
+// ============================================================
+
+#[tokio::test]
+async fn test_line_redirect_with_tenant_id() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("OAUTH_STATE_SECRET", "test-state-secret");
+    std::env::set_var("LINE_LOGIN_CHANNEL_ID", "test-line-channel-id");
+    std::env::set_var("API_ORIGIN", "http://localhost:0");
+
+    let tenant_id = Uuid::new_v4();
+    let mock = Arc::new(MockAuthRepository::default());
+    let mut state = setup_mock_app_state();
+    state.auth = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let res = client
+        .get(format!(
+            "{base_url}/api/auth/line/redirect?redirect_uri=https://example.com/callback&tenant_id={}",
+            tenant_id
+        ))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 307);
+    let location = res.headers().get("location").unwrap().to_str().unwrap();
+    assert!(location.contains("access.line.me"));
+
+    std::env::remove_var("LINE_LOGIN_CHANNEL_ID");
+}
+
+// ============================================================
+// GET /api/auth/line/redirect — missing OAUTH_STATE_SECRET → 500
+// ============================================================
+
+#[tokio::test]
+async fn test_line_redirect_missing_state_secret() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::remove_var("OAUTH_STATE_SECRET");
+    std::env::set_var("LINE_LOGIN_CHANNEL_ID", "test-line-channel-id");
+
+    let mock = Arc::new(MockAuthRepository::default());
+    let mut state = setup_mock_app_state();
+    state.auth = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let res = client
+        .get(format!(
+            "{base_url}/api/auth/line/redirect?redirect_uri=https://example.com/callback"
+        ))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 500);
+
+    std::env::remove_var("LINE_LOGIN_CHANNEL_ID");
+}
+
+// ============================================================
+// GET /api/auth/line/redirect — missing LINE_LOGIN_CHANNEL_ID → 500
+// ============================================================
+
+#[tokio::test]
+async fn test_line_redirect_missing_channel_id() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("OAUTH_STATE_SECRET", "test-state-secret");
+    std::env::remove_var("LINE_LOGIN_CHANNEL_ID");
+
+    let mock = Arc::new(MockAuthRepository::default());
+    let mut state = setup_mock_app_state();
+    state.auth = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let res = client
+        .get(format!(
+            "{base_url}/api/auth/line/redirect?redirect_uri=https://example.com/callback"
+        ))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 500);
+}
+
+// ============================================================
+// POST /api/auth/line/select-tenant — success (existing user)
+// ============================================================
+
+#[tokio::test]
+async fn test_line_select_tenant_success() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+
+    let tenant_id = Uuid::new_v4();
+    let user = User {
+        id: Uuid::new_v4(),
+        tenant_id,
+        google_sub: None,
+        lineworks_id: None,
+        line_user_id: Some("line-user-001".to_string()),
+        email: "line-user-001".to_string(),
+        name: "LINE User".to_string(),
+        role: "viewer".to_string(),
+        username: None,
+        password_hash: None,
+        refresh_token_hash: None,
+        refresh_token_expires_at: None,
+        created_at: chrono::Utc::now(),
+    };
+
+    let mock = Arc::new(MockAuthRepository::default());
+    // Set up recipients: tenant_id matches the request
+    *mock.return_line_recipients.lock().unwrap() = vec![(tenant_id, "Test Tenant".to_string())];
+    // Existing user found
+    *mock.return_line_user.lock().unwrap() = Some(user.clone());
+
+    let mut state = setup_mock_app_state();
+    state.auth = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/auth/line/select-tenant"))
+        .json(&serde_json::json!({
+            "line_user_id": "line-user-001",
+            "line_name": "LINE User",
+            "tenant_id": tenant_id.to_string()
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    assert!(body["access_token"].is_string());
+    assert!(body["refresh_token"].is_string());
+    assert_eq!(body["expires_in"], 3600);
+}
+
+// ============================================================
+// POST /api/auth/line/select-tenant — new user (no existing)
+// ============================================================
+
+#[tokio::test]
+async fn test_line_select_tenant_new_user() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+
+    let tenant_id = Uuid::new_v4();
+
+    let mock = Arc::new(MockAuthRepository::default());
+    *mock.return_line_recipients.lock().unwrap() = vec![(tenant_id, "Test Tenant".to_string())];
+    // return_line_user = None → new user created via create_user_line
+
+    let mut state = setup_mock_app_state();
+    state.auth = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/auth/line/select-tenant"))
+        .json(&serde_json::json!({
+            "line_user_id": "line-new-user",
+            "line_name": "New LINE User",
+            "tenant_id": tenant_id.to_string()
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    assert!(body["access_token"].is_string());
+    assert!(body["refresh_token"].is_string());
+}
+
+// ============================================================
+// POST /api/auth/line/select-tenant — tenant not in recipients → 403
+// ============================================================
+
+#[tokio::test]
+async fn test_line_select_tenant_forbidden() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+
+    let tenant_id = Uuid::new_v4();
+    let other_tenant_id = Uuid::new_v4();
+
+    let mock = Arc::new(MockAuthRepository::default());
+    // Recipients list has a different tenant_id
+    *mock.return_line_recipients.lock().unwrap() =
+        vec![(other_tenant_id, "Other Tenant".to_string())];
+
+    let mut state = setup_mock_app_state();
+    state.auth = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/auth/line/select-tenant"))
+        .json(&serde_json::json!({
+            "line_user_id": "line-user-001",
+            "line_name": "LINE User",
+            "tenant_id": tenant_id.to_string()
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 403);
+}
+
+// ============================================================
+// POST /api/auth/line/select-tenant — DB error on find_recipients
+// ============================================================
+
+#[tokio::test]
+async fn test_line_select_tenant_db_error() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+
+    let tenant_id = Uuid::new_v4();
+
+    let mock = Arc::new(MockAuthRepository::default());
+    mock.fail_next.store(true, Ordering::SeqCst);
+    let mut state = setup_mock_app_state();
+    state.auth = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/auth/line/select-tenant"))
+        .json(&serde_json::json!({
+            "line_user_id": "line-user-001",
+            "line_name": "LINE User",
+            "tenant_id": tenant_id.to_string()
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 500);
+}
+
+// ============================================================
+// POST /api/auth/login — password login success
+// ============================================================
+
+#[tokio::test]
+async fn test_password_login_success() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+
+    let tenant_id = Uuid::new_v4();
+
+    // Create argon2 hash for "testpass"
+    use argon2::password_hash::rand_core::OsRng;
+    use argon2::password_hash::SaltString;
+    use argon2::{Argon2, PasswordHasher};
+    let salt = SaltString::generate(&mut OsRng);
+    let hash = Argon2::default()
+        .hash_password(b"testpass", &salt)
+        .unwrap()
+        .to_string();
+
+    let user = User {
+        id: Uuid::new_v4(),
+        tenant_id,
+        google_sub: None,
+        lineworks_id: None,
+        line_user_id: None,
+        email: "user@example.com".to_string(),
+        name: "Password User".to_string(),
+        role: "admin".to_string(),
+        username: Some("testuser".to_string()),
+        password_hash: Some(hash),
+        refresh_token_hash: None,
+        refresh_token_expires_at: None,
+        created_at: chrono::Utc::now(),
+    };
+
+    let mock = Arc::new(MockAuthRepository::default());
+    *mock.return_username_user.lock().unwrap() = Some(user);
+    *mock.return_slug.lock().unwrap() = Some("test-org".to_string());
+
+    let mut state = setup_mock_app_state();
+    state.auth = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/auth/login"))
+        .json(&serde_json::json!({
+            "organization_id": tenant_id.to_string(),
+            "username": "testuser",
+            "password": "testpass"
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    assert!(body["access_token"].is_string());
+    assert!(body["refresh_token"].is_string());
+    assert_eq!(body["expires_in"], 3600);
+    assert_eq!(body["user"]["email"], "user@example.com");
+    assert_eq!(body["user"]["name"], "Password User");
+}
+
+// ============================================================
+// POST /api/auth/login — wrong password → 401
+// ============================================================
+
+#[tokio::test]
+async fn test_password_login_wrong_password() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+
+    let tenant_id = Uuid::new_v4();
+
+    use argon2::password_hash::rand_core::OsRng;
+    use argon2::password_hash::SaltString;
+    use argon2::{Argon2, PasswordHasher};
+    let salt = SaltString::generate(&mut OsRng);
+    let hash = Argon2::default()
+        .hash_password(b"correct-pass", &salt)
+        .unwrap()
+        .to_string();
+
+    let user = User {
+        id: Uuid::new_v4(),
+        tenant_id,
+        google_sub: None,
+        lineworks_id: None,
+        line_user_id: None,
+        email: "user@example.com".to_string(),
+        name: "Password User".to_string(),
+        role: "admin".to_string(),
+        username: Some("testuser".to_string()),
+        password_hash: Some(hash),
+        refresh_token_hash: None,
+        refresh_token_expires_at: None,
+        created_at: chrono::Utc::now(),
+    };
+
+    let mock = Arc::new(MockAuthRepository::default());
+    *mock.return_username_user.lock().unwrap() = Some(user);
+
+    let mut state = setup_mock_app_state();
+    state.auth = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/auth/login"))
+        .json(&serde_json::json!({
+            "organization_id": tenant_id.to_string(),
+            "username": "testuser",
+            "password": "wrong-pass"
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 401);
+}
+
+// ============================================================
+// POST /api/auth/login — user not found → 401
+// ============================================================
+
+#[tokio::test]
+async fn test_password_login_user_not_found() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+
+    let tenant_id = Uuid::new_v4();
+
+    // return_username_user = None → user not found → 401
+    let mock = Arc::new(MockAuthRepository::default());
+    let mut state = setup_mock_app_state();
+    state.auth = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/auth/login"))
+        .json(&serde_json::json!({
+            "organization_id": tenant_id.to_string(),
+            "username": "nonexistent",
+            "password": "any"
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 401);
+}
+
+// ============================================================
+// POST /api/auth/login — no password_hash set → 401
+// ============================================================
+
+#[tokio::test]
+async fn test_password_login_no_hash() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+
+    let tenant_id = Uuid::new_v4();
+
+    // User exists but password_hash is None
+    let user = User {
+        id: Uuid::new_v4(),
+        tenant_id,
+        google_sub: None,
+        lineworks_id: None,
+        line_user_id: None,
+        email: "user@example.com".to_string(),
+        name: "No Hash User".to_string(),
+        role: "admin".to_string(),
+        username: Some("testuser".to_string()),
+        password_hash: None,
+        refresh_token_hash: None,
+        refresh_token_expires_at: None,
+        created_at: chrono::Utc::now(),
+    };
+
+    let mock = Arc::new(MockAuthRepository::default());
+    *mock.return_username_user.lock().unwrap() = Some(user);
+
+    let mut state = setup_mock_app_state();
+    state.auth = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/auth/login"))
+        .json(&serde_json::json!({
+            "organization_id": tenant_id.to_string(),
+            "username": "testuser",
+            "password": "any"
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 401);
+}
+
+// ============================================================
+// POST /api/auth/login — invalid organization_id → 400
+// ============================================================
+
+#[tokio::test]
+async fn test_password_login_invalid_org_id() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+
+    let mock = Arc::new(MockAuthRepository::default());
+    let mut state = setup_mock_app_state();
+    state.auth = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/auth/login"))
+        .json(&serde_json::json!({
+            "organization_id": "not-a-uuid",
+            "username": "testuser",
+            "password": "any"
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 400);
+}
+
+// ============================================================
+// POST /api/auth/login — DB error on find_user_by_username
+// ============================================================
+
+#[tokio::test]
+async fn test_password_login_db_error() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+
+    let tenant_id = Uuid::new_v4();
+
+    let mock = Arc::new(MockAuthRepository::default());
+    mock.fail_next.store(true, Ordering::SeqCst);
+    let mut state = setup_mock_app_state();
+    state.auth = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/auth/login"))
+        .json(&serde_json::json!({
+            "organization_id": tenant_id.to_string(),
+            "username": "testuser",
+            "password": "any"
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 500);
+}
+
+// ============================================================
+// line_callback — existing user → redirect with JWT (wiremock)
+// ============================================================
+
+#[tokio::test]
+async fn test_line_callback_existing_user() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    let mock_server = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .and(wiremock::matchers::path("/oauth2/v2.1/token"))
+        .respond_with(
+            wiremock::ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"access_token": "t"})),
+        )
+        .mount(&mock_server)
+        .await;
+    wiremock::Mock::given(wiremock::matchers::method("GET"))
+        .and(wiremock::matchers::path("/v2/profile"))
+        .respond_with(
+            wiremock::ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"userId": "lu", "displayName": "T"})),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let tid = Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap();
+    let mock_auth = Arc::new(MockAuthRepository::default());
+    *mock_auth.return_line_user.lock().unwrap() = Some(User {
+        id: Uuid::new_v4(),
+        tenant_id: tid,
+        email: "l@e.com".into(),
+        name: "T".into(),
+        role: "admin".into(),
+        google_sub: None,
+        lineworks_id: None,
+        line_user_id: Some("lu".into()),
+        username: None,
+        password_hash: None,
+        refresh_token_hash: None,
+        refresh_token_expires_at: None,
+        created_at: chrono::Utc::now(),
+    });
+    *mock_auth.return_slug.lock().unwrap() = Some("s".into());
+    let mut state = setup_mock_app_state();
+    state.auth = mock_auth;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let ss = "test-ss1";
+    std::env::set_var("OAUTH_STATE_SECRET", ss);
+    std::env::set_var("LINE_LOGIN_CHANNEL_ID", "c");
+    std::env::set_var("LINE_LOGIN_CHANNEL_SECRET", "s");
+    std::env::set_var("LINE_API_BASE", mock_server.uri());
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+
+    let p = lineworks::state::StatePayload {
+        redirect_uri: "https://e.com/cb".into(),
+        nonce: "n".into(),
+        provider: "line".into(),
+        external_org_id: String::new(),
+    };
+    let signed = lineworks::state::sign(&p, ss);
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let res = client
+        .get(format!(
+            "{base_url}/api/auth/line/callback?code=c&state={}",
+            urlencoding::encode(&signed)
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 307);
+    assert!(res
+        .headers()
+        .get("location")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .contains("token="));
+    std::env::remove_var("LINE_API_BASE");
+}
+
+// ============================================================
+// line_callback — 0 tenants → error redirect
+// ============================================================
+
+#[tokio::test]
+async fn test_line_callback_zero_tenants() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    let mock_server = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .and(wiremock::matchers::path("/oauth2/v2.1/token"))
+        .respond_with(
+            wiremock::ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"access_token": "t"})),
+        )
+        .mount(&mock_server)
+        .await;
+    wiremock::Mock::given(wiremock::matchers::method("GET"))
+        .and(wiremock::matchers::path("/v2/profile"))
+        .respond_with(
+            wiremock::ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"userId": "u0", "displayName": "U"})),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let state = setup_mock_app_state();
+    let base_url = crate::common::spawn_test_server(state).await;
+    let ss = "ss2";
+    std::env::set_var("OAUTH_STATE_SECRET", ss);
+    std::env::set_var("LINE_LOGIN_CHANNEL_ID", "c");
+    std::env::set_var("LINE_LOGIN_CHANNEL_SECRET", "s");
+    std::env::set_var("LINE_API_BASE", mock_server.uri());
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+
+    let p = lineworks::state::StatePayload {
+        redirect_uri: "https://e.com/cb".into(),
+        nonce: "n".into(),
+        provider: "line".into(),
+        external_org_id: String::new(),
+    };
+    let signed = lineworks::state::sign(&p, ss);
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let res = client
+        .get(format!(
+            "{base_url}/api/auth/line/callback?code=c&state={}",
+            urlencoding::encode(&signed)
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 307);
+    assert!(res
+        .headers()
+        .get("location")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .contains("error="));
+    std::env::remove_var("LINE_API_BASE");
+}
+
+// ============================================================
+// line_callback — 1 tenant → auto login
+// ============================================================
+
+#[tokio::test]
+async fn test_line_callback_one_tenant() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    let mock_server = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .and(wiremock::matchers::path("/oauth2/v2.1/token"))
+        .respond_with(
+            wiremock::ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"access_token": "t"})),
+        )
+        .mount(&mock_server)
+        .await;
+    wiremock::Mock::given(wiremock::matchers::method("GET"))
+        .and(wiremock::matchers::path("/v2/profile"))
+        .respond_with(
+            wiremock::ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"userId": "u1", "displayName": "N"})),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let tid = Uuid::new_v4();
+    let mock_auth = Arc::new(MockAuthRepository::default());
+    *mock_auth.return_line_recipients.lock().unwrap() = vec![(tid, "Org".into())];
+    *mock_auth.return_slug.lock().unwrap() = Some("s".into());
+    let mut state = setup_mock_app_state();
+    state.auth = mock_auth;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let ss = "ss3";
+    std::env::set_var("OAUTH_STATE_SECRET", ss);
+    std::env::set_var("LINE_LOGIN_CHANNEL_ID", "c");
+    std::env::set_var("LINE_LOGIN_CHANNEL_SECRET", "s");
+    std::env::set_var("LINE_API_BASE", mock_server.uri());
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+
+    let p = lineworks::state::StatePayload {
+        redirect_uri: "https://e.com/cb".into(),
+        nonce: "n".into(),
+        provider: "line".into(),
+        external_org_id: String::new(),
+    };
+    let signed = lineworks::state::sign(&p, ss);
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let res = client
+        .get(format!(
+            "{base_url}/api/auth/line/callback?code=c&state={}",
+            urlencoding::encode(&signed)
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 307);
+    assert!(res
+        .headers()
+        .get("location")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .contains("token="));
+    std::env::remove_var("LINE_API_BASE");
+}
+
+// ============================================================
+// line_callback — multiple tenants → selection redirect
+// ============================================================
+
+#[tokio::test]
+async fn test_line_callback_multiple_tenants() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    let mock_server = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .and(wiremock::matchers::path("/oauth2/v2.1/token"))
+        .respond_with(
+            wiremock::ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"access_token": "t"})),
+        )
+        .mount(&mock_server)
+        .await;
+    wiremock::Mock::given(wiremock::matchers::method("GET"))
+        .and(wiremock::matchers::path("/v2/profile"))
+        .respond_with(
+            wiremock::ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"userId": "um", "displayName": "M"})),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let mock_auth = Arc::new(MockAuthRepository::default());
+    *mock_auth.return_line_recipients.lock().unwrap() =
+        vec![(Uuid::new_v4(), "A".into()), (Uuid::new_v4(), "B".into())];
+    let mut state = setup_mock_app_state();
+    state.auth = mock_auth;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let ss = "ss4";
+    std::env::set_var("OAUTH_STATE_SECRET", ss);
+    std::env::set_var("LINE_LOGIN_CHANNEL_ID", "c");
+    std::env::set_var("LINE_LOGIN_CHANNEL_SECRET", "s");
+    std::env::set_var("LINE_API_BASE", mock_server.uri());
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+
+    let p = lineworks::state::StatePayload {
+        redirect_uri: "https://e.com/s".into(),
+        nonce: "n".into(),
+        provider: "line".into(),
+        external_org_id: String::new(),
+    };
+    let signed = lineworks::state::sign(&p, ss);
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let res = client
+        .get(format!(
+            "{base_url}/api/auth/line/callback?code=c&state={}",
+            urlencoding::encode(&signed)
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 307);
+    assert!(res
+        .headers()
+        .get("location")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .contains("tenants="));
+    std::env::remove_var("LINE_API_BASE");
+}
+
+// ============================================================
+// line_callback — invalid state → 400
+// ============================================================
+
+#[tokio::test]
+async fn test_line_callback_invalid_state_param() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("OAUTH_STATE_SECRET", "s");
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    let state = setup_mock_app_state();
+    let base_url = crate::common::spawn_test_server(state).await;
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let res = client
+        .get(format!(
+            "{base_url}/api/auth/line/callback?code=c&state=bad"
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 400);
+}
+
+// ============================================================
+// line_callback — token exchange fails → 502
+// ============================================================
+
+#[tokio::test]
+async fn test_line_callback_token_exchange_fails() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    let mock_server = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .and(wiremock::matchers::path("/oauth2/v2.1/token"))
+        .respond_with(wiremock::ResponseTemplate::new(401).set_body_string("fail"))
+        .mount(&mock_server)
+        .await;
+
+    let state = setup_mock_app_state();
+    let base_url = crate::common::spawn_test_server(state).await;
+    let ss = "ss5";
+    std::env::set_var("OAUTH_STATE_SECRET", ss);
+    std::env::set_var("LINE_LOGIN_CHANNEL_ID", "c");
+    std::env::set_var("LINE_LOGIN_CHANNEL_SECRET", "s");
+    std::env::set_var("LINE_API_BASE", mock_server.uri());
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+
+    let p = lineworks::state::StatePayload {
+        redirect_uri: "https://e.com/cb".into(),
+        nonce: "n".into(),
+        provider: "line".into(),
+        external_org_id: String::new(),
+    };
+    let signed = lineworks::state::sign(&p, ss);
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let res = client
+        .get(format!(
+            "{base_url}/api/auth/line/callback?code=c&state={}",
+            urlencoding::encode(&signed)
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 502);
+    std::env::remove_var("LINE_API_BASE");
+}
+
+// ============================================================
+// line_callback — profile fetch fails → 502
+// ============================================================
+
+#[tokio::test]
+async fn test_line_callback_profile_fetch_fails() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    let mock_server = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .and(wiremock::matchers::path("/oauth2/v2.1/token"))
+        .respond_with(
+            wiremock::ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"access_token": "t"})),
+        )
+        .mount(&mock_server)
+        .await;
+    wiremock::Mock::given(wiremock::matchers::method("GET"))
+        .and(wiremock::matchers::path("/v2/profile"))
+        .respond_with(wiremock::ResponseTemplate::new(500).set_body_string("fail"))
+        .mount(&mock_server)
+        .await;
+
+    let state = setup_mock_app_state();
+    let base_url = crate::common::spawn_test_server(state).await;
+    let ss = "ss6";
+    std::env::set_var("OAUTH_STATE_SECRET", ss);
+    std::env::set_var("LINE_LOGIN_CHANNEL_ID", "c");
+    std::env::set_var("LINE_LOGIN_CHANNEL_SECRET", "s");
+    std::env::set_var("LINE_API_BASE", mock_server.uri());
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+
+    let p = lineworks::state::StatePayload {
+        redirect_uri: "https://e.com/cb".into(),
+        nonce: "n".into(),
+        provider: "line".into(),
+        external_org_id: String::new(),
+    };
+    let signed = lineworks::state::sign(&p, ss);
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let res = client
+        .get(format!(
+            "{base_url}/api/auth/line/callback?code=c&state={}",
+            urlencoding::encode(&signed)
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 502);
+    std::env::remove_var("LINE_API_BASE");
+}
+
+// ============================================================
+// line_callback — missing LINE_LOGIN_CHANNEL_ID → 500
+// ============================================================
+
+#[tokio::test]
+async fn test_line_callback_missing_channel_id() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    let ss = "ss-ch-missing";
+    std::env::set_var("OAUTH_STATE_SECRET", ss);
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::remove_var("LINE_LOGIN_CHANNEL_ID");
+    std::env::remove_var("LINE_LOGIN_CHANNEL_SECRET");
+
+    let state = setup_mock_app_state();
+    let base_url = crate::common::spawn_test_server(state).await;
+    let p = lineworks::state::StatePayload {
+        redirect_uri: "https://e.com/cb".into(),
+        nonce: "n".into(),
+        provider: "line".into(),
+        external_org_id: String::new(),
+    };
+    let signed = lineworks::state::sign(&p, ss);
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let res = client
+        .get(format!(
+            "{base_url}/api/auth/line/callback?code=c&state={}",
+            urlencoding::encode(&signed)
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 500);
+}
+
+// ============================================================
+// line_callback — QR invite with external_org_id → redirect
+// ============================================================
+
+#[tokio::test]
+async fn test_line_callback_qr_invite() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    let mock_server = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .and(wiremock::matchers::path("/oauth2/v2.1/token"))
+        .respond_with(
+            wiremock::ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"access_token": "t"})),
+        )
+        .mount(&mock_server)
+        .await;
+    wiremock::Mock::given(wiremock::matchers::method("GET"))
+        .and(wiremock::matchers::path("/v2/profile"))
+        .respond_with(
+            wiremock::ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"userId": "qr-user", "displayName": "QR"})),
+        )
+        .mount(&mock_server)
+        .await;
+
+    let tid = Uuid::new_v4();
+    let mock_auth = Arc::new(MockAuthRepository::default());
+    *mock_auth.return_slug.lock().unwrap() = Some("s".into());
+    let mut state = setup_mock_app_state();
+    state.auth = mock_auth;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let ss = "ss-qr";
+    std::env::set_var("OAUTH_STATE_SECRET", ss);
+    std::env::set_var("LINE_LOGIN_CHANNEL_ID", "c");
+    std::env::set_var("LINE_LOGIN_CHANNEL_SECRET", "s");
+    std::env::set_var("LINE_API_BASE", mock_server.uri());
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+
+    let p = lineworks::state::StatePayload {
+        redirect_uri: "https://e.com/cb".into(),
+        nonce: "n".into(),
+        provider: "line".into(),
+        external_org_id: tid.to_string(),
+    };
+    let signed = lineworks::state::sign(&p, ss);
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let res = client
+        .get(format!(
+            "{base_url}/api/auth/line/callback?code=c&state={}",
+            urlencoding::encode(&signed)
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 307);
+    assert!(res
+        .headers()
+        .get("location")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .contains("token="));
+    std::env::remove_var("LINE_API_BASE");
+}

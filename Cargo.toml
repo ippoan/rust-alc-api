@@ -37,6 +37,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
+argon2 = "0.5"
 async-trait = "0.1"
 base64 = "0.22"
 encoding_rs = "0.8"

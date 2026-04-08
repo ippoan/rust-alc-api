@@ -224,6 +224,25 @@ impl AuthRepository for PgAuthRepository {
         .await
     }
 
+    async fn register_line_recipient(
+        &self,
+        tenant_id: Uuid,
+        name: &str,
+        line_user_id: &str,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "INSERT INTO alc_api.notify_recipients (tenant_id, name, provider, line_user_id) \
+             VALUES ($1, $2, 'line', $3) \
+             ON CONFLICT (tenant_id, line_user_id) WHERE line_user_id IS NOT NULL DO NOTHING",
+        )
+        .bind(tenant_id)
+        .bind(name)
+        .bind(line_user_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     async fn create_user_line(
         &self,
         tenant_id: Uuid,

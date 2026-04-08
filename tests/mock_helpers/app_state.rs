@@ -11,7 +11,7 @@ use crate::common::mock_storage::MockStorage;
 pub fn setup_mock_app_state() -> AppState {
     // tracing 初期化 (1回だけ)
     let _ = tracing_subscriber::fmt()
-        .with_env_filter("warn")
+        .with_env_filter("info")
         .with_test_writer()
         .try_init();
 

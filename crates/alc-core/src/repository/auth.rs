@@ -98,6 +98,14 @@ pub trait AuthRepository: Send + Sync {
         line_user_id: &str,
     ) -> Result<Vec<(Uuid, String)>, sqlx::Error>;
 
+    /// LINE recipient 自動登録 (QR 招待フロー)
+    async fn register_line_recipient(
+        &self,
+        tenant_id: Uuid,
+        name: &str,
+        line_user_id: &str,
+    ) -> Result<(), sqlx::Error>;
+
     async fn create_user_line(
         &self,
         tenant_id: Uuid,

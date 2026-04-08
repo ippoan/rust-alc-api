@@ -340,36 +340,19 @@ mod tests {
     }
 
     #[test]
-    fn test_decrypt_secret_roundtrip() {
+    fn test_encrypt_decrypt_roundtrip() {
         test_group!("LINE WORKS OAuth");
-        test_case!("秘密鍵の暗号化・復号ラウンドトリップ", {
-            use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
-            use ring::rand::{SecureRandom, SystemRandom};
+        test_case!(
+            "encrypt_secret → decrypt_secret ラウンドトリップ",
+            {
+                let key_material = "test-encryption-key-for-roundtrip";
+                let plaintext = "my-secret-client-key";
 
-            let key_material = "test-encryption-key-for-roundtrip";
-            let plaintext = "my-secret-client-key";
-
-            // encrypt (same logic as sso_admin::encrypt_secret)
-            let mut key_bytes = [0u8; 32];
-            let hash = sha2::Sha256::digest(key_material.as_bytes());
-            key_bytes.copy_from_slice(&hash);
-            let unbound = UnboundKey::new(&AES_256_GCM, &key_bytes).unwrap();
-            let key = LessSafeKey::new(unbound);
-            let rng = SystemRandom::new();
-            let mut nonce_bytes = [0u8; 12];
-            rng.fill(&mut nonce_bytes).unwrap();
-            let nonce = Nonce::assume_unique_for_key(nonce_bytes);
-            let mut in_out = plaintext.as_bytes().to_vec();
-            key.seal_in_place_append_tag(nonce, Aad::empty(), &mut in_out)
-                .unwrap();
-            let mut data = nonce_bytes.to_vec();
-            data.extend_from_slice(&in_out);
-            let ciphertext_b64 = BASE64.encode(&data);
-
-            // decrypt
-            let decrypted = decrypt_secret(&ciphertext_b64, key_material).unwrap();
-            assert_eq!(decrypted, plaintext);
-        });
+                let ciphertext_b64 = encrypt_secret(plaintext, key_material).unwrap();
+                let decrypted = decrypt_secret(&ciphertext_b64, key_material).unwrap();
+                assert_eq!(decrypted, plaintext);
+            }
+        );
     }
 
     #[test]
