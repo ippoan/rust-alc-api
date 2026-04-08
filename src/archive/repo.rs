@@ -125,10 +125,7 @@ impl ArchiveDb for PgArchiveDb {
 
     async fn list_dtako_dates(&self) -> anyhow::Result<Vec<(String, String, i64)>> {
         let rows = sqlx::query_as::<_, (String, String, i64)>(
-            "SELECT tenant_id::TEXT, data_date_time::DATE::TEXT AS date_str, COUNT(*)
-             FROM alc_api.dtakologs
-             GROUP BY tenant_id, data_date_time::DATE
-             ORDER BY date_str",
+            "SELECT * FROM alc_api.archive_list_dtako_dates()",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -143,10 +140,7 @@ impl ArchiveDb for PgArchiveDb {
         offset: i64,
     ) -> anyhow::Result<Vec<serde_json::Value>> {
         let rows: Vec<(serde_json::Value,)> = sqlx::query_as(
-            "SELECT row_to_json(d) FROM alc_api.dtakologs d
-             WHERE tenant_id = $1::UUID AND data_date_time::DATE = $2::DATE
-             ORDER BY data_date_time
-             LIMIT $3 OFFSET $4",
+            "SELECT row_json FROM alc_api.archive_fetch_dtako_rows_json($1, $2, $3, $4)",
         )
         .bind(tenant_id)
         .bind(date)
@@ -162,11 +156,7 @@ impl ArchiveDb for PgArchiveDb {
         cutoff: &str,
     ) -> anyhow::Result<Vec<(String, String, i64)>> {
         let rows = sqlx::query_as::<_, (String, String, i64)>(
-            "SELECT tenant_id::TEXT, data_date_time::DATE::TEXT AS date_str, COUNT(*)
-             FROM alc_api.dtakologs
-             WHERE data_date_time::DATE < $1::DATE
-             GROUP BY tenant_id, data_date_time::DATE
-             ORDER BY date_str",
+            "SELECT * FROM alc_api.archive_list_old_dtako_dates($1)",
         )
         .bind(cutoff)
         .fetch_all(&self.pool)
@@ -175,81 +165,22 @@ impl ArchiveDb for PgArchiveDb {
     }
 
     async fn delete_dtako_date(&self, tenant_id: &str, date: &str) -> anyhow::Result<u64> {
-        let result = sqlx::query(
-            "DELETE FROM alc_api.dtakologs
-             WHERE tenant_id = $1::UUID AND data_date_time::DATE = $2::DATE",
-        )
-        .bind(tenant_id)
-        .bind(date)
-        .execute(&self.pool)
-        .await?;
-        Ok(result.rows_affected())
+        let row: (i64,) = sqlx::query_as("SELECT alc_api.archive_delete_dtako_date($1, $2)")
+            .bind(tenant_id)
+            .bind(date)
+            .fetch_one(&self.pool)
+            .await?;
+        Ok(row.0 as u64)
     }
 
     async fn upsert_dtako_batch(&self, rows_json: &[String]) -> anyhow::Result<()> {
         for row_json in rows_json {
             let v: serde_json::Value = serde_json::from_str(row_json)?;
-            sqlx::query(
-                "INSERT INTO alc_api.dtakologs (
-                    tenant_id, data_date_time, vehicle_cd,
-                    type, all_state_font_color_index, all_state_ryout_color,
-                    branch_cd, branch_name, current_work_cd, data_filter_type,
-                    disp_flag, driver_cd, gps_direction, gps_enable,
-                    gps_latitude, gps_longitude, gps_satellite_num,
-                    operation_state, recive_event_type, recive_packet_type,
-                    recive_work_cd, revo, setting_temp, setting_temp1,
-                    setting_temp3, setting_temp4, speed, sub_driver_cd,
-                    temp_state, vehicle_name,
-                    address_disp_c, address_disp_p, all_state, all_state_ex,
-                    all_state_font_color, comu_date_time, current_work_name,
-                    driver_name, event_val, gps_lati_and_long, odometer,
-                    recive_type_color_name, recive_type_name,
-                    start_work_date_time, state, state1, state2, state3,
-                    state_flag, temp1, temp2, temp3, temp4,
-                    vehicle_icon_color, vehicle_icon_label_for_datetime,
-                    vehicle_icon_label_for_driver, vehicle_icon_label_for_vehicle
-                )
-                SELECT
-                    (j->>'tenant_id')::UUID, j->>'data_date_time', (j->>'vehicle_cd')::INTEGER,
-                    COALESCE(j->>'type', ''),
-                    COALESCE((j->>'all_state_font_color_index')::INTEGER, 0),
-                    COALESCE(j->>'all_state_ryout_color', 'Transparent'),
-                    COALESCE((j->>'branch_cd')::INTEGER, 0), COALESCE(j->>'branch_name', ''),
-                    COALESCE((j->>'current_work_cd')::INTEGER, 0),
-                    COALESCE((j->>'data_filter_type')::INTEGER, 0),
-                    COALESCE((j->>'disp_flag')::INTEGER, 0), COALESCE((j->>'driver_cd')::INTEGER, 0),
-                    COALESCE((j->>'gps_direction')::DOUBLE PRECISION, 0),
-                    COALESCE((j->>'gps_enable')::INTEGER, 0),
-                    COALESCE((j->>'gps_latitude')::DOUBLE PRECISION, 0),
-                    COALESCE((j->>'gps_longitude')::DOUBLE PRECISION, 0),
-                    COALESCE((j->>'gps_satellite_num')::INTEGER, 0),
-                    COALESCE((j->>'operation_state')::INTEGER, 0),
-                    COALESCE((j->>'recive_event_type')::INTEGER, 0),
-                    COALESCE((j->>'recive_packet_type')::INTEGER, 0),
-                    COALESCE((j->>'recive_work_cd')::INTEGER, 0),
-                    COALESCE((j->>'revo')::INTEGER, 0),
-                    COALESCE(j->>'setting_temp', ''), COALESCE(j->>'setting_temp1', ''),
-                    COALESCE(j->>'setting_temp3', ''), COALESCE(j->>'setting_temp4', ''),
-                    COALESCE((j->>'speed')::REAL, 0), COALESCE((j->>'sub_driver_cd')::INTEGER, 0),
-                    COALESCE((j->>'temp_state')::INTEGER, 0), COALESCE(j->>'vehicle_name', ''),
-                    j->>'address_disp_c', j->>'address_disp_p', j->>'all_state', j->>'all_state_ex',
-                    j->>'all_state_font_color', j->>'comu_date_time', j->>'current_work_name',
-                    j->>'driver_name', j->>'event_val', j->>'gps_lati_and_long', j->>'odometer',
-                    j->>'recive_type_color_name', j->>'recive_type_name',
-                    j->>'start_work_date_time', j->>'state', j->>'state1',
-                    j->>'state2', j->>'state3', j->>'state_flag',
-                    j->>'temp1', j->>'temp2', j->>'temp3', j->>'temp4',
-                    j->>'vehicle_icon_color', j->>'vehicle_icon_label_for_datetime',
-                    j->>'vehicle_icon_label_for_driver', j->>'vehicle_icon_label_for_vehicle'
-                FROM jsonb_array_elements($1::JSONB) AS j
-                ON CONFLICT (tenant_id, data_date_time, vehicle_cd) DO UPDATE SET
-                    type = EXCLUDED.type, speed = EXCLUDED.speed,
-                    gps_latitude = EXCLUDED.gps_latitude, gps_longitude = EXCLUDED.gps_longitude,
-                    gps_direction = EXCLUDED.gps_direction",
-            )
-            .bind(format!("[{}]", v))
-            .execute(&self.pool)
-            .await?;
+            let arr = serde_json::Value::Array(vec![v]);
+            sqlx::query("SELECT alc_api.archive_upsert_dtako_batch($1::JSONB)")
+                .bind(arr)
+                .execute(&self.pool)
+                .await?;
         }
         Ok(())
     }
