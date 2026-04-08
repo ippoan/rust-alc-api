@@ -172,9 +172,8 @@ pub async fn dtako_archive_range(
 
         println!("  {} rows → {}", row_count, r2_key);
         archived_count += row_count;
-    }
 
-    if !dry_run && archived_count > 0 {
+        // Save manifest after each date to avoid losing progress on timeout
         manifest.updated_at = chrono::Utc::now().to_rfc3339();
         save_manifest(storage, &manifest).await?;
     }
