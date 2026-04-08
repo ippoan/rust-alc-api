@@ -38,19 +38,24 @@ jobs:
       matrix:
         target:
           - { name: "release", key: "release-build", cmd: "cargo build --release" }
-          - { name: "test", key: "test-lib", cmd: "cargo test --no-run --lib --workspace" }
-          - { name: "mock-tenko", key: "test-mock-tenko", cmd: "cargo test --no-run --test mock_tenko" }
-          - { name: "mock-dtako", key: "test-mock-dtako", cmd: "cargo test --no-run --test mock_dtako" }
-          - { name: "mock-devices", key: "test-mock-devices", cmd: "cargo test --no-run --test mock_devices" }
-          - { name: "mock-carins", key: "test-mock-carins", cmd: "cargo test --no-run --test mock_carins" }
-          - { name: "mock-misc", key: "test-mock-misc", cmd: "cargo test --no-run --test mock_misc --test archive_repo_test" }
+          - { name: "test", key: "test-lib", cmd: "cargo llvm-cov nextest --no-report --no-run --lib --workspace" }
+          - { name: "mock-tenko", key: "test-mock-tenko", cmd: "cargo llvm-cov nextest --no-report --no-run --test mock_tenko" }
+          - { name: "mock-dtako", key: "test-mock-dtako", cmd: "cargo llvm-cov nextest --no-report --no-run --test mock_dtako" }
+          - { name: "mock-devices", key: "test-mock-devices", cmd: "cargo llvm-cov nextest --no-report --no-run --test mock_devices" }
+          - { name: "mock-carins", key: "test-mock-carins", cmd: "cargo llvm-cov nextest --no-report --no-run --test mock_carins" }
+          - { name: "mock-misc", key: "test-mock-misc", cmd: "cargo llvm-cov nextest --no-report --no-run --test mock_misc --test archive_repo_test" }
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.92.0
+        with:
+          components: llvm-tools-preview
       - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: swatinem/rust-cache@v2
         with:
           shared-key: ${{ matrix.target.key }}
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov@0.8.4,cargo-nextest
       - name: Build (${{ matrix.target.name }})
         env:
           SCCACHE_GHA_ENABLED: "true"
