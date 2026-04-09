@@ -229,6 +229,7 @@ jobs:
           cp bazel-bin/rust-alc-api docker-context/
           cp bazel-bin/migrate docker-context/
           cp bazel-bin/archive docker-context/
+          chmod u+w docker-context/rust-alc-api docker-context/migrate docker-context/archive
           strip docker-context/rust-alc-api docker-context/migrate docker-context/archive
           cp -r migrations docker-context/
           cp Dockerfile docker-context/
