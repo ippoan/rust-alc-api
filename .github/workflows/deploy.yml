@@ -27,8 +27,8 @@ jobs:
   # ---------------------------------------------------------------------------
   # Staging: build staging images (entrypoint.sh + sidecar)
   # ---------------------------------------------------------------------------
-  staging-images:
-    name: "Build staging images"
+  staging-db:
+    name: "Build staging-db"
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
@@ -36,65 +36,65 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
+      - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build staging-db image
+      - name: Build and push staging-db
         run: |
           docker build -f staging/Dockerfile.postgres \
             -t ${{ env.REPO }}-staging-db:latest .
           docker push ${{ env.REPO }}-staging-db:latest
 
-      - name: Build staging service images
+  staging-images:
+    name: "Build staging ${{ matrix.service }}"
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { service: backend, suffix: "",       binary: rust-alc-api }
+          - { service: tenko,   suffix: "-tenko", binary: tenko-api }
+          - { service: carins,  suffix: "-carins", binary: carins-api }
+          - { service: dtako,   suffix: "-dtako",  binary: dtako-api }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build staging image
         run: |
           SHA="${{ inputs.image_sha }}"
           REPO="${{ env.REPO }}"
+          SUFFIX="${{ matrix.suffix }}"
+          BIN="${{ matrix.binary }}"
 
-          # Extract binaries from each production image
-          for svc in backend tenko carins dtako; do
-            case "$svc" in
-              backend) SUFFIX="";       BIN="rust-alc-api" ;;
-              tenko)   SUFFIX="-tenko"; BIN="tenko-api" ;;
-              carins)  SUFFIX="-carins"; BIN="carins-api" ;;
-              dtako)   SUFFIX="-dtako"; BIN="dtako-api" ;;
-            esac
+          mkdir -p ctx/staging
 
-            echo "=== Building staging image for $svc ==="
-            mkdir -p "ctx-${svc}/staging"
+          # Extract service binary
+          docker create --name extract-svc "${REPO}${SUFFIX}:${SHA}"
+          docker cp "extract-svc:/usr/local/bin/${BIN}" ctx/
+          docker rm extract-svc
 
-            # Extract binary from production image
-            docker create --name "extract-${svc}" "${REPO}${SUFFIX}:${SHA}"
-            docker cp "extract-${svc}:/usr/local/bin/${BIN}" "ctx-${svc}/"
-            docker rm "extract-${svc}"
+          # Extract migrate + migrations from backend image
+          docker create --name extract-mig "${REPO}:${SHA}"
+          docker cp extract-mig:/usr/local/bin/migrate ctx/
+          docker cp extract-mig:/app/migrations ctx/
+          docker rm extract-mig
 
-            # Extract migrate binary and migrations from backend image
-            if [ "$svc" != "backend" ]; then
-              docker create --name "extract-migrate-${svc}" "${REPO}:${SHA}"
-              docker cp "extract-migrate-${svc}:/usr/local/bin/migrate" "ctx-${svc}/"
-              docker cp "extract-migrate-${svc}:/app/migrations" "ctx-${svc}/"
-              docker rm "extract-migrate-${svc}"
-            else
-              docker create --name "extract-backend" "${REPO}:${SHA}"
-              docker cp "extract-backend:/usr/local/bin/rust-alc-api" "ctx-${svc}/"
-              docker cp "extract-backend:/usr/local/bin/migrate" "ctx-${svc}/"
-              docker cp "extract-backend:/app/migrations" "ctx-${svc}/"
-              docker rm "extract-backend"
-            fi
+          cp staging/Dockerfile.app ctx/Dockerfile
+          cp staging/entrypoint.sh ctx/staging/
 
-            cp staging/Dockerfile.app "ctx-${svc}/Dockerfile"
-            cp staging/entrypoint.sh "ctx-${svc}/staging/"
-
-            docker build \
-              --build-arg "BINARY_NAME=${BIN}" \
-              -t "${REPO}${SUFFIX}-staging:${SHA}" \
-              "ctx-${svc}/"
-            docker push "${REPO}${SUFFIX}-staging:${SHA}"
-          done
+          docker build --build-arg "BINARY_NAME=${BIN}" \
+            -t "${REPO}${SUFFIX}-staging:${SHA}" ctx/
+          docker push "${REPO}${SUFFIX}-staging:${SHA}"
 
   # ---------------------------------------------------------------------------
   # Production: promote dev → version tag
@@ -171,10 +171,10 @@ jobs:
   # ---------------------------------------------------------------------------
   deploy-services:
     name: "Deploy ${{ matrix.service }}"
-    needs: [staging-images, promote-images, migrate]
+    needs: [staging-db, staging-images, promote-images, migrate]
     if: >-
       always() && (
-        (github.event_name == 'pull_request' && needs.staging-images.result == 'success') ||
+        (github.event_name == 'pull_request' && needs.staging-images.result == 'success' && needs.staging-db.result == 'success') ||
         (startsWith(github.ref, 'refs/tags/v') && needs.migrate.result == 'success')
       )
     runs-on: ubuntu-latest
