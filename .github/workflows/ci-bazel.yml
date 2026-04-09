@@ -1,0 +1,42 @@
+name: CI (Bazel)
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  bazel-build-test:
+    name: Bazel Build & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install bazelisk
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL https://github.com/bazelbuild/bazelisk/releases/download/v1.25.0/bazelisk-linux-amd64 -o "$HOME/.local/bin/bazel"
+          chmod +x "$HOME/.local/bin/bazel"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Start bazel-remote
+        run: |
+          curl -fsSL https://github.com/buchgr/bazel-remote/releases/download/v2.6.1/bazel-remote-2.6.1-linux-amd64 -o "$HOME/.local/bin/bazel-remote"
+          chmod +x "$HOME/.local/bin/bazel-remote"
+          bazel-remote \
+            --s3.endpoint 24b45709d060d957340180e995f0d373.r2.cloudflarestorage.com \
+            --s3.bucket bazel-cache \
+            --s3.auth_method access_key \
+            --s3.access_key_id "${{ secrets.BAZEL_R2_ACCESS_KEY_ID }}" \
+            --s3.secret_access_key "${{ secrets.BAZEL_R2_SECRET_ACCESS_KEY }}" \
+            --s3.region auto \
+            --max_size 10 \
+            --dir /tmp/bazel-remote-data \
+            --http_address :9080 \
+            --grpc_address :9092 &
+          sleep 2
+
+      - name: Build
+        run: bazel build --config=ci //...
+
+      - name: Test
+        run: bazel test --config=ci //...
