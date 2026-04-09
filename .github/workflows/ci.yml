@@ -74,7 +74,7 @@ jobs:
           external-cache: true
           repository-cache: true
       - name: Build release binaries (Bazel)
-        run: bazel build -c opt //:rust-alc-api //:migrate //:archive //crates/gateway
+        run: bazel build -c opt //:rust-alc-api //:migrate //:archive //crates/gateway //crates/tenko-api
 
   cache-cleanup:
     name: Cache Cleanup
@@ -267,7 +267,7 @@ jobs:
           r2-secret-access-key: ${{ secrets.BAZEL_R2_SECRET_ACCESS_KEY }}
 
       - name: Build release binaries (Bazel)
-        run: bazel build -c opt //:rust-alc-api //:migrate //:archive //crates/gateway
+        run: bazel build -c opt //:rust-alc-api //:migrate //:archive //crates/gateway //crates/tenko-api
 
       - name: Prepare Docker context (backend)
         run: |
@@ -275,8 +275,9 @@ jobs:
           cp bazel-bin/rust-alc-api docker-context/
           cp bazel-bin/migrate docker-context/
           cp bazel-bin/archive docker-context/
-          chmod u+w docker-context/rust-alc-api docker-context/migrate docker-context/archive
-          strip docker-context/rust-alc-api docker-context/migrate docker-context/archive
+          cp bazel-bin/crates/tenko-api/tenko-api docker-context/
+          chmod u+w docker-context/rust-alc-api docker-context/migrate docker-context/archive docker-context/tenko-api
+          strip docker-context/rust-alc-api docker-context/migrate docker-context/archive docker-context/tenko-api
           cp -r migrations docker-context/
           cp Dockerfile docker-context/
 
@@ -550,8 +551,8 @@ jobs:
 
   deploy-gateway:
     name: Deploy Gateway
-    needs: [migrate, coverage-check]
-    if: "always() && needs.migrate.result == 'success' && (needs.coverage-check.result == 'success' || needs.coverage-check.result == 'skipped')"
+    needs: [deploy-tenko-api, coverage-check]
+    if: "always() && needs.deploy-tenko-api.result == 'success' && (needs.coverage-check.result == 'success' || needs.coverage-check.result == 'skipped')"
     runs-on: ubuntu-latest
     steps:
       - name: Authenticate to GCP
@@ -568,6 +569,14 @@ jobs:
           BACKEND_URL=$(gcloud run services describe rust-alc-api \
             --region asia-northeast1 --project cloudsql-sv \
             --format 'value(status.url)')
+          TENKO_URL=$(gcloud run services describe rust-alc-api-tenko \
+            --region asia-northeast1 --project cloudsql-sv \
+            --format 'value(status.url)' 2>/dev/null || echo "")
+
+          ENV_VARS="BACKEND_URL=${BACKEND_URL}"
+          if [ -n "$TENKO_URL" ]; then
+            ENV_VARS="${ENV_VARS},TENKO_API_URL=${TENKO_URL}"
+          fi
 
           gcloud run deploy rust-alc-api-gateway \
             --image "$AR_IMAGE" \
@@ -575,7 +584,7 @@ jobs:
             --project cloudsql-sv \
             --allow-unauthenticated \
             --set-secrets "JWT_SECRET=JWT_SECRET:latest" \
-            --set-env-vars "BACKEND_URL=${BACKEND_URL}" \
+            --set-env-vars "$ENV_VARS" \
             --port 8080 \
             --memory 256Mi \
             --cpu 1 \
@@ -587,6 +596,44 @@ jobs:
             --region asia-northeast1 --project cloudsql-sv \
             --format 'value(status.url)')
           echo "::notice ::Gateway URL: $URL (${GITHUB_REF_NAME})"
+
+  deploy-tenko-api:
+    name: Deploy Tenko API
+    needs: [deploy-service, coverage-check]
+    if: "always() && needs.deploy-service.result == 'success' && (needs.coverage-check.result == 'success' || needs.coverage-check.result == 'skipped')"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy tenko-api to Cloud Run
+        run: |
+          AR_IMAGE="asia-northeast1-docker.pkg.dev/cloudsql-sv/ghcr/ghcr.io/${{ github.repository }}:${{ github.sha }}"
+
+          gcloud run deploy rust-alc-api-tenko \
+            --image "$AR_IMAGE" \
+            --region asia-northeast1 \
+            --project cloudsql-sv \
+            --ingress internal \
+            --set-secrets "DATABASE_URL=alc-app-database-url:latest" \
+            --set-env-vars "RUST_LOG=tenko_api=info" \
+            --command "tenko-api" \
+            --port 8080 \
+            --memory 256Mi \
+            --cpu 1 \
+            --max-instances 5
+
+      - name: Print tenko-api URL
+        run: |
+          URL=$(gcloud run services describe rust-alc-api-tenko \
+            --region asia-northeast1 --project cloudsql-sv \
+            --format 'value(status.url)')
+          echo "::notice ::Tenko API URL: $URL (${GITHUB_REF_NAME})"
 
   update-archive-job:
     name: Update Archive Job
