@@ -47,7 +47,12 @@ esac
 
 if [[ "$ENV" == "staging" ]]; then
   SERVICE_NAME="rust-alc-api-staging${SUFFIX}"
-  IMAGE="${AR_PREFIX}/${REPO}${SUFFIX}-staging:${IMAGE_SHA}"
+  # Gateway has no sidecar, so use the production image directly
+  if [[ "$SERVICE" == "gateway" ]]; then
+    IMAGE="${AR_PREFIX}/${REPO}${SUFFIX}:${IMAGE_SHA}"
+  else
+    IMAGE="${AR_PREFIX}/${REPO}${SUFFIX}-staging:${IMAGE_SHA}"
+  fi
 else
   SERVICE_NAME="rust-alc-api${SUFFIX}"
   IMAGE="${AR_PREFIX}/${REPO}${SUFFIX}:${IMAGE_SHA}"
