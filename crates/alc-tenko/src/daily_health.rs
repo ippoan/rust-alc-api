@@ -7,11 +7,15 @@ use axum::{
 use chrono::{NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::TenkoState;
 use alc_core::auth_middleware::TenantId;
 use alc_core::repository::daily_health::DailyHealthRow;
-use alc_core::AppState;
 
-pub fn tenant_router() -> Router<AppState> {
+pub fn tenant_router<S>() -> Router<S>
+where
+    TenkoState: axum::extract::FromRef<S>,
+    S: Clone + Send + Sync + 'static,
+{
     Router::new().route("/tenko/daily-health-status", get(daily_health_status))
 }
 
@@ -37,7 +41,7 @@ struct DailyHealthResponse {
 }
 
 async fn daily_health_status(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
     Query(filter): Query<DailyHealthFilter>,
 ) -> Result<Json<DailyHealthResponse>, StatusCode> {

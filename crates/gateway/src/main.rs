@@ -35,10 +35,15 @@ async fn main() {
         .build()
         .expect("Failed to create HTTP client");
 
+    if let Some(ref tenko_url) = config.tenko_url {
+        tracing::info!("tenko-api: {tenko_url}");
+    }
+
     let proxy_state = ProxyState {
         client,
         backend_url: config.backend_url.clone(),
         jwt_secret: config.jwt_secret,
+        tenko_url: config.tenko_url,
     };
 
     let cors = CorsLayer::new()

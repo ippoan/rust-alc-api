@@ -4313,6 +4313,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "tenko-api"
+version = "0.1.0"
+dependencies = [
+ "alc-core",
+ "alc-tenko",
+ "axum",
+ "sqlx",
+ "tokio",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "termcolor"
 version = "1.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -14,6 +14,17 @@ pub struct ProxyState {
     pub client: Client,
     pub backend_url: String,
     pub jwt_secret: String,
+    pub tenko_url: Option<String>,
+}
+
+/// パスに応じてバックエンド URL を選択する
+fn resolve_backend<'a>(path: &str, state: &'a ProxyState) -> &'a str {
+    let api_path = path.strip_prefix("/api").unwrap_or(path);
+    if api_path.starts_with("/tenko") || api_path.starts_with("/tenko-call") {
+        state.tenko_url.as_deref().unwrap_or(&state.backend_url)
+    } else {
+        &state.backend_url
+    }
 }
 
 /// リクエストを backend に転送する
@@ -36,8 +47,9 @@ pub async fn proxy_handler(
         try_verify_jwt(&parts.headers, &state.jwt_secret)
     };
 
-    // backend URL 構築
-    let url = format!("{}{}", state.backend_url, path_and_query);
+    // backend URL 構築 (パスに応じて tenko-api or backend を選択)
+    let backend = resolve_backend(path, &state);
+    let url = format!("{}{}", backend, path_and_query);
 
     // reqwest リクエスト構築
     let method = reqwest::Method::from_bytes(parts.method.as_str().as_bytes())
@@ -121,6 +133,42 @@ fn inject_auth_headers(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_resolve_backend_tenko() {
+        let state = ProxyState {
+            client: Client::new(),
+            backend_url: "http://backend:8081".to_string(),
+            jwt_secret: "secret".to_string(),
+            tenko_url: Some("http://tenko:8082".to_string()),
+        };
+        assert_eq!(
+            resolve_backend("/api/tenko/sessions", &state),
+            "http://tenko:8082"
+        );
+        assert_eq!(
+            resolve_backend("/api/tenko-call/register", &state),
+            "http://tenko:8082"
+        );
+        assert_eq!(
+            resolve_backend("/api/employees", &state),
+            "http://backend:8081"
+        );
+    }
+
+    #[test]
+    fn test_resolve_backend_fallback() {
+        let state = ProxyState {
+            client: Client::new(),
+            backend_url: "http://backend:8081".to_string(),
+            jwt_secret: "secret".to_string(),
+            tenko_url: None,
+        };
+        assert_eq!(
+            resolve_backend("/api/tenko/sessions", &state),
+            "http://backend:8081"
+        );
+    }
 
     #[test]
     fn test_try_verify_jwt_no_header() {

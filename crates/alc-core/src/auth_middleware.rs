@@ -72,6 +72,51 @@ pub async fn require_tenant(
     Ok(next.run(req).await)
 }
 
+/// X-Tenant-ID ヘッダーのみで認証するミドルウェア (gateway 配下の内部サービス用)
+///
+/// Gateway が JWT を検証済みで X-Tenant-ID ヘッダーを注入している前提。
+/// AuthUser も X-User-ID / X-User-Email / X-User-Role ヘッダーから復元する。
+pub async fn require_tenant_header(mut req: Request, next: Next) -> Result<Response, StatusCode> {
+    let tenant_id = req
+        .headers()
+        .get("X-Tenant-ID")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| Uuid::parse_str(v).ok())
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    req.extensions_mut().insert(TenantId(tenant_id));
+
+    // Gateway が注入した認証ヘッダーから AuthUser を復元
+    let user_id = req
+        .headers()
+        .get("X-User-ID")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| Uuid::parse_str(v).ok());
+    let email = req
+        .headers()
+        .get("X-User-Email")
+        .and_then(|v| v.to_str().ok())
+        .map(String::from);
+    let role = req
+        .headers()
+        .get("X-User-Role")
+        .and_then(|v| v.to_str().ok())
+        .map(String::from);
+
+    if let (Some(user_id), Some(email), Some(role)) = (user_id, email, role) {
+        let auth_user = AuthUser {
+            user_id,
+            email,
+            name: String::new(),
+            tenant_id,
+            role,
+        };
+        req.extensions_mut().insert(auth_user);
+    }
+
+    Ok(next.run(req).await)
+}
+
 /// Authorization ヘッダーから Bearer トークンを抽出
 fn extract_bearer_token(req: &Request) -> Option<&str> {
     req.headers()

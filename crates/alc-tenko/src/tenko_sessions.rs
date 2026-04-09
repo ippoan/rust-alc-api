@@ -9,6 +9,7 @@ use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use uuid::Uuid;
 
+use crate::TenkoState;
 use alc_core::auth_middleware::{AuthUser, TenantId};
 use alc_core::models::{
     CancelTenkoSession, InterruptSession, MedicalDiffs, ResumeSession, SafetyJudgment,
@@ -17,11 +18,14 @@ use alc_core::models::{
     TenkoDashboard, TenkoRecord, TenkoSession, TenkoSessionFilter, TenkoSessionsResponse,
 };
 use alc_core::repository::TenkoSessionRepository;
-use alc_core::AppState;
 
 /// JWT 必須ルート (管理者)
 /// テナント対応ルート (JWT or X-Tenant-ID)
-pub fn tenant_router() -> Router<AppState> {
+pub fn tenant_router<S>() -> Router<S>
+where
+    TenkoState: axum::extract::FromRef<S>,
+    S: Clone + Send + Sync + 'static,
+{
     Router::new()
         .route("/tenko/sessions", get(list_sessions))
         .route("/tenko/dashboard", get(dashboard))
@@ -53,7 +57,7 @@ pub fn tenant_router() -> Router<AppState> {
 
 /// セッション開始 (顔認証完了後)
 async fn start_session(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
     Json(body): Json<StartTenkoSession>,
 ) -> Result<(StatusCode, Json<TenkoSession>), StatusCode> {
@@ -128,7 +132,7 @@ async fn start_session(
 
 /// アルコール結果送信
 async fn submit_alcohol(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
     Path(id): Path<Uuid>,
     Json(body): Json<SubmitAlcoholResult>,
@@ -226,7 +230,7 @@ async fn submit_alcohol(
 
 /// 医療データ送信 (業務前のみ)
 async fn submit_medical(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
     Path(id): Path<Uuid>,
     Json(body): Json<SubmitMedicalData>,
@@ -270,7 +274,7 @@ async fn submit_medical(
 
 /// 指示事項確認
 async fn confirm_instruction(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<TenkoSession>, StatusCode> {
@@ -300,7 +304,7 @@ async fn confirm_instruction(
 
 /// 運行状況報告 (業務後のみ)
 async fn submit_report(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
     Path(id): Path<Uuid>,
     Json(body): Json<SubmitOperationReport>,
@@ -391,7 +395,7 @@ async fn submit_report(
 
 /// セッション中止
 async fn cancel_session(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
     Path(id): Path<Uuid>,
     Json(body): Json<CancelTenkoSession>,
@@ -425,7 +429,7 @@ async fn cancel_session(
 
 /// セッション取得
 async fn get_session(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<TenkoSession>, StatusCode> {
@@ -443,7 +447,7 @@ async fn get_session(
 
 /// セッション一覧 (管理者)
 async fn list_sessions(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
     Query(filter): Query<TenkoSessionFilter>,
 ) -> Result<Json<TenkoSessionsResponse>, StatusCode> {
@@ -467,7 +471,7 @@ async fn list_sessions(
 
 /// ダッシュボード集計
 async fn dashboard(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
 ) -> Result<Json<TenkoDashboard>, StatusCode> {
     let tenant_id = tenant.0 .0;
@@ -533,7 +537,7 @@ async fn create_tenko_record(
 
 /// 自己申告送信 (業務前のみ)
 async fn submit_self_declaration(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
     Path(id): Path<Uuid>,
     Json(body): Json<SubmitSelfDeclaration>,
@@ -756,7 +760,7 @@ async fn perform_safety_judgment(
 
 /// 日常点検送信 (業務前のみ)
 async fn submit_daily_inspection(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
     Path(id): Path<Uuid>,
     Json(body): Json<SubmitDailyInspection>,
@@ -875,7 +879,7 @@ async fn submit_daily_inspection(
 
 /// 携行品チェック結果送信
 async fn submit_carrying_items(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
     Path(id): Path<Uuid>,
     Json(body): Json<SubmitCarryingItemChecks>,
@@ -941,7 +945,7 @@ async fn submit_carrying_items(
 
 /// セッション中断 (管理者)
 async fn interrupt_session(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
     Path(id): Path<Uuid>,
     Json(body): Json<InterruptSession>,
@@ -1001,7 +1005,7 @@ async fn interrupt_session(
 
 /// セッション再開 (管理者)
 async fn resume_session(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
     auth_user: axum::Extension<AuthUser>,
     Path(id): Path<Uuid>,

@@ -6,12 +6,16 @@ use axum::{
 };
 use uuid::Uuid;
 
+use crate::TenkoState;
 use alc_core::auth_middleware::TenantId;
 use alc_core::models::{CreateWebhookConfig, WebhookConfig, WebhookDelivery};
-use alc_core::AppState;
 
 /// テナント対応ルート (JWT or X-Tenant-ID)
-pub fn tenant_router() -> Router<AppState> {
+pub fn tenant_router<S>() -> Router<S>
+where
+    TenkoState: axum::extract::FromRef<S>,
+    S: Clone + Send + Sync + 'static,
+{
     Router::new()
         .route("/tenko/webhooks", post(upsert_webhook).get(list_webhooks))
         .route(
@@ -23,7 +27,7 @@ pub fn tenant_router() -> Router<AppState> {
 
 /// Webhook 作成/更新 (event_type が同じなら UPSERT)
 async fn upsert_webhook(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
     Json(body): Json<CreateWebhookConfig>,
 ) -> Result<(StatusCode, Json<WebhookConfig>), StatusCode> {
@@ -57,7 +61,7 @@ async fn upsert_webhook(
 }
 
 async fn list_webhooks(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
 ) -> Result<Json<Vec<WebhookConfig>>, StatusCode> {
     let tenant_id = tenant.0 .0;
@@ -72,7 +76,7 @@ async fn list_webhooks(
 }
 
 async fn get_webhook(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<WebhookConfig>, StatusCode> {
@@ -89,7 +93,7 @@ async fn get_webhook(
 }
 
 async fn delete_webhook(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, StatusCode> {
@@ -112,7 +116,7 @@ async fn delete_webhook(
 }
 
 async fn list_deliveries(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Vec<WebhookDelivery>>, StatusCode> {

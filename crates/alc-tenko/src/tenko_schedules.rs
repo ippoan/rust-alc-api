@@ -6,15 +6,19 @@ use axum::{
 };
 use uuid::Uuid;
 
+use crate::TenkoState;
 use alc_core::auth_middleware::TenantId;
 use alc_core::models::{
     BatchCreateTenkoSchedules, CreateTenkoSchedule, TenkoSchedule, TenkoScheduleFilter,
     TenkoSchedulesResponse, UpdateTenkoSchedule,
 };
-use alc_core::AppState;
 
 /// テナント対応ルート (JWT or X-Tenant-ID)
-pub fn tenant_router() -> Router<AppState> {
+pub fn tenant_router<S>() -> Router<S>
+where
+    TenkoState: axum::extract::FromRef<S>,
+    S: Clone + Send + Sync + 'static,
+{
     Router::new()
         .route(
             "/tenko/schedules",
@@ -34,7 +38,7 @@ pub fn tenant_router() -> Router<AppState> {
 }
 
 async fn create_schedule(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
     Json(body): Json<CreateTenkoSchedule>,
 ) -> Result<(StatusCode, Json<TenkoSchedule>), StatusCode> {
@@ -52,7 +56,7 @@ async fn create_schedule(
 }
 
 async fn batch_create_schedules(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
     Json(body): Json<BatchCreateTenkoSchedules>,
 ) -> Result<(StatusCode, Json<Vec<TenkoSchedule>>), StatusCode> {
@@ -79,7 +83,7 @@ async fn batch_create_schedules(
 }
 
 async fn list_schedules(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
     Query(filter): Query<TenkoScheduleFilter>,
 ) -> Result<Json<TenkoSchedulesResponse>, StatusCode> {
@@ -102,7 +106,7 @@ async fn list_schedules(
 }
 
 async fn get_schedule(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<TenkoSchedule>, StatusCode> {
@@ -119,7 +123,7 @@ async fn get_schedule(
 }
 
 async fn update_schedule(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateTenkoSchedule>,
@@ -140,7 +144,7 @@ async fn update_schedule(
 }
 
 async fn delete_schedule(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, StatusCode> {
@@ -161,7 +165,7 @@ async fn delete_schedule(
 
 /// キオスク: 特定乗務員の未消費予定を取得
 async fn get_pending_schedules(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
     Path(employee_id): Path<Uuid>,
 ) -> Result<Json<Vec<TenkoSchedule>>, StatusCode> {

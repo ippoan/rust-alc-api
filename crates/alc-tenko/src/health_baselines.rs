@@ -6,12 +6,16 @@ use axum::{
 };
 use uuid::Uuid;
 
+use crate::TenkoState;
 use alc_core::auth_middleware::TenantId;
 use alc_core::models::{CreateHealthBaseline, EmployeeHealthBaseline, UpdateHealthBaseline};
-use alc_core::AppState;
 
 /// テナント対応ルート (JWT or X-Tenant-ID)
-pub fn tenant_router() -> Router<AppState> {
+pub fn tenant_router<S>() -> Router<S>
+where
+    TenkoState: axum::extract::FromRef<S>,
+    S: Clone + Send + Sync + 'static,
+{
     Router::new()
         .route(
             "/tenko/health-baselines",
@@ -27,7 +31,7 @@ pub fn tenant_router() -> Router<AppState> {
 
 /// 基準値作成/更新 (UPSERT)
 async fn upsert_baseline(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
     Json(body): Json<CreateHealthBaseline>,
 ) -> Result<(StatusCode, Json<EmployeeHealthBaseline>), StatusCode> {
@@ -45,7 +49,7 @@ async fn upsert_baseline(
 
 /// テナント内一覧
 async fn list_baselines(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
 ) -> Result<Json<Vec<EmployeeHealthBaseline>>, StatusCode> {
     let baselines = state
@@ -59,7 +63,7 @@ async fn list_baselines(
 
 /// 個別取得 (employee_id で検索)
 async fn get_baseline(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
     Path(employee_id): Path<Uuid>,
 ) -> Result<Json<EmployeeHealthBaseline>, StatusCode> {
@@ -75,7 +79,7 @@ async fn get_baseline(
 
 /// 基準値更新
 async fn update_baseline(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
     Path(employee_id): Path<Uuid>,
     Json(body): Json<UpdateHealthBaseline>,
@@ -92,7 +96,7 @@ async fn update_baseline(
 
 /// 基準値削除
 async fn delete_baseline(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
     Path(employee_id): Path<Uuid>,
 ) -> Result<StatusCode, StatusCode> {

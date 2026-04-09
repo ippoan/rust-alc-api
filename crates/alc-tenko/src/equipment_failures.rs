@@ -7,15 +7,19 @@ use axum::{
 };
 use uuid::Uuid;
 
+use crate::TenkoState;
 use alc_core::auth_middleware::TenantId;
 use alc_core::models::{
     CreateEquipmentFailure, EquipmentFailure, EquipmentFailureFilter, EquipmentFailuresResponse,
     UpdateEquipmentFailure,
 };
-use alc_core::AppState;
 
 /// テナント対応ルート (JWT or X-Tenant-ID)
-pub fn tenant_router() -> Router<AppState> {
+pub fn tenant_router<S>() -> Router<S>
+where
+    TenkoState: axum::extract::FromRef<S>,
+    S: Clone + Send + Sync + 'static,
+{
     Router::new()
         .route(
             "/tenko/equipment-failures",
@@ -30,7 +34,7 @@ pub fn tenant_router() -> Router<AppState> {
 
 /// 故障記録作成
 async fn create_failure(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
     Json(body): Json<CreateEquipmentFailure>,
 ) -> Result<(StatusCode, Json<EquipmentFailure>), StatusCode> {
@@ -64,7 +68,7 @@ async fn create_failure(
 
 /// 故障一覧 (フィルタ+ページネーション)
 async fn list_failures(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
     Query(filter): Query<EquipmentFailureFilter>,
 ) -> Result<Json<EquipmentFailuresResponse>, StatusCode> {
@@ -78,7 +82,7 @@ async fn list_failures(
 
 /// 個別取得
 async fn get_failure(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<EquipmentFailure>, StatusCode> {
@@ -93,7 +97,7 @@ async fn get_failure(
 
 /// 解決記録
 async fn resolve_failure(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateEquipmentFailure>,
@@ -109,7 +113,7 @@ async fn resolve_failure(
 
 /// CSV出力 (BOM付き)
 async fn export_csv(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
     Query(filter): Query<EquipmentFailureFilter>,
 ) -> Result<impl IntoResponse, StatusCode> {

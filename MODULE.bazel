@@ -27,6 +27,7 @@ crate.from_cargo(
         "//crates/alc-storage:Cargo.toml",
         "//crates/alc-tenko:Cargo.toml",
         "//crates/gateway:Cargo.toml",
+        "//crates/tenko-api:Cargo.toml",
     ],
 )
 

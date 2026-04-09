@@ -6,17 +6,25 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
-use alc_core::AppState;
+use crate::TenkoState;
 
 /// 公開ルート (認証不要) - Android アプリから呼ばれる
-pub fn public_router() -> Router<AppState> {
+pub fn public_router<S>() -> Router<S>
+where
+    TenkoState: axum::extract::FromRef<S>,
+    S: Clone + Send + Sync + 'static,
+{
     Router::new()
         .route("/tenko-call/register", post(register))
         .route("/tenko-call/tenko", post(tenko))
 }
 
 /// テナント認証付きルート - 管理画面から呼ばれる
-pub fn tenant_router() -> Router<AppState> {
+pub fn tenant_router<S>() -> Router<S>
+where
+    TenkoState: axum::extract::FromRef<S>,
+    S: Clone + Send + Sync + 'static,
+{
     Router::new()
         .route("/tenko-call/numbers", get(list_numbers).post(create_number))
         .route("/tenko-call/numbers/{id}", delete(delete_number))
@@ -43,7 +51,7 @@ struct RegisterResponse {
 }
 
 async fn register(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     Json(body): Json<RegisterRequest>,
 ) -> Result<Json<RegisterResponse>, (StatusCode, Json<RegisterResponse>)> {
     let result = state
@@ -108,7 +116,7 @@ struct TenkoResponse {
 }
 
 async fn tenko(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     Json(body): Json<TenkoRequest>,
 ) -> Result<Json<TenkoResponse>, StatusCode> {
     let result = state
@@ -146,7 +154,7 @@ struct TenkoCallNumber {
 }
 
 async fn list_numbers(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
 ) -> Result<Json<Vec<TenkoCallNumber>>, StatusCode> {
     let rows = state.tenko_call.list_numbers().await.map_err(|e| {
         tracing::error!("tenko_call list_numbers error: {e}");
@@ -180,7 +188,7 @@ struct CreateNumberResponse {
 }
 
 async fn create_number(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     Json(body): Json<CreateNumberRequest>,
 ) -> Result<Json<CreateNumberResponse>, StatusCode> {
     let tenant = body.tenant_id.unwrap_or_else(|| "default".into());
@@ -197,7 +205,7 @@ async fn create_number(
 }
 
 async fn delete_number(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     Path(id): Path<i32>,
 ) -> Result<StatusCode, StatusCode> {
     state.tenko_call.delete_number(id).await.map_err(|e| {
@@ -220,7 +228,7 @@ struct TenkoCallDriver {
 }
 
 async fn list_drivers(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
 ) -> Result<Json<Vec<TenkoCallDriver>>, StatusCode> {
     let rows = state.tenko_call.list_drivers().await.map_err(|e| {
         tracing::error!("tenko_call list_drivers error: {e}");

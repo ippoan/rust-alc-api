@@ -8,12 +8,16 @@ use axum::{
 };
 use uuid::Uuid;
 
+use crate::TenkoState;
 use alc_core::auth_middleware::TenantId;
 use alc_core::models::{TenkoRecord, TenkoRecordFilter, TenkoRecordsResponse};
-use alc_core::AppState;
 
 /// テナント対応ルート (JWT or X-Tenant-ID)
-pub fn tenant_router() -> Router<AppState> {
+pub fn tenant_router<S>() -> Router<S>
+where
+    TenkoState: axum::extract::FromRef<S>,
+    S: Clone + Send + Sync + 'static,
+{
     Router::new()
         .route("/tenko/records", get(list_records))
         .route("/tenko/records/csv", get(export_csv))
@@ -21,7 +25,7 @@ pub fn tenant_router() -> Router<AppState> {
 }
 
 async fn list_records(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
     Query(filter): Query<TenkoRecordFilter>,
 ) -> Result<Json<TenkoRecordsResponse>, StatusCode> {
@@ -51,7 +55,7 @@ async fn list_records(
 }
 
 async fn get_record(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<TenkoRecord>, StatusCode> {
@@ -69,7 +73,7 @@ async fn get_record(
 
 /// CSV エクスポート
 async fn export_csv(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
     Query(filter): Query<TenkoRecordFilter>,
 ) -> Result<Response, StatusCode> {
