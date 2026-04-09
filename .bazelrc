@@ -3,6 +3,9 @@ build --incompatible_strict_action_env
 build --action_env=PATH
 build --jobs=auto
 
+# Strip binaries in opt mode (match cargo --release behavior)
+build:ci --strip=always
+
 # Remote cache (R2 via bazel-remote proxy)
 build:ci --remote_cache=grpc://localhost:9092
 build:ci --remote_upload_local_results=true
