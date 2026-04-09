@@ -13,13 +13,15 @@ jobs:
 
       - name: Install bazelisk
         run: |
-          curl -fsSL https://github.com/bazelbuild/bazelisk/releases/download/v1.25.0/bazelisk-linux-amd64 -o /usr/local/bin/bazel
-          chmod +x /usr/local/bin/bazel
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL https://github.com/bazelbuild/bazelisk/releases/download/v1.25.0/bazelisk-linux-amd64 -o "$HOME/.local/bin/bazel"
+          chmod +x "$HOME/.local/bin/bazel"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Start bazel-remote
         run: |
-          curl -fsSL https://github.com/buchgr/bazel-remote/releases/download/v2.6.1/bazel-remote-2.6.1-linux-amd64 -o /usr/local/bin/bazel-remote
-          chmod +x /usr/local/bin/bazel-remote
+          curl -fsSL https://github.com/buchgr/bazel-remote/releases/download/v2.6.1/bazel-remote-2.6.1-linux-amd64 -o "$HOME/.local/bin/bazel-remote"
+          chmod +x "$HOME/.local/bin/bazel-remote"
           bazel-remote \
             --s3.endpoint 24b45709d060d957340180e995f0d373.r2.cloudflarestorage.com \
             --s3.bucket bazel-cache \
