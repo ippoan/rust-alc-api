@@ -10,7 +10,7 @@ spec:
   template:
     metadata:
       annotations:
-        run.googleapis.com/container-dependencies: '{"gateway":["app"],"app":["postgres"]}'
+        run.googleapis.com/container-dependencies: '{"gateway":["app","tenko","carins","dtako"],"app":["postgres"],"tenko":["postgres"],"carins":["postgres"],"dtako":["postgres"]}'
         autoscaling.knative.dev/maxScale: "1"
         autoscaling.knative.dev/minScale: "0"
     spec:
@@ -24,6 +24,12 @@ spec:
           env:
             - name: BACKEND_URL
               value: "http://localhost:8081"
+            - name: TENKO_API_URL
+              value: "http://localhost:8082"
+            - name: CARINS_API_URL
+              value: "http://localhost:8083"
+            - name: DTAKO_API_URL
+              value: "http://localhost:8084"
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:
@@ -159,6 +165,98 @@ spec:
           volumeMounts:
             - name: pg-data
               mountPath: /var/lib/postgresql/data
+        - name: tenko
+          image: PLACEHOLDER_TENKO_IMAGE
+          env:
+            - name: PORT
+              value: "8082"
+            - name: DATABASE_URL
+              value: "postgresql://postgres:staging@localhost:5432/postgres?options=-c search_path=alc_api"
+            - name: RUST_LOG
+              value: "tenko_api=info"
+          resources:
+            limits:
+              memory: 128Mi
+              cpu: "0.5"
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8082
+            initialDelaySeconds: 2
+            periodSeconds: 2
+            failureThreshold: 10
+        - name: carins
+          image: PLACEHOLDER_CARINS_IMAGE
+          env:
+            - name: PORT
+              value: "8083"
+            - name: DATABASE_URL
+              value: "postgresql://postgres:staging@localhost:5432/postgres?options=-c search_path=alc_api"
+            - name: STORAGE_BACKEND
+              value: "r2"
+            - name: CARINS_R2_BUCKET
+              value: "carins-files-staging"
+            - name: CARINS_R2_ACCOUNT_ID
+              value: "24b45709d060d957340180e995f0d373"
+            - name: CARINS_R2_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: carins-r2-access-key
+            - name: CARINS_R2_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: carins-r2-secret-key
+            - name: RUST_LOG
+              value: "carins_api=info"
+          resources:
+            limits:
+              memory: 128Mi
+              cpu: "0.5"
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8083
+            initialDelaySeconds: 2
+            periodSeconds: 2
+            failureThreshold: 10
+        - name: dtako
+          image: PLACEHOLDER_DTAKO_IMAGE
+          env:
+            - name: PORT
+              value: "8084"
+            - name: DATABASE_URL
+              value: "postgresql://postgres:staging@localhost:5432/postgres?options=-c search_path=alc_api"
+            - name: STORAGE_BACKEND
+              value: "r2"
+            - name: DTAKO_R2_BUCKET
+              value: "ohishi-dtako-staging"
+            - name: DTAKO_R2_ACCOUNT_ID
+              value: "24b45709d060d957340180e995f0d373"
+            - name: DTAKO_R2_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: dtako-r2-access-key
+            - name: DTAKO_R2_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: dtako-r2-secret-key
+            - name: RUST_LOG
+              value: "dtako_api=info"
+          resources:
+            limits:
+              memory: 256Mi
+              cpu: "0.5"
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8084
+            initialDelaySeconds: 2
+            periodSeconds: 2
+            failureThreshold: 10
       volumes:
         - name: pg-data
           emptyDir:

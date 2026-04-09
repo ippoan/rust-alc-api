@@ -435,7 +435,7 @@ jobs:
             -t ghcr.io/${{ github.repository }}-staging-db:latest .
           docker push ghcr.io/${{ github.repository }}-staging-db:latest
 
-      # Staging app イメージ (entrypoint 差し替え版) build & push
+      # Staging app イメージ (entrypoint 差し替え版 — マイグレーション実行用)
       - name: Build staging app image
         run: |
           mkdir -p staging-context/staging
@@ -469,9 +469,16 @@ jobs:
 
           GW_IMAGE="${AR_PREFIX}/ghcr.io/${{ github.repository }}-gateway:${{ github.sha }}"
 
+          TENKO_IMAGE="${AR_PREFIX}/ghcr.io/${{ github.repository }}-tenko:${{ github.sha }}"
+          CARINS_IMAGE="${AR_PREFIX}/ghcr.io/${{ github.repository }}-carins:${{ github.sha }}"
+          DTAKO_IMAGE="${AR_PREFIX}/ghcr.io/${{ github.repository }}-dtako:${{ github.sha }}"
+
           sed -e "s|PLACEHOLDER_APP_IMAGE|${APP_IMAGE}|" \
               -e "s|PLACEHOLDER_DB_IMAGE|${DB_IMAGE}|" \
               -e "s|PLACEHOLDER_GATEWAY_IMAGE|${GW_IMAGE}|" \
+              -e "s|PLACEHOLDER_TENKO_IMAGE|${TENKO_IMAGE}|" \
+              -e "s|PLACEHOLDER_CARINS_IMAGE|${CARINS_IMAGE}|" \
+              -e "s|PLACEHOLDER_DTAKO_IMAGE|${DTAKO_IMAGE}|" \
               -e "s|PLACEHOLDER_STAGING_URL|${STAGING_URL}|" \
               staging/cloudrun-staging.yaml > /tmp/staging-deploy.yaml
 
