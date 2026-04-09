@@ -3,18 +3,19 @@ name: Deploy
 on:
   workflow_call:
     inputs:
-      environment:
-        required: true
-        type: string  # "staging" or "production"
       image_sha:
         required: true
         type: string
       ref_name:
         required: false
-        type: string  # e.g. "v1.2.3" for production tag
+        type: string
     secrets:
       GCP_SA_KEY:
         required: true
+
+# Environment is derived from github context:
+#   pull_request → staging
+#   tag push     → production
 
 env:
   REGION: asia-northeast1
@@ -28,7 +29,7 @@ jobs:
   # ---------------------------------------------------------------------------
   staging-images:
     name: "Build staging images"
-    if: inputs.environment == 'staging'
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -100,7 +101,7 @@ jobs:
   # ---------------------------------------------------------------------------
   promote-images:
     name: "Promote images"
-    if: inputs.environment == 'production'
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       packages: write
@@ -130,7 +131,7 @@ jobs:
   # ---------------------------------------------------------------------------
   migrate:
     name: Migrate
-    if: inputs.environment == 'production'
+    if: startsWith(github.ref, 'refs/tags/v')
     needs: [promote-images]
     runs-on: ubuntu-latest
     steps:
@@ -173,8 +174,8 @@ jobs:
     needs: [staging-images, promote-images, migrate]
     if: >-
       always() && (
-        (inputs.environment == 'staging' && needs.staging-images.result == 'success') ||
-        (inputs.environment == 'production' && needs.migrate.result == 'success')
+        (github.event_name == 'pull_request' && needs.staging-images.result == 'success') ||
+        (startsWith(github.ref, 'refs/tags/v') && needs.migrate.result == 'success')
       )
     runs-on: ubuntu-latest
     strategy:
@@ -194,9 +195,14 @@ jobs:
 
       - name: Render and deploy
         run: |
-          RENDER_ARGS="${{ matrix.service }} ${{ inputs.environment }} ${{ inputs.image_sha }}"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            DEPLOY_ENV="staging"
+          else
+            DEPLOY_ENV="production"
+          fi
+          RENDER_ARGS="${{ matrix.service }} ${DEPLOY_ENV} ${{ inputs.image_sha }}"
 
-          if [ "${{ inputs.environment }}" = "staging" ]; then
+          if [ "${DEPLOY_ENV}" = "staging" ]; then
             STAGING_URL="${{ vars.STAGING_API_URL }}"
             DB_IMAGE="${{ env.AR_PREFIX }}/${{ env.REPO }}-staging-db:latest"
             RENDER_ARGS="${RENDER_ARGS} --staging-url ${STAGING_URL} --db-image ${DB_IMAGE}"
@@ -212,7 +218,7 @@ jobs:
             --project ${{ env.PROJECT }}
 
       - name: Ensure public access (staging)
-        if: inputs.environment == 'staging'
+        if: github.event_name == 'pull_request'
         run: |
           case "${{ matrix.service }}" in
             backend) SVC_NAME="rust-alc-api-staging" ;;
@@ -226,12 +232,13 @@ jobs:
 
       - name: Print URL
         run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then DEPLOY_ENV="staging"; else DEPLOY_ENV="production"; fi
           case "${{ matrix.service }}" in
             backend)
-              if [ "${{ inputs.environment }}" = "staging" ]; then SVC="rust-alc-api-staging"
+              if [ "${DEPLOY_ENV}" = "staging" ]; then SVC="rust-alc-api-staging"
               else SVC="rust-alc-api"; fi ;;
             *)
-              if [ "${{ inputs.environment }}" = "staging" ]; then SVC="rust-alc-api-staging-${{ matrix.service }}"
+              if [ "${DEPLOY_ENV}" = "staging" ]; then SVC="rust-alc-api-staging-${{ matrix.service }}"
               else SVC="rust-alc-api-${{ matrix.service }}"; fi ;;
           esac
           URL=$(gcloud run services describe "$SVC" \
@@ -262,7 +269,7 @@ jobs:
       - name: Render gateway YAML with service URLs
         run: |
           # Discover backend/service URLs
-          if [ "${{ inputs.environment }}" = "staging" ]; then
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
             BACKEND_URL=$(gcloud run services describe rust-alc-api-staging \
               --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
               --format 'value(status.url)')
@@ -291,7 +298,8 @@ jobs:
           fi
 
           # Render gateway YAML
-          bash cloudrun/render.sh gateway ${{ inputs.environment }} ${{ inputs.image_sha }} \
+          if [ "${{ github.event_name }}" = "pull_request" ]; then GW_ENV="staging"; else GW_ENV="production"; fi
+          bash cloudrun/render.sh gateway ${GW_ENV} ${{ inputs.image_sha }} \
             > /tmp/gateway.yaml
 
           # Replace gateway URL placeholders
@@ -311,7 +319,7 @@ jobs:
 
       - name: Ensure public access
         run: |
-          if [ "${{ inputs.environment }}" = "staging" ]; then SVC="rust-alc-api-staging-gateway"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then SVC="rust-alc-api-staging-gateway"
           else SVC="rust-alc-api-gateway"; fi
           gcloud run services add-iam-policy-binding "$SVC" \
             --region ${{ env.REGION }} \
@@ -321,7 +329,7 @@ jobs:
 
       - name: Print gateway URL
         run: |
-          if [ "${{ inputs.environment }}" = "staging" ]; then SVC="rust-alc-api-staging-gateway"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then SVC="rust-alc-api-staging-gateway"
           else SVC="rust-alc-api-gateway"; fi
           URL=$(gcloud run services describe "$SVC" \
             --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
@@ -333,7 +341,7 @@ jobs:
   # ---------------------------------------------------------------------------
   update-archive:
     name: "Update Archive Job"
-    if: inputs.environment == 'production'
+    if: startsWith(github.ref, 'refs/tags/v')
     needs: [migrate]
     runs-on: ubuntu-latest
     steps:
