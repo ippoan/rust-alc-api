@@ -37,6 +37,7 @@ jobs:
       fail-fast: false
       matrix:
         target:
+          - { name: "check", key: "check", cmd: "cargo clippy --workspace -- -D warnings" }
           - { name: "test", key: "test-lib", cmd: "cargo llvm-cov nextest --no-report --ignore-run-fail --lib --workspace" }
           - { name: "mock-tenko", key: "test-mock-tenko", cmd: "cargo llvm-cov nextest --no-report --ignore-run-fail --test mock_tenko" }
           - { name: "mock-dtako", key: "test-mock-dtako", cmd: "cargo llvm-cov nextest --no-report --ignore-run-fail --test mock_dtako" }
@@ -70,6 +71,8 @@ jobs:
       - uses: ippoan/setup-bazel@main
         with:
           disk-cache: bazel
+          external-cache: true
+          repository-cache: true
       - name: Build release binaries (Bazel)
         run: bazel build -c opt //:rust-alc-api //:migrate //:archive //crates/gateway
 
@@ -84,6 +87,8 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: swatinem/rust-cache@v2
+        with:
+          shared-key: check
       - run: cargo fmt --check --all
       - run: cargo clippy --workspace -- -D warnings
       - name: Generate TypeScript bindings
