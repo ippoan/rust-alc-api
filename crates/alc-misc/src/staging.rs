@@ -33,6 +33,73 @@ fn is_staging_mode() -> bool {
 }
 
 // ---------------------------------------------------------------------------
+// Macros — export / import boilerplate elimination
+// ---------------------------------------------------------------------------
+
+/// Generate an export function: `SELECT <cols> FROM <table> WHERE tenant_id = $1`
+macro_rules! staging_export {
+    ($fn_name:ident, $struct_ty:ty, $table:expr, $tid_ty:ty, [$($col:ident),+ $(,)?]) => {
+        async fn $fn_name(pool: &PgPool, tid: $tid_ty) -> Result<Vec<$struct_ty>, StatusCode> {
+            sqlx::query_as::<_, $struct_ty>(
+                concat!(
+                    "SELECT ",
+                    staging_export!(@cols $($col),+),
+                    " FROM ", $table, " WHERE tenant_id = $1"
+                )
+            )
+            .bind(tid)
+            .fetch_all(pool)
+            .await
+            .map_err(db_err)
+        }
+    };
+    (@cols $col:ident) => { stringify!($col) };
+    (@cols $col:ident, $($rest:ident),+) => {
+        concat!(stringify!($col), ", ", staging_export!(@cols $($rest),+))
+    };
+}
+
+/// Build an UPSERT SQL string at runtime (avoids compile-time counter limitation).
+fn build_upsert_sql(table: &str, insert_cols: &[&str], update_cols: &[&str]) -> String {
+    let placeholders = (1..=insert_cols.len())
+        .map(|i| format!("${i}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let cols = insert_cols.join(", ");
+    let updates = update_cols
+        .iter()
+        .map(|c| format!("{c} = EXCLUDED.{c}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("INSERT INTO {table} ({cols}) VALUES ({placeholders}) ON CONFLICT (id) DO UPDATE SET {updates}")
+}
+
+/// Generate an import function: loop + UPSERT with `.bind(&item.field)` chain.
+macro_rules! staging_import {
+    (
+        $fn_name:ident, $struct_ty:ty, $table:expr,
+        insert: [$($icol:ident),+ $(,)?],
+        update: [$($ucol:ident),+ $(,)?]
+    ) => {
+        async fn $fn_name(tx: &mut Tx<'_>, items: &[$struct_ty]) -> Result<usize, StatusCode> {
+            let sql = build_upsert_sql(
+                $table,
+                &[$(stringify!($icol)),+],
+                &[$(stringify!($ucol)),+],
+            );
+            for item in items {
+                sqlx::query(&sql)
+                    $( .bind(&item.$icol) )+
+                    .execute(&mut **tx)
+                    .await
+                    .map_err(db_err)?;
+            }
+            Ok(items.len())
+        }
+    };
+}
+
+// ---------------------------------------------------------------------------
 // Data structures (staging-specific — includes fields skipped in normal API)
 // ---------------------------------------------------------------------------
 
@@ -211,6 +278,168 @@ pub struct ExportParams {
 }
 
 // ---------------------------------------------------------------------------
+// Export functions (macro-generated)
+// ---------------------------------------------------------------------------
+
+staging_export!(
+    export_users,
+    StagingUser,
+    "users",
+    Uuid,
+    [
+        id,
+        tenant_id,
+        google_sub,
+        lineworks_id,
+        line_user_id,
+        email,
+        name,
+        role,
+        created_at
+    ]
+);
+
+staging_export!(
+    export_employees,
+    StagingEmployee,
+    "employees",
+    Uuid,
+    [
+        id,
+        tenant_id,
+        code,
+        nfc_id,
+        name,
+        face_photo_url,
+        face_embedding,
+        face_embedding_at,
+        face_model_version,
+        face_approval_status,
+        face_approved_by,
+        face_approved_at,
+        license_issue_date,
+        license_expiry_date,
+        role,
+        created_at,
+        updated_at,
+        deleted_at
+    ]
+);
+
+staging_export!(
+    export_devices,
+    StagingDevice,
+    "devices",
+    Uuid,
+    [
+        id,
+        tenant_id,
+        device_name,
+        device_type,
+        phone_number,
+        user_id,
+        status,
+        approved_by,
+        approved_at,
+        last_seen_at,
+        call_enabled,
+        call_schedule,
+        fcm_token,
+        last_login_employee_id,
+        last_login_employee_name,
+        last_login_employee_role,
+        app_version_code,
+        app_version_name,
+        is_device_owner,
+        is_dev_device,
+        always_on,
+        watchdog_running,
+        created_at,
+        updated_at
+    ]
+);
+
+staging_export!(
+    export_tenko_schedules,
+    StagingTenkoSchedule,
+    "tenko_schedules",
+    Uuid,
+    [
+        id,
+        tenant_id,
+        employee_id,
+        tenko_type,
+        responsible_manager_name,
+        scheduled_at,
+        instruction,
+        consumed,
+        consumed_by_session_id,
+        overdue_notified_at,
+        created_at,
+        updated_at
+    ]
+);
+
+staging_export!(
+    export_webhook_configs,
+    StagingWebhookConfig,
+    "webhook_configs",
+    Uuid,
+    [id, tenant_id, event_type, url, secret, enabled, created_at, updated_at]
+);
+
+staging_export!(
+    export_allowed_emails,
+    StagingTenantAllowedEmail,
+    "tenant_allowed_emails",
+    Uuid,
+    [id, tenant_id, email, role, created_at]
+);
+
+staging_export!(
+    export_sso_configs,
+    StagingSsoProviderConfig,
+    "sso_provider_configs",
+    Uuid,
+    [
+        id,
+        tenant_id,
+        provider,
+        client_id,
+        client_secret_encrypted,
+        external_org_id,
+        enabled,
+        woff_id,
+        created_at,
+        updated_at
+    ]
+);
+
+staging_export!(
+    export_tenko_call_numbers,
+    StagingTenkoCallNumber,
+    "tenko_call_numbers",
+    &str,
+    [id, call_number, tenant_id, label, created_at]
+);
+
+staging_export!(
+    export_tenko_call_drivers,
+    StagingTenkoCallDriver,
+    "tenko_call_drivers",
+    &str,
+    [
+        id,
+        phone_number,
+        driver_name,
+        call_number,
+        tenant_id,
+        employee_code,
+        created_at
+    ]
+);
+
+// ---------------------------------------------------------------------------
 // Export handler
 // ---------------------------------------------------------------------------
 
@@ -264,133 +493,67 @@ async fn export_handler(
     }))
 }
 
-async fn export_users(pool: &PgPool, tid: Uuid) -> Result<Vec<StagingUser>, StatusCode> {
-    sqlx::query_as::<_, StagingUser>(
-        "SELECT id, tenant_id, google_sub, lineworks_id, line_user_id, email, name, role, created_at
-         FROM users WHERE tenant_id = $1",
-    )
-    .bind(tid)
-    .fetch_all(pool)
-    .await
-    .map_err(db_err)
-}
+// ---------------------------------------------------------------------------
+// Import functions (macro-generated)
+// ---------------------------------------------------------------------------
 
-async fn export_employees(pool: &PgPool, tid: Uuid) -> Result<Vec<StagingEmployee>, StatusCode> {
-    sqlx::query_as::<_, StagingEmployee>(
-        "SELECT id, tenant_id, code, nfc_id, name, face_photo_url, face_embedding,
-                face_embedding_at, face_model_version, face_approval_status,
-                face_approved_by, face_approved_at, license_issue_date, license_expiry_date,
-                role, created_at, updated_at, deleted_at
-         FROM employees WHERE tenant_id = $1",
-    )
-    .bind(tid)
-    .fetch_all(pool)
-    .await
-    .map_err(db_err)
-}
+type Tx<'a> = sqlx::Transaction<'a, sqlx::Postgres>;
 
-async fn export_devices(pool: &PgPool, tid: Uuid) -> Result<Vec<StagingDevice>, StatusCode> {
-    sqlx::query_as::<_, StagingDevice>(
-        "SELECT id, tenant_id, device_name, device_type, phone_number, user_id, status,
-                approved_by, approved_at, last_seen_at, call_enabled, call_schedule,
-                fcm_token, last_login_employee_id, last_login_employee_name,
-                last_login_employee_role, app_version_code, app_version_name,
-                is_device_owner, is_dev_device, always_on, watchdog_running,
-                created_at, updated_at
-         FROM devices WHERE tenant_id = $1",
-    )
-    .bind(tid)
-    .fetch_all(pool)
-    .await
-    .map_err(db_err)
-}
+staging_import!(import_tenants, StagingTenant, "tenants",
+    insert: [id, name, slug, email_domain, created_at],
+    update: [name, slug, email_domain]);
 
-async fn export_tenko_schedules(
-    pool: &PgPool,
-    tid: Uuid,
-) -> Result<Vec<StagingTenkoSchedule>, StatusCode> {
-    sqlx::query_as::<_, StagingTenkoSchedule>(
-        "SELECT id, tenant_id, employee_id, tenko_type, responsible_manager_name,
-                scheduled_at, instruction, consumed, consumed_by_session_id,
-                overdue_notified_at, created_at, updated_at
-         FROM tenko_schedules WHERE tenant_id = $1",
-    )
-    .bind(tid)
-    .fetch_all(pool)
-    .await
-    .map_err(db_err)
-}
+staging_import!(import_users, StagingUser, "users",
+    insert: [id, tenant_id, google_sub, lineworks_id, line_user_id, email, name, role, created_at],
+    update: [google_sub, lineworks_id, line_user_id, email, name, role]);
 
-async fn export_webhook_configs(
-    pool: &PgPool,
-    tid: Uuid,
-) -> Result<Vec<StagingWebhookConfig>, StatusCode> {
-    sqlx::query_as::<_, StagingWebhookConfig>(
-        "SELECT id, tenant_id, event_type, url, secret, enabled, created_at, updated_at
-         FROM webhook_configs WHERE tenant_id = $1",
-    )
-    .bind(tid)
-    .fetch_all(pool)
-    .await
-    .map_err(db_err)
-}
+staging_import!(import_employees, StagingEmployee, "employees",
+    insert: [id, tenant_id, code, nfc_id, name, face_photo_url,
+             face_embedding, face_embedding_at, face_model_version,
+             face_approval_status, face_approved_by, face_approved_at,
+             license_issue_date, license_expiry_date, role, created_at, updated_at, deleted_at],
+    update: [code, nfc_id, name, face_photo_url, face_embedding, face_embedding_at,
+             face_model_version, face_approval_status, face_approved_by, face_approved_at,
+             license_issue_date, license_expiry_date, role, updated_at, deleted_at]);
 
-async fn export_allowed_emails(
-    pool: &PgPool,
-    tid: Uuid,
-) -> Result<Vec<StagingTenantAllowedEmail>, StatusCode> {
-    sqlx::query_as::<_, StagingTenantAllowedEmail>(
-        "SELECT id, tenant_id, email, role, created_at
-         FROM tenant_allowed_emails WHERE tenant_id = $1",
-    )
-    .bind(tid)
-    .fetch_all(pool)
-    .await
-    .map_err(db_err)
-}
+staging_import!(import_devices, StagingDevice, "devices",
+    insert: [id, tenant_id, device_name, device_type, phone_number,
+             user_id, status, approved_by, approved_at, last_seen_at, call_enabled,
+             call_schedule, fcm_token, last_login_employee_id, last_login_employee_name,
+             last_login_employee_role, app_version_code, app_version_name,
+             is_device_owner, is_dev_device, always_on, watchdog_running,
+             created_at, updated_at],
+    update: [device_name, device_type, phone_number, user_id, status,
+             call_enabled, call_schedule, fcm_token,
+             is_device_owner, is_dev_device, always_on, watchdog_running, updated_at]);
 
-async fn export_sso_configs(
-    pool: &PgPool,
-    tid: Uuid,
-) -> Result<Vec<StagingSsoProviderConfig>, StatusCode> {
-    sqlx::query_as::<_, StagingSsoProviderConfig>(
-        "SELECT id, tenant_id, provider, client_id, client_secret_encrypted,
-                external_org_id, enabled, woff_id, created_at, updated_at
-         FROM sso_provider_configs WHERE tenant_id = $1",
-    )
-    .bind(tid)
-    .fetch_all(pool)
-    .await
-    .map_err(db_err)
-}
+staging_import!(import_tenko_schedules, StagingTenkoSchedule, "tenko_schedules",
+    insert: [id, tenant_id, employee_id, tenko_type,
+             responsible_manager_name, scheduled_at, instruction, consumed,
+             consumed_by_session_id, overdue_notified_at, created_at, updated_at],
+    update: [tenko_type, responsible_manager_name, scheduled_at, instruction,
+             consumed, consumed_by_session_id, updated_at]);
 
-async fn export_tenko_call_numbers(
-    pool: &PgPool,
-    tid: &str,
-) -> Result<Vec<StagingTenkoCallNumber>, StatusCode> {
-    sqlx::query_as::<_, StagingTenkoCallNumber>(
-        "SELECT id, call_number, tenant_id, label, created_at
-         FROM tenko_call_numbers WHERE tenant_id = $1",
-    )
-    .bind(tid)
-    .fetch_all(pool)
-    .await
-    .map_err(db_err)
-}
+staging_import!(import_webhook_configs, StagingWebhookConfig, "webhook_configs",
+    insert: [id, tenant_id, event_type, url, secret, enabled, created_at, updated_at],
+    update: [event_type, url, secret, enabled, updated_at]);
 
-async fn export_tenko_call_drivers(
-    pool: &PgPool,
-    tid: &str,
-) -> Result<Vec<StagingTenkoCallDriver>, StatusCode> {
-    sqlx::query_as::<_, StagingTenkoCallDriver>(
-        "SELECT id, phone_number, driver_name, call_number, tenant_id, employee_code, created_at
-         FROM tenko_call_drivers WHERE tenant_id = $1",
-    )
-    .bind(tid)
-    .fetch_all(pool)
-    .await
-    .map_err(db_err)
-}
+staging_import!(import_allowed_emails, StagingTenantAllowedEmail, "tenant_allowed_emails",
+    insert: [id, tenant_id, email, role, created_at],
+    update: [email, role]);
+
+staging_import!(import_sso_configs, StagingSsoProviderConfig, "sso_provider_configs",
+    insert: [id, tenant_id, provider, client_id,
+             client_secret_encrypted, external_org_id, enabled, woff_id, created_at, updated_at],
+    update: [client_id, client_secret_encrypted, external_org_id, enabled, woff_id, updated_at]);
+
+staging_import!(import_tenko_call_numbers, StagingTenkoCallNumber, "tenko_call_numbers",
+    insert: [id, call_number, tenant_id, label, created_at],
+    update: [call_number, label]);
+
+staging_import!(import_tenko_call_drivers, StagingTenkoCallDriver, "tenko_call_drivers",
+    insert: [id, phone_number, driver_name, call_number, tenant_id, employee_code, created_at],
+    update: [phone_number, driver_name, call_number, employee_code]);
 
 // ---------------------------------------------------------------------------
 // Import handler
@@ -410,7 +573,7 @@ async fn import_handler(
     let mut tx = pool.begin().await.map_err(db_err)?;
 
     // 1. Tenant first (other tables reference it via FK)
-    import_tenant(&mut tx, &data.tenant).await?;
+    import_tenants(&mut tx, std::slice::from_ref(&data.tenant)).await?;
 
     // 2. Set RLS tenant context for remaining inserts
     alc_core::tenant::set_current_tenant(&mut tx, &data.tenant.id.to_string())
@@ -445,345 +608,6 @@ async fn import_handler(
             "tenko_call_drivers": call_driver_count,
         }
     })))
-}
-
-type Tx<'a> = sqlx::Transaction<'a, sqlx::Postgres>;
-
-async fn import_tenant(tx: &mut Tx<'_>, t: &StagingTenant) -> Result<(), StatusCode> {
-    sqlx::query(
-        "INSERT INTO tenants (id, name, slug, email_domain, created_at)
-         VALUES ($1, $2, $3, $4, $5)
-         ON CONFLICT (id) DO UPDATE SET
-           name = EXCLUDED.name,
-           slug = EXCLUDED.slug,
-           email_domain = EXCLUDED.email_domain",
-    )
-    .bind(t.id)
-    .bind(&t.name)
-    .bind(&t.slug)
-    .bind(&t.email_domain)
-    .bind(t.created_at)
-    .execute(&mut **tx)
-    .await
-    .map_err(db_err)?;
-    Ok(())
-}
-
-async fn import_users(tx: &mut Tx<'_>, users: &[StagingUser]) -> Result<usize, StatusCode> {
-    for u in users {
-        sqlx::query(
-            "INSERT INTO users (id, tenant_id, google_sub, lineworks_id, line_user_id, email, name, role, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-             ON CONFLICT (id) DO UPDATE SET
-               google_sub = EXCLUDED.google_sub,
-               lineworks_id = EXCLUDED.lineworks_id,
-               line_user_id = EXCLUDED.line_user_id,
-               email = EXCLUDED.email,
-               name = EXCLUDED.name,
-               role = EXCLUDED.role",
-        )
-        .bind(u.id)
-        .bind(u.tenant_id)
-        .bind(&u.google_sub)
-        .bind(&u.lineworks_id)
-        .bind(&u.line_user_id)
-        .bind(&u.email)
-        .bind(&u.name)
-        .bind(&u.role)
-        .bind(u.created_at)
-        .execute(&mut **tx)
-        .await
-        .map_err(db_err)?;
-    }
-    Ok(users.len())
-}
-
-async fn import_employees(
-    tx: &mut Tx<'_>,
-    employees: &[StagingEmployee],
-) -> Result<usize, StatusCode> {
-    for e in employees {
-        sqlx::query(
-            "INSERT INTO employees (id, tenant_id, code, nfc_id, name, face_photo_url,
-                face_embedding, face_embedding_at, face_model_version,
-                face_approval_status, face_approved_by, face_approved_at,
-                license_issue_date, license_expiry_date, role, created_at, updated_at, deleted_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
-             ON CONFLICT (id) DO UPDATE SET
-               code = EXCLUDED.code,
-               nfc_id = EXCLUDED.nfc_id,
-               name = EXCLUDED.name,
-               face_photo_url = EXCLUDED.face_photo_url,
-               face_embedding = EXCLUDED.face_embedding,
-               face_embedding_at = EXCLUDED.face_embedding_at,
-               face_model_version = EXCLUDED.face_model_version,
-               face_approval_status = EXCLUDED.face_approval_status,
-               face_approved_by = EXCLUDED.face_approved_by,
-               face_approved_at = EXCLUDED.face_approved_at,
-               license_issue_date = EXCLUDED.license_issue_date,
-               license_expiry_date = EXCLUDED.license_expiry_date,
-               role = EXCLUDED.role,
-               updated_at = EXCLUDED.updated_at,
-               deleted_at = EXCLUDED.deleted_at",
-        )
-        .bind(e.id)
-        .bind(e.tenant_id)
-        .bind(&e.code)
-        .bind(&e.nfc_id)
-        .bind(&e.name)
-        .bind(&e.face_photo_url)
-        .bind(&e.face_embedding)
-        .bind(e.face_embedding_at)
-        .bind(&e.face_model_version)
-        .bind(&e.face_approval_status)
-        .bind(e.face_approved_by)
-        .bind(e.face_approved_at)
-        .bind(e.license_issue_date)
-        .bind(e.license_expiry_date)
-        .bind(&e.role)
-        .bind(e.created_at)
-        .bind(e.updated_at)
-        .bind(e.deleted_at)
-        .execute(&mut **tx)
-        .await
-        .map_err(db_err)?;
-    }
-    Ok(employees.len())
-}
-
-async fn import_devices(tx: &mut Tx<'_>, devices: &[StagingDevice]) -> Result<usize, StatusCode> {
-    for d in devices {
-        sqlx::query(
-            "INSERT INTO devices (id, tenant_id, device_name, device_type, phone_number,
-                user_id, status, approved_by, approved_at, last_seen_at, call_enabled,
-                call_schedule, fcm_token, last_login_employee_id, last_login_employee_name,
-                last_login_employee_role, app_version_code, app_version_name,
-                is_device_owner, is_dev_device, always_on, watchdog_running,
-                created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
-             ON CONFLICT (id) DO UPDATE SET
-               device_name = EXCLUDED.device_name,
-               device_type = EXCLUDED.device_type,
-               phone_number = EXCLUDED.phone_number,
-               user_id = EXCLUDED.user_id,
-               status = EXCLUDED.status,
-               call_enabled = EXCLUDED.call_enabled,
-               call_schedule = EXCLUDED.call_schedule,
-               fcm_token = EXCLUDED.fcm_token,
-               is_device_owner = EXCLUDED.is_device_owner,
-               is_dev_device = EXCLUDED.is_dev_device,
-               always_on = EXCLUDED.always_on,
-               watchdog_running = EXCLUDED.watchdog_running,
-               updated_at = EXCLUDED.updated_at",
-        )
-        .bind(d.id)
-        .bind(d.tenant_id)
-        .bind(&d.device_name)
-        .bind(&d.device_type)
-        .bind(&d.phone_number)
-        .bind(d.user_id)
-        .bind(&d.status)
-        .bind(d.approved_by)
-        .bind(d.approved_at)
-        .bind(d.last_seen_at)
-        .bind(d.call_enabled)
-        .bind(&d.call_schedule)
-        .bind(&d.fcm_token)
-        .bind(d.last_login_employee_id)
-        .bind(&d.last_login_employee_name)
-        .bind(&d.last_login_employee_role)
-        .bind(d.app_version_code)
-        .bind(&d.app_version_name)
-        .bind(d.is_device_owner)
-        .bind(d.is_dev_device)
-        .bind(d.always_on)
-        .bind(d.watchdog_running)
-        .bind(d.created_at)
-        .bind(d.updated_at)
-        .execute(&mut **tx)
-        .await
-        .map_err(db_err)?;
-    }
-    Ok(devices.len())
-}
-
-async fn import_tenko_schedules(
-    tx: &mut Tx<'_>,
-    schedules: &[StagingTenkoSchedule],
-) -> Result<usize, StatusCode> {
-    for s in schedules {
-        sqlx::query(
-            "INSERT INTO tenko_schedules (id, tenant_id, employee_id, tenko_type,
-                responsible_manager_name, scheduled_at, instruction, consumed,
-                consumed_by_session_id, overdue_notified_at, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-             ON CONFLICT (id) DO UPDATE SET
-               tenko_type = EXCLUDED.tenko_type,
-               responsible_manager_name = EXCLUDED.responsible_manager_name,
-               scheduled_at = EXCLUDED.scheduled_at,
-               instruction = EXCLUDED.instruction,
-               consumed = EXCLUDED.consumed,
-               consumed_by_session_id = EXCLUDED.consumed_by_session_id,
-               updated_at = EXCLUDED.updated_at",
-        )
-        .bind(s.id)
-        .bind(s.tenant_id)
-        .bind(s.employee_id)
-        .bind(&s.tenko_type)
-        .bind(&s.responsible_manager_name)
-        .bind(s.scheduled_at)
-        .bind(&s.instruction)
-        .bind(s.consumed)
-        .bind(s.consumed_by_session_id)
-        .bind(s.overdue_notified_at)
-        .bind(s.created_at)
-        .bind(s.updated_at)
-        .execute(&mut **tx)
-        .await
-        .map_err(db_err)?;
-    }
-    Ok(schedules.len())
-}
-
-async fn import_webhook_configs(
-    tx: &mut Tx<'_>,
-    configs: &[StagingWebhookConfig],
-) -> Result<usize, StatusCode> {
-    for c in configs {
-        sqlx::query(
-            "INSERT INTO webhook_configs (id, tenant_id, event_type, url, secret, enabled, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-             ON CONFLICT (id) DO UPDATE SET
-               event_type = EXCLUDED.event_type,
-               url = EXCLUDED.url,
-               secret = EXCLUDED.secret,
-               enabled = EXCLUDED.enabled,
-               updated_at = EXCLUDED.updated_at",
-        )
-        .bind(c.id)
-        .bind(c.tenant_id)
-        .bind(&c.event_type)
-        .bind(&c.url)
-        .bind(&c.secret)
-        .bind(c.enabled)
-        .bind(c.created_at)
-        .bind(c.updated_at)
-        .execute(&mut **tx)
-        .await
-        .map_err(db_err)?;
-    }
-    Ok(configs.len())
-}
-
-async fn import_allowed_emails(
-    tx: &mut Tx<'_>,
-    emails: &[StagingTenantAllowedEmail],
-) -> Result<usize, StatusCode> {
-    for e in emails {
-        sqlx::query(
-            "INSERT INTO tenant_allowed_emails (id, tenant_id, email, role, created_at)
-             VALUES ($1, $2, $3, $4, $5)
-             ON CONFLICT (id) DO UPDATE SET
-               email = EXCLUDED.email,
-               role = EXCLUDED.role",
-        )
-        .bind(e.id)
-        .bind(e.tenant_id)
-        .bind(&e.email)
-        .bind(&e.role)
-        .bind(e.created_at)
-        .execute(&mut **tx)
-        .await
-        .map_err(db_err)?;
-    }
-    Ok(emails.len())
-}
-
-async fn import_sso_configs(
-    tx: &mut Tx<'_>,
-    configs: &[StagingSsoProviderConfig],
-) -> Result<usize, StatusCode> {
-    for c in configs {
-        sqlx::query(
-            "INSERT INTO sso_provider_configs (id, tenant_id, provider, client_id,
-                client_secret_encrypted, external_org_id, enabled, woff_id, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-             ON CONFLICT (id) DO UPDATE SET
-               client_id = EXCLUDED.client_id,
-               client_secret_encrypted = EXCLUDED.client_secret_encrypted,
-               external_org_id = EXCLUDED.external_org_id,
-               enabled = EXCLUDED.enabled,
-               woff_id = EXCLUDED.woff_id,
-               updated_at = EXCLUDED.updated_at",
-        )
-        .bind(c.id)
-        .bind(c.tenant_id)
-        .bind(&c.provider)
-        .bind(&c.client_id)
-        .bind(&c.client_secret_encrypted)
-        .bind(&c.external_org_id)
-        .bind(c.enabled)
-        .bind(&c.woff_id)
-        .bind(c.created_at)
-        .bind(c.updated_at)
-        .execute(&mut **tx)
-        .await
-        .map_err(db_err)?;
-    }
-    Ok(configs.len())
-}
-
-async fn import_tenko_call_numbers(
-    tx: &mut Tx<'_>,
-    numbers: &[StagingTenkoCallNumber],
-) -> Result<usize, StatusCode> {
-    for n in numbers {
-        sqlx::query(
-            "INSERT INTO tenko_call_numbers (id, call_number, tenant_id, label, created_at)
-             VALUES ($1, $2, $3, $4, $5)
-             ON CONFLICT (id) DO UPDATE SET
-               call_number = EXCLUDED.call_number,
-               label = EXCLUDED.label",
-        )
-        .bind(n.id)
-        .bind(&n.call_number)
-        .bind(&n.tenant_id)
-        .bind(&n.label)
-        .bind(n.created_at)
-        .execute(&mut **tx)
-        .await
-        .map_err(db_err)?;
-    }
-    Ok(numbers.len())
-}
-
-async fn import_tenko_call_drivers(
-    tx: &mut Tx<'_>,
-    drivers: &[StagingTenkoCallDriver],
-) -> Result<usize, StatusCode> {
-    for d in drivers {
-        sqlx::query(
-            "INSERT INTO tenko_call_drivers (id, phone_number, driver_name, call_number,
-                tenant_id, employee_code, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)
-             ON CONFLICT (id) DO UPDATE SET
-               phone_number = EXCLUDED.phone_number,
-               driver_name = EXCLUDED.driver_name,
-               call_number = EXCLUDED.call_number,
-               employee_code = EXCLUDED.employee_code",
-        )
-        .bind(d.id)
-        .bind(&d.phone_number)
-        .bind(&d.driver_name)
-        .bind(&d.call_number)
-        .bind(&d.tenant_id)
-        .bind(&d.employee_code)
-        .bind(d.created_at)
-        .execute(&mut **tx)
-        .await
-        .map_err(db_err)?;
-    }
-    Ok(drivers.len())
 }
 
 // ---------------------------------------------------------------------------
