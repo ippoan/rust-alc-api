@@ -1,0 +1,353 @@
+name: Deploy
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string  # "staging" or "production"
+      image_sha:
+        required: true
+        type: string
+      ref_name:
+        required: false
+        type: string  # e.g. "v1.2.3" for production tag
+    secrets:
+      GCP_SA_KEY:
+        required: true
+
+env:
+  REGION: asia-northeast1
+  PROJECT: cloudsql-sv
+  REPO: ghcr.io/${{ github.repository }}
+  AR_PREFIX: asia-northeast1-docker.pkg.dev/cloudsql-sv/ghcr
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Staging: build staging images (entrypoint.sh + sidecar)
+  # ---------------------------------------------------------------------------
+  staging-images:
+    name: "Build staging images"
+    if: inputs.environment == 'staging'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build staging-db image
+        run: |
+          docker build -f staging/Dockerfile.postgres \
+            -t ${{ env.REPO }}-staging-db:latest .
+          docker push ${{ env.REPO }}-staging-db:latest
+
+      - name: Build staging service images
+        run: |
+          SHA="${{ inputs.image_sha }}"
+          REPO="${{ env.REPO }}"
+
+          # Extract binaries from each production image
+          for svc in backend tenko carins dtako; do
+            case "$svc" in
+              backend) SUFFIX="";       BIN="rust-alc-api" ;;
+              tenko)   SUFFIX="-tenko"; BIN="tenko-api" ;;
+              carins)  SUFFIX="-carins"; BIN="carins-api" ;;
+              dtako)   SUFFIX="-dtako"; BIN="dtako-api" ;;
+            esac
+
+            echo "=== Building staging image for $svc ==="
+            mkdir -p "ctx-${svc}/staging"
+
+            # Extract binary from production image
+            docker create --name "extract-${svc}" "${REPO}${SUFFIX}:${SHA}"
+            docker cp "extract-${svc}:/usr/local/bin/${BIN}" "ctx-${svc}/"
+            docker rm "extract-${svc}"
+
+            # Extract migrate binary and migrations from backend image
+            if [ "$svc" != "backend" ]; then
+              docker create --name "extract-migrate-${svc}" "${REPO}:${SHA}"
+              docker cp "extract-migrate-${svc}:/usr/local/bin/migrate" "ctx-${svc}/"
+              docker cp "extract-migrate-${svc}:/app/migrations" "ctx-${svc}/"
+              docker rm "extract-migrate-${svc}"
+            else
+              docker create --name "extract-backend" "${REPO}:${SHA}"
+              docker cp "extract-backend:/usr/local/bin/rust-alc-api" "ctx-${svc}/"
+              docker cp "extract-backend:/usr/local/bin/migrate" "ctx-${svc}/"
+              docker cp "extract-backend:/app/migrations" "ctx-${svc}/"
+              docker rm "extract-backend"
+            fi
+
+            cp staging/Dockerfile.app "ctx-${svc}/Dockerfile"
+            cp staging/entrypoint.sh "ctx-${svc}/staging/"
+
+            docker build \
+              --build-arg "BINARY_NAME=${BIN}" \
+              -t "${REPO}${SUFFIX}-staging:${SHA}" \
+              "ctx-${svc}/"
+            docker push "${REPO}${SUFFIX}-staging:${SHA}"
+          done
+
+  # ---------------------------------------------------------------------------
+  # Production: promote dev → version tag
+  # ---------------------------------------------------------------------------
+  promote-images:
+    name: "Promote images"
+    if: inputs.environment == 'production'
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Promote dev → version + sha (all images)
+        run: |
+          REPO="${{ env.REPO }}"
+          TAG="${{ inputs.ref_name }}"
+          SHA="${{ inputs.image_sha }}"
+          for suffix in "" "-gateway" "-tenko" "-carins" "-dtako"; do
+            docker pull "${REPO}${suffix}:dev"
+            docker tag "${REPO}${suffix}:dev" "${REPO}${suffix}:${TAG}"
+            docker tag "${REPO}${suffix}:dev" "${REPO}${suffix}:${SHA}"
+            docker push "${REPO}${suffix}:${TAG}"
+            docker push "${REPO}${suffix}:${SHA}"
+          done
+
+  # ---------------------------------------------------------------------------
+  # Production: run migrations
+  # ---------------------------------------------------------------------------
+  migrate:
+    name: Migrate
+    if: inputs.environment == 'production'
+    needs: [promote-images]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Run migrations
+        run: |
+          AR_IMAGE="${{ env.AR_PREFIX }}/${{ env.REPO }}:${{ inputs.image_sha }}"
+          JOB_NAME="rust-alc-api-migrate"
+
+          if gcloud run jobs describe $JOB_NAME --region ${{ env.REGION }} --project ${{ env.PROJECT }} &>/dev/null; then
+            gcloud run jobs update $JOB_NAME \
+              --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
+              --image "$AR_IMAGE"
+          else
+            gcloud run jobs create $JOB_NAME \
+              --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
+              --image "$AR_IMAGE" \
+              --set-secrets "DATABASE_URL=alc-app-database-url:latest" \
+              --command "migrate" \
+              --memory 512Mi --task-timeout 120s --max-retries 0
+          fi
+
+          gcloud run jobs execute $JOB_NAME \
+            --region ${{ env.REGION }} --project ${{ env.PROJECT }} --wait
+
+  # ---------------------------------------------------------------------------
+  # Deploy services (shared by staging and production via render.sh)
+  # ---------------------------------------------------------------------------
+  deploy-services:
+    name: "Deploy ${{ matrix.service }}"
+    needs: [staging-images, migrate]
+    if: |
+      always() &&
+      (inputs.environment == 'staging' && needs.staging-images.result == 'success') ||
+      (inputs.environment == 'production' && needs.migrate.result == 'success')
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [backend, tenko, carins, dtako]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Render and deploy
+        run: |
+          RENDER_ARGS="${{ matrix.service }} ${{ inputs.environment }} ${{ inputs.image_sha }}"
+
+          if [ "${{ inputs.environment }}" = "staging" ]; then
+            STAGING_URL="${{ vars.STAGING_API_URL }}"
+            DB_IMAGE="${{ env.AR_PREFIX }}/${{ env.REPO }}-staging-db:latest"
+            RENDER_ARGS="${RENDER_ARGS} --staging-url ${STAGING_URL} --db-image ${DB_IMAGE}"
+          fi
+
+          bash cloudrun/render.sh ${RENDER_ARGS} > /tmp/service.yaml
+
+          echo "=== Generated YAML ==="
+          cat /tmp/service.yaml
+
+          gcloud run services replace /tmp/service.yaml \
+            --region ${{ env.REGION }} \
+            --project ${{ env.PROJECT }}
+
+      - name: Ensure public access (staging)
+        if: inputs.environment == 'staging'
+        run: |
+          case "${{ matrix.service }}" in
+            backend) SVC_NAME="rust-alc-api-staging" ;;
+            *)       SVC_NAME="rust-alc-api-staging-${{ matrix.service }}" ;;
+          esac
+          gcloud run services add-iam-policy-binding "$SVC_NAME" \
+            --region ${{ env.REGION }} \
+            --member="allUsers" \
+            --role="roles/run.invoker" \
+            --project ${{ env.PROJECT }}
+
+      - name: Print URL
+        run: |
+          case "${{ matrix.service }}" in
+            backend)
+              if [ "${{ inputs.environment }}" = "staging" ]; then SVC="rust-alc-api-staging"
+              else SVC="rust-alc-api"; fi ;;
+            *)
+              if [ "${{ inputs.environment }}" = "staging" ]; then SVC="rust-alc-api-staging-${{ matrix.service }}"
+              else SVC="rust-alc-api-${{ matrix.service }}"; fi ;;
+          esac
+          URL=$(gcloud run services describe "$SVC" \
+            --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
+            --format 'value(status.url)')
+          echo "::notice ::${{ matrix.service }} URL: $URL"
+
+  # ---------------------------------------------------------------------------
+  # Deploy gateway (after other services, needs their URLs)
+  # ---------------------------------------------------------------------------
+  deploy-gateway:
+    name: "Deploy gateway"
+    needs: [deploy-services]
+    if: |
+      always() && needs.deploy-services.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Render gateway YAML with service URLs
+        run: |
+          # Discover backend/service URLs
+          if [ "${{ inputs.environment }}" = "staging" ]; then
+            BACKEND_URL=$(gcloud run services describe rust-alc-api-staging \
+              --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
+              --format 'value(status.url)')
+            TENKO_URL=$(gcloud run services describe rust-alc-api-staging-tenko \
+              --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
+              --format 'value(status.url)' 2>/dev/null || echo "")
+            CARINS_URL=$(gcloud run services describe rust-alc-api-staging-carins \
+              --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
+              --format 'value(status.url)' 2>/dev/null || echo "")
+            DTAKO_URL=$(gcloud run services describe rust-alc-api-staging-dtako \
+              --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
+              --format 'value(status.url)' 2>/dev/null || echo "")
+          else
+            BACKEND_URL=$(gcloud run services describe rust-alc-api \
+              --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
+              --format 'value(status.url)')
+            TENKO_URL=$(gcloud run services describe rust-alc-api-tenko \
+              --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
+              --format 'value(status.url)' 2>/dev/null || echo "")
+            CARINS_URL=$(gcloud run services describe rust-alc-api-carins \
+              --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
+              --format 'value(status.url)' 2>/dev/null || echo "")
+            DTAKO_URL=$(gcloud run services describe rust-alc-api-dtako \
+              --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
+              --format 'value(status.url)' 2>/dev/null || echo "")
+          fi
+
+          # Render gateway YAML
+          bash cloudrun/render.sh gateway ${{ inputs.environment }} ${{ inputs.image_sha }} \
+            > /tmp/gateway.yaml
+
+          # Replace gateway URL placeholders
+          sed -i \
+            -e "s|PLACEHOLDER_BACKEND_URL|${BACKEND_URL}|" \
+            -e "s|PLACEHOLDER_TENKO_URL|${TENKO_URL}|" \
+            -e "s|PLACEHOLDER_CARINS_URL|${CARINS_URL}|" \
+            -e "s|PLACEHOLDER_DTAKO_URL|${DTAKO_URL}|" \
+            /tmp/gateway.yaml
+
+          echo "=== Gateway YAML ==="
+          cat /tmp/gateway.yaml
+
+          gcloud run services replace /tmp/gateway.yaml \
+            --region ${{ env.REGION }} \
+            --project ${{ env.PROJECT }}
+
+      - name: Ensure public access
+        run: |
+          if [ "${{ inputs.environment }}" = "staging" ]; then SVC="rust-alc-api-staging-gateway"
+          else SVC="rust-alc-api-gateway"; fi
+          gcloud run services add-iam-policy-binding "$SVC" \
+            --region ${{ env.REGION }} \
+            --member="allUsers" \
+            --role="roles/run.invoker" \
+            --project ${{ env.PROJECT }}
+
+      - name: Print gateway URL
+        run: |
+          if [ "${{ inputs.environment }}" = "staging" ]; then SVC="rust-alc-api-staging-gateway"
+          else SVC="rust-alc-api-gateway"; fi
+          URL=$(gcloud run services describe "$SVC" \
+            --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
+            --format 'value(status.url)')
+          echo "::notice ::Gateway URL: $URL"
+
+  # ---------------------------------------------------------------------------
+  # Production: update archive job
+  # ---------------------------------------------------------------------------
+  update-archive:
+    name: "Update Archive Job"
+    if: inputs.environment == 'production'
+    needs: [migrate]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Update archive Job image
+        run: |
+          AR_IMAGE="${{ env.AR_PREFIX }}/${{ env.REPO }}:${{ inputs.image_sha }}"
+          gcloud run jobs update rust-alc-api-archive \
+            --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
+            --image "$AR_IMAGE"
+          echo "::notice ::Archive Job updated"
