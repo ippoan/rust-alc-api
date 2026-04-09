@@ -1,6 +1,7 @@
 # rust-alc-api
 
 Axum + PostgreSQL RLS による ALC (アルコールチェック) API バックエンド
+<!-- Bazel disk-cache: tar.zst + actions/cache (ippoan/setup-bazel) -->
 
 ## プロジェクト構成
 
