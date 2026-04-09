@@ -53,6 +53,7 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with:
           shared-key: ${{ matrix.target.key }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-llvm-cov@0.8.4,cargo-nextest
@@ -135,6 +136,7 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with:
           shared-key: check
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo fmt --check --all
       - run: cargo clippy --workspace -- -D warnings
         env:
@@ -189,6 +191,7 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with:
           shared-key: test-${{ matrix.group.name }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-llvm-cov@0.8.4,cargo-nextest
@@ -558,8 +561,8 @@ jobs:
 
   deploy-gateway:
     name: Deploy Gateway
-    needs: [deploy-tenko-api, coverage-check]
-    if: "always() && needs.deploy-tenko-api.result == 'success' && (needs.coverage-check.result == 'success' || needs.coverage-check.result == 'skipped')"
+    needs: [migrate, coverage-check]
+    if: "always() && needs.migrate.result == 'success' && (needs.coverage-check.result == 'success' || needs.coverage-check.result == 'skipped')"
     runs-on: ubuntu-latest
     steps:
       - name: Authenticate to GCP
@@ -606,8 +609,8 @@ jobs:
 
   deploy-tenko-api:
     name: Deploy Tenko API
-    needs: [deploy-service, coverage-check]
-    if: "always() && needs.deploy-service.result == 'success' && (needs.coverage-check.result == 'success' || needs.coverage-check.result == 'skipped')"
+    needs: [migrate, coverage-check]
+    if: "always() && needs.migrate.result == 'success' && (needs.coverage-check.result == 'success' || needs.coverage-check.result == 'skipped')"
     runs-on: ubuntu-latest
     steps:
       - name: Authenticate to GCP
