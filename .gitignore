@@ -20,3 +20,4 @@ node_modules/
 /bazel-*
 MODULE.bazel.lock
 backup/
+setup-bazel
