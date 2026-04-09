@@ -64,18 +64,27 @@ jobs:
         run: ${{ matrix.target.cmd }}
 
   cache-warm-bazel:
-    name: Cache Warm (bazel)
+    name: "Cache Warm (bazel-${{ matrix.name }})"
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: backend, targets: "//:rust-alc-api //:migrate //:archive" }
+          - { name: gateway, targets: "//crates/gateway" }
+          - { name: tenko, targets: "//crates/tenko-api" }
+          - { name: carins, targets: "//crates/carins-api" }
+          - { name: dtako, targets: "//crates/dtako-api" }
     steps:
       - uses: actions/checkout@v4
       - uses: ippoan/setup-bazel@main
         with:
-          disk-cache: bazel
+          disk-cache: "bazel-${{ matrix.name }}"
           external-cache: true
           repository-cache: true
-      - name: Build release binaries (Bazel)
-        run: bazel build -c opt //:rust-alc-api //:migrate //:archive //crates/gateway //crates/tenko-api //crates/carins-api //crates/dtako-api
+      - name: Build (Bazel)
+        run: bazel build -c opt ${{ matrix.targets }}
 
   cache-cleanup:
     name: Cache Cleanup
@@ -310,7 +319,7 @@ jobs:
 
       - uses: ippoan/setup-bazel@main
         with:
-          disk-cache: bazel
+          disk-cache: "bazel-${{ matrix.name }}"
           r2-endpoint: ${{ vars.BAZEL_R2_ENDPOINT }}
           r2-bucket: ${{ vars.BAZEL_R2_BUCKET }}
           r2-access-key-id: ${{ secrets.BAZEL_R2_ACCESS_KEY_ID }}
