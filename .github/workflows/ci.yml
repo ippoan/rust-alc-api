@@ -61,17 +61,6 @@ jobs:
           RUSTC_WRAPPER: "sccache"
         run: ${{ matrix.target.cmd }}
 
-  cache-warm-bazel:
-    name: Cache Warm (Bazel)
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: bazelbuild/setup-bazelisk@v3
-      - uses: tsawada/bazel-github-actions-cache@v0
-      - name: Build
-        run: bazel build --config=ci -c opt //:rust-alc-api //:migrate //:archive //crates/gateway
-
   check:
     name: Format & Lint
     needs: [pr-limit]
@@ -207,11 +196,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: bazelbuild/setup-bazelisk@v3
-      - uses: tsawada/bazel-github-actions-cache@v0
+      - uses: ippoan/setup-bazel@main
+        with:
+          disk-cache: bazel
+          cache-save: ${{ github.event_name != 'pull_request' }}
+          r2-endpoint: ${{ vars.BAZEL_R2_ENDPOINT }}
+          r2-bucket: ${{ vars.BAZEL_R2_BUCKET }}
+          r2-access-key-id: ${{ secrets.BAZEL_R2_ACCESS_KEY_ID }}
+          r2-secret-access-key: ${{ secrets.BAZEL_R2_SECRET_ACCESS_KEY }}
 
       - name: Build release binaries (Bazel)
-        run: bazel build --config=ci -c opt //:rust-alc-api //:migrate //:archive //crates/gateway
+        run: bazel build -c opt //:rust-alc-api //:migrate //:archive //crates/gateway
 
       - name: Prepare Docker context (backend)
         run: |
