@@ -61,6 +61,22 @@ jobs:
           RUSTC_WRAPPER: "sccache"
         run: ${{ matrix.target.cmd }}
 
+  cache-warm-bazel:
+    name: Cache Warm (Bazel)
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bazelbuild/setup-bazelisk@v3
+      - name: Restore Bazel cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/bazel-disk-cache
+          key: bazel-opt-${{ hashFiles('Cargo.lock', 'MODULE.bazel') }}
+          restore-keys: bazel-opt-
+      - name: Build
+        run: bazel build --config=ci -c opt //:rust-alc-api //:migrate //:archive
+
   check:
     name: Format & Lint
     needs: [pr-limit]
