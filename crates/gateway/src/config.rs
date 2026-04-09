@@ -1,0 +1,20 @@
+use std::env;
+
+pub struct Config {
+    pub port: u16,
+    pub backend_url: String,
+    pub jwt_secret: String,
+}
+
+impl Config {
+    pub fn from_env() -> Self {
+        Self {
+            port: env::var("PORT")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(8080),
+            backend_url: env::var("BACKEND_URL").expect("BACKEND_URL is required"),
+            jwt_secret: env::var("JWT_SECRET").expect("JWT_SECRET is required"),
+        }
+    }
+}

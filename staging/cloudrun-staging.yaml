@@ -10,18 +10,43 @@ spec:
   template:
     metadata:
       annotations:
-        run.googleapis.com/container-dependencies: '{"app":["postgres"]}'
+        run.googleapis.com/container-dependencies: '{"gateway":["app"],"app":["postgres"]}'
         autoscaling.knative.dev/maxScale: "1"
         autoscaling.knative.dev/minScale: "0"
     spec:
       containerConcurrency: 80
       timeoutSeconds: 300
       containers:
-        - name: app
-          image: PLACEHOLDER_APP_IMAGE
+        - name: gateway
+          image: PLACEHOLDER_GATEWAY_IMAGE
           ports:
             - containerPort: 8080
           env:
+            - name: BACKEND_URL
+              value: "http://localhost:8081"
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: alc-api-staging-jwt-secret
+            - name: RUST_LOG
+              value: "gateway=info,tower_http=info"
+          resources:
+            limits:
+              memory: 128Mi
+              cpu: "0.5"
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 2
+            periodSeconds: 2
+            failureThreshold: 10
+        - name: app
+          image: PLACEHOLDER_APP_IMAGE
+          env:
+            - name: PORT
+              value: "8081"
             - name: DATABASE_URL
               value: "postgresql://postgres:staging@localhost:5432/postgres?options=-c search_path=alc_api"
             - name: STORAGE_BACKEND
@@ -110,7 +135,7 @@ spec:
           startupProbe:
             httpGet:
               path: /api/health
-              port: 8080
+              port: 8081
             initialDelaySeconds: 5
             periodSeconds: 3
             failureThreshold: 20

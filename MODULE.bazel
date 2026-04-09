@@ -26,6 +26,7 @@ crate.from_cargo(
         "//crates/alc-pdf:Cargo.toml",
         "//crates/alc-storage:Cargo.toml",
         "//crates/alc-tenko:Cargo.toml",
+        "//crates/gateway:Cargo.toml",
     ],
 )
 

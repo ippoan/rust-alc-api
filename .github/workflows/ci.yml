@@ -70,7 +70,7 @@ jobs:
       - uses: bazelbuild/setup-bazelisk@v3
       - uses: tsawada/bazel-github-actions-cache@v0
       - name: Build
-        run: bazel build --config=ci -c opt //:rust-alc-api //:migrate //:archive
+        run: bazel build --config=ci -c opt //:rust-alc-api //:migrate //:archive //crates/gateway
 
   check:
     name: Format & Lint
@@ -211,9 +211,9 @@ jobs:
       - uses: tsawada/bazel-github-actions-cache@v0
 
       - name: Build release binaries (Bazel)
-        run: bazel build --config=ci -c opt //:rust-alc-api //:migrate //:archive
+        run: bazel build --config=ci -c opt //:rust-alc-api //:migrate //:archive //crates/gateway
 
-      - name: Prepare Docker context
+      - name: Prepare Docker context (backend)
         run: |
           mkdir -p docker-context
           cp bazel-bin/rust-alc-api docker-context/
@@ -223,6 +223,14 @@ jobs:
           strip docker-context/rust-alc-api docker-context/migrate docker-context/archive
           cp -r migrations docker-context/
           cp Dockerfile docker-context/
+
+      - name: Prepare Docker context (gateway)
+        run: |
+          mkdir -p gateway-context
+          cp bazel-bin/crates/gateway/gateway gateway-context/
+          chmod u+w gateway-context/gateway
+          strip gateway-context/gateway
+          cp Dockerfile.gateway gateway-context/Dockerfile
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -234,7 +242,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build and push (sha tag)
+      - name: Build and push backend (sha tag)
         uses: docker/build-push-action@v6
         with:
           context: docker-context
@@ -242,6 +250,15 @@ jobs:
           tags: ghcr.io/${{ github.repository }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Build and push gateway (sha tag)
+        uses: docker/build-push-action@v6
+        with:
+          context: gateway-context
+          push: true
+          tags: ghcr.io/${{ github.repository }}-gateway:${{ github.sha }}
+          cache-from: type=gha,scope=gateway
+          cache-to: type=gha,mode=max,scope=gateway
 
   docker-dev:
     name: Tag dev
@@ -258,11 +275,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Copy sha tag to dev
+      - name: Copy sha tag to dev (backend)
         run: |
           docker pull ghcr.io/${{ github.repository }}:${{ github.sha }}
           docker tag ghcr.io/${{ github.repository }}:${{ github.sha }} ghcr.io/${{ github.repository }}:dev
           docker push ghcr.io/${{ github.repository }}:dev
+
+      - name: Copy sha tag to dev (gateway)
+        run: |
+          docker pull ghcr.io/${{ github.repository }}-gateway:${{ github.sha }}
+          docker tag ghcr.io/${{ github.repository }}-gateway:${{ github.sha }} ghcr.io/${{ github.repository }}-gateway:dev
+          docker push ghcr.io/${{ github.repository }}-gateway:dev
 
   docker-latest:
     name: Tag latest
@@ -286,6 +309,14 @@ jobs:
           docker tag ghcr.io/${{ github.repository }}:dev ghcr.io/${{ github.repository }}:latest
           docker push ghcr.io/${{ github.repository }}:${{ github.sha }}
           docker push ghcr.io/${{ github.repository }}:latest
+
+      - name: Retag gateway dev → sha + latest
+        run: |
+          docker pull ghcr.io/${{ github.repository }}-gateway:dev
+          docker tag ghcr.io/${{ github.repository }}-gateway:dev ghcr.io/${{ github.repository }}-gateway:${{ github.sha }}
+          docker tag ghcr.io/${{ github.repository }}-gateway:dev ghcr.io/${{ github.repository }}-gateway:latest
+          docker push ghcr.io/${{ github.repository }}-gateway:${{ github.sha }}
+          docker push ghcr.io/${{ github.repository }}-gateway:latest
 
   deploy-staging:
     name: Deploy Staging
@@ -344,8 +375,11 @@ jobs:
 
           STAGING_URL="${{ vars.STAGING_API_URL }}"
 
+          GW_IMAGE="${AR_PREFIX}/ghcr.io/${{ github.repository }}-gateway:${{ github.sha }}"
+
           sed -e "s|PLACEHOLDER_APP_IMAGE|${APP_IMAGE}|" \
               -e "s|PLACEHOLDER_DB_IMAGE|${DB_IMAGE}|" \
+              -e "s|PLACEHOLDER_GATEWAY_IMAGE|${GW_IMAGE}|" \
               -e "s|PLACEHOLDER_STAGING_URL|${STAGING_URL}|" \
               staging/cloudrun-staging.yaml > /tmp/staging-deploy.yaml
 
@@ -390,6 +424,14 @@ jobs:
           docker tag ghcr.io/${{ github.repository }}:dev ghcr.io/${{ github.repository }}:${{ github.sha }}
           docker push ghcr.io/${{ github.repository }}:${{ github.ref_name }}
           docker push ghcr.io/${{ github.repository }}:${{ github.sha }}
+
+      - name: Promote gateway dev → version + sha
+        run: |
+          docker pull ghcr.io/${{ github.repository }}-gateway:dev
+          docker tag ghcr.io/${{ github.repository }}-gateway:dev ghcr.io/${{ github.repository }}-gateway:${{ github.ref_name }}
+          docker tag ghcr.io/${{ github.repository }}-gateway:dev ghcr.io/${{ github.repository }}-gateway:${{ github.sha }}
+          docker push ghcr.io/${{ github.repository }}-gateway:${{ github.ref_name }}
+          docker push ghcr.io/${{ github.repository }}-gateway:${{ github.sha }}
 
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
@@ -449,6 +491,46 @@ jobs:
             --region asia-northeast1 --project cloudsql-sv \
             --format 'value(status.url)')
           echo "::notice ::Production URL: $URL (${GITHUB_REF_NAME})"
+
+  deploy-gateway:
+    name: Deploy Gateway
+    needs: [migrate, coverage-check]
+    if: "always() && needs.migrate.result == 'success' && (needs.coverage-check.result == 'success' || needs.coverage-check.result == 'skipped')"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy Gateway to Cloud Run
+        run: |
+          AR_IMAGE="asia-northeast1-docker.pkg.dev/cloudsql-sv/ghcr/ghcr.io/${{ github.repository }}-gateway:${{ github.sha }}"
+          BACKEND_URL=$(gcloud run services describe rust-alc-api \
+            --region asia-northeast1 --project cloudsql-sv \
+            --format 'value(status.url)')
+
+          gcloud run deploy rust-alc-api-gateway \
+            --image "$AR_IMAGE" \
+            --region asia-northeast1 \
+            --project cloudsql-sv \
+            --allow-unauthenticated \
+            --set-secrets "JWT_SECRET=JWT_SECRET:latest" \
+            --set-env-vars "BACKEND_URL=${BACKEND_URL}" \
+            --port 8080 \
+            --memory 256Mi \
+            --cpu 1 \
+            --max-instances 5
+
+      - name: Print gateway URL
+        run: |
+          URL=$(gcloud run services describe rust-alc-api-gateway \
+            --region asia-northeast1 --project cloudsql-sv \
+            --format 'value(status.url)')
+          echo "::notice ::Gateway URL: $URL (${GITHUB_REF_NAME})"
 
   update-archive-job:
     name: Update Archive Job
