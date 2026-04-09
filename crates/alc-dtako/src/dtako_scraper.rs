@@ -13,8 +13,8 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
+use crate::DtakoState;
 use alc_core::auth_middleware::TenantId;
-use alc_core::AppState;
 
 #[derive(Clone)]
 pub struct ScraperUrl(pub String);
@@ -90,7 +90,7 @@ async fn get_id_token(client: &Client, audience: &str) -> Result<String, String>
 
 /// SSE ストリームプロキシ: dtako-scraper の SSE レスポンスを中継 + DB 保存
 async fn trigger_scrape(
-    State(state): State<AppState>,
+    State(state): State<DtakoState>,
     Extension(scraper_url): Extension<ScraperUrl>,
     Extension(tenant_id): Extension<TenantId>,
     Json(req): Json<ScrapeRequest>,
@@ -204,7 +204,7 @@ async fn trigger_scrape(
 
 /// スクレイプ履歴を取得
 async fn get_scrape_history(
-    State(state): State<AppState>,
+    State(state): State<DtakoState>,
     Extension(tenant_id): Extension<TenantId>,
     Query(query): Query<HistoryQuery>,
 ) -> Result<Json<Vec<ScrapeHistoryItem>>, (axum::http::StatusCode, String)> {
@@ -222,7 +222,11 @@ async fn get_scrape_history(
     Ok(Json(rows))
 }
 
-pub fn tenant_router() -> Router<AppState> {
+pub fn tenant_router<S>() -> Router<S>
+where
+    DtakoState: axum::extract::FromRef<S>,
+    S: Clone + Send + Sync + 'static,
+{
     Router::new()
         .route("/scraper/trigger", post(trigger_scrape))
         .route("/scraper/history", get(get_scrape_history))

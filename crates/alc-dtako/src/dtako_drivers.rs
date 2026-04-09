@@ -1,15 +1,19 @@
 use axum::{extract::State, http::StatusCode, routing::get, Json, Router};
 
+use crate::DtakoState;
 use alc_core::auth_middleware::TenantId;
 use alc_core::repository::dtako_drivers::Driver;
-use alc_core::AppState;
 
-pub fn tenant_router() -> Router<AppState> {
+pub fn tenant_router<S>() -> Router<S>
+where
+    DtakoState: axum::extract::FromRef<S>,
+    S: Clone + Send + Sync + 'static,
+{
     Router::new().route("/drivers", get(list_drivers))
 }
 
 async fn list_drivers(
-    State(state): State<AppState>,
+    State(state): State<DtakoState>,
     tenant: axum::Extension<TenantId>,
 ) -> Result<Json<Vec<Driver>>, StatusCode> {
     let tenant_id = tenant.0 .0;

@@ -6,10 +6,14 @@ use axum::{
 };
 use serde::Serialize;
 
+use crate::CarinsState;
 use alc_core::auth_middleware::TenantId;
-use alc_core::AppState;
 
-pub fn tenant_router() -> Router<AppState> {
+pub fn tenant_router<S>() -> Router<S>
+where
+    CarinsState: axum::extract::FromRef<S>,
+    S: Clone + Send + Sync + 'static,
+{
     Router::new()
         .route("/car-inspections/current", get(list_current))
         .route("/car-inspections/expired", get(list_expired))
@@ -29,7 +33,7 @@ struct ListResponse {
 }
 
 async fn list_current(
-    State(state): State<AppState>,
+    State(state): State<CarinsState>,
     Extension(tenant_id): Extension<TenantId>,
 ) -> Result<Json<ListResponse>, StatusCode> {
     let rows = state
@@ -47,7 +51,7 @@ async fn list_current(
 }
 
 async fn get_by_id(
-    State(state): State<AppState>,
+    State(state): State<CarinsState>,
     Extension(tenant_id): Extension<TenantId>,
     Path(id): Path<i32>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
@@ -65,7 +69,7 @@ async fn get_by_id(
 }
 
 async fn vehicle_categories(
-    State(state): State<AppState>,
+    State(state): State<CarinsState>,
     Extension(tenant_id): Extension<TenantId>,
 ) -> Result<Json<alc_core::repository::car_inspections::VehicleCategories>, StatusCode> {
     let row = state
@@ -81,7 +85,7 @@ async fn vehicle_categories(
 }
 
 async fn list_expired(
-    State(state): State<AppState>,
+    State(state): State<CarinsState>,
     Extension(tenant_id): Extension<TenantId>,
 ) -> Result<Json<ListResponse>, StatusCode> {
     let rows = state
@@ -99,7 +103,7 @@ async fn list_expired(
 }
 
 async fn list_renew(
-    State(state): State<AppState>,
+    State(state): State<CarinsState>,
     Extension(tenant_id): Extension<TenantId>,
 ) -> Result<Json<ListResponse>, StatusCode> {
     let rows = state

@@ -1,6 +1,6 @@
 use crate::dtako_restraint_report::build_report_with_name;
+use crate::DtakoState;
 use alc_core::auth_middleware::TenantId;
-use alc_core::AppState;
 use alc_pdf::generate_pdf;
 use axum::{
     body::Body,
@@ -14,7 +14,11 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
 
-pub fn tenant_router() -> Router<AppState> {
+pub fn tenant_router<S>() -> Router<S>
+where
+    DtakoState: axum::extract::FromRef<S>,
+    S: Clone + Send + Sync + 'static,
+{
     Router::new()
         .route("/restraint-report/pdf", get(get_restraint_report_pdf))
         .route(
@@ -44,7 +48,7 @@ struct PdfProgressEvent {
 }
 
 async fn get_restraint_report_pdf(
-    State(state): State<AppState>,
+    State(state): State<DtakoState>,
     tenant: axum::Extension<TenantId>,
     Query(filter): Query<PdfFilter>,
 ) -> Result<Response<Body>, (StatusCode, String)> {
@@ -106,7 +110,7 @@ async fn get_restraint_report_pdf(
 }
 
 async fn get_restraint_report_pdf_stream(
-    State(state): State<AppState>,
+    State(state): State<DtakoState>,
     tenant: axum::Extension<TenantId>,
     Query(filter): Query<PdfFilter>,
 ) -> Response<Body> {

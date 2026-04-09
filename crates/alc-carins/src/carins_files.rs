@@ -8,12 +8,16 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::CarinsState;
 use alc_core::auth_middleware::TenantId;
 use alc_core::repository::car_inspections::{CarInspectionRepository, CreateFileLinkParams};
 use alc_core::repository::carins_files::FileRow;
-use alc_core::AppState;
 
-pub fn tenant_router() -> Router<AppState> {
+pub fn tenant_router<S>() -> Router<S>
+where
+    CarinsState: axum::extract::FromRef<S>,
+    S: Clone + Send + Sync + 'static,
+{
     Router::new()
         .route("/files", get(list_files).post(create_file))
         .route("/files/recent", get(list_recent))
@@ -37,7 +41,7 @@ struct ListQuery {
 }
 
 async fn list_files(
-    State(state): State<AppState>,
+    State(state): State<CarinsState>,
     Extension(tenant_id): Extension<TenantId>,
     Query(q): Query<ListQuery>,
 ) -> Result<Json<ListResponse>, StatusCode> {
@@ -54,7 +58,7 @@ async fn list_files(
 }
 
 async fn list_recent(
-    State(state): State<AppState>,
+    State(state): State<CarinsState>,
     Extension(tenant_id): Extension<TenantId>,
 ) -> Result<Json<ListResponse>, StatusCode> {
     let rows = state
@@ -70,7 +74,7 @@ async fn list_recent(
 }
 
 async fn list_not_attached(
-    State(state): State<AppState>,
+    State(state): State<CarinsState>,
     Extension(tenant_id): Extension<TenantId>,
 ) -> Result<Json<ListResponse>, StatusCode> {
     let rows = state
@@ -86,7 +90,7 @@ async fn list_not_attached(
 }
 
 async fn get_file(
-    State(state): State<AppState>,
+    State(state): State<CarinsState>,
     Extension(tenant_id): Extension<TenantId>,
     Path(uuid): Path<String>,
 ) -> Result<Json<FileRow>, StatusCode> {
@@ -104,7 +108,7 @@ async fn get_file(
 }
 
 async fn download_file(
-    State(state): State<AppState>,
+    State(state): State<CarinsState>,
     Extension(tenant_id): Extension<TenantId>,
     Path(uuid): Path<String>,
 ) -> Result<impl IntoResponse, StatusCode> {
@@ -118,16 +122,10 @@ async fn download_file(
 
     // Download from GCS
     if let Some(ref s3_key) = row.s3_key {
-        let data = state
-            .carins_storage
-            .as_ref()
-            .unwrap_or(&state.storage)
-            .download(s3_key)
-            .await
-            .map_err(|e| {
-                tracing::error!("GCS download failed: {e}");
-                StatusCode::INTERNAL_SERVER_ERROR
-            })?;
+        let data = state.storage.download(s3_key).await.map_err(|e| {
+            tracing::error!("GCS download failed: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
         let content_type = row.file_type.clone();
         let filename = row.filename.clone();
@@ -175,7 +173,7 @@ struct CreateFileRequest {
 }
 
 async fn create_file(
-    State(state): State<AppState>,
+    State(state): State<CarinsState>,
     Extension(tenant_id): Extension<TenantId>,
     Json(body): Json<CreateFileRequest>,
 ) -> Result<(StatusCode, Json<FileRow>), StatusCode> {
@@ -190,9 +188,7 @@ async fn create_file(
         .map_err(|_| StatusCode::BAD_REQUEST)?;
 
     state
-        .carins_storage
-        .as_ref()
-        .unwrap_or(&state.storage)
+        .storage
         .upload(&gcs_key, &data, &body.file_type)
         .await
         .map_err(|e| {
@@ -444,7 +440,7 @@ fn strip_spaces_str(s: &str) -> String {
 }
 
 async fn delete_file(
-    State(state): State<AppState>,
+    State(state): State<CarinsState>,
     Extension(tenant_id): Extension<TenantId>,
     Path(uuid): Path<String>,
 ) -> Result<StatusCode, StatusCode> {
@@ -462,7 +458,7 @@ async fn delete_file(
 }
 
 async fn restore_file(
-    State(state): State<AppState>,
+    State(state): State<CarinsState>,
     Extension(tenant_id): Extension<TenantId>,
     Path(uuid): Path<String>,
 ) -> Result<StatusCode, StatusCode> {

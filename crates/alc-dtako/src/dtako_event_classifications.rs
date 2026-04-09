@@ -6,18 +6,22 @@ use axum::{
 };
 use uuid::Uuid;
 
+use crate::DtakoState;
 use alc_core::auth_middleware::TenantId;
 use alc_core::models::{DtakoEventClassification, UpdateDtakoClassification};
-use alc_core::AppState;
 
-pub fn tenant_router() -> Router<AppState> {
+pub fn tenant_router<S>() -> Router<S>
+where
+    DtakoState: axum::extract::FromRef<S>,
+    S: Clone + Send + Sync + 'static,
+{
     Router::new()
         .route("/event-classifications", get(list_event_classifications))
         .route("/event-classifications/{id}", put(update_classification))
 }
 
 async fn list_event_classifications(
-    State(state): State<AppState>,
+    State(state): State<DtakoState>,
     tenant: axum::Extension<TenantId>,
 ) -> Result<Json<Vec<DtakoEventClassification>>, StatusCode> {
     let tenant_id = tenant.0 .0;
@@ -32,7 +36,7 @@ async fn list_event_classifications(
 }
 
 async fn update_classification(
-    State(state): State<AppState>,
+    State(state): State<DtakoState>,
     tenant: axum::Extension<TenantId>,
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateDtakoClassification>,

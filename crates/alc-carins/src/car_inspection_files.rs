@@ -1,11 +1,15 @@
 use axum::{extract::State, http::StatusCode, routing::get, Extension, Json, Router};
 use serde::Serialize;
 
+use crate::CarinsState;
 use alc_core::auth_middleware::TenantId;
 use alc_core::repository::car_inspections::CarInspectionFile;
-use alc_core::AppState;
 
-pub fn tenant_router() -> Router<AppState> {
+pub fn tenant_router<S>() -> Router<S>
+where
+    CarinsState: axum::extract::FromRef<S>,
+    S: Clone + Send + Sync + 'static,
+{
     Router::new().route("/car-inspection-files/current", get(list_current))
 }
 
@@ -15,7 +19,7 @@ struct ListResponse {
 }
 
 async fn list_current(
-    State(state): State<AppState>,
+    State(state): State<CarinsState>,
     Extension(tenant_id): Extension<TenantId>,
 ) -> Result<Json<ListResponse>, StatusCode> {
     let rows = state

@@ -6,11 +6,15 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::CarinsState;
 use alc_core::auth_middleware::TenantId;
 use alc_core::models::NfcTag;
-use alc_core::AppState;
 
-pub fn tenant_router() -> Router<AppState> {
+pub fn tenant_router<S>() -> Router<S>
+where
+    CarinsState: axum::extract::FromRef<S>,
+    S: Clone + Send + Sync + 'static,
+{
     Router::new()
         .route("/nfc-tags", get(list_tags).post(register_tag))
         .route("/nfc-tags/search", get(search_by_uuid))
@@ -34,7 +38,7 @@ struct SearchResponse {
 }
 
 async fn search_by_uuid(
-    State(state): State<AppState>,
+    State(state): State<CarinsState>,
     Extension(tenant_id): Extension<TenantId>,
     Query(q): Query<SearchQuery>,
 ) -> Result<Json<SearchResponse>, StatusCode> {
@@ -65,7 +69,7 @@ struct ListQuery {
 }
 
 async fn list_tags(
-    State(state): State<AppState>,
+    State(state): State<CarinsState>,
     Extension(tenant_id): Extension<TenantId>,
     Query(q): Query<ListQuery>,
 ) -> Result<Json<Vec<NfcTag>>, StatusCode> {
@@ -85,7 +89,7 @@ struct RegisterRequest {
 }
 
 async fn register_tag(
-    State(state): State<AppState>,
+    State(state): State<CarinsState>,
     Extension(tenant_id): Extension<TenantId>,
     Json(body): Json<RegisterRequest>,
 ) -> Result<(StatusCode, Json<NfcTag>), StatusCode> {
@@ -104,7 +108,7 @@ async fn register_tag(
 }
 
 async fn delete_tag(
-    State(state): State<AppState>,
+    State(state): State<CarinsState>,
     Extension(tenant_id): Extension<TenantId>,
     Path(nfc_uuid): Path<String>,
 ) -> Result<StatusCode, StatusCode> {

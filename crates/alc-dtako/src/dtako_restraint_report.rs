@@ -12,6 +12,7 @@ pub use alc_pdf::types::{
     MonthlyTotal, OperationDetail, RestraintDayRow, RestraintReportResponse, WeeklySubtotal,
 };
 
+use crate::DtakoState;
 use alc_compare::{
     self, annotate_known_bugs, parse_restraint_csv, CsvDayRow, CsvDriverData, DiffItem,
 };
@@ -19,9 +20,12 @@ use alc_core::auth_middleware::TenantId;
 use alc_core::repository::dtako_restraint_report::{
     DailyWorkHoursRow, DtakoRestraintReportRepository, OpTimesRow, SegmentRow,
 };
-use alc_core::AppState;
 
-pub fn tenant_router() -> Router<AppState> {
+pub fn tenant_router<S>() -> Router<S>
+where
+    DtakoState: axum::extract::FromRef<S>,
+    S: Clone + Send + Sync + 'static,
+{
     Router::new()
         .route("/restraint-report", get(get_restraint_report))
         .route("/restraint-report/compare-csv", post(compare_csv))
@@ -40,7 +44,7 @@ pub struct CompareQuery {
 }
 
 async fn get_restraint_report(
-    State(state): State<AppState>,
+    State(state): State<DtakoState>,
     tenant: axum::Extension<TenantId>,
     Query(filter): Query<RestraintReportFilter>,
 ) -> Result<Json<RestraintReportResponse>, (StatusCode, String)> {
@@ -532,7 +536,7 @@ pub fn parse_hhmm(s: &str) -> i32 {
 }
 
 async fn compare_csv(
-    State(state): State<AppState>,
+    State(state): State<DtakoState>,
     tenant: axum::Extension<TenantId>,
     Query(query): Query<CompareQuery>,
     mut multipart: Multipart,

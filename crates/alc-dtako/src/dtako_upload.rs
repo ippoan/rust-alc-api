@@ -9,18 +9,22 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::DtakoState;
 use alc_core::auth_middleware::TenantId;
 use alc_core::repository::dtako_upload::{
     InsertDailyWorkHoursParams, InsertOperationParams, InsertSegmentParams,
 };
-use alc_core::AppState;
 use alc_csv_parser;
 use alc_csv_parser::kudgivt::{parse_kudgivt, KudgivtRow};
 use alc_csv_parser::kudguri::{parse_kudguri, KudguriRow};
 use alc_csv_parser::work_segments::EventClass;
 use tokio_stream::StreamExt;
 
-pub fn tenant_router() -> Router<AppState> {
+pub fn tenant_router<S>() -> Router<S>
+where
+    DtakoState: axum::extract::FromRef<S>,
+    S: Clone + Send + Sync + 'static,
+{
     Router::new()
         .route("/upload", post(upload_zip))
         .route("/recalculate", post(internal_recalculate_all))
@@ -42,7 +46,7 @@ pub struct UploadResponse {
 }
 
 async fn upload_zip(
-    State(state): State<AppState>,
+    State(state): State<DtakoState>,
     tenant: axum::Extension<TenantId>,
     mut multipart: Multipart,
 ) -> Result<Json<UploadResponse>, (StatusCode, String)> {
@@ -110,7 +114,7 @@ async fn extract_file(
 }
 
 async fn process_zip(
-    state: &AppState,
+    state: &DtakoState,
     tenant_id: Uuid,
     upload_id: Uuid,
     filename: &str,
@@ -257,7 +261,7 @@ struct FerryData {
 /// R2のKUDGFRYからフェリー乗船時間(分)を取得
 /// Returns: unko_no → FerryData のマッピング
 async fn load_ferry_minutes(
-    state: &AppState,
+    state: &DtakoState,
     tenant_id: Uuid,
     rows: &[KudguriRow],
 ) -> std::collections::HashMap<String, FerryData> {
@@ -327,7 +331,7 @@ async fn load_ferry_minutes(
 }
 
 async fn calculate_daily_hours(
-    state: &AppState,
+    state: &DtakoState,
     tenant_id: Uuid,
     rows: &[KudguriRow],
     kudgivt_rows: &[KudgivtRow],
@@ -706,7 +710,7 @@ async fn calculate_daily_hours(
 
 /// R2のZIPからKUDGIVTを取得（テナント・月の全ZIPを走査）
 async fn load_kudgivt_from_zips(
-    state: &AppState,
+    state: &DtakoState,
     tenant_id: Uuid,
     month_start: chrono::NaiveDate,
     _month_end: chrono::NaiveDate,
@@ -766,7 +770,7 @@ async fn load_kudgivt_from_zips(
 
 /// イベント分類をDBから取得、なければデフォルトで初期化
 async fn load_or_init_classifications(
-    state: &AppState,
+    state: &DtakoState,
     tenant_id: Uuid,
     kudgivt_rows: &[KudgivtRow],
 ) -> Result<std::collections::HashMap<String, EventClass>, anyhow::Error> {
@@ -846,7 +850,7 @@ pub fn compute_month_range(
 }
 
 /// CSV split を試行 (失敗してもブロックしない)
-pub(crate) async fn try_split_csv(state: &AppState, upload_id: Uuid) {
+pub(crate) async fn try_split_csv(state: &DtakoState, upload_id: Uuid) {
     if let Err(e) = split_csv_from_r2(state, upload_id).await {
         tracing::warn!("CSV split failed (will not block): {e}");
     }
@@ -854,7 +858,7 @@ pub(crate) async fn try_split_csv(state: &AppState, upload_id: Uuid) {
 
 /// R2 から ZIP をダウンロードして CSV を unko_no 別に分割アップロード
 pub(crate) async fn split_csv_from_r2(
-    state: &AppState,
+    state: &DtakoState,
     upload_id: Uuid,
 ) -> Result<(), anyhow::Error> {
     let record = state
@@ -955,7 +959,7 @@ pub(crate) async fn split_csv_from_r2(
 
 /// R2 に保存済みの ZIP をダウンロード
 async fn internal_download(
-    State(state): State<AppState>,
+    State(state): State<DtakoState>,
     Path(upload_id): Path<Uuid>,
 ) -> Result<Response, (StatusCode, String)> {
     let record = state
@@ -1009,7 +1013,7 @@ async fn internal_download(
 
 /// R2 に保存済みの ZIP を再処理
 async fn internal_rerun(
-    State(state): State<AppState>,
+    State(state): State<DtakoState>,
     Path(upload_id): Path<Uuid>,
 ) -> Result<Json<UploadResponse>, (StatusCode, String)> {
     // upload_history から r2_zip_key を取得
@@ -1084,7 +1088,7 @@ struct RecalcFilter {
 
 /// 月指定再計算のコアロジック (テスト可能)
 pub async fn recalculate_all_core(
-    state: &AppState,
+    state: &DtakoState,
     tenant_id: Uuid,
     year: i32,
     month: u32,
@@ -1196,7 +1200,7 @@ pub async fn recalculate_all_core(
 /// 月指定で再計算（R2の個別CSVから。SSEで進捗通知）
 #[allow(clippy::redundant_closure)]
 async fn internal_recalculate_all(
-    State(state): State<AppState>,
+    State(state): State<DtakoState>,
     tenant: axum::Extension<TenantId>,
     Query(params): Query<RecalcFilter>,
 ) -> Response<Body> {
@@ -1240,7 +1244,7 @@ async fn internal_recalculate_all(
 
 /// pending_retry / failed のアップロード一覧
 async fn list_pending_uploads(
-    State(state): State<AppState>,
+    State(state): State<DtakoState>,
     tenant: axum::Extension<TenantId>,
 ) -> Result<Json<Vec<serde_json::Value>>, (StatusCode, String)> {
     let tenant_id = tenant.0 .0;
@@ -1261,7 +1265,7 @@ struct RecalcDriverFilter {
 
 /// recalculate 共通: ドライバーの operations を KudguriRow として取得
 async fn load_driver_ops_as_kudguri(
-    state: &AppState,
+    state: &DtakoState,
     tenant_id: Uuid,
     driver_id: Uuid,
     driver_cd: &str,
@@ -1306,7 +1310,7 @@ async fn load_driver_ops_as_kudguri(
 
 /// recalculate のコア処理 (SSE なし、テストから直接呼び出し可能)
 pub async fn recalculate_driver_core(
-    state: &AppState,
+    state: &DtakoState,
     tenant_id: Uuid,
     driver_id: Uuid,
     year: i32,
@@ -1358,7 +1362,7 @@ pub async fn recalculate_driver_core(
 /// 1ドライバー分の月次再計算（R2からKUDGIVT取得→再計算）— SSE ラッパー
 #[allow(clippy::redundant_closure)]
 async fn recalculate_driver(
-    State(state): State<AppState>,
+    State(state): State<DtakoState>,
     tenant: axum::Extension<TenantId>,
     Query(params): Query<RecalcDriverFilter>,
 ) -> Response<Body> {
@@ -1410,7 +1414,7 @@ async fn recalculate_driver(
 
 /// バッチ再計算: 1ドライバー分の処理 (事前ロード済み KUDGIVT を使用)
 async fn process_single_driver_batch(
-    state: &AppState,
+    state: &DtakoState,
     tenant_id: Uuid,
     driver_id: Uuid,
     month_start: chrono::NaiveDate,
@@ -1448,7 +1452,7 @@ struct BatchRecalcBody {
 
 /// バッチ再計算コアロジック (テスト可能)
 pub async fn recalculate_drivers_batch_core(
-    state: &AppState,
+    state: &DtakoState,
     tenant_id: Uuid,
     year: i32,
     month: u32,
@@ -1505,7 +1509,7 @@ pub async fn recalculate_drivers_batch_core(
 
 #[allow(clippy::redundant_closure)]
 async fn recalculate_drivers_batch(
-    State(state): State<AppState>,
+    State(state): State<DtakoState>,
     tenant: axum::Extension<TenantId>,
     Json(body): Json<BatchRecalcBody>,
 ) -> Response<Body> {
@@ -1552,7 +1556,7 @@ async fn recalculate_drivers_batch(
 
 /// アップロード一覧
 async fn list_uploads(
-    State(state): State<AppState>,
+    State(state): State<DtakoState>,
     tenant: axum::Extension<TenantId>,
 ) -> Result<Json<Vec<serde_json::Value>>, (StatusCode, String)> {
     let tenant_id = tenant.0 .0;
@@ -1566,7 +1570,7 @@ async fn list_uploads(
 
 /// 認証付きCSV分割エンドポイント
 async fn split_csv_handler(
-    State(state): State<AppState>,
+    State(state): State<DtakoState>,
     _tenant: axum::Extension<TenantId>,
     Path(upload_id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
@@ -1583,7 +1587,7 @@ async fn split_csv_handler(
 
 /// CSV 一括分割コアロジック (テスト可能)
 pub async fn split_csv_all_core(
-    state: &AppState,
+    state: &DtakoState,
     tenant_id: Uuid,
 ) -> Result<(usize, usize), anyhow::Error> {
     let uploads = state
@@ -1638,7 +1642,7 @@ pub async fn split_csv_all_core(
 /// 全completedアップロードのCSV分割（SSE進捗）
 #[allow(clippy::redundant_closure)]
 async fn split_csv_all_handler(
-    State(state): State<AppState>,
+    State(state): State<DtakoState>,
     tenant: axum::Extension<TenantId>,
 ) -> Response<Body> {
     let tenant_id = tenant.0 .0;

@@ -38,12 +38,20 @@ async fn main() {
     if let Some(ref tenko_url) = config.tenko_url {
         tracing::info!("tenko-api: {tenko_url}");
     }
+    if let Some(ref carins_url) = config.carins_url {
+        tracing::info!("carins-api: {carins_url}");
+    }
+    if let Some(ref dtako_url) = config.dtako_url {
+        tracing::info!("dtako-api: {dtako_url}");
+    }
 
     let proxy_state = ProxyState {
         client,
         backend_url: config.backend_url.clone(),
         jwt_secret: config.jwt_secret,
         tenko_url: config.tenko_url,
+        carins_url: config.carins_url,
+        dtako_url: config.dtako_url,
     };
 
     let cors = CorsLayer::new()

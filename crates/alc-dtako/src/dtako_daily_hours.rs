@@ -7,11 +7,15 @@ use axum::{
 use chrono::NaiveDate;
 use uuid::Uuid;
 
+use crate::DtakoState;
 use alc_core::auth_middleware::TenantId;
 use alc_core::models::{DtakoDailyHoursFilter, DtakoDailyHoursResponse, DtakoSegmentsResponse};
-use alc_core::AppState;
 
-pub fn tenant_router() -> Router<AppState> {
+pub fn tenant_router<S>() -> Router<S>
+where
+    DtakoState: axum::extract::FromRef<S>,
+    S: Clone + Send + Sync + 'static,
+{
     Router::new()
         .route("/daily-hours", get(list_daily_hours))
         .route(
@@ -21,7 +25,7 @@ pub fn tenant_router() -> Router<AppState> {
 }
 
 async fn list_daily_hours(
-    State(state): State<AppState>,
+    State(state): State<DtakoState>,
     tenant: axum::Extension<TenantId>,
     Query(filter): Query<DtakoDailyHoursFilter>,
 ) -> Result<Json<DtakoDailyHoursResponse>, StatusCode> {
@@ -63,7 +67,7 @@ async fn list_daily_hours(
 }
 
 async fn get_daily_segments(
-    State(state): State<AppState>,
+    State(state): State<DtakoState>,
     tenant: axum::Extension<TenantId>,
     Path((driver_id, date)): Path<(Uuid, NaiveDate)>,
 ) -> Result<Json<DtakoSegmentsResponse>, StatusCode> {

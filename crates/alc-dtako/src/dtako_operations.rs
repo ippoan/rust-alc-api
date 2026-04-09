@@ -5,11 +5,15 @@ use axum::{
     Json, Router,
 };
 
+use crate::DtakoState;
 use alc_core::auth_middleware::TenantId;
 use alc_core::models::DtakoOperationFilter;
-use alc_core::AppState;
 
-pub fn tenant_router() -> Router<AppState> {
+pub fn tenant_router<S>() -> Router<S>
+where
+    DtakoState: axum::extract::FromRef<S>,
+    S: Clone + Send + Sync + 'static,
+{
     Router::new()
         .route("/operations", get(list_operations))
         .route("/operations/calendar", get(calendar_dates))
@@ -37,7 +41,7 @@ struct CalendarDateEntry {
 }
 
 async fn calendar_dates(
-    State(state): State<AppState>,
+    State(state): State<DtakoState>,
     tenant: axum::Extension<TenantId>,
     Query(q): Query<CalendarQuery>,
 ) -> Result<Json<CalendarResponse>, StatusCode> {
@@ -73,7 +77,7 @@ async fn calendar_dates(
 }
 
 async fn list_operations(
-    State(state): State<AppState>,
+    State(state): State<DtakoState>,
     tenant: axum::Extension<TenantId>,
     Query(filter): Query<DtakoOperationFilter>,
 ) -> Result<Json<alc_core::models::DtakoOperationsResponse>, StatusCode> {
@@ -87,7 +91,7 @@ async fn list_operations(
 }
 
 async fn get_operation(
-    State(state): State<AppState>,
+    State(state): State<DtakoState>,
     tenant: axum::Extension<TenantId>,
     Path(unko_no): Path<String>,
 ) -> Result<Json<Vec<alc_core::models::DtakoOperation>>, StatusCode> {
@@ -104,7 +108,7 @@ async fn get_operation(
 }
 
 async fn delete_operation(
-    State(state): State<AppState>,
+    State(state): State<DtakoState>,
     tenant: axum::Extension<TenantId>,
     Path(unko_no): Path<String>,
 ) -> Result<StatusCode, StatusCode> {

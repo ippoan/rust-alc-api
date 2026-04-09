@@ -5,14 +5,18 @@ use axum::{
     Json, Router,
 };
 
+use crate::DtakoState;
 use alc_core::auth_middleware::TenantId;
 use alc_core::models::{
     BulkUpsertResponse, DtakologDateQuery, DtakologDateRangeQuery, DtakologInput,
     DtakologSelectQuery, DtakologView,
 };
-use alc_core::AppState;
 
-pub fn tenant_router() -> Router<AppState> {
+pub fn tenant_router<S>() -> Router<S>
+where
+    DtakoState: axum::extract::FromRef<S>,
+    S: Clone + Send + Sync + 'static,
+{
     Router::new()
         .route("/current", get(current_list_all))
         .route("/by-date", get(get_by_date))
@@ -22,7 +26,7 @@ pub fn tenant_router() -> Router<AppState> {
 }
 
 async fn current_list_all(
-    State(state): State<AppState>,
+    State(state): State<DtakoState>,
     tenant: axum::Extension<TenantId>,
 ) -> Result<Json<Vec<DtakologView>>, StatusCode> {
     let rows = state
@@ -34,7 +38,7 @@ async fn current_list_all(
 }
 
 async fn get_by_date(
-    State(state): State<AppState>,
+    State(state): State<DtakoState>,
     tenant: axum::Extension<TenantId>,
     Query(q): Query<DtakologDateQuery>,
 ) -> Result<Json<Vec<DtakologView>>, StatusCode> {
@@ -47,7 +51,7 @@ async fn get_by_date(
 }
 
 async fn current_list_select(
-    State(state): State<AppState>,
+    State(state): State<DtakoState>,
     tenant: axum::Extension<TenantId>,
     Query(q): Query<DtakologSelectQuery>,
 ) -> Result<Json<Vec<DtakologView>>, StatusCode> {
@@ -72,7 +76,7 @@ async fn current_list_select(
 }
 
 async fn get_by_date_range(
-    State(state): State<AppState>,
+    State(state): State<DtakoState>,
     tenant: axum::Extension<TenantId>,
     Query(q): Query<DtakologDateRangeQuery>,
 ) -> Result<Json<Vec<DtakologView>>, StatusCode> {
@@ -122,7 +126,7 @@ fn extract_date(datetime_str: &str) -> String {
 }
 
 async fn bulk_upsert(
-    State(state): State<AppState>,
+    State(state): State<DtakoState>,
     tenant: axum::Extension<TenantId>,
     Json(records): Json<Vec<DtakologInput>>,
 ) -> Result<Json<BulkUpsertResponse>, StatusCode> {

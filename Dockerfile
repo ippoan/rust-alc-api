@@ -6,6 +6,8 @@ COPY rust-alc-api /usr/local/bin/
 COPY migrate /usr/local/bin/
 COPY archive /usr/local/bin/
 COPY tenko-api /usr/local/bin/
+COPY carins-api /usr/local/bin/
+COPY dtako-api /usr/local/bin/
 COPY migrations /app/migrations
 
 WORKDIR /app

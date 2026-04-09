@@ -6,10 +6,14 @@ use axum::{
 };
 use serde::Serialize;
 
+use crate::DtakoState;
 use alc_core::auth_middleware::TenantId;
-use alc_core::AppState;
 
-pub fn tenant_router() -> Router<AppState> {
+pub fn tenant_router<S>() -> Router<S>
+where
+    DtakoState: axum::extract::FromRef<S>,
+    S: Clone + Send + Sync + 'static,
+{
     Router::new().route("/operations/{unko_no}/csv/{csv_type}", get(get_csv_as_json))
 }
 
@@ -20,7 +24,7 @@ pub struct CsvJsonResponse {
 }
 
 async fn get_csv_as_json(
-    State(state): State<AppState>,
+    State(state): State<DtakoState>,
     tenant: axum::Extension<TenantId>,
     Path((unko_no, csv_type)): Path<(String, String)>,
 ) -> Result<Json<CsvJsonResponse>, StatusCode> {

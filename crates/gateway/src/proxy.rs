@@ -15,6 +15,8 @@ pub struct ProxyState {
     pub backend_url: String,
     pub jwt_secret: String,
     pub tenko_url: Option<String>,
+    pub carins_url: Option<String>,
+    pub dtako_url: Option<String>,
 }
 
 /// パスに応じてバックエンド URL を選択する
@@ -22,6 +24,27 @@ fn resolve_backend<'a>(path: &str, state: &'a ProxyState) -> &'a str {
     let api_path = path.strip_prefix("/api").unwrap_or(path);
     if api_path.starts_with("/tenko") || api_path.starts_with("/tenko-call") {
         state.tenko_url.as_deref().unwrap_or(&state.backend_url)
+    } else if api_path.starts_with("/car-inspection")
+        || api_path.starts_with("/files")
+        || api_path.starts_with("/nfc-tags")
+    {
+        state.carins_url.as_deref().unwrap_or(&state.backend_url)
+    } else if api_path.starts_with("/dtako-")
+        || api_path.starts_with("/upload")
+        || api_path.starts_with("/uploads")
+        || api_path.starts_with("/recalculate")
+        || api_path.starts_with("/split-csv")
+        || api_path.starts_with("/drivers")
+        || api_path.starts_with("/vehicles")
+        || api_path.starts_with("/operations")
+        || api_path.starts_with("/daily-hours")
+        || api_path.starts_with("/work-times")
+        || api_path.starts_with("/event-classifications")
+        || api_path.starts_with("/restraint-report")
+        || api_path.starts_with("/scraper/")
+        || api_path.starts_with("/internal/")
+    {
+        state.dtako_url.as_deref().unwrap_or(&state.backend_url)
     } else {
         &state.backend_url
     }
@@ -134,14 +157,20 @@ fn inject_auth_headers(
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_resolve_backend_tenko() {
-        let state = ProxyState {
+    fn test_state() -> ProxyState {
+        ProxyState {
             client: Client::new(),
             backend_url: "http://backend:8081".to_string(),
             jwt_secret: "secret".to_string(),
             tenko_url: Some("http://tenko:8082".to_string()),
-        };
+            carins_url: Some("http://carins:8083".to_string()),
+            dtako_url: Some("http://dtako:8084".to_string()),
+        }
+    }
+
+    #[test]
+    fn test_resolve_backend_tenko() {
+        let state = test_state();
         assert_eq!(
             resolve_backend("/api/tenko/sessions", &state),
             "http://tenko:8082"
@@ -157,15 +186,98 @@ mod tests {
     }
 
     #[test]
+    fn test_resolve_backend_carins() {
+        let state = test_state();
+        assert_eq!(
+            resolve_backend("/api/car-inspections/current", &state),
+            "http://carins:8083"
+        );
+        assert_eq!(
+            resolve_backend("/api/car-inspection-files/current", &state),
+            "http://carins:8083"
+        );
+        assert_eq!(
+            resolve_backend("/api/files/recent", &state),
+            "http://carins:8083"
+        );
+        assert_eq!(
+            resolve_backend("/api/nfc-tags", &state),
+            "http://carins:8083"
+        );
+    }
+
+    #[test]
+    fn test_resolve_backend_dtako() {
+        let state = test_state();
+        assert_eq!(
+            resolve_backend("/api/dtako-logs/current", &state),
+            "http://dtako:8084"
+        );
+        assert_eq!(resolve_backend("/api/upload", &state), "http://dtako:8084");
+        assert_eq!(resolve_backend("/api/uploads", &state), "http://dtako:8084");
+        assert_eq!(
+            resolve_backend("/api/recalculate", &state),
+            "http://dtako:8084"
+        );
+        assert_eq!(
+            resolve_backend("/api/split-csv/123", &state),
+            "http://dtako:8084"
+        );
+        assert_eq!(resolve_backend("/api/drivers", &state), "http://dtako:8084");
+        assert_eq!(
+            resolve_backend("/api/vehicles", &state),
+            "http://dtako:8084"
+        );
+        assert_eq!(
+            resolve_backend("/api/operations", &state),
+            "http://dtako:8084"
+        );
+        assert_eq!(
+            resolve_backend("/api/daily-hours", &state),
+            "http://dtako:8084"
+        );
+        assert_eq!(
+            resolve_backend("/api/work-times", &state),
+            "http://dtako:8084"
+        );
+        assert_eq!(
+            resolve_backend("/api/event-classifications", &state),
+            "http://dtako:8084"
+        );
+        assert_eq!(
+            resolve_backend("/api/restraint-report", &state),
+            "http://dtako:8084"
+        );
+        assert_eq!(
+            resolve_backend("/api/scraper/trigger", &state),
+            "http://dtako:8084"
+        );
+        assert_eq!(
+            resolve_backend("/api/internal/pending", &state),
+            "http://dtako:8084"
+        );
+    }
+
+    #[test]
     fn test_resolve_backend_fallback() {
         let state = ProxyState {
             client: Client::new(),
             backend_url: "http://backend:8081".to_string(),
             jwt_secret: "secret".to_string(),
             tenko_url: None,
+            carins_url: None,
+            dtako_url: None,
         };
         assert_eq!(
             resolve_backend("/api/tenko/sessions", &state),
+            "http://backend:8081"
+        );
+        assert_eq!(
+            resolve_backend("/api/car-inspections/current", &state),
+            "http://backend:8081"
+        );
+        assert_eq!(
+            resolve_backend("/api/dtako-logs/current", &state),
             "http://backend:8081"
         );
     }
