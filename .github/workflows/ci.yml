@@ -71,6 +71,8 @@ jobs:
       - uses: ippoan/setup-bazel@main
         with:
           disk-cache: bazel
+          external-cache: true
+          repository-cache: true
       - name: Build release binaries (Bazel)
         run: bazel build -c opt //:rust-alc-api //:migrate //:archive //crates/gateway
 
