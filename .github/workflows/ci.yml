@@ -509,21 +509,18 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Promote dev → version + sha (build once, promote)
+      - name: Promote dev → version + sha (all images)
         run: |
-          docker pull ghcr.io/${{ github.repository }}:dev
-          docker tag ghcr.io/${{ github.repository }}:dev ghcr.io/${{ github.repository }}:${{ github.ref_name }}
-          docker tag ghcr.io/${{ github.repository }}:dev ghcr.io/${{ github.repository }}:${{ github.sha }}
-          docker push ghcr.io/${{ github.repository }}:${{ github.ref_name }}
-          docker push ghcr.io/${{ github.repository }}:${{ github.sha }}
-
-      - name: Promote gateway dev → version + sha
-        run: |
-          docker pull ghcr.io/${{ github.repository }}-gateway:dev
-          docker tag ghcr.io/${{ github.repository }}-gateway:dev ghcr.io/${{ github.repository }}-gateway:${{ github.ref_name }}
-          docker tag ghcr.io/${{ github.repository }}-gateway:dev ghcr.io/${{ github.repository }}-gateway:${{ github.sha }}
-          docker push ghcr.io/${{ github.repository }}-gateway:${{ github.ref_name }}
-          docker push ghcr.io/${{ github.repository }}-gateway:${{ github.sha }}
+          REPO="ghcr.io/${{ github.repository }}"
+          TAG="${{ github.ref_name }}"
+          SHA="${{ github.sha }}"
+          for suffix in "" "-gateway" "-tenko" "-carins" "-dtako"; do
+            docker pull "${REPO}${suffix}:dev"
+            docker tag "${REPO}${suffix}:dev" "${REPO}${suffix}:${TAG}"
+            docker tag "${REPO}${suffix}:dev" "${REPO}${suffix}:${SHA}"
+            docker push "${REPO}${suffix}:${TAG}"
+            docker push "${REPO}${suffix}:${SHA}"
+          done
 
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
