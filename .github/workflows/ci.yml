@@ -68,12 +68,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: bazelbuild/setup-bazelisk@v3
-      - name: Restore Bazel cache
-        uses: actions/cache@v4
-        with:
-          path: /tmp/bazel-disk-cache
-          key: bazel-opt-${{ hashFiles('Cargo.lock', 'MODULE.bazel') }}
-          restore-keys: bazel-opt-
+      - uses: tsawada/bazel-github-actions-cache@v0
       - name: Build
         run: bazel build --config=ci -c opt //:rust-alc-api //:migrate //:archive
 
@@ -213,13 +208,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: bazelbuild/setup-bazelisk@v3
-
-      - name: Restore Bazel cache
-        uses: actions/cache@v4
-        with:
-          path: /tmp/bazel-disk-cache
-          key: bazel-opt-${{ hashFiles('Cargo.lock', 'MODULE.bazel') }}
-          restore-keys: bazel-opt-
+      - uses: tsawada/bazel-github-actions-cache@v0
 
       - name: Build release binaries (Bazel)
         run: bazel build --config=ci -c opt //:rust-alc-api //:migrate //:archive
