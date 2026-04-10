@@ -42,6 +42,7 @@ case "$SERVICE" in
   tenko)    SUFFIX="-tenko";   BIN="tenko-api" ;;
   carins)   SUFFIX="-carins";  BIN="carins-api" ;;
   dtako)    SUFFIX="-dtako";   BIN="dtako-api" ;;
+  trouble)  SUFFIX="-trouble"; BIN="trouble-api" ;;
   *) echo "Unknown service: $SERVICE" >&2; exit 1 ;;
 esac
 
@@ -184,6 +185,8 @@ emit_env_gateway() {
               value: "PLACEHOLDER_CARINS_URL"
             - name: DTAKO_API_URL
               value: "PLACEHOLDER_DTAKO_URL"
+            - name: TROUBLE_API_URL
+              value: "PLACEHOLDER_TROUBLE_URL"
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:
@@ -250,6 +253,14 @@ YAML
   emit_database_url
 }
 
+emit_env_trouble() {
+  cat <<YAML
+            - name: RUST_LOG
+              value: "trouble_api=info"
+YAML
+  emit_database_url
+}
+
 # Shared helper: emit DATABASE_URL (staging=localhost, production=Secret Manager)
 emit_database_url() {
   if [[ "$ENV" == "staging" ]]; then
@@ -298,6 +309,7 @@ case "$SERVICE" in
   tenko)   MEMORY="256Mi"; CPU="1"   ;;
   carins)  MEMORY="256Mi"; CPU="1"   ;;
   dtako)   MEMORY="512Mi"; CPU="1"   ;;
+  trouble) MEMORY="256Mi"; CPU="1"   ;;
 esac
 
 # Port

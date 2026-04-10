@@ -77,6 +77,7 @@ jobs:
           - { name: tenko, targets: "//crates/tenko-api" }
           - { name: carins, targets: "//crates/carins-api" }
           - { name: dtako, targets: "//crates/dtako-api" }
+          - { name: trouble, targets: "//crates/trouble-api" }
     steps:
       - uses: actions/checkout@v4
       - uses: ippoan/setup-bazel@main
@@ -316,6 +317,13 @@ jobs:
             dockerfile: Dockerfile.dtako
             tag-suffix: "-dtako"
             extra-copy: ""
+          - name: trouble
+            targets: "//crates/trouble-api"
+            binaries: "trouble-api"
+            bin-paths: "bazel-bin/crates/trouble-api/trouble-api"
+            dockerfile: Dockerfile.trouble
+            tag-suffix: "-trouble"
+            extra-copy: ""
     steps:
       - uses: actions/checkout@v4
 
@@ -379,7 +387,7 @@ jobs:
         run: |
           REPO="ghcr.io/${{ github.repository }}"
           SHA="${{ github.sha }}"
-          for suffix in "" "-gateway" "-tenko" "-carins" "-dtako"; do
+          for suffix in "" "-gateway" "-tenko" "-carins" "-dtako" "-trouble"; do
             docker pull "${REPO}${suffix}:${SHA}"
             docker tag "${REPO}${suffix}:${SHA}" "${REPO}${suffix}:dev"
             docker push "${REPO}${suffix}:dev"
@@ -404,7 +412,7 @@ jobs:
         run: |
           REPO="ghcr.io/${{ github.repository }}"
           SHA="${{ github.sha }}"
-          for suffix in "" "-gateway" "-tenko" "-carins" "-dtako"; do
+          for suffix in "" "-gateway" "-tenko" "-carins" "-dtako" "-trouble"; do
             docker pull "${REPO}${suffix}:dev"
             docker tag "${REPO}${suffix}:dev" "${REPO}${suffix}:${SHA}"
             docker tag "${REPO}${suffix}:dev" "${REPO}${suffix}:latest"

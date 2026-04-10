@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/alc-carins", "crates/alc-core", "crates/alc-csv-parser", "crates/alc-compare", "crates/alc-devices", "crates/alc-dtako", "crates/alc-misc", "crates/alc-notify", "crates/alc-pdf", "crates/alc-storage", "crates/alc-tenko", "crates/alc-trouble", "crates/carins-api", "crates/dtako-api", "crates/gateway", "crates/tenko-api"]
+members = [".", "crates/alc-carins", "crates/alc-core", "crates/alc-csv-parser", "crates/alc-compare", "crates/alc-devices", "crates/alc-dtako", "crates/alc-misc", "crates/alc-notify", "crates/alc-pdf", "crates/alc-storage", "crates/alc-tenko", "crates/alc-trouble", "crates/carins-api", "crates/dtako-api", "crates/gateway", "crates/tenko-api", "crates/trouble-api"]
 resolver = "2"
 
 [package]

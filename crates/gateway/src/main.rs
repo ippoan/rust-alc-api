@@ -44,6 +44,9 @@ async fn main() {
     if let Some(ref dtako_url) = config.dtako_url {
         tracing::info!("dtako-api: {dtako_url}");
     }
+    if let Some(ref trouble_url) = config.trouble_url {
+        tracing::info!("trouble-api: {trouble_url}");
+    }
 
     let proxy_state = ProxyState {
         client,
@@ -52,6 +55,7 @@ async fn main() {
         tenko_url: config.tenko_url,
         carins_url: config.carins_url,
         dtako_url: config.dtako_url,
+        trouble_url: config.trouble_url,
     };
 
     let cors = CorsLayer::new()
