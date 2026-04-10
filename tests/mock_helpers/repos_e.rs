@@ -4,14 +4,16 @@ use chrono::Utc;
 use uuid::Uuid;
 
 use rust_alc_api::db::models::{
-    CreateTroubleCategory, CreateTroubleComment, CreateTroubleOffice, CreateTroubleTicket,
-    CreateWorkflowState, CreateWorkflowTransition, TroubleCategory, TroubleComment, TroubleFile,
-    TroubleOffice, TroubleStatusHistory, TroubleTicket, TroubleTicketFilter,
-    TroubleTicketsResponse, TroubleWorkflowState, TroubleWorkflowTransition, UpdateTroubleTicket,
+    CreateTroubleCategory, CreateTroubleComment, CreateTroubleOffice, CreateTroubleProgressStatus,
+    CreateTroubleTicket, CreateWorkflowState, CreateWorkflowTransition, TroubleCategory,
+    TroubleComment, TroubleFile, TroubleOffice, TroubleProgressStatus, TroubleStatusHistory,
+    TroubleTicket, TroubleTicketFilter, TroubleTicketsResponse, TroubleWorkflowState,
+    TroubleWorkflowTransition, UpdateTroubleTicket,
 };
 use rust_alc_api::db::repository::{
     TroubleCategoriesRepository, TroubleCommentsRepository, TroubleFilesRepository,
-    TroubleOfficesRepository, TroubleTicketsRepository, TroubleWorkflowRepository,
+    TroubleOfficesRepository, TroubleProgressStatusesRepository, TroubleTicketsRepository,
+    TroubleWorkflowRepository,
 };
 
 macro_rules! check_fail {
@@ -566,6 +568,21 @@ impl TroubleCategoriesRepository for MockTroubleCategoriesRepository {
         }
         Ok(true)
     }
+
+    async fn update_sort_order(
+        &self,
+        _tenant_id: Uuid,
+        id: Uuid,
+        sort_order: i32,
+    ) -> Result<Option<TroubleCategory>, sqlx::Error> {
+        check_fail!(self);
+        let mut cats = self.categories.lock().unwrap();
+        if let Some(cat) = cats.iter_mut().find(|c| c.id == id) {
+            cat.sort_order = sort_order;
+            return Ok(Some(cat.clone()));
+        }
+        Ok(None)
+    }
 }
 
 // ============================================================
@@ -618,5 +635,88 @@ impl TroubleOfficesRepository for MockTroubleOfficesRepository {
             return Ok(false);
         }
         Ok(true)
+    }
+
+    async fn update_sort_order(
+        &self,
+        _tenant_id: Uuid,
+        id: Uuid,
+        sort_order: i32,
+    ) -> Result<Option<TroubleOffice>, sqlx::Error> {
+        check_fail!(self);
+        let mut offices = self.offices.lock().unwrap();
+        if let Some(office) = offices.iter_mut().find(|o| o.id == id) {
+            office.sort_order = sort_order;
+            return Ok(Some(office.clone()));
+        }
+        Ok(None)
+    }
+}
+
+// ============================================================
+// MockTroubleProgressStatusesRepository
+// ============================================================
+
+pub struct MockTroubleProgressStatusesRepository {
+    pub fail_next: AtomicBool,
+    pub delete_returns_false: AtomicBool,
+    pub statuses: std::sync::Mutex<Vec<TroubleProgressStatus>>,
+}
+
+impl Default for MockTroubleProgressStatusesRepository {
+    fn default() -> Self {
+        Self {
+            fail_next: AtomicBool::new(false),
+            delete_returns_false: AtomicBool::new(false),
+            statuses: std::sync::Mutex::new(vec![]),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl TroubleProgressStatusesRepository for MockTroubleProgressStatusesRepository {
+    async fn list(&self, _tenant_id: Uuid) -> Result<Vec<TroubleProgressStatus>, sqlx::Error> {
+        check_fail!(self);
+        Ok(self.statuses.lock().unwrap().clone())
+    }
+
+    async fn create(
+        &self,
+        tenant_id: Uuid,
+        input: &CreateTroubleProgressStatus,
+    ) -> Result<TroubleProgressStatus, sqlx::Error> {
+        check_fail!(self);
+        let status = TroubleProgressStatus {
+            id: Uuid::new_v4(),
+            tenant_id,
+            name: input.name.clone(),
+            sort_order: input.sort_order.unwrap_or(0),
+            created_at: Utc::now(),
+        };
+        self.statuses.lock().unwrap().push(status.clone());
+        Ok(status)
+    }
+
+    async fn delete(&self, _tenant_id: Uuid, _id: Uuid) -> Result<bool, sqlx::Error> {
+        check_fail!(self);
+        if self.delete_returns_false.load(Ordering::SeqCst) {
+            return Ok(false);
+        }
+        Ok(true)
+    }
+
+    async fn update_sort_order(
+        &self,
+        _tenant_id: Uuid,
+        id: Uuid,
+        sort_order: i32,
+    ) -> Result<Option<TroubleProgressStatus>, sqlx::Error> {
+        check_fail!(self);
+        let mut statuses = self.statuses.lock().unwrap();
+        if let Some(status) = statuses.iter_mut().find(|s| s.id == id) {
+            status.sort_order = sort_order;
+            return Ok(Some(status.clone()));
+        }
+        Ok(None)
     }
 }

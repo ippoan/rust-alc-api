@@ -56,4 +56,21 @@ impl TroubleOfficesRepository for PgTroubleOfficesRepository {
             .await?;
         Ok(result.rows_affected() > 0)
     }
+
+    async fn update_sort_order(
+        &self,
+        tenant_id: Uuid,
+        id: Uuid,
+        sort_order: i32,
+    ) -> Result<Option<TroubleOffice>, sqlx::Error> {
+        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
+        sqlx::query_as::<_, TroubleOffice>(
+            "UPDATE trouble_offices SET sort_order = $3 WHERE id = $1 AND tenant_id = $2 RETURNING *",
+        )
+        .bind(id)
+        .bind(tenant_id)
+        .bind(sort_order)
+        .fetch_optional(&mut *tc.conn)
+        .await
+    }
 }

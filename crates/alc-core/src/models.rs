@@ -1684,6 +1684,23 @@ pub struct CreateTroubleOffice {
     pub sort_order: Option<i32>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, TS)]
+#[ts(export)]
+pub struct TroubleProgressStatus {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub name: String,
+    pub sort_order: i32,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize, TS)]
+#[ts(export)]
+pub struct CreateTroubleProgressStatus {
+    pub name: String,
+    pub sort_order: Option<i32>,
+}
+
 #[derive(Debug, Deserialize, TS)]
 #[ts(export)]
 pub struct TransitionRequest {

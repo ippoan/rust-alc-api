@@ -12,4 +12,10 @@ pub trait TroubleCategoriesRepository: Send + Sync {
         input: &CreateTroubleCategory,
     ) -> Result<TroubleCategory, sqlx::Error>;
     async fn delete(&self, tenant_id: Uuid, id: Uuid) -> Result<bool, sqlx::Error>;
+    async fn update_sort_order(
+        &self,
+        tenant_id: Uuid,
+        id: Uuid,
+        sort_order: i32,
+    ) -> Result<Option<TroubleCategory>, sqlx::Error>;
 }

@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::TroubleState;
 use alc_core::auth_middleware::TenantId;
-use alc_core::models::{CreateTroubleOffice, TroubleOffice};
+use alc_core::models::{CreateTroubleProgressStatus, TroubleProgressStatus};
 
 pub fn tenant_router<S>() -> Router<S>
 where
@@ -16,35 +16,38 @@ where
     S: Clone + Send + Sync + 'static,
 {
     Router::new()
-        .route("/trouble/offices", get(list_offices).post(create_office))
         .route(
-            "/trouble/offices/{id}",
-            delete(delete_office).put(update_office_sort),
+            "/trouble/progress-statuses",
+            get(list_progress_statuses).post(create_progress_status),
+        )
+        .route(
+            "/trouble/progress-statuses/{id}",
+            delete(delete_progress_status).put(update_progress_status_sort),
         )
 }
 
-async fn list_offices(
+async fn list_progress_statuses(
     State(state): State<TroubleState>,
     tenant: axum::Extension<TenantId>,
-) -> Result<Json<Vec<TroubleOffice>>, StatusCode> {
-    let offices = state
-        .trouble_offices
+) -> Result<Json<Vec<TroubleProgressStatus>>, StatusCode> {
+    let statuses = state
+        .trouble_progress_statuses
         .list(tenant.0 .0)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(Json(offices))
+    Ok(Json(statuses))
 }
 
-async fn create_office(
+async fn create_progress_status(
     State(state): State<TroubleState>,
     tenant: axum::Extension<TenantId>,
-    Json(body): Json<CreateTroubleOffice>,
-) -> Result<(StatusCode, Json<TroubleOffice>), StatusCode> {
+    Json(body): Json<CreateTroubleProgressStatus>,
+) -> Result<(StatusCode, Json<TroubleProgressStatus>), StatusCode> {
     if body.name.trim().is_empty() {
         return Err(StatusCode::BAD_REQUEST);
     }
-    let office = state
-        .trouble_offices
+    let status = state
+        .trouble_progress_statuses
         .create(tenant.0 .0, &body)
         .await
         .map_err(|e| {
@@ -53,10 +56,10 @@ async fn create_office(
                     return StatusCode::CONFLICT;
                 }
             }
-            tracing::error!("create_office error: {e}");
+            tracing::error!("create_progress_status error: {e}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
-    Ok((StatusCode::CREATED, Json(office)))
+    Ok((StatusCode::CREATED, Json(status)))
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -64,28 +67,28 @@ struct UpdateSortOrder {
     sort_order: i32,
 }
 
-async fn update_office_sort(
+async fn update_progress_status_sort(
     State(state): State<TroubleState>,
     tenant: axum::Extension<TenantId>,
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateSortOrder>,
-) -> Result<Json<TroubleOffice>, StatusCode> {
-    let office = state
-        .trouble_offices
+) -> Result<Json<TroubleProgressStatus>, StatusCode> {
+    let status = state
+        .trouble_progress_statuses
         .update_sort_order(tenant.0 .0, id, body.sort_order)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
-    Ok(Json(office))
+    Ok(Json(status))
 }
 
-async fn delete_office(
+async fn delete_progress_status(
     State(state): State<TroubleState>,
     tenant: axum::Extension<TenantId>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, StatusCode> {
     let deleted = state
-        .trouble_offices
+        .trouble_progress_statuses
         .delete(tenant.0 .0, id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;

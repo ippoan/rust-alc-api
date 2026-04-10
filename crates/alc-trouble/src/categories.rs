@@ -20,7 +20,10 @@ where
             "/trouble/categories",
             get(list_categories).post(create_category),
         )
-        .route("/trouble/categories/{id}", delete(delete_category))
+        .route(
+            "/trouble/categories/{id}",
+            delete(delete_category).put(update_category_sort),
+        )
 }
 
 async fn list_categories(
@@ -57,6 +60,26 @@ async fn create_category(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
     Ok((StatusCode::CREATED, Json(category)))
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct UpdateSortOrder {
+    sort_order: i32,
+}
+
+async fn update_category_sort(
+    State(state): State<TroubleState>,
+    tenant: axum::Extension<TenantId>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<UpdateSortOrder>,
+) -> Result<Json<TroubleCategory>, StatusCode> {
+    let cat = state
+        .trouble_categories
+        .update_sort_order(tenant.0 .0, id, body.sort_order)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+    Ok(Json(cat))
 }
 
 async fn delete_category(

@@ -12,4 +12,10 @@ pub trait TroubleOfficesRepository: Send + Sync {
         input: &CreateTroubleOffice,
     ) -> Result<TroubleOffice, sqlx::Error>;
     async fn delete(&self, tenant_id: Uuid, id: Uuid) -> Result<bool, sqlx::Error>;
+    async fn update_sort_order(
+        &self,
+        tenant_id: Uuid,
+        id: Uuid,
+        sort_order: i32,
+    ) -> Result<Option<TroubleOffice>, sqlx::Error>;
 }
