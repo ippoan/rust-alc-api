@@ -157,12 +157,14 @@ impl TroubleTicketsRepository for MockTroubleTicketsRepository {
 
 pub struct MockTroubleFilesRepository {
     pub fail_next: AtomicBool,
+    pub delete_returns_false: AtomicBool,
 }
 
 impl Default for MockTroubleFilesRepository {
     fn default() -> Self {
         Self {
             fail_next: AtomicBool::new(false),
+            delete_returns_false: AtomicBool::new(false),
         }
     }
 }
@@ -207,6 +209,9 @@ impl TroubleFilesRepository for MockTroubleFilesRepository {
 
     async fn delete(&self, _tenant_id: Uuid, _id: Uuid) -> Result<bool, sqlx::Error> {
         check_fail!(self);
+        if self.delete_returns_false.load(Ordering::SeqCst) {
+            return Ok(false);
+        }
         Ok(true)
     }
 }
@@ -400,12 +405,14 @@ impl TroubleWorkflowRepository for MockTroubleWorkflowRepository {
 
 pub struct MockTroubleCommentsRepository {
     pub fail_next: AtomicBool,
+    pub delete_returns_false: AtomicBool,
 }
 
 impl Default for MockTroubleCommentsRepository {
     fn default() -> Self {
         Self {
             fail_next: AtomicBool::new(false),
+            delete_returns_false: AtomicBool::new(false),
         }
     }
 }
@@ -442,6 +449,9 @@ impl TroubleCommentsRepository for MockTroubleCommentsRepository {
 
     async fn delete(&self, _tenant_id: Uuid, _id: Uuid) -> Result<bool, sqlx::Error> {
         check_fail!(self);
+        if self.delete_returns_false.load(Ordering::SeqCst) {
+            return Ok(false);
+        }
         Ok(true)
     }
 }
