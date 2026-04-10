@@ -10,6 +10,10 @@ use alc_notify::repo::{
     PgNotifyDeliveryRepository, PgNotifyDocumentRepository, PgNotifyLineConfigRepository,
     PgNotifyRecipientRepository,
 };
+use alc_trouble::repo::{
+    trouble_comments::PgTroubleCommentsRepository, trouble_files::PgTroubleFilesRepository,
+    trouble_tickets::PgTroubleTicketsRepository, trouble_workflow::PgTroubleWorkflowRepository,
+};
 use rust_alc_api::auth::google::GoogleTokenVerifier;
 use rust_alc_api::auth::jwt::JwtSecret;
 use rust_alc_api::db::repository::{
@@ -173,6 +177,10 @@ async fn main() -> anyhow::Result<()> {
     let notify_documents = Arc::new(PgNotifyDocumentRepository::new(pool.clone()));
     let notify_deliveries = Arc::new(PgNotifyDeliveryRepository::new(pool.clone()));
     let notify_line_config = Arc::new(PgNotifyLineConfigRepository::new(pool.clone()));
+    let trouble_tickets = Arc::new(PgTroubleTicketsRepository::new(pool.clone()));
+    let trouble_files = Arc::new(PgTroubleFilesRepository::new(pool.clone()));
+    let trouble_workflow = Arc::new(PgTroubleWorkflowRepository::new(pool.clone()));
+    let trouble_comments = Arc::new(PgTroubleCommentsRepository::new(pool.clone()));
 
     // notify 用 R2 (optional)
     let notify_storage: Option<Arc<dyn StorageBackend>> =
@@ -189,6 +197,24 @@ async fn main() -> anyhow::Result<()> {
                     bucket, account_id, access_key, secret_key, None,
                 )
                 .expect("Failed to init notify R2 backend"),
+            ) as Arc<dyn StorageBackend>
+        });
+
+    // trouble 用 R2 (optional)
+    let trouble_storage: Option<Arc<dyn StorageBackend>> =
+        std::env::var("TROUBLE_R2_BUCKET").ok().map(|bucket| {
+            let account_id = std::env::var("R2_ACCOUNT_ID")
+                .expect("R2_ACCOUNT_ID required for TROUBLE_R2_BUCKET");
+            let access_key =
+                std::env::var("TROUBLE_R2_ACCESS_KEY").expect("TROUBLE_R2_ACCESS_KEY required");
+            let secret_key =
+                std::env::var("TROUBLE_R2_SECRET_KEY").expect("TROUBLE_R2_SECRET_KEY required");
+            tracing::info!("Trouble storage: R2 (bucket={})", bucket);
+            Arc::new(
+                rust_alc_api::storage::R2Backend::new(
+                    bucket, account_id, access_key, secret_key, None,
+                )
+                .expect("Failed to init trouble R2 backend"),
             ) as Arc<dyn StorageBackend>
         });
 
@@ -240,6 +266,11 @@ async fn main() -> anyhow::Result<()> {
         notify_deliveries,
         notify_line_config,
         notify_storage,
+        trouble_tickets,
+        trouble_files,
+        trouble_workflow,
+        trouble_comments,
+        trouble_storage,
         webhook: {
             let wh_repo: Arc<dyn rust_alc_api::db::repository::WebhookRepository> = Arc::new(
                 rust_alc_api::db::repository::PgWebhookRepository::new(pool.clone()),

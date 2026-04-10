@@ -17,6 +17,7 @@ pub struct ProxyState {
     pub tenko_url: Option<String>,
     pub carins_url: Option<String>,
     pub dtako_url: Option<String>,
+    pub trouble_url: Option<String>,
 }
 
 /// パスに応じてバックエンド URL を選択する
@@ -45,6 +46,8 @@ fn resolve_backend<'a>(path: &str, state: &'a ProxyState) -> &'a str {
         || api_path.starts_with("/internal/")
     {
         state.dtako_url.as_deref().unwrap_or(&state.backend_url)
+    } else if api_path.starts_with("/trouble") {
+        state.trouble_url.as_deref().unwrap_or(&state.backend_url)
     } else {
         &state.backend_url
     }
@@ -165,6 +168,7 @@ mod tests {
             tenko_url: Some("http://tenko:8082".to_string()),
             carins_url: Some("http://carins:8083".to_string()),
             dtako_url: Some("http://dtako:8084".to_string()),
+            trouble_url: Some("http://trouble:8085".to_string()),
         }
     }
 
@@ -259,6 +263,19 @@ mod tests {
     }
 
     #[test]
+    fn test_resolve_backend_trouble() {
+        let state = test_state();
+        assert_eq!(
+            resolve_backend("/api/trouble/tickets", &state),
+            "http://trouble:8085"
+        );
+        assert_eq!(
+            resolve_backend("/api/trouble/workflow/states", &state),
+            "http://trouble:8085"
+        );
+    }
+
+    #[test]
     fn test_resolve_backend_fallback() {
         let state = ProxyState {
             client: Client::new(),
@@ -267,6 +284,7 @@ mod tests {
             tenko_url: None,
             carins_url: None,
             dtako_url: None,
+            trouble_url: None,
         };
         assert_eq!(
             resolve_backend("/api/tenko/sessions", &state),

@@ -69,6 +69,11 @@ pub fn setup_mock_app_state() -> AppState {
         notify_deliveries: Arc::new(MockNotifyDeliveryRepository::default()),
         notify_line_config: Arc::new(MockNotifyLineConfigRepository::default()),
         notify_storage: None,
+        trouble_tickets: Arc::new(MockTroubleTicketsRepository::default()),
+        trouble_files: Arc::new(MockTroubleFilesRepository::default()),
+        trouble_workflow: Arc::new(MockTroubleWorkflowRepository::default()),
+        trouble_comments: Arc::new(MockTroubleCommentsRepository::default()),
+        trouble_storage: Some(Arc::new(MockStorage::new("trouble-bucket"))),
         webhook: None,
     }
 }

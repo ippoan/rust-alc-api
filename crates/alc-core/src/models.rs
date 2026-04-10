@@ -1440,3 +1440,265 @@ pub struct ItemFile {
     pub size_bytes: i64,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
+
+// --- Trouble ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, TS)]
+#[ts(export)]
+pub struct TroubleWorkflowState {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub name: String,
+    pub label: String,
+    pub color: String,
+    pub sort_order: i32,
+    pub is_initial: bool,
+    pub is_terminal: bool,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize, TS)]
+#[ts(export)]
+pub struct CreateWorkflowState {
+    pub name: String,
+    pub label: String,
+    pub color: Option<String>,
+    pub sort_order: Option<i32>,
+    pub is_initial: Option<bool>,
+    pub is_terminal: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, TS)]
+#[ts(export)]
+pub struct TroubleWorkflowTransition {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub from_state_id: Uuid,
+    pub to_state_id: Uuid,
+    pub label: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize, TS)]
+#[ts(export)]
+pub struct CreateWorkflowTransition {
+    pub from_state_id: Uuid,
+    pub to_state_id: Uuid,
+    pub label: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, TS)]
+#[ts(export)]
+pub struct TroubleTicket {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub ticket_no: i32,
+    pub category: String,
+    pub title: String,
+    pub occurred_at: Option<DateTime<Utc>>,
+    pub occurred_date: Option<chrono::NaiveDate>,
+    pub company_name: String,
+    pub office_name: String,
+    pub department: String,
+    pub person_name: String,
+    pub person_id: Option<Uuid>,
+    pub vehicle_number: String,
+    pub location: String,
+    pub description: String,
+    pub status_id: Option<Uuid>,
+    pub assigned_to: Option<Uuid>,
+    pub progress_notes: String,
+    pub allowance: String,
+    pub damage_amount: Option<String>,
+    pub compensation_amount: Option<String>,
+    pub confirmation_notice: String,
+    pub disciplinary_content: String,
+    pub road_service_cost: Option<String>,
+    pub counterparty: String,
+    pub counterparty_insurance: String,
+    pub custom_fields: serde_json::Value,
+    pub due_date: Option<DateTime<Utc>>,
+    pub overdue_notified_at: Option<DateTime<Utc>>,
+    pub created_by: Option<Uuid>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub deleted_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Deserialize, TS)]
+#[ts(export)]
+pub struct CreateTroubleTicket {
+    pub category: String,
+    pub title: Option<String>,
+    pub occurred_at: Option<DateTime<Utc>>,
+    pub occurred_date: Option<chrono::NaiveDate>,
+    pub company_name: Option<String>,
+    pub office_name: Option<String>,
+    pub department: Option<String>,
+    pub person_name: Option<String>,
+    pub person_id: Option<Uuid>,
+    pub vehicle_number: Option<String>,
+    pub location: Option<String>,
+    pub description: Option<String>,
+    pub assigned_to: Option<Uuid>,
+    pub damage_amount: Option<f64>,
+    pub compensation_amount: Option<f64>,
+    pub road_service_cost: Option<f64>,
+    pub counterparty: Option<String>,
+    pub counterparty_insurance: Option<String>,
+    pub custom_fields: Option<serde_json::Value>,
+    pub due_date: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Deserialize, TS)]
+#[ts(export)]
+pub struct UpdateTroubleTicket {
+    pub category: Option<String>,
+    pub title: Option<String>,
+    pub occurred_at: Option<DateTime<Utc>>,
+    pub occurred_date: Option<chrono::NaiveDate>,
+    pub company_name: Option<String>,
+    pub office_name: Option<String>,
+    pub department: Option<String>,
+    pub person_name: Option<String>,
+    pub person_id: Option<Uuid>,
+    pub vehicle_number: Option<String>,
+    pub location: Option<String>,
+    pub description: Option<String>,
+    pub assigned_to: Option<Uuid>,
+    pub progress_notes: Option<String>,
+    pub allowance: Option<String>,
+    pub damage_amount: Option<f64>,
+    pub compensation_amount: Option<f64>,
+    pub confirmation_notice: Option<String>,
+    pub disciplinary_content: Option<String>,
+    pub road_service_cost: Option<f64>,
+    pub counterparty: Option<String>,
+    pub counterparty_insurance: Option<String>,
+    pub custom_fields: Option<serde_json::Value>,
+    pub due_date: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Deserialize, TS)]
+#[ts(export)]
+pub struct TroubleTicketFilter {
+    pub category: Option<String>,
+    pub status_id: Option<Uuid>,
+    pub person_name: Option<String>,
+    pub company_name: Option<String>,
+    pub office_name: Option<String>,
+    pub date_from: Option<chrono::NaiveDate>,
+    pub date_to: Option<chrono::NaiveDate>,
+    pub q: Option<String>,
+    pub page: Option<i64>,
+    pub per_page: Option<i64>,
+}
+
+#[derive(Debug, Serialize, TS)]
+#[ts(export)]
+pub struct TroubleTicketsResponse {
+    pub tickets: Vec<TroubleTicket>,
+    pub total: i64,
+    pub page: i64,
+    pub per_page: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, TS)]
+#[ts(export)]
+pub struct TroubleFile {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub ticket_id: Uuid,
+    pub filename: String,
+    pub content_type: String,
+    pub size_bytes: i64,
+    pub storage_key: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, TS)]
+#[ts(export)]
+pub struct TroubleStatusHistory {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub ticket_id: Uuid,
+    pub from_state_id: Option<Uuid>,
+    pub to_state_id: Uuid,
+    pub changed_by: Option<Uuid>,
+    pub comment: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, TS)]
+#[ts(export)]
+pub struct TroubleComment {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub ticket_id: Uuid,
+    pub author_id: Option<Uuid>,
+    pub body: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize, TS)]
+#[ts(export)]
+pub struct CreateTroubleComment {
+    pub body: String,
+}
+
+#[derive(Debug, Deserialize, TS)]
+#[ts(export)]
+pub struct TransitionRequest {
+    pub to_state_id: Uuid,
+    pub comment: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, TS)]
+#[ts(export)]
+pub struct TroubleCustomFieldDef {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub field_key: String,
+    pub label: String,
+    pub field_type: String,
+    pub options: Option<serde_json::Value>,
+    pub required: bool,
+    pub sort_order: i32,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize, TS)]
+#[ts(export)]
+pub struct CreateCustomFieldDef {
+    pub field_key: String,
+    pub label: String,
+    pub field_type: String,
+    pub options: Option<serde_json::Value>,
+    pub required: Option<bool>,
+    pub sort_order: Option<i32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, TS)]
+#[ts(export)]
+pub struct TroubleNotificationPref {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub event_type: String,
+    pub notify_channel: String,
+    pub enabled: bool,
+    pub recipient_ids: Vec<Uuid>,
+    pub notify_admins: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize, TS)]
+#[ts(export)]
+pub struct UpsertNotificationPref {
+    pub event_type: String,
+    pub notify_channel: String,
+    pub enabled: Option<bool>,
+    pub recipient_ids: Option<Vec<Uuid>>,
+    pub notify_admins: Option<bool>,
+}

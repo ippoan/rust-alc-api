@@ -61,7 +61,8 @@ jobs:
           - { service: backend, suffix: "",       binary: rust-alc-api }
           - { service: tenko,   suffix: "-tenko", binary: tenko-api }
           - { service: carins,  suffix: "-carins", binary: carins-api }
-          - { service: dtako,   suffix: "-dtako",  binary: dtako-api }
+          - { service: dtako,   suffix: "-dtako",   binary: dtako-api }
+          - { service: trouble, suffix: "-trouble", binary: trouble-api }
     steps:
       - uses: actions/checkout@v4
       - uses: docker/login-action@v3
@@ -118,7 +119,7 @@ jobs:
           REPO="${{ env.REPO }}"
           TAG="${{ inputs.ref_name }}"
           SHA="${{ inputs.image_sha }}"
-          for suffix in "" "-gateway" "-tenko" "-carins" "-dtako"; do
+          for suffix in "" "-gateway" "-tenko" "-carins" "-dtako" "-trouble"; do
             docker pull "${REPO}${suffix}:dev"
             docker tag "${REPO}${suffix}:dev" "${REPO}${suffix}:${TAG}"
             docker tag "${REPO}${suffix}:dev" "${REPO}${suffix}:${SHA}"
@@ -181,7 +182,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        service: [backend, tenko, carins, dtako]
+        service: [backend, tenko, carins, dtako, trouble]
     steps:
       - uses: actions/checkout@v4
 
@@ -282,6 +283,9 @@ jobs:
             DTAKO_URL=$(gcloud run services describe rust-alc-api-staging-dtako \
               --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
               --format 'value(status.url)' 2>/dev/null || echo "")
+            TROUBLE_URL=$(gcloud run services describe rust-alc-api-staging-trouble \
+              --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
+              --format 'value(status.url)' 2>/dev/null || echo "")
           else
             BACKEND_URL=$(gcloud run services describe rust-alc-api \
               --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
@@ -293,6 +297,9 @@ jobs:
               --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
               --format 'value(status.url)' 2>/dev/null || echo "")
             DTAKO_URL=$(gcloud run services describe rust-alc-api-dtako \
+              --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
+              --format 'value(status.url)' 2>/dev/null || echo "")
+            TROUBLE_URL=$(gcloud run services describe rust-alc-api-trouble \
               --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
               --format 'value(status.url)' 2>/dev/null || echo "")
           fi
@@ -308,6 +315,7 @@ jobs:
             -e "s|PLACEHOLDER_TENKO_URL|${TENKO_URL}|" \
             -e "s|PLACEHOLDER_CARINS_URL|${CARINS_URL}|" \
             -e "s|PLACEHOLDER_DTAKO_URL|${DTAKO_URL}|" \
+            -e "s|PLACEHOLDER_TROUBLE_URL|${TROUBLE_URL}|" \
             /tmp/gateway.yaml
 
           echo "=== Gateway YAML ==="

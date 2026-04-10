@@ -46,6 +46,10 @@ pub use alc_tenko::tenko_records;
 pub use alc_tenko::tenko_schedules;
 pub use alc_tenko::tenko_sessions;
 pub use alc_tenko::tenko_webhooks;
+pub use alc_trouble::comments as trouble_comments;
+pub use alc_trouble::files as trouble_files;
+pub use alc_trouble::tickets as trouble_tickets;
+pub use alc_trouble::workflow as trouble_workflow;
 
 use axum::{middleware as axum_middleware, Router};
 
@@ -103,6 +107,10 @@ pub fn router() -> Router<AppState> {
         .merge(notify_documents::tenant_router())
         .merge(notify_distribute::tenant_router())
         .merge(notify_line_config::tenant_router())
+        .merge(trouble_tickets::tenant_router())
+        .merge(trouble_files::tenant_router())
+        .merge(trouble_workflow::tenant_router())
+        .merge(trouble_comments::tenant_router())
         .layer(axum_middleware::from_fn(require_tenant));
 
     // 公開ルート (認証不要)

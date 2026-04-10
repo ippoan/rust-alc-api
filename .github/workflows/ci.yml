@@ -43,6 +43,7 @@ jobs:
           - { name: "mock-dtako", key: "test-mock-dtako", cmd: "cargo llvm-cov nextest --no-report --ignore-run-fail --test mock_dtako" }
           - { name: "mock-devices", key: "test-mock-devices", cmd: "cargo llvm-cov nextest --no-report --ignore-run-fail --test mock_devices" }
           - { name: "mock-carins", key: "test-mock-carins", cmd: "cargo llvm-cov nextest --no-report --ignore-run-fail --test mock_carins" }
+          - { name: "mock-trouble", key: "test-mock-trouble", cmd: "cargo llvm-cov nextest --no-report --ignore-run-fail --test mock_trouble" }
           - { name: "mock-misc", key: "test-mock-misc", cmd: "cargo llvm-cov nextest --no-report --ignore-run-fail --test mock_misc --test archive_repo_test" }
     steps:
       - uses: actions/checkout@v4
@@ -76,6 +77,7 @@ jobs:
           - { name: tenko, targets: "//crates/tenko-api" }
           - { name: carins, targets: "//crates/carins-api" }
           - { name: dtako, targets: "//crates/dtako-api" }
+          - { name: trouble, targets: "//crates/trouble-api" }
     steps:
       - uses: actions/checkout@v4
       - uses: ippoan/setup-bazel@main
@@ -176,6 +178,7 @@ jobs:
           - { name: "mock-dtako", cmd: "--test mock_dtako" }
           - { name: "mock-devices", cmd: "--test mock_devices" }
           - { name: "mock-carins", cmd: "--test mock_carins" }
+          - { name: "mock-trouble", cmd: "--test mock_trouble" }
           - { name: "mock-misc", cmd: "--test mock_misc --test archive_repo_test" }
     services:
       postgres:
@@ -314,6 +317,13 @@ jobs:
             dockerfile: Dockerfile.dtako
             tag-suffix: "-dtako"
             extra-copy: ""
+          - name: trouble
+            targets: "//crates/trouble-api"
+            binaries: "trouble-api"
+            bin-paths: "bazel-bin/crates/trouble-api/trouble-api"
+            dockerfile: Dockerfile.trouble
+            tag-suffix: "-trouble"
+            extra-copy: ""
     steps:
       - uses: actions/checkout@v4
 
@@ -377,7 +387,7 @@ jobs:
         run: |
           REPO="ghcr.io/${{ github.repository }}"
           SHA="${{ github.sha }}"
-          for suffix in "" "-gateway" "-tenko" "-carins" "-dtako"; do
+          for suffix in "" "-gateway" "-tenko" "-carins" "-dtako" "-trouble"; do
             docker pull "${REPO}${suffix}:${SHA}"
             docker tag "${REPO}${suffix}:${SHA}" "${REPO}${suffix}:dev"
             docker push "${REPO}${suffix}:dev"
@@ -402,7 +412,7 @@ jobs:
         run: |
           REPO="ghcr.io/${{ github.repository }}"
           SHA="${{ github.sha }}"
-          for suffix in "" "-gateway" "-tenko" "-carins" "-dtako"; do
+          for suffix in "" "-gateway" "-tenko" "-carins" "-dtako" "-trouble"; do
             docker pull "${REPO}${suffix}:dev"
             docker tag "${REPO}${suffix}:dev" "${REPO}${suffix}:${SHA}"
             docker tag "${REPO}${suffix}:dev" "${REPO}${suffix}:latest"
