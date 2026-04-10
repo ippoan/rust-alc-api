@@ -153,7 +153,7 @@ async fn delete_comment_success() {
 }
 
 #[tokio::test]
-async fn delete_comment_not_found() {
+async fn delete_comment_db_error() {
     let mock = Arc::new(MockTroubleCommentsRepository::default());
     mock.fail_next
         .store(true, std::sync::atomic::Ordering::SeqCst);
@@ -172,4 +172,26 @@ async fn delete_comment_not_found() {
         .await
         .unwrap();
     assert_eq!(res.status(), 500);
+}
+
+#[tokio::test]
+async fn delete_comment_returns_not_found() {
+    let mock = Arc::new(MockTroubleCommentsRepository::default());
+    mock.delete_returns_false
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let tenant_id = Uuid::new_v4();
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+    state.trouble_comments = mock;
+    let base = crate::common::spawn_test_server(state).await;
+    let auth = format!("Bearer {jwt}");
+
+    let id = Uuid::new_v4();
+    let res = client()
+        .delete(format!("{base}/api/trouble/comments/{id}"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 404);
 }
