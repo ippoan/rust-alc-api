@@ -1503,6 +1503,7 @@ pub struct TroubleTicket {
     pub person_name: String,
     pub person_id: Option<Uuid>,
     pub vehicle_number: String,
+    pub registration_number: String,
     pub location: String,
     pub description: String,
     pub status_id: Option<Uuid>,
@@ -1645,6 +1646,40 @@ pub struct TroubleComment {
 #[ts(export)]
 pub struct CreateTroubleComment {
     pub body: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, TS)]
+#[ts(export)]
+pub struct TroubleCategory {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub name: String,
+    pub sort_order: i32,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize, TS)]
+#[ts(export)]
+pub struct CreateTroubleCategory {
+    pub name: String,
+    pub sort_order: Option<i32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, TS)]
+#[ts(export)]
+pub struct TroubleOffice {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub name: String,
+    pub sort_order: i32,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize, TS)]
+#[ts(export)]
+pub struct CreateTroubleOffice {
+    pub name: String,
+    pub sort_order: Option<i32>,
 }
 
 #[derive(Debug, Deserialize, TS)]
