@@ -30,3 +30,6 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON alc_api.trouble_offices TO alc_api_app;
 
 -- registration_number column
 ALTER TABLE alc_api.trouble_tickets ADD COLUMN IF NOT EXISTS registration_number TEXT NOT NULL DEFAULT '';
+
+-- disciplinary_action column (処分内容、既存 disciplinary_content は処分検討内容として使う)
+ALTER TABLE alc_api.trouble_tickets ADD COLUMN IF NOT EXISTS disciplinary_action TEXT NOT NULL DEFAULT '';

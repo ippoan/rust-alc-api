@@ -63,7 +63,7 @@ impl TroubleTicketsRepository for PgTroubleTicketsRepository {
                 status_id, assigned_to,
                 progress_notes, allowance,
                 damage_amount::text, compensation_amount::text,
-                confirmation_notice, disciplinary_content,
+                confirmation_notice, disciplinary_content, disciplinary_action,
                 road_service_cost::text,
                 counterparty, counterparty_insurance,
                 custom_fields, due_date, overdue_notified_at,
@@ -162,7 +162,7 @@ impl TroubleTicketsRepository for PgTroubleTicketsRepository {
                 status_id, assigned_to,
                 progress_notes, allowance,
                 damage_amount::text, compensation_amount::text,
-                confirmation_notice, disciplinary_content,
+                confirmation_notice, disciplinary_content, disciplinary_action,
                 road_service_cost::text,
                 counterparty, counterparty_insurance,
                 custom_fields, due_date, overdue_notified_at,
@@ -234,7 +234,7 @@ impl TroubleTicketsRepository for PgTroubleTicketsRepository {
                 status_id, assigned_to,
                 progress_notes, allowance,
                 damage_amount::text, compensation_amount::text,
-                confirmation_notice, disciplinary_content,
+                confirmation_notice, disciplinary_content, disciplinary_action,
                 road_service_cost::text,
                 counterparty, counterparty_insurance,
                 custom_fields, due_date, overdue_notified_at,
@@ -276,11 +276,12 @@ impl TroubleTicketsRepository for PgTroubleTicketsRepository {
                 compensation_amount = COALESCE($19, compensation_amount),
                 confirmation_notice = COALESCE($20, confirmation_notice),
                 disciplinary_content = COALESCE($21, disciplinary_content),
-                road_service_cost = COALESCE($22, road_service_cost),
-                counterparty = COALESCE($23, counterparty),
-                counterparty_insurance = COALESCE($24, counterparty_insurance),
-                custom_fields = COALESCE($25, custom_fields),
-                due_date = COALESCE($26, due_date),
+                disciplinary_action = COALESCE($22, disciplinary_action),
+                road_service_cost = COALESCE($23, road_service_cost),
+                counterparty = COALESCE($24, counterparty),
+                counterparty_insurance = COALESCE($25, counterparty_insurance),
+                custom_fields = COALESCE($26, custom_fields),
+                due_date = COALESCE($27, due_date),
                 updated_at = NOW()
             WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL
             RETURNING id, tenant_id, ticket_no, category, title,
@@ -292,7 +293,7 @@ impl TroubleTicketsRepository for PgTroubleTicketsRepository {
                 status_id, assigned_to,
                 progress_notes, allowance,
                 damage_amount::text, compensation_amount::text,
-                confirmation_notice, disciplinary_content,
+                confirmation_notice, disciplinary_content, disciplinary_action,
                 road_service_cost::text,
                 counterparty, counterparty_insurance,
                 custom_fields, due_date, overdue_notified_at,
@@ -319,6 +320,7 @@ impl TroubleTicketsRepository for PgTroubleTicketsRepository {
         .bind(input.compensation_amount)
         .bind(&input.confirmation_notice)
         .bind(&input.disciplinary_content)
+        .bind(&input.disciplinary_action)
         .bind(input.road_service_cost)
         .bind(&input.counterparty)
         .bind(&input.counterparty_insurance)
@@ -360,7 +362,7 @@ impl TroubleTicketsRepository for PgTroubleTicketsRepository {
                 status_id, assigned_to,
                 progress_notes, allowance,
                 damage_amount::text, compensation_amount::text,
-                confirmation_notice, disciplinary_content,
+                confirmation_notice, disciplinary_content, disciplinary_action,
                 road_service_cost::text,
                 counterparty, counterparty_insurance,
                 custom_fields, due_date, overdue_notified_at,

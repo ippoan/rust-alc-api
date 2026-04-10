@@ -68,6 +68,7 @@ fn mock_ticket(tenant_id: Uuid) -> TroubleTicket {
         compensation_amount: None,
         confirmation_notice: "".to_string(),
         disciplinary_content: "".to_string(),
+        disciplinary_action: "".to_string(),
         road_service_cost: None,
         counterparty: "".to_string(),
         counterparty_insurance: "".to_string(),
