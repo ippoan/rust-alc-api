@@ -254,3 +254,37 @@ path = "src/archive/dtako.rs"
 type = "unit"
 
 # src/archive/repo.rs — temporarily excluded: PgArchiveDb Phase B methods need integration tests
+
+# --- alc-trouble ---
+
+[[files]]
+path = "crates/alc-trouble/src/tickets.rs"
+type = "combined"
+
+[[files]]
+path = "crates/alc-trouble/src/files.rs"
+type = "combined"
+
+[[files]]
+path = "crates/alc-trouble/src/workflow.rs"
+type = "combined"
+
+[[files]]
+path = "crates/alc-trouble/src/comments.rs"
+type = "combined"
+
+[[files]]
+path = "crates/alc-trouble/src/repo/trouble_tickets.rs"
+type = "combined"
+
+[[files]]
+path = "crates/alc-trouble/src/repo/trouble_files.rs"
+type = "combined"
+
+[[files]]
+path = "crates/alc-trouble/src/repo/trouble_workflow.rs"
+type = "combined"
+
+[[files]]
+path = "crates/alc-trouble/src/repo/trouble_comments.rs"
+type = "combined"

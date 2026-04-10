@@ -662,18 +662,26 @@ async fn test_trouble_file_metadata_crud() {
     let files: Vec<Value> = res.json().await.unwrap();
     assert_eq!(files.len(), 0);
 
-    // Insert file metadata directly via DB
-    let file_id = uuid::Uuid::new_v4();
-    sqlx::query(
-        r#"INSERT INTO trouble_files (id, tenant_id, ticket_id, filename, content_type, size_bytes, storage_key)
-        VALUES ($1, $2, $3::uuid, 'test.pdf', 'application/pdf', 1024, 'test/key.pdf')"#,
-    )
-    .bind(file_id)
-    .bind(tenant_id)
-    .bind(uuid::Uuid::parse_str(ticket_id).unwrap())
-    .execute(state.pool())
-    .await
-    .unwrap();
+    // Upload file via multipart API (covers PgTroubleFilesRepository::create)
+    let form = reqwest::multipart::Form::new().part(
+        "file",
+        reqwest::multipart::Part::bytes(b"hello world".to_vec())
+            .file_name("test.pdf")
+            .mime_str("application/pdf")
+            .unwrap(),
+    );
+    let res = client
+        .post(format!("{base_url}/api/trouble/tickets/{ticket_id}/files"))
+        .header("Authorization", &auth)
+        .multipart(form)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 201);
+    let file: Value = res.json().await.unwrap();
+    let file_id = file["id"].as_str().unwrap();
+    assert_eq!(file["filename"], "test.pdf");
+    assert_eq!(file["content_type"], "application/pdf");
 
     // List files (1)
     let res = client
@@ -686,14 +694,14 @@ async fn test_trouble_file_metadata_crud() {
     let files: Vec<Value> = res.json().await.unwrap();
     assert_eq!(files.len(), 1);
 
-    // Get file (download → 503 no storage, but repo get() is covered)
+    // Download file (MockStorage has the data)
     let res = client
         .get(format!("{base_url}/api/trouble/files/{file_id}/download"))
         .header("Authorization", &auth)
         .send()
         .await
         .unwrap();
-    assert!(res.status() == 503 || res.status() == 404);
+    assert_eq!(res.status(), 200);
 
     // Delete file
     let res = client
