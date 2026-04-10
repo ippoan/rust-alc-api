@@ -32,7 +32,8 @@ use repository::{
     MeasurementsRepository, NfcTagRepository, NotifyDeliveryRepository, NotifyDocumentRepository,
     NotifyLineConfigRepository, NotifyRecipientRepository, SsoAdminRepository,
     TenantUsersRepository, TenkoCallRepository, TenkoRecordsRepository, TenkoSchedulesRepository,
-    TenkoSessionRepository, TenkoWebhooksRepository, TimecardRepository,
+    TenkoSessionRepository, TenkoWebhooksRepository, TimecardRepository, TroubleCommentsRepository,
+    TroubleFilesRepository, TroubleTicketsRepository, TroubleWorkflowRepository,
 };
 use storage::StorageBackend;
 
@@ -86,6 +87,11 @@ pub struct AppState {
     pub notify_deliveries: Arc<dyn NotifyDeliveryRepository>,
     pub notify_line_config: Arc<dyn NotifyLineConfigRepository>,
     pub notify_storage: Option<Arc<dyn StorageBackend>>,
+    pub trouble_tickets: Arc<dyn TroubleTicketsRepository>,
+    pub trouble_files: Arc<dyn TroubleFilesRepository>,
+    pub trouble_workflow: Arc<dyn TroubleWorkflowRepository>,
+    pub trouble_comments: Arc<dyn TroubleCommentsRepository>,
+    pub trouble_storage: Option<Arc<dyn StorageBackend>>,
 }
 
 impl AppState {

@@ -1,0 +1,17 @@
+[package]
+name = "alc-trouble"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+alc-core = { path = "../alc-core" }
+async-trait = "0.1"
+axum = { version = "0.8", features = ["multipart"] }
+chrono = { version = "0.4", features = ["serde"] }
+csv = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sqlx = { version = "0.8", features = ["postgres", "chrono", "uuid"] }
+tokio = "1"
+tracing = "0.1"
+uuid = { version = "1", features = ["v4", "serde"] }
