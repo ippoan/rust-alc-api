@@ -13,6 +13,7 @@ _WORKSPACE_CRATES = [
     "//crates/alc-pdf",
     "//crates/alc-storage",
     "//crates/alc-tenko",
+    "//crates/alc-trouble",
 ]
 
 rust_library(

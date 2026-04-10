@@ -1,0 +1,18 @@
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
+load("@crates//:defs.bzl", "all_crate_deps")
+
+rust_library(
+    name = "alc-trouble",
+    srcs = glob(["src/**/*.rs"]),
+    crate_name = "alc_trouble",
+    deps = all_crate_deps(normal = True) + [
+        "//crates/alc-core",
+    ],
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    visibility = ["//visibility:public"],
+)
+
+rust_test(
+    name = "alc-trouble_test",
+    crate = ":alc-trouble",
+)
