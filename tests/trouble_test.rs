@@ -553,3 +553,154 @@ async fn test_trouble_comment_empty_body() {
         assert_eq!(res.status(), 400);
     });
 }
+
+// ============================================================
+// 9. Workflow transition CRUD
+// ============================================================
+
+#[tokio::test]
+async fn test_trouble_workflow_transition_crud() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(state.pool(), "Transition CRUD").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let client = reqwest::Client::new();
+    let auth = format!("Bearer {jwt}");
+
+    // Setup defaults
+    let res = client
+        .post(format!("{base_url}/api/trouble/workflow/setup"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let states: Vec<Value> = res.json().await.unwrap();
+
+    // Add state "on_hold"
+    let res = client
+        .post(format!("{base_url}/api/trouble/workflow/states"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({"name": "on_hold", "label": "保留"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 201);
+    let on_hold: Value = res.json().await.unwrap();
+    let on_hold_id = on_hold["id"].as_str().unwrap();
+
+    // Create transition: new → on_hold
+    let new_id = states.iter().find(|s| s["name"] == "new").unwrap()["id"]
+        .as_str()
+        .unwrap();
+    let res = client
+        .post(format!("{base_url}/api/trouble/workflow/transitions"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "from_state_id": new_id,
+            "to_state_id": on_hold_id,
+            "label": "保留にする"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 201);
+    let tr: Value = res.json().await.unwrap();
+    let tr_id = tr["id"].as_str().unwrap();
+
+    // Delete transition
+    let res = client
+        .delete(format!(
+            "{base_url}/api/trouble/workflow/transitions/{tr_id}"
+        ))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 204);
+}
+
+// ============================================================
+// 10. File metadata CRUD (covers repo/trouble_files.rs)
+// ============================================================
+
+#[tokio::test]
+async fn test_trouble_file_metadata_crud() {
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let tenant_id = common::create_test_tenant(state.pool(), "File Meta").await;
+    let jwt = common::create_test_jwt(tenant_id, "admin");
+    let client = reqwest::Client::new();
+    let auth = format!("Bearer {jwt}");
+
+    // Setup + create ticket
+    client
+        .post(format!("{base_url}/api/trouble/workflow/setup"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .unwrap();
+    let res = client
+        .post(format!("{base_url}/api/trouble/tickets"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({"category": "その他", "person_name": "ファイルテスト"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 201);
+    let ticket: Value = res.json().await.unwrap();
+    let ticket_id = ticket["id"].as_str().unwrap();
+
+    // List files (empty)
+    let res = client
+        .get(format!("{base_url}/api/trouble/tickets/{ticket_id}/files"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let files: Vec<Value> = res.json().await.unwrap();
+    assert_eq!(files.len(), 0);
+
+    // Insert file metadata directly via DB
+    let file_id = uuid::Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO trouble_files (id, tenant_id, ticket_id, filename, content_type, size_bytes, storage_key)
+        VALUES ($1, $2, $3::uuid, 'test.pdf', 'application/pdf', 1024, 'test/key.pdf')"#,
+    )
+    .bind(file_id)
+    .bind(tenant_id)
+    .bind(uuid::Uuid::parse_str(ticket_id).unwrap())
+    .execute(state.pool())
+    .await
+    .unwrap();
+
+    // List files (1)
+    let res = client
+        .get(format!("{base_url}/api/trouble/tickets/{ticket_id}/files"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let files: Vec<Value> = res.json().await.unwrap();
+    assert_eq!(files.len(), 1);
+
+    // Get file (download → 503 no storage, but repo get() is covered)
+    let res = client
+        .get(format!("{base_url}/api/trouble/files/{file_id}/download"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .unwrap();
+    assert!(res.status() == 503 || res.status() == 404);
+
+    // Delete file
+    let res = client
+        .delete(format!("{base_url}/api/trouble/files/{file_id}"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 204);
+}
