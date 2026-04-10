@@ -2,27 +2,27 @@ use async_trait::async_trait;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use alc_core::models::{CreateTroubleCategory, TroubleCategory};
+use alc_core::models::{CreateTroubleProgressStatus, TroubleProgressStatus};
 use alc_core::tenant::TenantConn;
 
-pub use alc_core::repository::trouble_categories::*;
+pub use alc_core::repository::trouble_progress_statuses::*;
 
-pub struct PgTroubleCategoriesRepository {
+pub struct PgTroubleProgressStatusesRepository {
     pool: PgPool,
 }
 
-impl PgTroubleCategoriesRepository {
+impl PgTroubleProgressStatusesRepository {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 }
 
 #[async_trait]
-impl TroubleCategoriesRepository for PgTroubleCategoriesRepository {
-    async fn list(&self, tenant_id: Uuid) -> Result<Vec<TroubleCategory>, sqlx::Error> {
+impl TroubleProgressStatusesRepository for PgTroubleProgressStatusesRepository {
+    async fn list(&self, tenant_id: Uuid) -> Result<Vec<TroubleProgressStatus>, sqlx::Error> {
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
-        sqlx::query_as::<_, TroubleCategory>(
-            "SELECT * FROM trouble_categories WHERE tenant_id = $1 ORDER BY sort_order, name",
+        sqlx::query_as::<_, TroubleProgressStatus>(
+            "SELECT * FROM trouble_progress_statuses WHERE tenant_id = $1 ORDER BY sort_order, name",
         )
         .bind(tenant_id)
         .fetch_all(&mut *tc.conn)
@@ -32,11 +32,11 @@ impl TroubleCategoriesRepository for PgTroubleCategoriesRepository {
     async fn create(
         &self,
         tenant_id: Uuid,
-        input: &CreateTroubleCategory,
-    ) -> Result<TroubleCategory, sqlx::Error> {
+        input: &CreateTroubleProgressStatus,
+    ) -> Result<TroubleProgressStatus, sqlx::Error> {
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
-        sqlx::query_as::<_, TroubleCategory>(
-            r#"INSERT INTO trouble_categories (tenant_id, name, sort_order)
+        sqlx::query_as::<_, TroubleProgressStatus>(
+            r#"INSERT INTO trouble_progress_statuses (tenant_id, name, sort_order)
             VALUES ($1, $2, $3)
             RETURNING *"#,
         )
@@ -49,11 +49,12 @@ impl TroubleCategoriesRepository for PgTroubleCategoriesRepository {
 
     async fn delete(&self, tenant_id: Uuid, id: Uuid) -> Result<bool, sqlx::Error> {
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
-        let result = sqlx::query("DELETE FROM trouble_categories WHERE id = $1 AND tenant_id = $2")
-            .bind(id)
-            .bind(tenant_id)
-            .execute(&mut *tc.conn)
-            .await?;
+        let result =
+            sqlx::query("DELETE FROM trouble_progress_statuses WHERE id = $1 AND tenant_id = $2")
+                .bind(id)
+                .bind(tenant_id)
+                .execute(&mut *tc.conn)
+                .await?;
         Ok(result.rows_affected() > 0)
     }
 
@@ -62,10 +63,10 @@ impl TroubleCategoriesRepository for PgTroubleCategoriesRepository {
         tenant_id: Uuid,
         id: Uuid,
         sort_order: i32,
-    ) -> Result<Option<TroubleCategory>, sqlx::Error> {
+    ) -> Result<Option<TroubleProgressStatus>, sqlx::Error> {
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
-        sqlx::query_as::<_, TroubleCategory>(
-            "UPDATE trouble_categories SET sort_order = $3 WHERE id = $1 AND tenant_id = $2 RETURNING *",
+        sqlx::query_as::<_, TroubleProgressStatus>(
+            "UPDATE trouble_progress_statuses SET sort_order = $3 WHERE id = $1 AND tenant_id = $2 RETURNING *",
         )
         .bind(id)
         .bind(tenant_id)

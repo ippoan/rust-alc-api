@@ -178,6 +178,72 @@ async fn delete_category_db_error() {
 }
 
 // ===========================================================================
+// PUT /api/trouble/categories/{id} — update_category_sort
+// ===========================================================================
+
+#[tokio::test]
+async fn update_category_sort_order_success() {
+    let cats_mock = Arc::new(MockTroubleCategoriesRepository::default());
+    let cat_id = Uuid::new_v4();
+    {
+        let mut cats = cats_mock.categories.lock().unwrap();
+        cats.push(rust_alc_api::db::models::TroubleCategory {
+            id: cat_id,
+            tenant_id: Uuid::nil(),
+            name: "テストカテゴリ".to_string(),
+            sort_order: 0,
+            created_at: chrono::Utc::now(),
+        });
+    }
+
+    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let tenant_id = Uuid::new_v4();
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+    state.trouble_categories = cats_mock;
+    let base = crate::common::spawn_test_server(state).await;
+    let auth = format!("Bearer {jwt}");
+
+    let res = client()
+        .put(format!("{base}/api/trouble/categories/{cat_id}"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "sort_order": 5 }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["sort_order"], 5);
+}
+
+#[tokio::test]
+async fn update_category_sort_order_not_found() {
+    let (base, auth) = setup().await;
+    let id = Uuid::new_v4();
+    let res = client()
+        .put(format!("{base}/api/trouble/categories/{id}"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "sort_order": 5 }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 404);
+}
+
+#[tokio::test]
+async fn update_category_sort_order_db_error() {
+    let (base, auth) = setup_failing().await;
+    let id = Uuid::new_v4();
+    let res = client()
+        .put(format!("{base}/api/trouble/categories/{id}"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "sort_order": 5 }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 500);
+}
+
+// ===========================================================================
 // Ticket creation with DB categories
 // ===========================================================================
 

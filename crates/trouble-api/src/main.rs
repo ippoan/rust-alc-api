@@ -13,8 +13,9 @@ use alc_core::auth_middleware::require_tenant_header;
 use alc_trouble::repo::{
     trouble_categories::PgTroubleCategoriesRepository,
     trouble_comments::PgTroubleCommentsRepository, trouble_files::PgTroubleFilesRepository,
-    trouble_offices::PgTroubleOfficesRepository, trouble_tickets::PgTroubleTicketsRepository,
-    trouble_workflow::PgTroubleWorkflowRepository,
+    trouble_offices::PgTroubleOfficesRepository,
+    trouble_progress_statuses::PgTroubleProgressStatusesRepository,
+    trouble_tickets::PgTroubleTicketsRepository, trouble_workflow::PgTroubleWorkflowRepository,
 };
 use alc_trouble::TroubleState;
 
@@ -51,6 +52,7 @@ async fn main() {
         trouble_comments: Arc::new(PgTroubleCommentsRepository::new(pool.clone())),
         trouble_categories: Arc::new(PgTroubleCategoriesRepository::new(pool.clone())),
         trouble_offices: Arc::new(PgTroubleOfficesRepository::new(pool.clone())),
+        trouble_progress_statuses: Arc::new(PgTroubleProgressStatusesRepository::new(pool.clone())),
         trouble_storage,
         webhook: None,
     };
@@ -62,6 +64,7 @@ async fn main() {
         .merge(alc_trouble::comments::tenant_router())
         .merge(alc_trouble::categories::tenant_router())
         .merge(alc_trouble::offices::tenant_router())
+        .merge(alc_trouble::progress_statuses::tenant_router())
         .layer(axum_middleware::from_fn(require_tenant_header));
 
     let cors = CorsLayer::new()

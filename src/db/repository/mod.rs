@@ -13,8 +13,8 @@ pub use alc_core::repository::{
     TenantUsersRepository, TenkoCallRepository, TenkoRecordsRepository, TenkoSchedulesRepository,
     TenkoSessionRepository, TenkoWebhooksRepository, TimecardRepository,
     TroubleCategoriesRepository, TroubleCommentsRepository, TroubleFilesRepository,
-    TroubleOfficesRepository, TroubleTicketsRepository, TroubleWorkflowRepository,
-    WebhookRepository,
+    TroubleOfficesRepository, TroubleProgressStatusesRepository, TroubleTicketsRepository,
+    TroubleWorkflowRepository, WebhookRepository,
 };
 
 // Re-export TenantConn from alc-core
@@ -74,6 +74,7 @@ pub use alc_tenko::repo::{
 pub use alc_trouble::repo::{
     trouble_categories::PgTroubleCategoriesRepository,
     trouble_comments::PgTroubleCommentsRepository, trouble_files::PgTroubleFilesRepository,
-    trouble_offices::PgTroubleOfficesRepository, trouble_tickets::PgTroubleTicketsRepository,
-    trouble_workflow::PgTroubleWorkflowRepository,
+    trouble_offices::PgTroubleOfficesRepository,
+    trouble_progress_statuses::PgTroubleProgressStatusesRepository,
+    trouble_tickets::PgTroubleTicketsRepository, trouble_workflow::PgTroubleWorkflowRepository,
 };

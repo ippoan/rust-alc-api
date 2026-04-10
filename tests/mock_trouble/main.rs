@@ -13,6 +13,8 @@ mod mock_trouble_comments_test;
 mod mock_trouble_files_test;
 #[path = "../mock_tests/mock_trouble_offices_test.rs"]
 mod mock_trouble_offices_test;
+#[path = "../mock_tests/mock_trouble_progress_statuses_test.rs"]
+mod mock_trouble_progress_statuses_test;
 #[path = "../mock_tests/mock_trouble_tickets_test.rs"]
 mod mock_trouble_tickets_test;
 #[path = "../mock_tests/mock_trouble_workflow_test.rs"]

@@ -2,6 +2,7 @@ pub mod categories;
 pub mod comments;
 pub mod files;
 pub mod offices;
+pub mod progress_statuses;
 pub mod repo;
 pub mod tickets;
 pub mod workflow;
@@ -10,7 +11,8 @@ use std::sync::Arc;
 
 use alc_core::repository::{
     TroubleCategoriesRepository, TroubleCommentsRepository, TroubleFilesRepository,
-    TroubleOfficesRepository, TroubleTicketsRepository, TroubleWorkflowRepository,
+    TroubleOfficesRepository, TroubleProgressStatusesRepository, TroubleTicketsRepository,
+    TroubleWorkflowRepository,
 };
 use alc_core::storage::StorageBackend;
 use alc_core::webhook::WebhookService;
@@ -25,6 +27,7 @@ pub struct TroubleState {
     pub trouble_comments: Arc<dyn TroubleCommentsRepository>,
     pub trouble_categories: Arc<dyn TroubleCategoriesRepository>,
     pub trouble_offices: Arc<dyn TroubleOfficesRepository>,
+    pub trouble_progress_statuses: Arc<dyn TroubleProgressStatusesRepository>,
     pub trouble_storage: Option<Arc<dyn StorageBackend>>,
     pub webhook: Option<Arc<dyn WebhookService>>,
 }
@@ -38,6 +41,7 @@ impl axum::extract::FromRef<alc_core::AppState> for TroubleState {
             trouble_comments: state.trouble_comments.clone(),
             trouble_categories: state.trouble_categories.clone(),
             trouble_offices: state.trouble_offices.clone(),
+            trouble_progress_statuses: state.trouble_progress_statuses.clone(),
             trouble_storage: state.trouble_storage.clone(),
             webhook: state.webhook.clone(),
         }
