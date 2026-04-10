@@ -36,7 +36,7 @@ async fn create_ticket(
 ) -> Result<(StatusCode, Json<TroubleTicket>), StatusCode> {
     let tenant_id = tenant.0 .0;
 
-    let valid_categories = [
+    let fallback_categories = [
         "苦情・トラブル",
         "貨物事故",
         "被害事故",
@@ -45,7 +45,17 @@ async fn create_ticket(
         "人身事故",
         "その他",
     ];
-    if !valid_categories.contains(&body.category.as_str()) {
+    let db_categories = state
+        .trouble_categories
+        .list(tenant_id)
+        .await
+        .unwrap_or_default();
+    let valid = if db_categories.is_empty() {
+        fallback_categories.contains(&body.category.as_str())
+    } else {
+        db_categories.iter().any(|c| c.name == body.category)
+    };
+    if !valid {
         return Err(StatusCode::BAD_REQUEST);
     }
 

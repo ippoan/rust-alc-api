@@ -23,8 +23,8 @@ use rust_alc_api::db::repository::{
     PgNotifyRecipientRepository, PgSsoAdminRepository, PgTenantUsersRepository,
     PgTenkoCallRepository, PgTenkoRecordsRepository, PgTenkoSchedulesRepository,
     PgTenkoSessionRepository, PgTenkoWebhooksRepository, PgTimecardRepository,
-    PgTroubleCommentsRepository, PgTroubleFilesRepository, PgTroubleTicketsRepository,
-    PgTroubleWorkflowRepository,
+    PgTroubleCategoriesRepository, PgTroubleCommentsRepository, PgTroubleFilesRepository,
+    PgTroubleOfficesRepository, PgTroubleTicketsRepository, PgTroubleWorkflowRepository,
 };
 use rust_alc_api::AppState;
 
@@ -289,6 +289,8 @@ fn build_app_state(
     let trouble_files = Arc::new(PgTroubleFilesRepository::new(pool.clone()));
     let trouble_workflow = Arc::new(PgTroubleWorkflowRepository::new(pool.clone()));
     let trouble_comments = Arc::new(PgTroubleCommentsRepository::new(pool.clone()));
+    let trouble_categories = Arc::new(PgTroubleCategoriesRepository::new(pool.clone()));
+    let trouble_offices = Arc::new(PgTroubleOfficesRepository::new(pool.clone()));
 
     AppState {
         pool: Some(pool),
@@ -342,6 +344,8 @@ fn build_app_state(
         trouble_files,
         trouble_workflow,
         trouble_comments,
+        trouble_categories,
+        trouble_offices,
         trouble_storage: Some(Arc::new(MockStorage::new("trouble-bucket"))),
         webhook: None,
     }

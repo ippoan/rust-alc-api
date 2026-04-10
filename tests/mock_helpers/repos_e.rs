@@ -4,13 +4,14 @@ use chrono::Utc;
 use uuid::Uuid;
 
 use rust_alc_api::db::models::{
-    CreateTroubleComment, CreateTroubleTicket, CreateWorkflowState, CreateWorkflowTransition,
-    TroubleComment, TroubleFile, TroubleStatusHistory, TroubleTicket, TroubleTicketFilter,
+    CreateTroubleCategory, CreateTroubleComment, CreateTroubleOffice, CreateTroubleTicket,
+    CreateWorkflowState, CreateWorkflowTransition, TroubleCategory, TroubleComment, TroubleFile,
+    TroubleOffice, TroubleStatusHistory, TroubleTicket, TroubleTicketFilter,
     TroubleTicketsResponse, TroubleWorkflowState, TroubleWorkflowTransition, UpdateTroubleTicket,
 };
 use rust_alc_api::db::repository::{
-    TroubleCommentsRepository, TroubleFilesRepository, TroubleTicketsRepository,
-    TroubleWorkflowRepository,
+    TroubleCategoriesRepository, TroubleCommentsRepository, TroubleFilesRepository,
+    TroubleOfficesRepository, TroubleTicketsRepository, TroubleWorkflowRepository,
 };
 
 macro_rules! check_fail {
@@ -56,6 +57,7 @@ fn mock_ticket(tenant_id: Uuid) -> TroubleTicket {
         person_name: "テスト太郎".to_string(),
         person_id: None,
         vehicle_number: "".to_string(),
+        registration_number: "".to_string(),
         location: "".to_string(),
         description: "test description".to_string(),
         status_id: None,
@@ -501,6 +503,112 @@ impl TroubleCommentsRepository for MockTroubleCommentsRepository {
     ) -> Result<Vec<TroubleComment>, sqlx::Error> {
         check_fail!(self);
         Ok(vec![])
+    }
+
+    async fn delete(&self, _tenant_id: Uuid, _id: Uuid) -> Result<bool, sqlx::Error> {
+        check_fail!(self);
+        if self.delete_returns_false.load(Ordering::SeqCst) {
+            return Ok(false);
+        }
+        Ok(true)
+    }
+}
+
+// ============================================================
+// MockTroubleCategoriesRepository
+// ============================================================
+
+pub struct MockTroubleCategoriesRepository {
+    pub fail_next: AtomicBool,
+    pub delete_returns_false: AtomicBool,
+    pub categories: std::sync::Mutex<Vec<TroubleCategory>>,
+}
+
+impl Default for MockTroubleCategoriesRepository {
+    fn default() -> Self {
+        Self {
+            fail_next: AtomicBool::new(false),
+            delete_returns_false: AtomicBool::new(false),
+            categories: std::sync::Mutex::new(vec![]),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl TroubleCategoriesRepository for MockTroubleCategoriesRepository {
+    async fn list(&self, _tenant_id: Uuid) -> Result<Vec<TroubleCategory>, sqlx::Error> {
+        check_fail!(self);
+        Ok(self.categories.lock().unwrap().clone())
+    }
+
+    async fn create(
+        &self,
+        tenant_id: Uuid,
+        input: &CreateTroubleCategory,
+    ) -> Result<TroubleCategory, sqlx::Error> {
+        check_fail!(self);
+        let cat = TroubleCategory {
+            id: Uuid::new_v4(),
+            tenant_id,
+            name: input.name.clone(),
+            sort_order: input.sort_order.unwrap_or(0),
+            created_at: Utc::now(),
+        };
+        self.categories.lock().unwrap().push(cat.clone());
+        Ok(cat)
+    }
+
+    async fn delete(&self, _tenant_id: Uuid, _id: Uuid) -> Result<bool, sqlx::Error> {
+        check_fail!(self);
+        if self.delete_returns_false.load(Ordering::SeqCst) {
+            return Ok(false);
+        }
+        Ok(true)
+    }
+}
+
+// ============================================================
+// MockTroubleOfficesRepository
+// ============================================================
+
+pub struct MockTroubleOfficesRepository {
+    pub fail_next: AtomicBool,
+    pub delete_returns_false: AtomicBool,
+    pub offices: std::sync::Mutex<Vec<TroubleOffice>>,
+}
+
+impl Default for MockTroubleOfficesRepository {
+    fn default() -> Self {
+        Self {
+            fail_next: AtomicBool::new(false),
+            delete_returns_false: AtomicBool::new(false),
+            offices: std::sync::Mutex::new(vec![]),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl TroubleOfficesRepository for MockTroubleOfficesRepository {
+    async fn list(&self, _tenant_id: Uuid) -> Result<Vec<TroubleOffice>, sqlx::Error> {
+        check_fail!(self);
+        Ok(self.offices.lock().unwrap().clone())
+    }
+
+    async fn create(
+        &self,
+        tenant_id: Uuid,
+        input: &CreateTroubleOffice,
+    ) -> Result<TroubleOffice, sqlx::Error> {
+        check_fail!(self);
+        let office = TroubleOffice {
+            id: Uuid::new_v4(),
+            tenant_id,
+            name: input.name.clone(),
+            sort_order: input.sort_order.unwrap_or(0),
+            created_at: Utc::now(),
+        };
+        self.offices.lock().unwrap().push(office.clone());
+        Ok(office)
     }
 
     async fn delete(&self, _tenant_id: Uuid, _id: Uuid) -> Result<bool, sqlx::Error> {
