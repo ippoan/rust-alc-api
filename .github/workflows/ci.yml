@@ -43,6 +43,7 @@ jobs:
           - { name: "mock-dtako", key: "test-mock-dtako", cmd: "cargo llvm-cov nextest --no-report --ignore-run-fail --test mock_dtako" }
           - { name: "mock-devices", key: "test-mock-devices", cmd: "cargo llvm-cov nextest --no-report --ignore-run-fail --test mock_devices" }
           - { name: "mock-carins", key: "test-mock-carins", cmd: "cargo llvm-cov nextest --no-report --ignore-run-fail --test mock_carins" }
+          - { name: "mock-trouble", key: "test-mock-trouble", cmd: "cargo llvm-cov nextest --no-report --ignore-run-fail --test mock_trouble" }
           - { name: "mock-misc", key: "test-mock-misc", cmd: "cargo llvm-cov nextest --no-report --ignore-run-fail --test mock_misc --test archive_repo_test" }
     steps:
       - uses: actions/checkout@v4
@@ -176,6 +177,7 @@ jobs:
           - { name: "mock-dtako", cmd: "--test mock_dtako" }
           - { name: "mock-devices", cmd: "--test mock_devices" }
           - { name: "mock-carins", cmd: "--test mock_carins" }
+          - { name: "mock-trouble", cmd: "--test mock_trouble" }
           - { name: "mock-misc", cmd: "--test mock_misc --test archive_repo_test" }
     services:
       postgres:
