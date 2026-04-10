@@ -342,7 +342,7 @@ fn build_app_state(
         trouble_files,
         trouble_workflow,
         trouble_comments,
-        trouble_storage: None,
+        trouble_storage: Some(Arc::new(MockStorage::new("trouble-bucket"))),
         webhook: None,
     }
 }
