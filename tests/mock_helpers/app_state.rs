@@ -76,6 +76,8 @@ pub fn setup_mock_app_state() -> AppState {
         trouble_categories: Arc::new(MockTroubleCategoriesRepository::default()),
         trouble_offices: Arc::new(MockTroubleOfficesRepository::default()),
         trouble_progress_statuses: Arc::new(MockTroubleProgressStatusesRepository::default()),
+        trouble_notification_prefs: Arc::new(MockTroubleNotificationPrefsRepository::default()),
+        trouble_schedules: Arc::new(MockTroubleSchedulesRepository::default()),
         trouble_storage: Some(Arc::new(MockStorage::new("trouble-bucket"))),
         webhook: None,
     }

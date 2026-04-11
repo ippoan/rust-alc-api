@@ -74,7 +74,9 @@ pub use alc_tenko::repo::{
 pub use alc_trouble::repo::{
     trouble_categories::PgTroubleCategoriesRepository,
     trouble_comments::PgTroubleCommentsRepository, trouble_files::PgTroubleFilesRepository,
+    trouble_notification_prefs::PgTroubleNotificationPrefsRepository,
     trouble_offices::PgTroubleOfficesRepository,
     trouble_progress_statuses::PgTroubleProgressStatusesRepository,
-    trouble_tickets::PgTroubleTicketsRepository, trouble_workflow::PgTroubleWorkflowRepository,
+    trouble_schedules::PgTroubleSchedulesRepository, trouble_tickets::PgTroubleTicketsRepository,
+    trouble_workflow::PgTroubleWorkflowRepository,
 };

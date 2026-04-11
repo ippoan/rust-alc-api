@@ -5,14 +5,16 @@ use uuid::Uuid;
 
 use rust_alc_api::db::models::{
     CreateTroubleCategory, CreateTroubleComment, CreateTroubleOffice, CreateTroubleProgressStatus,
-    CreateTroubleTicket, CreateWorkflowState, CreateWorkflowTransition, TroubleCategory,
-    TroubleComment, TroubleFile, TroubleOffice, TroubleProgressStatus, TroubleStatusHistory,
-    TroubleTicket, TroubleTicketFilter, TroubleTicketsResponse, TroubleWorkflowState,
-    TroubleWorkflowTransition, UpdateTroubleTicket,
+    CreateTroubleSchedule, CreateTroubleTicket, CreateWorkflowState, CreateWorkflowTransition,
+    TroubleCategory, TroubleComment, TroubleFile, TroubleNotificationPref, TroubleOffice,
+    TroubleProgressStatus, TroubleSchedule, TroubleStatusHistory, TroubleTicket,
+    TroubleTicketFilter, TroubleTicketsResponse, TroubleWorkflowState, TroubleWorkflowTransition,
+    UpdateTroubleTicket, UpsertNotificationPref,
 };
 use rust_alc_api::db::repository::{
     TroubleCategoriesRepository, TroubleCommentsRepository, TroubleFilesRepository,
-    TroubleOfficesRepository, TroubleProgressStatusesRepository, TroubleTicketsRepository,
+    TroubleNotificationPrefsRepository, TroubleOfficesRepository,
+    TroubleProgressStatusesRepository, TroubleSchedulesRepository, TroubleTicketsRepository,
     TroubleWorkflowRepository,
 };
 
@@ -718,5 +720,158 @@ impl TroubleProgressStatusesRepository for MockTroubleProgressStatusesRepository
             return Ok(Some(status.clone()));
         }
         Ok(None)
+    }
+}
+
+// ============================================================
+// MockTroubleNotificationPrefsRepository
+// ============================================================
+
+pub struct MockTroubleNotificationPrefsRepository {
+    pub fail_next: AtomicBool,
+}
+
+impl Default for MockTroubleNotificationPrefsRepository {
+    fn default() -> Self {
+        Self {
+            fail_next: AtomicBool::new(false),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl TroubleNotificationPrefsRepository for MockTroubleNotificationPrefsRepository {
+    async fn upsert(
+        &self,
+        tenant_id: Uuid,
+        input: &UpsertNotificationPref,
+    ) -> Result<TroubleNotificationPref, sqlx::Error> {
+        check_fail!(self);
+        Ok(TroubleNotificationPref {
+            id: Uuid::new_v4(),
+            tenant_id,
+            event_type: input.event_type.clone(),
+            notify_channel: input.notify_channel.clone(),
+            enabled: input.enabled.unwrap_or(true),
+            recipient_ids: input.recipient_ids.clone().unwrap_or_default(),
+            notify_admins: input.notify_admins.unwrap_or(false),
+            lineworks_user_ids: input.lineworks_user_ids.clone().unwrap_or_default(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        })
+    }
+
+    async fn list(&self, _tenant_id: Uuid) -> Result<Vec<TroubleNotificationPref>, sqlx::Error> {
+        check_fail!(self);
+        Ok(vec![])
+    }
+
+    async fn delete(&self, _tenant_id: Uuid, _id: Uuid) -> Result<bool, sqlx::Error> {
+        check_fail!(self);
+        Ok(true)
+    }
+
+    async fn find_enabled(
+        &self,
+        _tenant_id: Uuid,
+        _event_type: &str,
+        _channel: &str,
+    ) -> Result<Option<TroubleNotificationPref>, sqlx::Error> {
+        check_fail!(self);
+        Ok(None)
+    }
+}
+
+// ============================================================
+// MockTroubleSchedulesRepository
+// ============================================================
+
+pub struct MockTroubleSchedulesRepository {
+    pub fail_next: AtomicBool,
+}
+
+impl Default for MockTroubleSchedulesRepository {
+    fn default() -> Self {
+        Self {
+            fail_next: AtomicBool::new(false),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl TroubleSchedulesRepository for MockTroubleSchedulesRepository {
+    async fn create(
+        &self,
+        tenant_id: Uuid,
+        input: &CreateTroubleSchedule,
+        created_by: Option<Uuid>,
+    ) -> Result<TroubleSchedule, sqlx::Error> {
+        check_fail!(self);
+        Ok(TroubleSchedule {
+            id: Uuid::new_v4(),
+            tenant_id,
+            ticket_id: input.ticket_id,
+            scheduled_at: input.scheduled_at,
+            message: input.message.clone(),
+            lineworks_user_ids: input.lineworks_user_ids.clone(),
+            cloud_task_name: None,
+            status: "pending".to_string(),
+            created_by,
+            created_at: Utc::now(),
+            sent_at: None,
+        })
+    }
+
+    async fn list_by_ticket(
+        &self,
+        _tenant_id: Uuid,
+        _ticket_id: Uuid,
+    ) -> Result<Vec<TroubleSchedule>, sqlx::Error> {
+        check_fail!(self);
+        Ok(vec![])
+    }
+
+    async fn get(
+        &self,
+        _tenant_id: Uuid,
+        _id: Uuid,
+    ) -> Result<Option<TroubleSchedule>, sqlx::Error> {
+        check_fail!(self);
+        Ok(None)
+    }
+
+    async fn update_status(
+        &self,
+        _tenant_id: Uuid,
+        _id: Uuid,
+        _status: &str,
+    ) -> Result<bool, sqlx::Error> {
+        check_fail!(self);
+        Ok(true)
+    }
+
+    async fn set_cloud_task_name(
+        &self,
+        _tenant_id: Uuid,
+        _id: Uuid,
+        _task_name: &str,
+    ) -> Result<bool, sqlx::Error> {
+        check_fail!(self);
+        Ok(true)
+    }
+
+    async fn get_for_fire(&self, _id: Uuid) -> Result<Option<TroubleSchedule>, sqlx::Error> {
+        check_fail!(self);
+        Ok(None)
+    }
+
+    async fn mark_sent(&self, _id: Uuid) -> Result<bool, sqlx::Error> {
+        check_fail!(self);
+        Ok(true)
+    }
+
+    async fn mark_failed(&self, _id: Uuid) -> Result<bool, sqlx::Error> {
+        check_fail!(self);
+        Ok(true)
     }
 }
