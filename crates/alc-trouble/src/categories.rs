@@ -30,12 +30,32 @@ async fn list_categories(
     State(state): State<TroubleState>,
     tenant: axum::Extension<TenantId>,
 ) -> Result<Json<Vec<TroubleCategory>>, StatusCode> {
+    let tenant_id = tenant.0 .0;
     let categories = state
         .trouble_categories
-        .list(tenant.0 .0)
+        .list(tenant_id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(Json(categories))
+
+    if !categories.is_empty() {
+        return Ok(Json(categories));
+    }
+
+    // Auto-seed default categories
+    let mut seeded = Vec::new();
+    for (i, name) in crate::DEFAULT_CATEGORIES.iter().enumerate() {
+        let input = CreateTroubleCategory {
+            name: name.to_string(),
+            sort_order: Some(i as i32 + 1),
+        };
+        match state.trouble_categories.create(tenant_id, &input).await {
+            Ok(cat) => seeded.push(cat),
+            Err(e) => {
+                tracing::warn!("auto-seed category {name}: {e}");
+            }
+        }
+    }
+    Ok(Json(seeded))
 }
 
 async fn create_category(

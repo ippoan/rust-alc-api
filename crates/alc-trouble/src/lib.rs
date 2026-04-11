@@ -7,6 +7,16 @@ pub mod repo;
 pub mod tickets;
 pub mod workflow;
 
+pub const DEFAULT_CATEGORIES: &[&str] = &[
+    "苦情・トラブル",
+    "貨物事故",
+    "被害事故",
+    "対物事故(他損)",
+    "対物事故(自損)",
+    "人身事故",
+    "その他",
+];
+
 use std::sync::Arc;
 
 use alc_core::repository::{

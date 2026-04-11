@@ -36,22 +36,13 @@ async fn create_ticket(
 ) -> Result<(StatusCode, Json<TroubleTicket>), StatusCode> {
     let tenant_id = tenant.0 .0;
 
-    let fallback_categories = [
-        "苦情・トラブル",
-        "貨物事故",
-        "被害事故",
-        "対物事故(他損)",
-        "対物事故(自損)",
-        "人身事故",
-        "その他",
-    ];
     let db_categories = state
         .trouble_categories
         .list(tenant_id)
         .await
         .unwrap_or_default();
     let valid = if db_categories.is_empty() {
-        fallback_categories.contains(&body.category.as_str())
+        crate::DEFAULT_CATEGORIES.contains(&body.category.as_str())
     } else {
         db_categories.iter().any(|c| c.name == body.category)
     };
