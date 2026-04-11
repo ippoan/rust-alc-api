@@ -17,6 +17,7 @@ pub fn is_public_route(path: &str) -> bool {
         || api_path.starts_with("/notify/line-webhook")
         || api_path.starts_with("/notify/read/")
         || api_path.starts_with("/access-requests")
+        || api_path.starts_with("/trouble/schedules/") && api_path.ends_with("/fire")
 }
 
 #[cfg(test)]
@@ -57,6 +58,11 @@ mod tests {
 
         // access-requests (public POST)
         assert!(is_public_route("/api/access-requests"));
+
+        // trouble schedule fire (Cloud Tasks callback)
+        assert!(is_public_route(
+            "/api/trouble/schedules/550e8400-e29b-41d4-a716-446655440000/fire"
+        ));
     }
 
     #[test]
@@ -77,5 +83,10 @@ mod tests {
 
         // devices tenant routes (not register/*)
         assert!(!is_public_route("/api/devices/pending"));
+
+        // trouble routes (tenant protected)
+        assert!(!is_public_route("/api/trouble/tickets"));
+        assert!(!is_public_route("/api/trouble/notification-prefs"));
+        assert!(!is_public_route("/api/trouble/schedules"));
     }
 }

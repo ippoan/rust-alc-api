@@ -96,6 +96,23 @@ async fn create_ticket(
             .await;
     }
 
+    // LINE WORKS Bot 通知
+    if let Some(notifier) = &state.notifier {
+        if let Ok(Some(pref)) = state
+            .trouble_notification_prefs
+            .find_enabled(tenant_id, "trouble_created", "lineworks")
+            .await
+        {
+            let msg = format!(
+                "トラブル登録: #{} {}\nカテゴリ: {}\n担当者: {}",
+                ticket.ticket_no, ticket.category, ticket.person_name, ticket.description,
+            );
+            notifier
+                .notify(tenant_id, "trouble_created", &msg, &pref.lineworks_user_ids)
+                .await;
+        }
+    }
+
     Ok((StatusCode::CREATED, Json(ticket)))
 }
 
@@ -138,15 +155,40 @@ async fn update_ticket(
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateTroubleTicket>,
 ) -> Result<Json<TroubleTicket>, StatusCode> {
+    let tenant_id = tenant.0 .0;
+    let has_assigned_to = body.assigned_to.is_some();
+
     let ticket = state
         .trouble_tickets
-        .update(tenant.0 .0, id, &body)
+        .update(tenant_id, id, &body)
         .await
         .map_err(|e| {
             tracing::error!("update_ticket error: {e}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?
         .ok_or(StatusCode::NOT_FOUND)?;
+
+    // assigned_to が設定された場合に LINE WORKS Bot 通知
+    if has_assigned_to {
+        if let Some(notifier) = &state.notifier {
+            if let Ok(Some(pref)) = state
+                .trouble_notification_prefs
+                .find_enabled(tenant_id, "trouble_assigned", "lineworks")
+                .await
+            {
+                let msg = format!("担当者アサイン: #{} {}", ticket.ticket_no, ticket.category,);
+                notifier
+                    .notify(
+                        tenant_id,
+                        "trouble_assigned",
+                        &msg,
+                        &pref.lineworks_user_ids,
+                    )
+                    .await;
+            }
+        }
+    }
+
     Ok(Json(ticket))
 }
 
@@ -233,6 +275,28 @@ async fn transition_ticket(
         webhook
             .fire_event(tenant_id, "trouble_status_changed", payload)
             .await;
+    }
+
+    // LINE WORKS Bot 通知
+    if let Some(notifier) = &state.notifier {
+        if let Ok(Some(pref)) = state
+            .trouble_notification_prefs
+            .find_enabled(tenant_id, "trouble_status_changed", "lineworks")
+            .await
+        {
+            let msg = format!(
+                "ステータス変更: #{} {}",
+                updated.ticket_no, updated.category,
+            );
+            notifier
+                .notify(
+                    tenant_id,
+                    "trouble_status_changed",
+                    &msg,
+                    &pref.lineworks_user_ids,
+                )
+                .await;
+        }
     }
 
     Ok(Json(updated))

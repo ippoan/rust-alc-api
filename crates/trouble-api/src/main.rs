@@ -13,9 +13,11 @@ use alc_core::auth_middleware::require_tenant_header;
 use alc_trouble::repo::{
     trouble_categories::PgTroubleCategoriesRepository,
     trouble_comments::PgTroubleCommentsRepository, trouble_files::PgTroubleFilesRepository,
+    trouble_notification_prefs::PgTroubleNotificationPrefsRepository,
     trouble_offices::PgTroubleOfficesRepository,
     trouble_progress_statuses::PgTroubleProgressStatusesRepository,
-    trouble_tickets::PgTroubleTicketsRepository, trouble_workflow::PgTroubleWorkflowRepository,
+    trouble_schedules::PgTroubleSchedulesRepository, trouble_tickets::PgTroubleTicketsRepository,
+    trouble_workflow::PgTroubleWorkflowRepository,
 };
 use alc_trouble::TroubleState;
 
@@ -53,8 +55,14 @@ async fn main() {
         trouble_categories: Arc::new(PgTroubleCategoriesRepository::new(pool.clone())),
         trouble_offices: Arc::new(PgTroubleOfficesRepository::new(pool.clone())),
         trouble_progress_statuses: Arc::new(PgTroubleProgressStatusesRepository::new(pool.clone())),
+        trouble_notification_prefs: Arc::new(PgTroubleNotificationPrefsRepository::new(
+            pool.clone(),
+        )),
+        trouble_schedules: Arc::new(PgTroubleSchedulesRepository::new(pool.clone())),
         trouble_storage,
         webhook: None,
+        cloud_tasks: None,
+        notifier: None,
     };
 
     let tenant_protected = Router::new()
@@ -65,6 +73,8 @@ async fn main() {
         .merge(alc_trouble::categories::tenant_router())
         .merge(alc_trouble::offices::tenant_router())
         .merge(alc_trouble::progress_statuses::tenant_router())
+        .merge(alc_trouble::notifications::tenant_router())
+        .merge(alc_trouble::schedules::tenant_router())
         .layer(axum_middleware::from_fn(require_tenant_header));
 
     let cors = CorsLayer::new()
@@ -74,6 +84,7 @@ async fn main() {
 
     let app = Router::new()
         .route("/health", axum::routing::get(|| async { "ok" }))
+        .merge(alc_trouble::schedules::fire_router())
         .merge(tenant_protected)
         .with_state(state)
         .layer(cors)

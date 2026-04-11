@@ -13,9 +13,11 @@ use alc_notify::repo::{
 use alc_trouble::repo::{
     trouble_categories::PgTroubleCategoriesRepository,
     trouble_comments::PgTroubleCommentsRepository, trouble_files::PgTroubleFilesRepository,
+    trouble_notification_prefs::PgTroubleNotificationPrefsRepository,
     trouble_offices::PgTroubleOfficesRepository,
     trouble_progress_statuses::PgTroubleProgressStatusesRepository,
-    trouble_tickets::PgTroubleTicketsRepository, trouble_workflow::PgTroubleWorkflowRepository,
+    trouble_schedules::PgTroubleSchedulesRepository, trouble_tickets::PgTroubleTicketsRepository,
+    trouble_workflow::PgTroubleWorkflowRepository,
 };
 use rust_alc_api::auth::google::GoogleTokenVerifier;
 use rust_alc_api::auth::jwt::JwtSecret;
@@ -188,6 +190,9 @@ async fn main() -> anyhow::Result<()> {
     let trouble_offices = Arc::new(PgTroubleOfficesRepository::new(pool.clone()));
     let trouble_progress_statuses =
         Arc::new(PgTroubleProgressStatusesRepository::new(pool.clone()));
+    let trouble_notification_prefs =
+        Arc::new(PgTroubleNotificationPrefsRepository::new(pool.clone()));
+    let trouble_schedules = Arc::new(PgTroubleSchedulesRepository::new(pool.clone()));
 
     // notify 用 R2 (optional)
     let notify_storage: Option<Arc<dyn StorageBackend>> =
@@ -280,6 +285,8 @@ async fn main() -> anyhow::Result<()> {
         trouble_categories,
         trouble_offices,
         trouble_progress_statuses,
+        trouble_notification_prefs,
+        trouble_schedules,
         trouble_storage,
         webhook: {
             let wh_repo: Arc<dyn rust_alc_api::db::repository::WebhookRepository> = Arc::new(

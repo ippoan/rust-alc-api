@@ -33,14 +33,36 @@ async fn create_comment(
         return Err(StatusCode::BAD_REQUEST);
     }
 
+    let tenant_id = tenant.0 .0;
+
     let comment = state
         .trouble_comments
-        .create(tenant.0 .0, ticket_id, None, &body)
+        .create(tenant_id, ticket_id, None, &body)
         .await
         .map_err(|e| {
             tracing::error!("create_comment error: {e}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
+
+    // LINE WORKS Bot 通知
+    if let Some(notifier) = &state.notifier {
+        if let Ok(Some(pref)) = state
+            .trouble_notification_prefs
+            .find_enabled(tenant_id, "trouble_comment_added", "lineworks")
+            .await
+        {
+            let msg = format!("コメント追加: {}", body.body);
+            notifier
+                .notify(
+                    tenant_id,
+                    "trouble_comment_added",
+                    &msg,
+                    &pref.lineworks_user_ids,
+                )
+                .await;
+        }
+    }
+
     Ok((StatusCode::CREATED, Json(comment)))
 }
 

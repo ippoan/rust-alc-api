@@ -241,13 +241,16 @@ name = "alc-trouble"
 version = "0.1.0"
 dependencies = [
  "alc-core",
+ "alc-notify",
  "async-trait",
  "axum",
  "chrono",
  "csv",
+ "reqwest",
  "serde",
  "serde_json",
  "sqlx",
+ "thiserror 2.0.18",
  "tokio",
  "tracing",
  "uuid",

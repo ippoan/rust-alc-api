@@ -1743,6 +1743,7 @@ pub struct TroubleNotificationPref {
     pub enabled: bool,
     pub recipient_ids: Vec<Uuid>,
     pub notify_admins: bool,
+    pub lineworks_user_ids: Vec<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -1755,4 +1756,30 @@ pub struct UpsertNotificationPref {
     pub enabled: Option<bool>,
     pub recipient_ids: Option<Vec<Uuid>>,
     pub notify_admins: Option<bool>,
+    pub lineworks_user_ids: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, TS)]
+#[ts(export)]
+pub struct TroubleSchedule {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub ticket_id: Uuid,
+    pub scheduled_at: DateTime<Utc>,
+    pub message: String,
+    pub lineworks_user_ids: Vec<String>,
+    pub cloud_task_name: Option<String>,
+    pub status: String,
+    pub created_by: Option<Uuid>,
+    pub created_at: DateTime<Utc>,
+    pub sent_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Deserialize, TS)]
+#[ts(export)]
+pub struct CreateTroubleSchedule {
+    pub ticket_id: Uuid,
+    pub scheduled_at: DateTime<Utc>,
+    pub message: String,
+    pub lineworks_user_ids: Vec<String>,
 }
