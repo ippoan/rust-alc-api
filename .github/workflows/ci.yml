@@ -427,7 +427,7 @@ jobs:
       always() &&
       (github.event_name == 'pull_request' || (startsWith(github.ref, 'refs/tags/v') && github.event_name == 'push')) &&
       (needs.build-image.result == 'success' || needs.build-image.result == 'skipped') &&
-      (needs.coverage-check.result == 'success' || needs.coverage-check.result == 'skipped')
+      needs.coverage-check.result == 'success'
     uses: ./.github/workflows/deploy.yml
     permissions:
       contents: read
