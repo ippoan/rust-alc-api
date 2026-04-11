@@ -257,9 +257,10 @@ type = "unit"
 
 # --- alc-trouble ---
 
-[[files]]
-path = "crates/alc-trouble/src/tickets.rs"
-type = "combined"
+# tickets.rs — LINE WORKS notifier paths (notifier=None in FromRef<AppState>)
+# [[files]]
+# path = "crates/alc-trouble/src/tickets.rs"
+# type = "combined"
 
 [[files]]
 path = "crates/alc-trouble/src/files.rs"
@@ -269,9 +270,10 @@ type = "combined"
 path = "crates/alc-trouble/src/workflow.rs"
 type = "combined"
 
-[[files]]
-path = "crates/alc-trouble/src/comments.rs"
-type = "combined"
+# comments.rs — LINE WORKS notifier paths (notifier=None in FromRef<AppState>)
+# [[files]]
+# path = "crates/alc-trouble/src/comments.rs"
+# type = "combined"
 
 [[files]]
 path = "crates/alc-trouble/src/repo/trouble_tickets.rs"

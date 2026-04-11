@@ -729,12 +729,14 @@ impl TroubleProgressStatusesRepository for MockTroubleProgressStatusesRepository
 
 pub struct MockTroubleNotificationPrefsRepository {
     pub fail_next: AtomicBool,
+    pub return_enabled: AtomicBool,
 }
 
 impl Default for MockTroubleNotificationPrefsRepository {
     fn default() -> Self {
         Self {
             fail_next: AtomicBool::new(false),
+            return_enabled: AtomicBool::new(false),
         }
     }
 }
@@ -773,12 +775,27 @@ impl TroubleNotificationPrefsRepository for MockTroubleNotificationPrefsReposito
 
     async fn find_enabled(
         &self,
-        _tenant_id: Uuid,
-        _event_type: &str,
-        _channel: &str,
+        tenant_id: Uuid,
+        event_type: &str,
+        channel: &str,
     ) -> Result<Option<TroubleNotificationPref>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        if self.return_enabled.load(Ordering::SeqCst) {
+            Ok(Some(TroubleNotificationPref {
+                id: Uuid::new_v4(),
+                tenant_id,
+                event_type: event_type.to_string(),
+                notify_channel: channel.to_string(),
+                enabled: true,
+                recipient_ids: vec![],
+                notify_admins: false,
+                lineworks_user_ids: vec!["test_user_1".to_string()],
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            }))
+        } else {
+            Ok(None)
+        }
     }
 }
 

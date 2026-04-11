@@ -635,6 +635,36 @@ async fn export_csv_db_error() {
 // ===========================================================================
 
 #[tokio::test]
+// ===========================================================================
+// Update ticket with assigned_to
+// ===========================================================================
+#[tokio::test]
+async fn update_ticket_with_assigned_to() {
+    let mock = Arc::new(MockTroubleTicketsRepository::default());
+    mock.return_some
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let tenant_id = Uuid::new_v4();
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+    state.trouble_tickets = mock;
+    let base = crate::common::spawn_test_server(state).await;
+    let auth = format!("Bearer {jwt}");
+
+    let id = Uuid::new_v4();
+    let assigned_to = Uuid::new_v4();
+    let res = client()
+        .put(format!("{base}/api/trouble/tickets/{id}"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "assigned_to": assigned_to
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+}
+
+#[tokio::test]
 async fn create_ticket_workflow_error() {
     let workflow_mock = Arc::new(MockTroubleWorkflowRepository::default());
     workflow_mock
