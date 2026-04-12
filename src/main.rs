@@ -340,6 +340,7 @@ async fn main() -> anyhow::Result<()> {
         )))
         .layer(Extension(bot_admin_ext))
         .layer(Extension(lw_client))
+        .layer(axum::extract::DefaultBodyLimit::max(20 * 1024 * 1024)) // 20MB
         .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state);

@@ -111,6 +111,7 @@ async fn main() {
         .merge(alc_trouble::schedules::fire_router())
         .merge(tenant_protected)
         .with_state(state)
+        .layer(axum::extract::DefaultBodyLimit::max(20 * 1024 * 1024)) // 20MB
         .layer(cors)
         .layer(TraceLayer::new_for_http());
 
