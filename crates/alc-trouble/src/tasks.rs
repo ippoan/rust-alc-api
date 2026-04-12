@@ -10,7 +10,7 @@ use crate::TroubleState;
 use alc_core::auth_middleware::TenantId;
 use alc_core::models::{
     CreateTroubleTask, CreateTroubleTaskActivity, TroubleActivityFile, TroubleTask,
-    TroubleTaskActivity, UpdateTroubleTask,
+    TroubleTaskActivity, UpdateTroubleTask, UpdateTroubleTaskActivity,
 };
 
 const VALID_STATUSES: &[&str] = &["open", "in_progress", "done"];
@@ -33,7 +33,10 @@ where
             "/trouble/tasks/{task_id}/activities",
             post(create_activity).get(list_activities),
         )
-        .route("/trouble/activities/{activity_id}", delete(delete_activity))
+        .route(
+            "/trouble/activities/{activity_id}",
+            axum::routing::put(update_activity).delete(delete_activity),
+        )
         .route(
             "/trouble/activities/{activity_id}/files",
             post(upload_activity_file).get(list_activity_files),
@@ -257,6 +260,25 @@ async fn list_activities(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
     Ok(Json(activities))
+}
+
+async fn update_activity(
+    State(state): State<TroubleState>,
+    tenant: axum::Extension<TenantId>,
+    Path(activity_id): Path<Uuid>,
+    Json(body): Json<UpdateTroubleTaskActivity>,
+) -> Result<Json<TroubleTaskActivity>, StatusCode> {
+    let activity = state
+        .trouble_task_activities
+        .update(tenant.0 .0, activity_id, &body)
+        .await
+        .map_err(|e| {
+            tracing::error!("update_activity error: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    Ok(Json(activity))
 }
 
 async fn delete_activity(

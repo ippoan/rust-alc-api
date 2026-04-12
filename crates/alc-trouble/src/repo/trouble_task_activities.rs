@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use alc_core::models::{CreateTroubleTaskActivity, TroubleTaskActivity};
+use alc_core::models::{CreateTroubleTaskActivity, TroubleTaskActivity, UpdateTroubleTaskActivity};
 use alc_core::tenant::TenantConn;
 
 pub use alc_core::repository::trouble_task_activities::*;
@@ -53,6 +53,29 @@ impl TroubleTaskActivitiesRepository for PgTroubleTaskActivitiesRepository {
         .bind(task_id)
         .bind(tenant_id)
         .fetch_all(&mut *tc.conn)
+        .await
+    }
+
+    async fn update(
+        &self,
+        tenant_id: Uuid,
+        id: Uuid,
+        input: &UpdateTroubleTaskActivity,
+    ) -> Result<Option<TroubleTaskActivity>, sqlx::Error> {
+        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
+        sqlx::query_as::<_, TroubleTaskActivity>(
+            r#"UPDATE trouble_task_activities SET
+                body = COALESCE($3, body),
+                occurred_at = CASE WHEN $4 THEN $5 ELSE occurred_at END
+            WHERE id = $1 AND tenant_id = $2
+            RETURNING *"#,
+        )
+        .bind(id)
+        .bind(tenant_id)
+        .bind(&input.body)
+        .bind(input.occurred_at.is_some())
+        .bind(input.occurred_at.flatten())
+        .fetch_optional(&mut *tc.conn)
         .await
     }
 

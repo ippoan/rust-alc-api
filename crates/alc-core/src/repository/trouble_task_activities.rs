@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use uuid::Uuid;
 
-use crate::models::{CreateTroubleTaskActivity, TroubleTaskActivity};
+use crate::models::{CreateTroubleTaskActivity, TroubleTaskActivity, UpdateTroubleTaskActivity};
 
 #[async_trait]
 pub trait TroubleTaskActivitiesRepository: Send + Sync {
@@ -18,6 +18,13 @@ pub trait TroubleTaskActivitiesRepository: Send + Sync {
         tenant_id: Uuid,
         task_id: Uuid,
     ) -> Result<Vec<TroubleTaskActivity>, sqlx::Error>;
+
+    async fn update(
+        &self,
+        tenant_id: Uuid,
+        id: Uuid,
+        input: &UpdateTroubleTaskActivity,
+    ) -> Result<Option<TroubleTaskActivity>, sqlx::Error>;
 
     async fn delete(&self, tenant_id: Uuid, id: Uuid) -> Result<bool, sqlx::Error>;
 }

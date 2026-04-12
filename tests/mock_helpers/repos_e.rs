@@ -10,7 +10,7 @@ use rust_alc_api::db::models::{
     TroubleComment, TroubleFile, TroubleNotificationPref, TroubleOffice, TroubleProgressStatus,
     TroubleSchedule, TroubleStatusHistory, TroubleTask, TroubleTaskActivity, TroubleTicket,
     TroubleTicketFilter, TroubleTicketsResponse, TroubleWorkflowState, TroubleWorkflowTransition,
-    UpdateTroubleTask, UpdateTroubleTicket, UpsertNotificationPref,
+    UpdateTroubleTask, UpdateTroubleTaskActivity, UpdateTroubleTicket, UpsertNotificationPref,
 };
 use rust_alc_api::db::repository::{
     TroubleActivityFilesRepository, TroubleCategoriesRepository, TroubleCommentsRepository,
@@ -1088,6 +1088,24 @@ impl TroubleTaskActivitiesRepository for MockTroubleTaskActivitiesRepository {
     ) -> Result<Vec<TroubleTaskActivity>, sqlx::Error> {
         check_fail!(self);
         Ok(vec![])
+    }
+
+    async fn update(
+        &self,
+        _tenant_id: Uuid,
+        _id: Uuid,
+        input: &UpdateTroubleTaskActivity,
+    ) -> Result<Option<TroubleTaskActivity>, sqlx::Error> {
+        check_fail!(self);
+        Ok(Some(TroubleTaskActivity {
+            id: _id,
+            tenant_id: _tenant_id,
+            task_id: Uuid::nil(),
+            body: input.body.clone().unwrap_or_default(),
+            occurred_at: Utc::now(),
+            created_by: None,
+            created_at: Utc::now(),
+        }))
     }
 
     async fn delete(&self, _tenant_id: Uuid, _id: Uuid) -> Result<bool, sqlx::Error> {

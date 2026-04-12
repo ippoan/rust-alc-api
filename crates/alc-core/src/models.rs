@@ -1876,6 +1876,15 @@ pub struct CreateTroubleTaskActivity {
     pub occurred_at: Option<DateTime<Utc>>,
 }
 
+#[derive(Debug, Deserialize, TS)]
+#[ts(export)]
+pub struct UpdateTroubleTaskActivity {
+    #[serde(default)]
+    pub body: Option<String>,
+    #[serde(default)]
+    pub occurred_at: Option<Option<DateTime<Utc>>>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow, TS)]
 #[ts(export)]
 pub struct TroubleActivityFile {
