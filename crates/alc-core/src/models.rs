@@ -1800,6 +1800,9 @@ pub struct TroubleTask {
     pub due_date: Option<DateTime<Utc>>,
     pub completed_at: Option<DateTime<Utc>>,
     pub sort_order: i32,
+    pub next_action: String,
+    pub next_action_by: Option<Uuid>,
+    pub next_action_due: Option<DateTime<Utc>>,
     pub created_by: Option<Uuid>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -1818,6 +1821,12 @@ pub struct CreateTroubleTask {
     pub due_date: Option<DateTime<Utc>>,
     #[serde(default)]
     pub sort_order: Option<i32>,
+    #[serde(default)]
+    pub next_action: Option<String>,
+    #[serde(default)]
+    pub next_action_by: Option<Uuid>,
+    #[serde(default)]
+    pub next_action_due: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Deserialize, TS)]
@@ -1839,6 +1848,12 @@ pub struct UpdateTroubleTask {
     pub completed_at: Option<Option<DateTime<Utc>>>,
     #[serde(default)]
     pub sort_order: Option<i32>,
+    #[serde(default)]
+    pub next_action: Option<String>,
+    #[serde(default)]
+    pub next_action_by: Option<Option<Uuid>>,
+    #[serde(default)]
+    pub next_action_due: Option<Option<DateTime<Utc>>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow, TS)]
