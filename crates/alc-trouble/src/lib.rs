@@ -38,11 +38,11 @@ pub const DEFAULT_TASK_TYPES: &[&str] = &[
 use std::sync::Arc;
 
 use alc_core::repository::{
-    TroubleActivityFilesRepository, TroubleCategoriesRepository, TroubleCommentsRepository,
-    TroubleFilesRepository, TroubleNotificationPrefsRepository, TroubleOfficesRepository,
-    TroubleProgressStatusesRepository, TroubleSchedulesRepository, TroubleTaskActivitiesRepository,
-    TroubleTaskTypesRepository, TroubleTasksRepository, TroubleTicketsRepository,
-    TroubleWorkflowRepository,
+    EmployeeRepository, TroubleActivityFilesRepository, TroubleCategoriesRepository,
+    TroubleCommentsRepository, TroubleFilesRepository, TroubleNotificationPrefsRepository,
+    TroubleOfficesRepository, TroubleProgressStatusesRepository, TroubleSchedulesRepository,
+    TroubleTaskActivitiesRepository, TroubleTaskTypesRepository, TroubleTasksRepository,
+    TroubleTicketsRepository, TroubleWorkflowRepository,
 };
 use alc_core::storage::StorageBackend;
 use alc_core::webhook::WebhookService;
@@ -71,6 +71,7 @@ pub struct TroubleState {
     pub webhook: Option<Arc<dyn WebhookService>>,
     pub cloud_tasks: Option<Arc<dyn CloudTasksClient>>,
     pub notifier: Option<Arc<dyn TroubleNotifier>>,
+    pub employees: Option<Arc<dyn EmployeeRepository>>,
 }
 
 impl axum::extract::FromRef<alc_core::AppState> for TroubleState {
@@ -93,6 +94,7 @@ impl axum::extract::FromRef<alc_core::AppState> for TroubleState {
             webhook: state.webhook.clone(),
             cloud_tasks: None,
             notifier: None,
+            employees: Some(state.employees.clone()),
         }
     }
 }

@@ -15,6 +15,8 @@ const VALID_EVENT_TYPES: &[&str] = &[
     "trouble_status_changed",
     "trouble_comment_added",
     "trouble_assigned",
+    "task_assigned",
+    "task_due_reminder",
 ];
 
 const VALID_CHANNELS: &[&str] = &["lineworks"];
