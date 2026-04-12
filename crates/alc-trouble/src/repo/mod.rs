@@ -7,6 +7,7 @@ pub mod trouble_offices;
 pub mod trouble_progress_statuses;
 pub mod trouble_schedules;
 pub mod trouble_task_activities;
+pub mod trouble_task_types;
 pub mod trouble_tasks;
 pub mod trouble_tickets;
 pub mod trouble_workflow;

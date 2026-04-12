@@ -16,7 +16,8 @@ use rust_alc_api::db::repository::{
     TroubleActivityFilesRepository, TroubleCategoriesRepository, TroubleCommentsRepository,
     TroubleFilesRepository, TroubleNotificationPrefsRepository, TroubleOfficesRepository,
     TroubleProgressStatusesRepository, TroubleSchedulesRepository, TroubleTaskActivitiesRepository,
-    TroubleTasksRepository, TroubleTicketsRepository, TroubleWorkflowRepository,
+    TroubleTaskTypesRepository, TroubleTasksRepository, TroubleTicketsRepository,
+    TroubleWorkflowRepository,
 };
 
 macro_rules! check_fail {
@@ -580,6 +581,74 @@ impl TroubleCategoriesRepository for MockTroubleCategoriesRepository {
     ) -> Result<Option<TroubleCategory>, sqlx::Error> {
         check_fail!(self);
         let mut cats = self.categories.lock().unwrap();
+        if let Some(cat) = cats.iter_mut().find(|c| c.id == id) {
+            cat.sort_order = sort_order;
+            return Ok(Some(cat.clone()));
+        }
+        Ok(None)
+    }
+}
+
+// ============================================================
+// MockTroubleTaskTypesRepository
+// ============================================================
+
+pub struct MockTroubleTaskTypesRepository {
+    pub fail_next: AtomicBool,
+    pub delete_returns_false: AtomicBool,
+    pub task_types: std::sync::Mutex<Vec<TroubleCategory>>,
+}
+
+impl Default for MockTroubleTaskTypesRepository {
+    fn default() -> Self {
+        Self {
+            fail_next: AtomicBool::new(false),
+            delete_returns_false: AtomicBool::new(false),
+            task_types: std::sync::Mutex::new(vec![]),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl TroubleTaskTypesRepository for MockTroubleTaskTypesRepository {
+    async fn list(&self, _tenant_id: Uuid) -> Result<Vec<TroubleCategory>, sqlx::Error> {
+        check_fail!(self);
+        Ok(self.task_types.lock().unwrap().clone())
+    }
+
+    async fn create(
+        &self,
+        tenant_id: Uuid,
+        input: &CreateTroubleCategory,
+    ) -> Result<TroubleCategory, sqlx::Error> {
+        check_fail!(self);
+        let cat = TroubleCategory {
+            id: Uuid::new_v4(),
+            tenant_id,
+            name: input.name.clone(),
+            sort_order: input.sort_order.unwrap_or(0),
+            created_at: Utc::now(),
+        };
+        self.task_types.lock().unwrap().push(cat.clone());
+        Ok(cat)
+    }
+
+    async fn delete(&self, _tenant_id: Uuid, _id: Uuid) -> Result<bool, sqlx::Error> {
+        check_fail!(self);
+        if self.delete_returns_false.load(Ordering::SeqCst) {
+            return Ok(false);
+        }
+        Ok(true)
+    }
+
+    async fn update_sort_order(
+        &self,
+        _tenant_id: Uuid,
+        id: Uuid,
+        sort_order: i32,
+    ) -> Result<Option<TroubleCategory>, sqlx::Error> {
+        check_fail!(self);
+        let mut cats = self.task_types.lock().unwrap();
         if let Some(cat) = cats.iter_mut().find(|c| c.id == id) {
             cat.sort_order = sort_order;
             return Ok(Some(cat.clone()));
