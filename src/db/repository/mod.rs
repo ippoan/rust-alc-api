@@ -12,10 +12,10 @@ pub use alc_core::repository::{
     NotifyLineConfigRepository, NotifyRecipientRepository, SsoAdminRepository,
     TenantUsersRepository, TenkoCallRepository, TenkoRecordsRepository, TenkoSchedulesRepository,
     TenkoSessionRepository, TenkoWebhooksRepository, TimecardRepository,
-    TroubleCategoriesRepository, TroubleCommentsRepository, TroubleFilesRepository,
-    TroubleNotificationPrefsRepository, TroubleOfficesRepository,
-    TroubleProgressStatusesRepository, TroubleSchedulesRepository, TroubleTicketsRepository,
-    TroubleWorkflowRepository, WebhookRepository,
+    TroubleActivityFilesRepository, TroubleCategoriesRepository, TroubleCommentsRepository,
+    TroubleFilesRepository, TroubleNotificationPrefsRepository, TroubleOfficesRepository,
+    TroubleProgressStatusesRepository, TroubleSchedulesRepository, TroubleTaskActivitiesRepository,
+    TroubleTasksRepository, TroubleTicketsRepository, TroubleWorkflowRepository, WebhookRepository,
 };
 
 // Re-export TenantConn from alc-core
