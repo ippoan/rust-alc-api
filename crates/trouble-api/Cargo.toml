@@ -9,6 +9,9 @@ path = "src/main.rs"
 
 [dependencies]
 alc-core = { path = "../alc-core" }
+alc-misc = { path = "../alc-misc" }
+alc-notify = { path = "../alc-notify" }
+alc-storage = { path = "../alc-storage" }
 alc-trouble = { path = "../alc-trouble" }
 axum = "0.8"
 sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres"] }

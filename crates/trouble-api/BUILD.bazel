@@ -6,6 +6,9 @@ rust_binary(
     srcs = glob(["src/**/*.rs"]),
     deps = all_crate_deps(normal = True) + [
         "//crates/alc-core",
+        "//crates/alc-misc",
+        "//crates/alc-notify",
+        "//crates/alc-storage",
         "//crates/alc-trouble",
     ],
     proc_macro_deps = all_crate_deps(proc_macro = True),

@@ -49,6 +49,7 @@ pub use alc_tenko::tenko_webhooks;
 pub use alc_trouble::categories as trouble_categories;
 pub use alc_trouble::comments as trouble_comments;
 pub use alc_trouble::files as trouble_files;
+pub use alc_trouble::lineworks_members as trouble_lineworks_members;
 pub use alc_trouble::notifications as trouble_notifications;
 pub use alc_trouble::offices as trouble_offices;
 pub use alc_trouble::progress_statuses as trouble_progress_statuses;
@@ -121,6 +122,7 @@ pub fn router() -> Router<AppState> {
         .merge(trouble_progress_statuses::tenant_router())
         .merge(trouble_notifications::tenant_router())
         .merge(trouble_schedules::tenant_router())
+        .merge(trouble_lineworks_members::tenant_router())
         .layer(axum_middleware::from_fn(require_tenant));
 
     // 公開ルート (認証不要)

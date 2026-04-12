@@ -141,6 +141,9 @@ async fn main() -> anyhow::Result<()> {
 
     let auth = Arc::new(PgAuthRepository::new(pool.clone()));
     let bot_admin = Arc::new(PgBotAdminRepository::new(pool.clone()));
+    let lw_client = Arc::new(alc_notify::clients::lineworks::LineworksBotClient::new());
+    let bot_admin_ext: Arc<dyn alc_core::repository::bot_admin::BotAdminRepository> =
+        bot_admin.clone();
     let car_inspections = Arc::new(PgCarInspectionRepository::new(pool.clone()));
     let carins_files = Arc::new(PgCarinsFilesRepository::new(pool.clone()));
     let carrying_items = Arc::new(PgCarryingItemsRepository::new(pool.clone()));
@@ -335,6 +338,8 @@ async fn main() -> anyhow::Result<()> {
         .layer(Extension(rust_alc_api::routes::dtako_scraper::ScraperUrl(
             scraper_url,
         )))
+        .layer(Extension(bot_admin_ext))
+        .layer(Extension(lw_client))
         .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state);

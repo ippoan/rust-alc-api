@@ -2,6 +2,7 @@ pub mod categories;
 pub mod cloud_tasks;
 pub mod comments;
 pub mod files;
+pub mod lineworks_members;
 pub mod notifications;
 pub mod notifier;
 pub mod offices;

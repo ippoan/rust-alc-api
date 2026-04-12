@@ -12,6 +12,7 @@ use uuid::Uuid;
 
 const AUTH_TOKEN_ENDPOINT: &str = "https://auth.worksmobile.com/oauth2/v2.0/token";
 const BOT_ENDPOINT: &str = "https://www.worksapis.com/v1.0/bots/";
+const USERS_ENDPOINT: &str = "https://www.worksapis.com/v1.0/users";
 
 #[derive(Debug, thiserror::Error)]
 pub enum LineworksBotError {
@@ -89,11 +90,49 @@ impl CachedToken {
     }
 }
 
+/// LINE WORKS API レスポンスから変換した組織メンバー
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LineworksMember {
+    pub user_id: String,
+    pub user_name: Option<String>,
+    pub email: Option<String>,
+}
+
+/// LINE WORKS Users API レスポンス
+#[derive(Debug, Deserialize)]
+struct UsersResponse {
+    users: Option<Vec<UserEntry>>,
+    #[serde(rename = "responseMetaData")]
+    response_meta_data: Option<ResponseMetaData>,
+}
+
+#[derive(Debug, Deserialize)]
+struct UserEntry {
+    #[serde(rename = "userId")]
+    user_id: String,
+    #[serde(rename = "userName")]
+    user_name: Option<UserName>,
+    email: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct UserName {
+    #[serde(rename = "lastName")]
+    last_name: Option<String>,
+    #[serde(rename = "firstName")]
+    first_name: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ResponseMetaData {
+    cursor: Option<String>,
+}
+
 /// マルチテナント対応の LINE WORKS Bot クライアント
-/// bot_config_id ごとにトークンをキャッシュ
+/// (config_id, scope) ごとにトークンをキャッシュ
 pub struct LineworksBotClient {
     client: reqwest::Client,
-    cache: Arc<RwLock<HashMap<Uuid, CachedToken>>>,
+    cache: Arc<RwLock<HashMap<(Uuid, String), CachedToken>>>,
 }
 
 impl Default for LineworksBotClient {
@@ -114,11 +153,13 @@ impl LineworksBotClient {
         &self,
         config_id: Uuid,
         config: &LineworksBotConfig,
+        scope: &str,
     ) -> Result<String, LineworksBotError> {
+        let cache_key = (config_id, scope.to_string());
         // キャッシュチェック
         {
             let cache = self.cache.read().await;
-            if let Some(cached) = cache.get(&config_id) {
+            if let Some(cached) = cache.get(&cache_key) {
                 if !cached.is_expired() {
                     return Ok(cached.token.access_token.clone());
                 }
@@ -126,12 +167,12 @@ impl LineworksBotClient {
         }
 
         // 新規トークン発行
-        let token = self.issue_token(config).await?;
+        let token = self.issue_token(config, scope).await?;
         let access_token = token.access_token.clone();
 
         let mut cache = self.cache.write().await;
         cache.insert(
-            config_id,
+            cache_key,
             CachedToken {
                 token,
                 issued_at: SystemTime::now()
@@ -147,6 +188,7 @@ impl LineworksBotClient {
     async fn issue_token(
         &self,
         config: &LineworksBotConfig,
+        scope: &str,
     ) -> Result<TokenResponse, LineworksBotError> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -171,7 +213,7 @@ impl LineworksBotClient {
             ),
             ("client_id", config.client_id.clone()),
             ("client_secret", config.client_secret.clone()),
-            ("scope", "bot".to_string()),
+            ("scope", scope.to_string()),
         ];
 
         let resp = self
@@ -202,7 +244,7 @@ impl LineworksBotClient {
         user_id: &str,
         text: &str,
     ) -> Result<(), LineworksBotError> {
-        let token = self.get_access_token(config_id, config).await?;
+        let token = self.get_access_token(config_id, config, "bot").await?;
         let url = format!(
             "{}{}/users/{}/messages",
             BOT_ENDPOINT, config.bot_id, user_id
@@ -231,5 +273,67 @@ impl LineworksBotClient {
         }
 
         Ok(())
+    }
+
+    /// 組織メンバー一覧を取得 (directory.read scope)
+    pub async fn list_org_users(
+        &self,
+        config_id: Uuid,
+        config: &LineworksBotConfig,
+    ) -> Result<Vec<LineworksMember>, LineworksBotError> {
+        let token = self
+            .get_access_token(config_id, config, "directory.read")
+            .await?;
+
+        let mut members = Vec::new();
+        let mut cursor: Option<String> = None;
+
+        loop {
+            let mut url = USERS_ENDPOINT.to_string();
+            if let Some(ref c) = cursor {
+                url = format!("{}?cursor={}", url, c);
+            }
+
+            let resp = self
+                .client
+                .get(&url)
+                .header("Authorization", format!("Bearer {}", token))
+                .send()
+                .await?;
+
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let body = resp.text().await.unwrap_or_default();
+                tracing::error!("LINE WORKS list users failed: {status} - {body}");
+                return Err(LineworksBotError::SendFailed(format!("{status}: {body}")));
+            }
+
+            let body: UsersResponse = resp
+                .json()
+                .await
+                .map_err(|e| LineworksBotError::SendFailed(format!("parse users response: {e}")))?;
+
+            if let Some(users) = body.users {
+                for u in users {
+                    let display_name = u.user_name.map(|n| {
+                        let last = n.last_name.unwrap_or_default();
+                        let first = n.first_name.unwrap_or_default();
+                        format!("{} {}", last, first).trim().to_string()
+                    });
+                    members.push(LineworksMember {
+                        user_id: u.user_id,
+                        user_name: display_name,
+                        email: u.email,
+                    });
+                }
+            }
+
+            cursor = body.response_meta_data.and_then(|m| m.cursor);
+            if cursor.is_none() {
+                break;
+            }
+        }
+
+        Ok(members)
     }
 }

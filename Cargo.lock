@@ -4729,6 +4729,9 @@ name = "trouble-api"
 version = "0.1.0"
 dependencies = [
  "alc-core",
+ "alc-misc",
+ "alc-notify",
+ "alc-storage",
  "alc-trouble",
  "axum",
  "sqlx",

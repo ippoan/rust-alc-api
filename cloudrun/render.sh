@@ -161,6 +161,18 @@ YAML
                 secretKeyRef:
                   key: latest
                   name: dtako-r2-secret-key
+            - name: TROUBLE_R2_BUCKET
+              value: "${ENV_TROUBLE_R2_BUCKET:-trouble-files}"
+            - name: TROUBLE_R2_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: trouble-r2-access-key
+            - name: TROUBLE_R2_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: trouble-r2-secret-key
             - name: LINE_LOGIN_CHANNEL_ID
               valueFrom:
                 secretKeyRef:
@@ -257,6 +269,20 @@ emit_env_trouble() {
   cat <<YAML
             - name: RUST_LOG
               value: "trouble_api=info"
+            - name: R2_ACCOUNT_ID
+              value: "24b45709d060d957340180e995f0d373"
+            - name: TROUBLE_R2_BUCKET
+              value: "${ENV_TROUBLE_R2_BUCKET:-trouble-files}"
+            - name: TROUBLE_R2_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: trouble-r2-access-key
+            - name: TROUBLE_R2_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: trouble-r2-secret-key
 YAML
   emit_database_url
 }

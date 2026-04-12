@@ -25,7 +25,7 @@ fn encryption_key() -> Result<String, String> {
         .map_err(|_| "SSO_ENCRYPTION_KEY or JWT_SECRET not set".to_string())
 }
 
-async fn resolve_lineworks_config(
+pub async fn resolve_lineworks_config(
     bot_admin: &dyn BotAdminRepository,
     tenant_id: Uuid,
 ) -> Result<(Uuid, LineworksBotConfig), String> {
