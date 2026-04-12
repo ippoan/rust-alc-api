@@ -4,13 +4,14 @@ use axum::{
     routing::{delete, get, post},
     Json, Router,
 };
+use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use crate::TroubleState;
 use alc_core::auth_middleware::TenantId;
 use alc_core::models::{
-    CreateTroubleTask, CreateTroubleTaskActivity, TroubleActivityFile, TroubleTask,
-    TroubleTaskActivity, UpdateTroubleTask,
+    CreateTroubleSchedule, CreateTroubleTask, CreateTroubleTaskActivity, TroubleActivityFile,
+    TroubleTask, TroubleTaskActivity, UpdateTroubleTask,
 };
 
 const VALID_STATUSES: &[&str] = &["open", "in_progress", "done"];
@@ -108,6 +109,11 @@ async fn create_task(
         }
     }
 
+    // 期限リマインダー自動スケジュール
+    if let Some(due_date) = task.due_date {
+        schedule_due_reminder(&state, tenant_id, &task, due_date).await;
+    }
+
     Ok((StatusCode::CREATED, Json(task)))
 }
 
@@ -193,6 +199,16 @@ async fn update_task(
                         .await;
                 }
             }
+        }
+    }
+
+    // 期限リマインダー再スケジュール
+    if body.due_date.is_some() {
+        // Cancel existing reminders for this task
+        cancel_task_reminders(&state, tenant_id, task.id).await;
+        // Schedule new reminder if due_date is set
+        if let Some(due_date) = task.due_date {
+            schedule_due_reminder(&state, tenant_id, &task, due_date).await;
         }
     }
 
@@ -410,5 +426,100 @@ async fn delete_activity_file(
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(StatusCode::NOT_FOUND)
+    }
+}
+
+/// Cancel all pending reminders for a task
+async fn cancel_task_reminders(state: &TroubleState, tenant_id: Uuid, task_id: Uuid) {
+    match state
+        .trouble_schedules
+        .cancel_pending_by_task(tenant_id, task_id)
+        .await
+    {
+        Ok(cancelled) => {
+            // Also delete from Cloud Tasks
+            if let Some(ct) = &state.cloud_tasks {
+                for schedule in &cancelled {
+                    if let Some(task_name) = &schedule.cloud_task_name {
+                        if let Err(e) = ct.delete_task(task_name).await {
+                            tracing::error!(
+                                "Cloud Tasks delete error for schedule {}: {e}",
+                                schedule.id
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        Err(e) => tracing::error!("cancel_pending_by_task error: {e}"),
+    }
+}
+
+/// Schedule a reminder 1 hour before due date
+async fn schedule_due_reminder(
+    state: &TroubleState,
+    tenant_id: Uuid,
+    task: &TroubleTask,
+    due_date: DateTime<Utc>,
+) {
+    let reminder_at = due_date - chrono::Duration::hours(1);
+    if reminder_at <= chrono::Utc::now() {
+        return; // Already past the reminder time
+    }
+
+    // Check if notification pref exists for task_due_reminder
+    let pref = match state
+        .trouble_notification_prefs
+        .find_enabled(tenant_id, "task_due_reminder", "lineworks")
+        .await
+    {
+        Ok(Some(pref)) => pref,
+        _ => return, // No pref configured
+    };
+
+    // Get ticket_no for the message
+    let ticket_no = state
+        .trouble_tickets
+        .get(tenant_id, task.ticket_id)
+        .await
+        .ok()
+        .flatten()
+        .map(|t| t.ticket_no)
+        .unwrap_or(0);
+
+    let msg = format!(
+        "タスク期限リマインダー: #{} {} (期限: {})",
+        ticket_no,
+        task.title,
+        due_date.format("%Y-%m-%d %H:%M"),
+    );
+
+    let schedule_input = CreateTroubleSchedule {
+        ticket_id: task.ticket_id,
+        task_id: Some(task.id),
+        scheduled_at: reminder_at,
+        message: msg,
+        lineworks_user_ids: pref.lineworks_user_ids.clone(),
+    };
+
+    match state
+        .trouble_schedules
+        .create(tenant_id, &schedule_input, None)
+        .await
+    {
+        Ok(schedule) => {
+            if let Some(ct) = &state.cloud_tasks {
+                match ct.create_task(schedule.id, schedule.scheduled_at).await {
+                    Ok(task_name) => {
+                        let _ = state
+                            .trouble_schedules
+                            .set_cloud_task_name(tenant_id, schedule.id, &task_name)
+                            .await;
+                    }
+                    Err(e) => tracing::error!("Cloud Tasks create error: {e}"),
+                }
+            }
+        }
+        Err(e) => tracing::error!("create due reminder schedule error: {e}"),
     }
 }

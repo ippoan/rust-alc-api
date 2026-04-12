@@ -29,13 +29,14 @@ impl TroubleSchedulesRepository for PgTroubleSchedulesRepository {
         sqlx::query_as::<_, TroubleSchedule>(
             r#"
             INSERT INTO trouble_schedules
-                (tenant_id, ticket_id, scheduled_at, message, lineworks_user_ids, created_by)
-            VALUES ($1, $2, $3, $4, $5, $6)
+                (tenant_id, ticket_id, task_id, scheduled_at, message, lineworks_user_ids, created_by)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             RETURNING *
             "#,
         )
         .bind(tenant_id)
         .bind(input.ticket_id)
+        .bind(input.task_id)
         .bind(input.scheduled_at)
         .bind(&input.message)
         .bind(&input.lineworks_user_ids)
@@ -108,6 +109,26 @@ impl TroubleSchedulesRepository for PgTroubleSchedulesRepository {
         .execute(&mut *tc.conn)
         .await?;
         Ok(result.rows_affected() > 0)
+    }
+
+    async fn cancel_pending_by_task(
+        &self,
+        tenant_id: Uuid,
+        task_id: Uuid,
+    ) -> Result<Vec<TroubleSchedule>, sqlx::Error> {
+        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
+        sqlx::query_as::<_, TroubleSchedule>(
+            r#"
+            UPDATE trouble_schedules
+            SET status = 'cancelled'
+            WHERE tenant_id = $1 AND task_id = $2 AND status = 'pending'
+            RETURNING *
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(task_id)
+        .fetch_all(&mut *tc.conn)
+        .await
     }
 
     async fn get_for_fire(&self, id: Uuid) -> Result<Option<TroubleSchedule>, sqlx::Error> {

@@ -34,6 +34,12 @@ pub trait TroubleSchedulesRepository: Send + Sync {
         task_name: &str,
     ) -> Result<bool, sqlx::Error>;
 
+    async fn cancel_pending_by_task(
+        &self,
+        tenant_id: Uuid,
+        task_id: Uuid,
+    ) -> Result<Vec<TroubleSchedule>, sqlx::Error>;
+
     /// RLS バイパス — Cloud Tasks fire 用 (SECURITY DEFINER 関数経由)
     async fn get_for_fire(&self, id: Uuid) -> Result<Option<TroubleSchedule>, sqlx::Error>;
 

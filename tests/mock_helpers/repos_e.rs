@@ -898,6 +898,7 @@ impl TroubleSchedulesRepository for MockTroubleSchedulesRepository {
             id: Uuid::new_v4(),
             tenant_id,
             ticket_id: input.ticket_id,
+            task_id: input.task_id,
             scheduled_at: input.scheduled_at,
             message: input.message.clone(),
             lineworks_user_ids: input.lineworks_user_ids.clone(),
@@ -945,6 +946,15 @@ impl TroubleSchedulesRepository for MockTroubleSchedulesRepository {
     ) -> Result<bool, sqlx::Error> {
         check_fail!(self);
         Ok(true)
+    }
+
+    async fn cancel_pending_by_task(
+        &self,
+        _tenant_id: Uuid,
+        _task_id: Uuid,
+    ) -> Result<Vec<TroubleSchedule>, sqlx::Error> {
+        check_fail!(self);
+        Ok(vec![])
     }
 
     async fn get_for_fire(&self, _id: Uuid) -> Result<Option<TroubleSchedule>, sqlx::Error> {

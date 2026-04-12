@@ -1765,6 +1765,7 @@ pub struct TroubleSchedule {
     pub id: Uuid,
     pub tenant_id: Uuid,
     pub ticket_id: Uuid,
+    pub task_id: Option<Uuid>,
     pub scheduled_at: DateTime<Utc>,
     pub message: String,
     pub lineworks_user_ids: Vec<String>,
@@ -1779,6 +1780,8 @@ pub struct TroubleSchedule {
 #[ts(export)]
 pub struct CreateTroubleSchedule {
     pub ticket_id: Uuid,
+    #[serde(default)]
+    pub task_id: Option<Uuid>,
     pub scheduled_at: DateTime<Utc>,
     pub message: String,
     pub lineworks_user_ids: Vec<String>,
