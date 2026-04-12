@@ -69,6 +69,45 @@ async fn create_task(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
+    // タスクアサイン通知
+    if let Some(assigned_to_id) = body.assigned_to {
+        if let Some(notifier) = &state.notifier {
+            if let Ok(Some(pref)) = state
+                .trouble_notification_prefs
+                .find_enabled(tenant_id, "task_assigned", "lineworks")
+                .await
+            {
+                let ticket_no = state
+                    .trouble_tickets
+                    .get(tenant_id, ticket_id)
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|t| t.ticket_no)
+                    .unwrap_or(0);
+                let emp_name = if let Some(ref employees) = state.employees {
+                    employees
+                        .get(tenant_id, assigned_to_id)
+                        .await
+                        .ok()
+                        .flatten()
+                        .map(|e| e.name)
+                } else {
+                    None
+                };
+                let msg = format!(
+                    "タスクアサイン: #{} {} → {}",
+                    ticket_no,
+                    task.title,
+                    emp_name.as_deref().unwrap_or("不明"),
+                );
+                notifier
+                    .notify(tenant_id, "task_assigned", &msg, &pref.lineworks_user_ids)
+                    .await;
+            }
+        }
+    }
+
     Ok((StatusCode::CREATED, Json(task)))
 }
 
@@ -103,6 +142,9 @@ async fn update_task(
 
     let tenant_id = tenant.0 .0;
 
+    // assigned_to が提供され、かつ Some(uuid) の場合に通知対象
+    let has_assigned_to = matches!(body.assigned_to, Some(Some(_)));
+
     let task = state
         .trouble_tasks
         .update(tenant_id, task_id, &body)
@@ -112,6 +154,47 @@ async fn update_task(
             StatusCode::INTERNAL_SERVER_ERROR
         })?
         .ok_or(StatusCode::NOT_FOUND)?;
+
+    // タスクアサイン通知
+    if has_assigned_to {
+        if let Some(assigned_to_id) = task.assigned_to {
+            if let Some(notifier) = &state.notifier {
+                if let Ok(Some(pref)) = state
+                    .trouble_notification_prefs
+                    .find_enabled(tenant_id, "task_assigned", "lineworks")
+                    .await
+                {
+                    let ticket_no = state
+                        .trouble_tickets
+                        .get(tenant_id, task.ticket_id)
+                        .await
+                        .ok()
+                        .flatten()
+                        .map(|t| t.ticket_no)
+                        .unwrap_or(0);
+                    let emp_name = if let Some(ref employees) = state.employees {
+                        employees
+                            .get(tenant_id, assigned_to_id)
+                            .await
+                            .ok()
+                            .flatten()
+                            .map(|e| e.name)
+                    } else {
+                        None
+                    };
+                    let msg = format!(
+                        "タスクアサイン: #{} {} → {}",
+                        ticket_no,
+                        task.title,
+                        emp_name.as_deref().unwrap_or("不明"),
+                    );
+                    notifier
+                        .notify(tenant_id, "task_assigned", &msg, &pref.lineworks_user_ids)
+                        .await;
+                }
+            }
+        }
+    }
 
     Ok(Json(task))
 }

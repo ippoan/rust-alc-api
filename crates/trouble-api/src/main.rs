@@ -87,6 +87,7 @@ async fn main() {
         webhook: None,
         cloud_tasks: None,
         notifier: None,
+        employees: None,
     };
 
     // LINE WORKS メンバー一覧用
