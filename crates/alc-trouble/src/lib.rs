@@ -9,6 +9,7 @@ pub mod offices;
 pub mod progress_statuses;
 pub mod repo;
 pub mod schedules;
+pub mod task_types;
 pub mod tasks;
 pub mod tickets;
 pub mod workflow;
@@ -23,13 +24,25 @@ pub const DEFAULT_CATEGORIES: &[&str] = &[
     "その他",
 ];
 
+pub const DEFAULT_TASK_TYPES: &[&str] = &[
+    "レッカー対応",
+    "修理手配",
+    "保険対応",
+    "示談交渉",
+    "処分決定",
+    "再発防止策",
+    "現場確認",
+    "その他",
+];
+
 use std::sync::Arc;
 
 use alc_core::repository::{
     TroubleActivityFilesRepository, TroubleCategoriesRepository, TroubleCommentsRepository,
     TroubleFilesRepository, TroubleNotificationPrefsRepository, TroubleOfficesRepository,
     TroubleProgressStatusesRepository, TroubleSchedulesRepository, TroubleTaskActivitiesRepository,
-    TroubleTasksRepository, TroubleTicketsRepository, TroubleWorkflowRepository,
+    TroubleTaskTypesRepository, TroubleTasksRepository, TroubleTicketsRepository,
+    TroubleWorkflowRepository,
 };
 use alc_core::storage::StorageBackend;
 use alc_core::webhook::WebhookService;
@@ -53,6 +66,7 @@ pub struct TroubleState {
     pub trouble_tasks: Arc<dyn TroubleTasksRepository>,
     pub trouble_task_activities: Arc<dyn TroubleTaskActivitiesRepository>,
     pub trouble_activity_files: Arc<dyn TroubleActivityFilesRepository>,
+    pub trouble_task_types: Arc<dyn TroubleTaskTypesRepository>,
     pub trouble_storage: Option<Arc<dyn StorageBackend>>,
     pub webhook: Option<Arc<dyn WebhookService>>,
     pub cloud_tasks: Option<Arc<dyn CloudTasksClient>>,
@@ -74,6 +88,7 @@ impl axum::extract::FromRef<alc_core::AppState> for TroubleState {
             trouble_tasks: state.trouble_tasks.clone(),
             trouble_task_activities: state.trouble_task_activities.clone(),
             trouble_activity_files: state.trouble_activity_files.clone(),
+            trouble_task_types: state.trouble_task_types.clone(),
             trouble_storage: state.trouble_storage.clone(),
             webhook: state.webhook.clone(),
             cloud_tasks: None,

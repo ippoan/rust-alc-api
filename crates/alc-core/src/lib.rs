@@ -36,7 +36,8 @@ use repository::{
     TroubleActivityFilesRepository, TroubleCategoriesRepository, TroubleCommentsRepository,
     TroubleFilesRepository, TroubleNotificationPrefsRepository, TroubleOfficesRepository,
     TroubleProgressStatusesRepository, TroubleSchedulesRepository, TroubleTaskActivitiesRepository,
-    TroubleTasksRepository, TroubleTicketsRepository, TroubleWorkflowRepository,
+    TroubleTaskTypesRepository, TroubleTasksRepository, TroubleTicketsRepository,
+    TroubleWorkflowRepository,
 };
 use storage::StorageBackend;
 
@@ -102,6 +103,7 @@ pub struct AppState {
     pub trouble_tasks: Arc<dyn TroubleTasksRepository>,
     pub trouble_task_activities: Arc<dyn TroubleTaskActivitiesRepository>,
     pub trouble_activity_files: Arc<dyn TroubleActivityFilesRepository>,
+    pub trouble_task_types: Arc<dyn TroubleTaskTypesRepository>,
     pub trouble_storage: Option<Arc<dyn StorageBackend>>,
 }
 

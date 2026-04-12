@@ -15,7 +15,8 @@ pub use alc_core::repository::{
     TroubleActivityFilesRepository, TroubleCategoriesRepository, TroubleCommentsRepository,
     TroubleFilesRepository, TroubleNotificationPrefsRepository, TroubleOfficesRepository,
     TroubleProgressStatusesRepository, TroubleSchedulesRepository, TroubleTaskActivitiesRepository,
-    TroubleTasksRepository, TroubleTicketsRepository, TroubleWorkflowRepository, WebhookRepository,
+    TroubleTaskTypesRepository, TroubleTasksRepository, TroubleTicketsRepository,
+    TroubleWorkflowRepository, WebhookRepository,
 };
 
 // Re-export TenantConn from alc-core
@@ -81,6 +82,6 @@ pub use alc_trouble::repo::{
     trouble_progress_statuses::PgTroubleProgressStatusesRepository,
     trouble_schedules::PgTroubleSchedulesRepository,
     trouble_task_activities::PgTroubleTaskActivitiesRepository,
-    trouble_tasks::PgTroubleTasksRepository, trouble_tickets::PgTroubleTicketsRepository,
-    trouble_workflow::PgTroubleWorkflowRepository,
+    trouble_task_types::PgTroubleTaskTypesRepository, trouble_tasks::PgTroubleTasksRepository,
+    trouble_tickets::PgTroubleTicketsRepository, trouble_workflow::PgTroubleWorkflowRepository,
 };

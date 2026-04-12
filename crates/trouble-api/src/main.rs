@@ -24,8 +24,8 @@ use alc_trouble::repo::{
     trouble_progress_statuses::PgTroubleProgressStatusesRepository,
     trouble_schedules::PgTroubleSchedulesRepository,
     trouble_task_activities::PgTroubleTaskActivitiesRepository,
-    trouble_tasks::PgTroubleTasksRepository, trouble_tickets::PgTroubleTicketsRepository,
-    trouble_workflow::PgTroubleWorkflowRepository,
+    trouble_task_types::PgTroubleTaskTypesRepository, trouble_tasks::PgTroubleTasksRepository,
+    trouble_tickets::PgTroubleTicketsRepository, trouble_workflow::PgTroubleWorkflowRepository,
 };
 use alc_trouble::TroubleState;
 
@@ -82,6 +82,7 @@ async fn main() {
         trouble_tasks: Arc::new(PgTroubleTasksRepository::new(pool.clone())),
         trouble_task_activities: Arc::new(PgTroubleTaskActivitiesRepository::new(pool.clone())),
         trouble_activity_files: Arc::new(PgTroubleActivityFilesRepository::new(pool.clone())),
+        trouble_task_types: Arc::new(PgTroubleTaskTypesRepository::new(pool.clone())),
         trouble_storage,
         webhook: None,
         cloud_tasks: None,
@@ -103,6 +104,7 @@ async fn main() {
         .merge(alc_trouble::notifications::tenant_router())
         .merge(alc_trouble::schedules::tenant_router())
         .merge(alc_trouble::tasks::tenant_router())
+        .merge(alc_trouble::task_types::tenant_router())
         .merge(alc_trouble::lineworks_members::tenant_router())
         .layer(Extension(bot_admin))
         .layer(Extension(lw_client))
