@@ -230,6 +230,11 @@ YAML
                 secretKeyRef:
                   key: latest
                   name: $(notify_worker_secret_name)
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: gemini-api-key
 YAML
 }
 

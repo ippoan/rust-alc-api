@@ -10,5 +10,7 @@ pub mod lineworks_channels;
 pub mod lineworks_directory;
 pub mod read_tracker;
 pub mod recipients;
+pub mod redact;
 pub mod repo;
+pub mod test_endpoints;
 pub mod viewer;
