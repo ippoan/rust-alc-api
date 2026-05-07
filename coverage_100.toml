@@ -293,3 +293,7 @@ type = "combined"
 [[files]]
 path = "crates/alc-notify/src/clients/line.rs"
 type = "unit"
+
+[[files]]
+path = "crates/alc-notify/src/mask.rs"
+type = "unit"

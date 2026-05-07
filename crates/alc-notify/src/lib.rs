@@ -8,6 +8,7 @@ pub mod line_config;
 pub mod line_webhook;
 pub mod lineworks_channels;
 pub mod lineworks_directory;
+pub mod mask;
 pub mod read_tracker;
 pub mod recipients;
 pub mod repo;
