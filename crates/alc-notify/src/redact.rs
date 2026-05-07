@@ -262,9 +262,13 @@ pub fn apply_redactions(
     Ok(out)
 }
 
-/// 指定ページの Resources/XObject に登録されている画像 XObject の **最初の 1 つ**
-/// の ObjectId を返す。FAX スキャン PDF はページに大きな JPEG 1 枚という構造が
-/// 大半なので、これで十分。
+/// 指定ページの Resources/XObject から **DCTDecode (= JPEG) フィルタの画像のうち
+/// 最も pixel 数が大きいもの** の ObjectId を返す。
+///
+/// FAX 由来 PDF は典型的に「メイン JPEG (本文) + CCITT ステンシル (印影 / マスク)」
+/// の多層構造で、CCITT ステンシルを掴むと `image::load_from_memory` が認識不能で
+/// 失敗する。CCITT を読めるようにする選択肢もあるが、本機能の目的は「金額部分を
+/// 隠す」だけなので、本文 JPEG の上に白矩形を焼き込む方針で十分。
 fn find_first_image_xobject(
     doc: &Document,
     page_id: ObjectId,
@@ -298,6 +302,7 @@ fn find_first_image_xobject(
         _ => return Ok(None),
     };
 
+    let mut best: Option<(ObjectId, u64)> = None;
     for (_name, obj) in xobject_dict.iter() {
         let id = match obj {
             Object::Reference(id) => *id,
@@ -310,6 +315,7 @@ fn find_first_image_xobject(
             },
             Err(_) => continue,
         };
+        // Subtype=Image
         let is_image = stream
             .dict
             .get(b"Subtype")
@@ -317,11 +323,42 @@ fn find_first_image_xobject(
             .and_then(|o| o.as_name().ok())
             .map(|n| n == b"Image")
             .unwrap_or(false);
-        if is_image {
-            return Ok(Some(id));
+        if !is_image {
+            continue;
+        }
+        // Filter=DCTDecode (JPEG) のみ対象。複数フィルタ (配列) のケースは「先頭が DCTDecode」と判定。
+        let is_jpeg = match stream.dict.get(b"Filter") {
+            Ok(Object::Name(n)) => n == b"DCTDecode",
+            Ok(Object::Array(arr)) => arr
+                .first()
+                .and_then(|o| o.as_name().ok())
+                .map(|n| n == b"DCTDecode")
+                .unwrap_or(false),
+            _ => false,
+        };
+        if !is_jpeg {
+            continue;
+        }
+        let w = stream
+            .dict
+            .get(b"Width")
+            .ok()
+            .and_then(|o| o.as_i64().ok())
+            .unwrap_or(0) as u64;
+        let h = stream
+            .dict
+            .get(b"Height")
+            .ok()
+            .and_then(|o| o.as_i64().ok())
+            .unwrap_or(0) as u64;
+        let area = w.saturating_mul(h);
+        match best {
+            None => best = Some((id, area)),
+            Some((_, prev_area)) if area > prev_area => best = Some((id, area)),
+            _ => {}
         }
     }
-    Ok(None)
+    Ok(best.map(|(id, _)| id))
 }
 
 #[cfg(test)]
