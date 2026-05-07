@@ -2,17 +2,27 @@
 //!
 //! 1. `detect_amount_boxes` — Gemini API に PDF を inlineData として直接送り、
 //!    金額表記の bounding box を JSON で返してもらう。
-//! 2. `apply_redactions` — 受け取った bbox を `lopdf` で各ページの content stream
-//!    末尾に「白矩形描画」命令として追記し、新しい PDF バイト列を返す。
+//! 2. `apply_redactions` — 受け取った bbox を「ページ内に埋め込まれた JPEG 画像
+//!    そのもの」のピクセルに白矩形で書き込み、JPEG を再エンコードして XObject
+//!    stream を上書きする。
 //!
-//! 既存描画の **上に** 白矩形を重ねる方式なので、元の PDF 構造 (ページ数 / 埋め込み
-//! 画像 / フォーム) はそのまま保持される。FAX 由来のスキャン画像 PDF (= 1 ページ
-//! 1 埋め込み画像) でも問題なく動作する。
+//! ## 「画像書き換え」アプローチを採用する理由
+//!
+//! 以前は lopdf でページの content stream に白矩形 PDF コマンドを末尾追加していた
+//! (上書きオーバーレイ)。ただし PDF は「後勝ち」描画なので、PDF.js のような
+//! progressive renderer では「元 stream → 白矩形 stream」の順に描かれ、
+//! **元値が一瞬見える (ちらつく)** という UX 上の問題があった。
+//!
+//! FAX 由来のスキャン PDF は実体として `/XObject/Image` (DCTDecode = JPEG) が
+//! 1 ページに 1 枚埋め込まれている。この **JPEG ピクセル自体に白矩形を焼き込む**
+//! と、PDF 内のどこを探しても元の金額値は見つからず、ちらつきが構造的に発生し
+//! 得ない。
 //!
 //! 設計ドキュメント: `~/.claude/projects/-home-yhonda-rust-rust-alc-api/memory/notify_pdf_redact_design.md`
 
 use base64::Engine;
-use lopdf::{dictionary, Document, Object, ObjectId, Stream};
+use image::ImageEncoder;
+use lopdf::{Document, Object, ObjectId, Stream};
 
 const GEMINI_DEFAULT_ENDPOINT: &str = "https://generativelanguage.googleapis.com/v1beta";
 // gemini-2.0-flash は 2026 年に新規ユーザー向け提供終了 (404)。
@@ -40,6 +50,7 @@ const REDACT_PROMPT: &str = r#"この PDF 内の「金額表記」の位置を�
 ルール:
 - box_2d は 0-1000 で正規化された [ymin, xmin, ymax, xmax] (Gemini 標準 bbox 形式)
 - page は 1-origin
+- bbox は数字 + 単位 (円) を確実に **完全に内包する** ように、左右に余裕を持たせる
 - 金額のみ。氏名・電話番号・FAX 番号・郵便番号・車両ナンバー・住所などは含めない
 - 「3,200 kg」「9PL」「10t」「10:00」など金額でない数字は含めない
 - 金額が見つからない場合は {"redactions": []} を返す"#;
@@ -78,6 +89,10 @@ pub enum RedactError {
     PageNotFound(usize),
     #[error("invalid bbox in redaction: {0:?}")]
     InvalidBox([f32; 4]),
+    #[error("page {0} has no embeddable image XObject (not a scan-style PDF?)")]
+    PageNoImage(usize),
+    #[error("image decode/encode: {0}")]
+    Image(#[from] image::ImageError),
 }
 
 /// Gemini API を叩いて、PDF 内の金額表記の bbox を取得する。
@@ -130,17 +145,28 @@ pub async fn detect_amount_boxes(
     Ok(list.redactions)
 }
 
-/// PDF バイト列に「白矩形オーバーレイ」を適用して、新しい PDF バイト列を返す。
-/// pure 関数 (HTTP / DB に触らない)。
+/// PDF 内の埋め込み JPEG 画像のピクセルを直接書き換えて redacted PDF を返す。
+///
+/// FAX 由来 PDF が前提 (1 page = 1 image XObject、DCTDecode フィルタ)。それ以外
+/// (テキスト PDF など) のページはスキップせずエラー返却 (`PageNoImage`)。
+///
+/// 元値は出力 PDF のどこにも残らないので、PDF.js progressive render でも
+/// **ちらつきは構造的に発生し得ない**。pure 関数 (HTTP / DB に触らない)。
 pub fn apply_redactions(
     pdf_bytes: &[u8],
     redactions: &[RedactionBox],
 ) -> Result<Vec<u8>, RedactError> {
     let mut doc = Document::load_mem(pdf_bytes)?;
 
-    // 1-origin page → ObjectId への変換テーブル
-    let pages: Vec<ObjectId> = doc.get_pages().into_values().collect();
+    if redactions.is_empty() {
+        let mut out = Vec::new();
+        doc.save_to(&mut out)?;
+        return Ok(out);
+    }
 
+    // 1) bbox 検証 + ページ単位にグループ化
+    let pages: Vec<ObjectId> = doc.get_pages().into_values().collect();
+    let mut by_page: std::collections::BTreeMap<usize, Vec<&RedactionBox>> = Default::default();
     for r in redactions {
         if r.page == 0 || r.page > pages.len() {
             return Err(RedactError::PageNotFound(r.page));
@@ -155,21 +181,80 @@ pub fn apply_redactions(
         {
             return Err(RedactError::InvalidBox(r.box_2d));
         }
+        by_page.entry(r.page).or_default().push(r);
+    }
 
-        let page_id = pages[r.page - 1];
-        let (page_w, page_h) = page_size(&doc, page_id)?;
+    // 2) ページごとに、埋め込み画像 XObject を探して書き換え
+    for (page_idx, redactions_on_page) in by_page {
+        let page_id = pages[page_idx - 1];
+        let image_obj_id =
+            find_first_image_xobject(&doc, page_id)?.ok_or(RedactError::PageNoImage(page_idx))?;
 
-        // box_2d は 0-1000 / 左上原点 → PDF 座標 (左下原点 pt) に変換
-        let x = (xmin / 1000.0) * page_w;
-        let y = page_h - (ymax / 1000.0) * page_h;
-        let bw = ((xmax - xmin) / 1000.0) * page_w;
-        let bh = ((ymax - ymin) / 1000.0) * page_h;
+        // XObject Image stream を取得し、JPEG bytes (`content`) と寸法 (`Width`,
+        // `Height`) を読む。
+        let (img_bytes, img_w, img_h, dict_keys) = {
+            let stream = doc.get_object(image_obj_id)?.as_stream()?;
+            let w = stream
+                .dict
+                .get(b"Width")
+                .ok()
+                .and_then(|o| o.as_i64().ok())
+                .unwrap_or(0) as u32;
+            let h = stream
+                .dict
+                .get(b"Height")
+                .ok()
+                .and_then(|o| o.as_i64().ok())
+                .unwrap_or(0) as u32;
+            // dict の他キーは温存して再構築するため key 一覧を控える
+            let keys: Vec<Vec<u8>> = stream.dict.iter().map(|(k, _)| k.to_vec()).collect();
+            (stream.content.clone(), w, h, keys)
+        };
 
-        let cmd = format!("q 1 1 1 rg {x:.2} {y:.2} {bw:.2} {bh:.2} re f Q\n");
-        let stream = Stream::new(dictionary! {}, cmd.into_bytes());
-        let stream_id = doc.add_object(stream);
+        // 3) JPEG decode → 白矩形描画 → JPEG re-encode
+        let mut img = image::load_from_memory(&img_bytes)?.to_rgb8();
+        let (real_w, real_h) = img.dimensions();
+        // 念のため: dict の Width/Height が 0 なら decode 後の寸法を使う
+        let (w_for_calc, h_for_calc) = if img_w > 0 && img_h > 0 {
+            (img_w as f32, img_h as f32)
+        } else {
+            (real_w as f32, real_h as f32)
+        };
 
-        append_content_stream(&mut doc, page_id, stream_id)?;
+        for r in &redactions_on_page {
+            let [ymin, xmin, ymax, xmax] = r.box_2d;
+            // box_2d (0-1000、左上原点) → 画像 pixel 座標
+            let px = ((xmin / 1000.0) * w_for_calc).round().max(0.0) as u32;
+            let py = ((ymin / 1000.0) * h_for_calc).round().max(0.0) as u32;
+            let pw = ((xmax - xmin) / 1000.0 * w_for_calc).round().max(0.0) as u32;
+            let ph = ((ymax - ymin) / 1000.0 * h_for_calc).round().max(0.0) as u32;
+
+            let x_end = (px + pw).min(real_w);
+            let y_end = (py + ph).min(real_h);
+            for y in py.min(real_h)..y_end {
+                for x in px.min(real_w)..x_end {
+                    img.put_pixel(x, y, image::Rgb([255, 255, 255]));
+                }
+            }
+        }
+
+        let mut new_jpeg = Vec::with_capacity(img_bytes.len());
+        // quality 90: 元の FAX スキャンが既に低品質なので 90 で十分、ファイル膨張も
+        // 抑えられる。
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut new_jpeg, 90).write_image(
+            img.as_raw(),
+            real_w,
+            real_h,
+            image::ExtendedColorType::Rgb8,
+        )?;
+
+        // 4) Stream の content だけ差し替え。dict (Filter=DCTDecode、Width/Height、
+        //    ColorSpace 等) は元のまま保持する。
+        // 寸法が変わらないので Width/Height も書き換え不要。
+        let stream = doc.get_object_mut(image_obj_id)?.as_stream_mut()?;
+        stream.set_content(new_jpeg);
+        // dict_keys は将来の検証用 (本実装では未使用)。dead code 警告を抑止。
+        let _ = dict_keys;
     }
 
     let mut out = Vec::new();
@@ -177,69 +262,72 @@ pub fn apply_redactions(
     Ok(out)
 }
 
-/// Page の MediaBox から (width, height) を pt 単位で取得。
-fn page_size(doc: &Document, page_id: ObjectId) -> Result<(f32, f32), RedactError> {
-    // 自分の MediaBox がなければ親 (Pages tree) を辿る
+/// 指定ページの Resources/XObject に登録されている画像 XObject の **最初の 1 つ**
+/// の ObjectId を返す。FAX スキャン PDF はページに大きな JPEG 1 枚という構造が
+/// 大半なので、これで十分。
+fn find_first_image_xobject(
+    doc: &Document,
+    page_id: ObjectId,
+) -> Result<Option<ObjectId>, RedactError> {
+    // Resources は Page 自身か親 (Pages tree) のどちらかにある可能性
     let mut current = page_id;
-    loop {
+    let resources_obj = loop {
         let dict = doc.get_object(current)?.as_dict()?;
-        if let Ok(mb) = dict.get(b"MediaBox") {
-            let arr = mb.as_array()?;
-            if arr.len() == 4 {
-                let llx = obj_to_f32(&arr[0])?;
-                let lly = obj_to_f32(&arr[1])?;
-                let urx = obj_to_f32(&arr[2])?;
-                let ury = obj_to_f32(&arr[3])?;
-                return Ok((urx - llx, ury - lly));
-            }
+        if let Ok(r) = dict.get(b"Resources") {
+            break r.clone();
         }
         match dict.get(b"Parent") {
             Ok(Object::Reference(parent_id)) => current = *parent_id,
-            _ => break,
+            _ => return Ok(None),
         }
-    }
-    // フォールバック: A4 縦
-    Ok((595.0, 842.0))
-}
-
-fn obj_to_f32(o: &Object) -> Result<f32, lopdf::Error> {
-    match o {
-        Object::Integer(i) => Ok(*i as f32),
-        Object::Real(r) => Ok(*r),
-        _ => Err(lopdf::Error::ObjectNotFound),
-    }
-}
-
-/// Page の Contents に新しい Stream を末尾追加する。
-/// Contents は Reference 単一 / 配列 / なし のどれかなので、それぞれ対応。
-fn append_content_stream(
-    doc: &mut Document,
-    page_id: ObjectId,
-    stream_id: ObjectId,
-) -> Result<(), RedactError> {
-    let page = doc.get_object_mut(page_id)?;
-    let dict = page.as_dict_mut()?;
-
-    let new_contents = match dict.get(b"Contents") {
-        Ok(Object::Reference(existing)) => Object::Array(vec![
-            Object::Reference(*existing),
-            Object::Reference(stream_id),
-        ]),
-        Ok(Object::Array(arr)) => {
-            let mut v = arr.clone();
-            v.push(Object::Reference(stream_id));
-            Object::Array(v)
-        }
-        _ => Object::Array(vec![Object::Reference(stream_id)]),
     };
 
-    dict.set("Contents", new_contents);
-    Ok(())
+    let resources_dict = match &resources_obj {
+        Object::Dictionary(d) => d.clone(),
+        Object::Reference(id) => doc.get_object(*id)?.as_dict()?.clone(),
+        _ => return Ok(None),
+    };
+
+    let xobject_obj = match resources_dict.get(b"XObject") {
+        Ok(o) => o.clone(),
+        Err(_) => return Ok(None),
+    };
+    let xobject_dict = match &xobject_obj {
+        Object::Dictionary(d) => d.clone(),
+        Object::Reference(id) => doc.get_object(*id)?.as_dict()?.clone(),
+        _ => return Ok(None),
+    };
+
+    for (_name, obj) in xobject_dict.iter() {
+        let id = match obj {
+            Object::Reference(id) => *id,
+            _ => continue,
+        };
+        let stream = match doc.get_object(id) {
+            Ok(o) => match o.as_stream() {
+                Ok(s) => s,
+                Err(_) => continue,
+            },
+            Err(_) => continue,
+        };
+        let is_image = stream
+            .dict
+            .get(b"Subtype")
+            .ok()
+            .and_then(|o| o.as_name().ok())
+            .map(|n| n == b"Image")
+            .unwrap_or(false);
+        if is_image {
+            return Ok(Some(id));
+        }
+    }
+    Ok(None)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lopdf::dictionary;
 
     #[test]
     fn test_redaction_box_serde() {
@@ -255,7 +343,7 @@ mod tests {
 
     #[test]
     fn test_apply_redactions_invalid_bbox_rejected() {
-        let pdf = minimal_pdf();
+        let pdf = pdf_with_jpeg_image(50, 50);
         let bad = vec![RedactionBox {
             page: 1,
             box_2d: [500.0, 500.0, 100.0, 100.0], // ymax < ymin
@@ -267,7 +355,7 @@ mod tests {
 
     #[test]
     fn test_apply_redactions_page_not_found() {
-        let pdf = minimal_pdf();
+        let pdf = pdf_with_jpeg_image(50, 50);
         let r = vec![RedactionBox {
             page: 99,
             box_2d: [100.0, 100.0, 200.0, 200.0],
@@ -279,59 +367,135 @@ mod tests {
 
     #[test]
     fn test_apply_redactions_empty_passthrough() {
-        let pdf = minimal_pdf();
+        let pdf = pdf_with_jpeg_image(50, 50);
         let out = apply_redactions(&pdf, &[]).unwrap();
         // 出力 PDF は valid (再 load できる) こと
         let _doc = Document::load_mem(&out).unwrap();
     }
 
     #[test]
-    fn test_apply_redactions_overlay_succeeds() {
-        let pdf = minimal_pdf();
+    fn test_apply_redactions_paints_white_on_jpeg() {
+        // 元画像は全面赤。bbox = 全面。redact 後の画像は全面 白 になっているはず。
+        let pdf = pdf_with_jpeg_image(40, 40);
         let r = vec![RedactionBox {
             page: 1,
-            box_2d: [100.0, 100.0, 200.0, 300.0],
-            text: "100円".into(),
+            box_2d: [0.0, 0.0, 1000.0, 1000.0],
+            text: "x".into(),
         }];
         let out = apply_redactions(&pdf, &r).unwrap();
         let doc = Document::load_mem(&out).unwrap();
-        // ページ数は 1 のまま
-        assert_eq!(doc.get_pages().len(), 1);
+        // 出力 PDF から再度 image stream を抽出し、ピクセル平均が白に近いことを確認
+        let pages: Vec<ObjectId> = doc.get_pages().into_values().collect();
+        let img_id = find_first_image_xobject(&doc, pages[0]).unwrap().unwrap();
+        let stream = doc.get_object(img_id).unwrap().as_stream().unwrap();
+        let img = image::load_from_memory(&stream.content).unwrap().to_rgb8();
+        // 中央ピクセルが白 (255,255,255) であること
+        let center = img.get_pixel(20, 20);
+        assert!(
+            center.0[0] > 240 && center.0[1] > 240 && center.0[2] > 240,
+            "center pixel should be white, got {:?}",
+            center.0
+        );
     }
 
-    /// テスト用: A4 1 ページの最小 PDF
-    fn minimal_pdf() -> Vec<u8> {
+    #[test]
+    fn test_apply_redactions_no_image_returns_error() {
+        // 画像 XObject を持たない page → PageNoImage
+        let pdf = pdf_without_image();
+        let r = vec![RedactionBox {
+            page: 1,
+            box_2d: [100.0, 100.0, 200.0, 200.0],
+            text: "x".into(),
+        }];
+        let err = apply_redactions(&pdf, &r).unwrap_err();
+        assert!(matches!(err, RedactError::PageNoImage(1)));
+    }
+
+    /// テスト用: A4 1 ページに `width × height` の赤い JPEG を 1 枚埋め込んだ PDF
+    fn pdf_with_jpeg_image(width: u32, height: u32) -> Vec<u8> {
+        // 赤一色の JPEG bytes を作る
+        let mut red = image::RgbImage::new(width, height);
+        for p in red.pixels_mut() {
+            *p = image::Rgb([255, 0, 0]);
+        }
+        let mut jpeg = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 90)
+            .write_image(red.as_raw(), width, height, image::ExtendedColorType::Rgb8)
+            .unwrap();
+
         let mut doc = Document::with_version("1.5");
         let pages_id = doc.new_object_id();
-        let page_id = doc.new_object_id();
 
-        // Catalog
+        // Image XObject (DCTDecode = JPEG)
+        let image_stream = Stream::new(
+            dictionary! {
+                "Type" => "XObject",
+                "Subtype" => "Image",
+                "Width" => width as i64,
+                "Height" => height as i64,
+                "ColorSpace" => "DeviceRGB",
+                "BitsPerComponent" => 8,
+                "Filter" => "DCTDecode",
+            },
+            jpeg,
+        );
+        // Stream を新規追加 (lopdf が自動で /Length を計算)
+        let image_id = doc.add_object(image_stream);
+
+        // Resources
+        let resources_id = doc.add_object(dictionary! {
+            "XObject" => dictionary! { "Im0" => image_id },
+        });
+
+        // Page
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "Resources" => resources_id,
+            "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
+        });
+
+        // Catalog + Pages tree
         let catalog_id = doc.add_object(dictionary! {
             "Type" => "Catalog",
             "Pages" => pages_id,
         });
-        doc.trailer.set("Root", catalog_id);
-
-        // Pages tree
         doc.objects.insert(
             pages_id,
             Object::Dictionary(dictionary! {
                 "Type" => "Pages",
                 "Count" => 1,
                 "Kids" => vec![page_id.into()],
-                "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
             }),
         );
+        doc.trailer.set("Root", catalog_id);
 
-        // Page
+        let mut out = Vec::new();
+        doc.save_to(&mut out).unwrap();
+        out
+    }
+
+    fn pdf_without_image() -> Vec<u8> {
+        let mut doc = Document::with_version("1.5");
+        let pages_id = doc.new_object_id();
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
+        });
+        let catalog_id = doc.add_object(dictionary! {
+            "Type" => "Catalog",
+            "Pages" => pages_id,
+        });
         doc.objects.insert(
-            page_id,
+            pages_id,
             Object::Dictionary(dictionary! {
-                "Type" => "Page",
-                "Parent" => pages_id,
+                "Type" => "Pages",
+                "Count" => 1,
+                "Kids" => vec![page_id.into()],
             }),
         );
-
+        doc.trailer.set("Root", catalog_id);
         let mut out = Vec::new();
         doc.save_to(&mut out).unwrap();
         out

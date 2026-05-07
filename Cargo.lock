@@ -199,6 +199,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "hmac",
+ "image",
  "jsonwebtoken",
  "lopdf 0.34.0",
  "reqwest",
