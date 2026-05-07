@@ -268,10 +268,14 @@ pub fn apply_redactions(
             image::ExtendedColorType::Rgb8,
         )?;
 
-        // 4) Stream content 差し替え。元 PDF が [/FlateDecode /DCTDecode] のように
-        //    Flate を被せている場合は、出力では **DCTDecode 単体に書き換える**
-        //    (Flate を再適用しても JPEG は既に圧縮済みなのでメリット無し)。
-        //    寸法は変わらないので Width/Height は触らない。
+        // 4) Stream content + dict 差し替え。
+        //    - Flate 被せありなら Filter を /DCTDecode 単体に書き換え
+        //      (Flate 再適用しても JPEG は既に圧縮済みなのでメリット無し)
+        //    - **重要**: 元 PDF の ColorSpace が /DeviceGray のページ (3163 等) でも
+        //      我々は to_rgb8() → JPEG (RGB) を出力するので、ColorSpace を
+        //      /DeviceRGB に書き換える。これを忘れると PDF reader が JPEG 内の
+        //      RGB ピクセルを 1ch グレーと誤解釈し、文字が壊れる + 表示崩壊
+        //    - Decode 配列があれば削除 (新エンコード色域と整合しないため)
         let stream = doc.get_object_mut(image_obj_id)?.as_stream_mut()?;
         stream.set_content(new_jpeg);
         if has_flate_wrapper {
@@ -279,6 +283,11 @@ pub fn apply_redactions(
                 .dict
                 .set("Filter", Object::Name(b"DCTDecode".to_vec()));
         }
+        stream
+            .dict
+            .set("ColorSpace", Object::Name(b"DeviceRGB".to_vec()));
+        stream.dict.remove(b"Decode");
+        stream.dict.set("BitsPerComponent", Object::Integer(8));
     }
 
     let mut out = Vec::new();
