@@ -21,8 +21,10 @@
 //! 設計ドキュメント: `~/.claude/projects/-home-yhonda-rust-rust-alc-api/memory/notify_pdf_redact_design.md`
 
 use base64::Engine;
+use flate2::read::ZlibDecoder;
 use image::ImageEncoder;
 use lopdf::{Document, Object, ObjectId, Stream};
+use std::io::Read;
 
 const GEMINI_DEFAULT_ENDPOINT: &str = "https://generativelanguage.googleapis.com/v1beta";
 // gemini-2.0-flash は 2026 年に新規ユーザー向け提供終了 (404)。
@@ -190,9 +192,11 @@ pub fn apply_redactions(
         let image_obj_id =
             find_first_image_xobject(&doc, page_id)?.ok_or(RedactError::PageNoImage(page_idx))?;
 
-        // XObject Image stream を取得し、JPEG bytes (`content`) と寸法 (`Width`,
-        // `Height`) を読む。
-        let (img_bytes, img_w, img_h, dict_keys) = {
+        // XObject Image stream を取得し、JPEG bytes と寸法 (Width, Height) を読む。
+        // PDF の Filter は単一名前 (e.g. /DCTDecode) または配列 (e.g. [/FlateDecode
+        // /DCTDecode]) のどちらか。FAX 由来 PDF は zlib 圧縮を被せた JPEG が
+        // 多いので、配列の場合は Flate を解凍してから JPEG を取り出す。
+        let (jpeg_bytes, img_w, img_h, has_flate_wrapper) = {
             let stream = doc.get_object(image_obj_id)?.as_stream()?;
             let w = stream
                 .dict
@@ -206,13 +210,29 @@ pub fn apply_redactions(
                 .ok()
                 .and_then(|o| o.as_i64().ok())
                 .unwrap_or(0) as u32;
-            // dict の他キーは温存して再構築するため key 一覧を控える
-            let keys: Vec<Vec<u8>> = stream.dict.iter().map(|(k, _)| k.to_vec()).collect();
-            (stream.content.clone(), w, h, keys)
+            let has_flate = match stream.dict.get(b"Filter") {
+                Ok(Object::Array(arr)) => arr
+                    .first()
+                    .and_then(|o| o.as_name().ok())
+                    .map(|n| n == b"FlateDecode")
+                    .unwrap_or(false),
+                _ => false,
+            };
+            let raw = stream.content.clone();
+            let jpeg = if has_flate {
+                let mut decoded = Vec::with_capacity(raw.len() * 4);
+                ZlibDecoder::new(raw.as_slice())
+                    .read_to_end(&mut decoded)
+                    .map_err(RedactError::PdfIo)?;
+                decoded
+            } else {
+                raw
+            };
+            (jpeg, w, h, has_flate)
         };
 
         // 3) JPEG decode → 白矩形描画 → JPEG re-encode
-        let mut img = image::load_from_memory(&img_bytes)?.to_rgb8();
+        let mut img = image::load_from_memory(&jpeg_bytes)?.to_rgb8();
         let (real_w, real_h) = img.dimensions();
         // 念のため: dict の Width/Height が 0 なら decode 後の寸法を使う
         let (w_for_calc, h_for_calc) = if img_w > 0 && img_h > 0 {
@@ -238,7 +258,7 @@ pub fn apply_redactions(
             }
         }
 
-        let mut new_jpeg = Vec::with_capacity(img_bytes.len());
+        let mut new_jpeg = Vec::with_capacity(jpeg_bytes.len());
         // quality 90: 元の FAX スキャンが既に低品質なので 90 で十分、ファイル膨張も
         // 抑えられる。
         image::codecs::jpeg::JpegEncoder::new_with_quality(&mut new_jpeg, 90).write_image(
@@ -248,13 +268,17 @@ pub fn apply_redactions(
             image::ExtendedColorType::Rgb8,
         )?;
 
-        // 4) Stream の content だけ差し替え。dict (Filter=DCTDecode、Width/Height、
-        //    ColorSpace 等) は元のまま保持する。
-        // 寸法が変わらないので Width/Height も書き換え不要。
+        // 4) Stream content 差し替え。元 PDF が [/FlateDecode /DCTDecode] のように
+        //    Flate を被せている場合は、出力では **DCTDecode 単体に書き換える**
+        //    (Flate を再適用しても JPEG は既に圧縮済みなのでメリット無し)。
+        //    寸法は変わらないので Width/Height は触らない。
         let stream = doc.get_object_mut(image_obj_id)?.as_stream_mut()?;
         stream.set_content(new_jpeg);
-        // dict_keys は将来の検証用 (本実装では未使用)。dead code 警告を抑止。
-        let _ = dict_keys;
+        if has_flate_wrapper {
+            stream
+                .dict
+                .set("Filter", Object::Name(b"DCTDecode".to_vec()));
+        }
     }
 
     let mut out = Vec::new();
@@ -326,14 +350,14 @@ fn find_first_image_xobject(
         if !is_image {
             continue;
         }
-        // Filter=DCTDecode (JPEG) のみ対象。複数フィルタ (配列) のケースは「先頭が DCTDecode」と判定。
+        // Filter に DCTDecode (JPEG) を含むものを対象にする。
+        // 単一名: /DCTDecode
+        // 配列: [/DCTDecode] / [/FlateDecode /DCTDecode] (FAX 由来 PDF に多い、JPEG の上に zlib 圧縮)
         let is_jpeg = match stream.dict.get(b"Filter") {
             Ok(Object::Name(n)) => n == b"DCTDecode",
             Ok(Object::Array(arr)) => arr
-                .first()
-                .and_then(|o| o.as_name().ok())
-                .map(|n| n == b"DCTDecode")
-                .unwrap_or(false),
+                .iter()
+                .any(|o| o.as_name().map(|n| n == b"DCTDecode").unwrap_or(false)),
             _ => false,
         };
         if !is_jpeg {
