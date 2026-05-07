@@ -45,6 +45,7 @@ pub use alc_notify::lineworks_channels as notify_lineworks_channels;
 pub use alc_notify::lineworks_directory as notify_lineworks_directory;
 pub use alc_notify::read_tracker as notify_read_tracker;
 pub use alc_notify::recipients as notify_recipients;
+pub use alc_notify::test_endpoints as notify_test_endpoints;
 pub use alc_notify::viewer as notify_viewer;
 pub use alc_tenko::daily_health;
 pub use alc_tenko::equipment_failures;
@@ -133,6 +134,7 @@ pub fn router() -> Router<AppState> {
         .merge(notify_documents::tenant_router())
         .merge(notify_distribute::tenant_router())
         .merge(notify_email_documents::tenant_router())
+        .merge(notify_test_endpoints::tenant_router())
         .merge(notify_line_config::tenant_router())
         .merge(trouble_tickets::tenant_router())
         .merge(trouble_files::tenant_router())
