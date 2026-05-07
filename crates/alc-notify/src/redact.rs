@@ -32,11 +32,18 @@ const GEMINI_DEFAULT_ENDPOINT: &str = "https://generativelanguage.googleapis.com
 // 2026-05-07 staging で実 API 200 OK 確認済み。stable suffix が付いたら更新。
 const GEMINI_DEFAULT_MODEL: &str = "gemini-3.1-flash-lite-preview";
 
-/// プロンプト本文。Gemini に「金額の bounding box だけ」を JSON で返させる。
-const REDACT_PROMPT: &str = r#"この PDF 内の「金額表記」の位置をすべて検出し、JSON で返してください。
+/// プロンプト本文。Gemini に「金額が入った **表のセル全体** の bbox」を返させる。
+///
+/// 数字に密着した bbox を返してもらうと、配置のばらつき (例: 3163 で「160,0  00 円」と
+/// 数字内に空白がある) で覆い切れないケースが出る。代わりに **罫線で囲まれたセル全体**
+/// を返してもらう = ラベル列にはみ出さず、かつセル内のどこに数字があっても確実に覆える。
+/// セル境界は表が必ず矩形の罫線で区切られているという前提に依存。
+const REDACT_PROMPT: &str = r#"この PDF は表形式の業務帳票です。
+表の罫線で囲まれた **セル単位** で「金額 (円) が入っているセル」を検出し、
+セル全体の矩形を返してください。
 
-対象となる金額の例: 運賃 / 代金 / 消費税 / 合計 / 支払額。
-形式: 「N円」「￥N」「JPY N」「N円(税別)」「N円(税込)」など、N にカンマや全角数字を含むものすべて。
+対象例: 「運賃」「代金」「消費税」「合計」「支払額」「支払運賃」など
+金額が入っているセル。形式: 「N円」「￥N」「JPY N」「N円(税別)」「N円(税込)」。
 
 出力形式 (これ以外の文字を一切出力しない):
 {
@@ -44,7 +51,8 @@ const REDACT_PROMPT: &str = r#"この PDF 内の「金額表記」の位置を�
     {
       "page": 1,
       "box_2d": [ymin, xmin, ymax, xmax],
-      "text": "160,000円"
+      "text": "160,000円",
+      "cell_label": "代金(税抜)"
     }
   ]
 }
@@ -52,8 +60,10 @@ const REDACT_PROMPT: &str = r#"この PDF 内の「金額表記」の位置を�
 ルール:
 - box_2d は 0-1000 で正規化された [ymin, xmin, ymax, xmax] (Gemini 標準 bbox 形式)
 - page は 1-origin
-- bbox は数字 + 単位 (円) を確実に **完全に内包する** ように、左右に余裕を持たせる
-- 金額のみ。氏名・電話番号・FAX 番号・郵便番号・車両ナンバー・住所などは含めない
+- **数字に密着した bbox ではなく、表の罫線で囲まれたセル領域全体** を返す
+- 隣接するラベル列 (例: 「代金(税抜)」のラベル自体) は含めない、値が入っているセルだけ
+- 金額が空のセルは無視
+- 氏名・電話番号・FAX 番号・郵便番号・車両ナンバー・住所のセルは含めない
 - 「3,200 kg」「9PL」「10t」「10:00」など金額でない数字は含めない
 - 金額が見つからない場合は {"redactions": []} を返す"#;
 
@@ -166,18 +176,13 @@ pub fn apply_redactions(
         return Ok(out);
     }
 
-    // 1) bbox 検証 + パディング付与 + ページ単位にグループ化
+    // 1) bbox 検証 + ページ単位にグループ化
     //
-    // Gemini が返す bbox は数字部分にぴったり収まりがちで、3163 のように
-    // 「160,0  00 円」と数字内に空白を含む配置だと右側がはみ出す。
-    // 確実にすべての桁 + 単位を覆うため、各方向に **5% パディング** を加える
-    // (50/1000 単位なので 0-1000 の正規化座標で +50/-50)。
-    // クランプ: パディング後も 0..=1000 の範囲を維持する。
-    const PAD_PCT: f32 = 50.0; // 5% of 1000
-
+    // bbox は **Gemini が返した値をそのまま** 使う。prompt で「セル全体」の
+    // bbox を返してもらっているので、人為的なパディングは不要 (むしろ隣のセル
+    // を巻き込むので有害)。
     let pages: Vec<ObjectId> = doc.get_pages().into_values().collect();
-    let mut padded_redactions: Vec<RedactionBox> = Vec::with_capacity(redactions.len());
-    let mut by_page: std::collections::BTreeMap<usize, Vec<usize>> = Default::default();
+    let mut by_page: std::collections::BTreeMap<usize, Vec<&RedactionBox>> = Default::default();
     for r in redactions {
         if r.page == 0 || r.page > pages.len() {
             return Err(RedactError::PageNotFound(r.page));
@@ -192,26 +197,8 @@ pub fn apply_redactions(
         {
             return Err(RedactError::InvalidBox(r.box_2d));
         }
-        // パディング適用
-        let padded = RedactionBox {
-            page: r.page,
-            box_2d: [
-                (ymin - PAD_PCT).max(0.0),
-                (xmin - PAD_PCT).max(0.0),
-                (ymax + PAD_PCT).min(1000.0),
-                (xmax + PAD_PCT).min(1000.0),
-            ],
-            text: r.text.clone(),
-        };
-        let idx = padded_redactions.len();
-        padded_redactions.push(padded);
-        by_page.entry(r.page).or_default().push(idx);
+        by_page.entry(r.page).or_default().push(r);
     }
-    // 元の参照ベースのコードと API を合わせるため、padded を index 経由でアクセスする。
-    let by_page: std::collections::BTreeMap<usize, Vec<&RedactionBox>> = by_page
-        .into_iter()
-        .map(|(p, idxs)| (p, idxs.into_iter().map(|i| &padded_redactions[i]).collect()))
-        .collect();
 
     // 2) ページごとに、埋め込み画像 XObject を探して書き換え
     for (page_idx, redactions_on_page) in by_page {
