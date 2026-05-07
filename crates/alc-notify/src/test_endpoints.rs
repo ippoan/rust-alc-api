@@ -26,7 +26,7 @@ use alc_core::tenant::set_current_tenant;
 use alc_core::AppState;
 
 use crate::ingest::sanitize_filename;
-use crate::redact::{apply_redactions, detect_amount_boxes};
+use crate::redact::{apply_redactions, detect_amount_boxes, detect_amount_boxes_v2};
 
 const MAX_UPLOAD_BYTES: usize = 25 * 1024 * 1024;
 const DEFAULT_EXPIRE_HOURS: i64 = 24;
@@ -132,15 +132,24 @@ async fn redact_pdf_test(
     })?;
 
     // 1) Gemini に bbox 問合わせ
-    let redactions = detect_amount_boxes(&pdf_bytes, &api_key, None, None)
-        .await
-        .map_err(|e| {
-            tracing::error!("detect_amount_boxes: {e}");
-            (
-                StatusCode::BAD_GATEWAY,
-                format!("gemini detect failed: {e}"),
-            )
-        })?;
+    //
+    // `NOTIFY_REDACT_2STAGE=1` で 2-stage パイプライン (全セル列挙 → JSON で
+    // 金額抽出) に切替。3164 のような行ズレ問題に強い。失敗時は内部で
+    // 1-stage に自動フォールバックするので運用上安全。
+    // 本番安定後にデフォルト化予定 (env 削除)。
+    let use_2stage = std::env::var("NOTIFY_REDACT_2STAGE").as_deref() == Ok("1");
+    let redactions = if use_2stage {
+        detect_amount_boxes_v2(&pdf_bytes, &api_key, None, None).await
+    } else {
+        detect_amount_boxes(&pdf_bytes, &api_key, None, None).await
+    }
+    .map_err(|e| {
+        tracing::error!("detect_amount_boxes (2stage={use_2stage}): {e}");
+        (
+            StatusCode::BAD_GATEWAY,
+            format!("gemini detect failed: {e}"),
+        )
+    })?;
     tracing::info!(
         "redact: tenant={} file={} got {} redaction(s)",
         tenant.0,

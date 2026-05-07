@@ -81,6 +81,32 @@ struct RedactionList {
     redactions: Vec<RedactionBox>,
 }
 
+/// 2-stage 用: Gemini Stage 1 が返すセル 1 件 (幾何 + OCR text)
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, PartialEq)]
+pub struct CellBox {
+    /// [ymin, xmin, ymax, xmax] in 0..=1000, 左上原点
+    pub box_2d: [f32; 4],
+    pub text: String,
+}
+
+/// 2-stage 用: Gemini Stage 1 が返す 1 ページ分のセル一覧
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, PartialEq)]
+pub struct PageCells {
+    pub page: usize,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub cells: Vec<CellBox>,
+}
+
+/// Stage 1 レスポンスを単一 page / 複数 tables 両形式から受け取る wrapper
+#[derive(Debug, serde::Deserialize)]
+#[serde(untagged)]
+enum Stage1Response {
+    Multi { tables: Vec<PageCells> },
+    Single(PageCells),
+}
+
 #[derive(thiserror::Error, Debug)]
 pub enum RedactError {
     #[error("gemini http: {0}")]
@@ -155,6 +181,250 @@ pub async fn detect_amount_boxes(
 
     let list: RedactionList = serde_json::from_str(text).map_err(RedactError::RedactionParse)?;
     Ok(list.redactions)
+}
+
+// ============================================================================
+// 2-stage Gemini パイプライン (`detect_amount_boxes_v2`)
+// ============================================================================
+//
+// 1-stage prompt (`REDACT_PROMPT`) は「金額が入ったセルを探して bbox を返せ」
+// という複合タスクを要求しており、表が密集していると Gemini が「ラベル列の
+// 文字」と「値列の数字」の行マッチングを誤る (3164 で消費税が 1 行下にズレる)。
+//
+// 2-stage では分解する:
+//   Stage 1: PDF → Gemini → **全セル列挙** (`detect_all_cells`)
+//            金額判定なし、純粋な「幾何 + OCR」
+//   Stage 2: Stage 1 の JSON → Gemini (画像なし) → **金額セルだけ抽出**
+//            (`filter_amount_cells`)
+//            画像を見ないので空間的な行ズレが構造的に発生し得ない
+//
+// `detect_amount_boxes_v2` がオーケストレーション層。失敗時は内部で 1-stage
+// (`detect_amount_boxes`) にフォールバック。
+//
+// 検証: ローカル probe (`/tmp/probe_2stage.py`) で 3163/3164/3165 全て成功確認済。
+
+/// Stage 1 prompt: 表内の全セルを列挙させる。金額判定はしない。
+const STAGE1_PROMPT: &str = r#"この PDF は表形式の業務帳票 (FAX スキャン画像) です。
+表内の **全セル** を列挙してください。金額判定や種類分けは一切しないこと。
+
+【セルの定義】
+- セル = 罫線で囲まれた **最小** の矩形領域 (1 行 × 1 列)
+- 1 つのセルに複数行のテキストが入っている場合は、**水平罫線を必ず疑う**
+- 罫線が薄い / かすれていても、テキストが 2 行以上ある領域は **別セル** として分割する
+- 1 セルの text に「\n (改行)」が入ったら粒度が粗すぎる → 行ごとに分割すること
+
+出力形式 (これ以外の文字を一切出力しない):
+{
+  "page": 1,
+  "title": "運賃明細",
+  "cells": [
+    {"box_2d": [ymin, xmin, ymax, xmax], "text": "運賃"},
+    {"box_2d": [ymin, xmin, ymax, xmax], "text": "100,000円"},
+    {"box_2d": [ymin, xmin, ymax, xmax], "text": "消費税"},
+    {"box_2d": [ymin, xmin, ymax, xmax], "text": "11,500円"}
+  ]
+}
+
+ルール:
+- box_2d は 0-1000 で正規化された [ymin, xmin, ymax, xmax] (左上原点)
+- page は 1-origin
+- title は表の見出し (なければ最も近いテキスト、推測でよい)
+- text はセル内の文字列を OCR したそのまま (空セルは text="")
+- **text に改行 (\n) を含めてはならない**。複数行に見えるなら別セル
+- **金額判定はしない**: ラベルセル ("運賃" / "消費税" / "合計") も値セル
+  ("100,000円" / "11,500円") もすべて等しく列挙する
+- 全セルを順番に左上から右下へ (行優先)
+- 罫線をたどって表全体を網羅 (取りこぼし禁止)"#;
+
+/// Stage 2 prompt フォーマット。Stage 1 出力 JSON を `{cells_json}` 部分に埋め込む。
+fn stage2_prompt(cells_json: &str) -> String {
+    format!(
+        r#"以下は業務帳票 PDF から抽出した全セルのリストです。この中から
+「金額 (円) が記入されている値セル」だけを抽出してください。
+
+入力 JSON:
+{cells_json}
+
+抽出対象:
+- text に「円」を含むセル (例: "100,000円", "￥11,500", "JPY 5,000")
+- 「N円(税抜)」「N円(税込)」など税表記付きも対象
+
+抽出しないもの:
+- ラベルセル ("運賃" / "消費税" / "合計" / "支払額" などの文字列のみ)
+- 単位付き数値だが金額でないもの ("3,200kg" / "9PL" / "10t" / "10:00")
+- 氏名・電話・FAX・郵便番号・車番・住所
+
+出力形式 (これ以外の文字を一切出力しない):
+{{
+  "redactions": [
+    {{"box_2d": [ymin, xmin, ymax, xmax], "text": "100,000円"}},
+    {{"box_2d": [ymin, xmin, ymax, xmax], "text": "11,500円"}}
+  ]
+}}
+
+box_2d は入力 JSON のまま使うこと。座標を変更してはならない。"#
+    )
+}
+
+/// Stage 1: PDF を投げて表内の全セルを列挙させる。
+///
+/// レスポンスは単一 page (`{"page": 1, "cells": [...]}`) または複数 tables
+/// (`{"tables": [{"page": 1, "cells": [...]}, ...]}`) のどちらでも受け取れる
+/// (`Stage1Response` の untagged enum で対応)。
+pub async fn detect_all_cells(
+    pdf_bytes: &[u8],
+    api_key: &str,
+    model: Option<&str>,
+    endpoint: Option<&str>,
+) -> Result<Vec<PageCells>, RedactError> {
+    let client = reqwest::Client::new();
+    let model = model.unwrap_or(GEMINI_DEFAULT_MODEL);
+    let endpoint = endpoint.unwrap_or(GEMINI_DEFAULT_ENDPOINT);
+
+    let url = format!("{endpoint}/models/{model}:generateContent?key={api_key}");
+    let pdf_b64 = base64::engine::general_purpose::STANDARD.encode(pdf_bytes);
+
+    // Stage 1 は全セル列挙なので token 上限を多めに (PDF によっては 50+ セル)
+    let body = serde_json::json!({
+        "contents": [{
+            "role": "user",
+            "parts": [
+                { "inlineData": { "mimeType": "application/pdf", "data": pdf_b64 } },
+                { "text": STAGE1_PROMPT }
+            ]
+        }],
+        "generationConfig": {
+            "temperature": 0.0,
+            "responseMimeType": "application/json",
+            "maxOutputTokens": 8192
+        }
+    });
+
+    let resp = client.post(&url).json(&body).send().await?;
+    let status = resp.status();
+    if !status.is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        return Err(RedactError::GeminiStatus(status, body));
+    }
+    let raw = resp.text().await?;
+    let parsed: serde_json::Value = serde_json::from_str(&raw).map_err(RedactError::GeminiParse)?;
+    let text = parsed
+        .pointer("/candidates/0/content/parts/0/text")
+        .and_then(|v| v.as_str())
+        .ok_or(RedactError::GeminiEmpty)?;
+
+    let stage1: Stage1Response = serde_json::from_str(text).map_err(RedactError::RedactionParse)?;
+    let pages = match stage1 {
+        Stage1Response::Multi { tables } => tables,
+        Stage1Response::Single(p) => vec![p],
+    };
+    Ok(pages)
+}
+
+/// Stage 2: Stage 1 の JSON を Gemini に **画像なしで** 投げ、金額セルだけ抽出。
+///
+/// 入力に画像を含まないので空間的な行マッチングミスは発生し得ない (= 3164 の
+/// 1 行ズレ問題が構造的に解消される)。返却される `RedactionBox.page` は
+/// 入力 `PageCells.page` をそのまま採用 (Gemini からは page 情報が返らないので
+/// 同 page 内のセルが入力なら全 redaction も同 page、複数ページの場合は
+/// 最初の page を採用)。
+pub async fn filter_amount_cells(
+    pages: &[PageCells],
+    api_key: &str,
+    model: Option<&str>,
+    endpoint: Option<&str>,
+) -> Result<Vec<RedactionBox>, RedactError> {
+    if pages.is_empty() {
+        return Ok(Vec::new());
+    }
+    let client = reqwest::Client::new();
+    let model = model.unwrap_or(GEMINI_DEFAULT_MODEL);
+    let endpoint = endpoint.unwrap_or(GEMINI_DEFAULT_ENDPOINT);
+
+    let url = format!("{endpoint}/models/{model}:generateContent?key={api_key}");
+    let cells_json = serde_json::to_string(&pages).map_err(RedactError::GeminiParse)?;
+    let prompt = stage2_prompt(&cells_json);
+
+    let body = serde_json::json!({
+        "contents": [{
+            "role": "user",
+            "parts": [{ "text": prompt }]
+        }],
+        "generationConfig": {
+            "temperature": 0.0,
+            "responseMimeType": "application/json",
+            "maxOutputTokens": 4096
+        }
+    });
+
+    let resp = client.post(&url).json(&body).send().await?;
+    let status = resp.status();
+    if !status.is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        return Err(RedactError::GeminiStatus(status, body));
+    }
+    let raw = resp.text().await?;
+    let parsed: serde_json::Value = serde_json::from_str(&raw).map_err(RedactError::GeminiParse)?;
+    let text = parsed
+        .pointer("/candidates/0/content/parts/0/text")
+        .and_then(|v| v.as_str())
+        .ok_or(RedactError::GeminiEmpty)?;
+
+    // Stage 2 は {"redactions": [{"box_2d": [...], "text": "..."}]} を返すが
+    // page フィールドは含まないので、ここで Stage 1 入力の page を補完する。
+    #[derive(serde::Deserialize)]
+    struct Stage2Box {
+        box_2d: [f32; 4],
+        text: String,
+    }
+    #[derive(serde::Deserialize)]
+    struct Stage2List {
+        redactions: Vec<Stage2Box>,
+    }
+    let list: Stage2List = serde_json::from_str(text).map_err(RedactError::RedactionParse)?;
+
+    // page は入力 pages[0].page を採用 (現実的に通知 PDF は単一ページが大半)。
+    // 複数ページ対応が必要になったら Stage 2 に page を返させる prompt 改修が必要。
+    let default_page = pages[0].page;
+    Ok(list
+        .redactions
+        .into_iter()
+        .map(|s2| RedactionBox {
+            page: default_page,
+            box_2d: s2.box_2d,
+            text: s2.text,
+        })
+        .collect())
+}
+
+/// 2-stage オーケストレーション。Stage 1/2 のいずれかが失敗したら、または
+/// Stage 1 が 0 セルを返したら、1-stage (`detect_amount_boxes`) に
+/// フォールバック。warn ログで判別可能。
+pub async fn detect_amount_boxes_v2(
+    pdf_bytes: &[u8],
+    api_key: &str,
+    model: Option<&str>,
+    endpoint: Option<&str>,
+) -> Result<Vec<RedactionBox>, RedactError> {
+    match detect_all_cells(pdf_bytes, api_key, model, endpoint).await {
+        Ok(pages) if pages.iter().any(|p| !p.cells.is_empty()) => {
+            match filter_amount_cells(&pages, api_key, model, endpoint).await {
+                Ok(boxes) => Ok(boxes),
+                Err(e) => {
+                    tracing::warn!("redact 2-stage: stage2 failed, fallback to 1-stage: {e}");
+                    detect_amount_boxes(pdf_bytes, api_key, model, endpoint).await
+                }
+            }
+        }
+        Ok(_) => {
+            tracing::warn!("redact 2-stage: stage1 returned 0 cells, fallback to 1-stage");
+            detect_amount_boxes(pdf_bytes, api_key, model, endpoint).await
+        }
+        Err(e) => {
+            tracing::warn!("redact 2-stage: stage1 failed, fallback to 1-stage: {e}");
+            detect_amount_boxes(pdf_bytes, api_key, model, endpoint).await
+        }
+    }
 }
 
 /// PDF 内の埋め込み JPEG 画像のピクセルを直接書き換えて redacted PDF を返す。
@@ -661,5 +931,350 @@ mod tests {
         let mut out = Vec::new();
         doc.save_to(&mut out).unwrap();
         out
+    }
+
+    // ====================================================================
+    // 2-stage パイプライン (`detect_amount_boxes_v2`) のテスト
+    // ====================================================================
+
+    #[test]
+    fn test_cell_box_serde() {
+        let c = CellBox {
+            box_2d: [100.0, 200.0, 150.0, 400.0],
+            text: "100,000円".into(),
+        };
+        let s = serde_json::to_string(&c).unwrap();
+        let back: CellBox = serde_json::from_str(&s).unwrap();
+        assert_eq!(c, back);
+    }
+
+    #[test]
+    fn test_page_cells_serde_single_form() {
+        // Stage 1 が `{"page": 1, "title": "x", "cells": [...]}` を返す形式
+        let raw =
+            r#"{"page":1,"title":"運賃明細","cells":[{"box_2d":[100,200,150,400],"text":"運賃"}]}"#;
+        let parsed: Stage1Response = serde_json::from_str(raw).unwrap();
+        let pages = match parsed {
+            Stage1Response::Single(p) => vec![p],
+            Stage1Response::Multi { tables } => tables,
+        };
+        assert_eq!(pages.len(), 1);
+        assert_eq!(pages[0].page, 1);
+        assert_eq!(pages[0].title, "運賃明細");
+        assert_eq!(pages[0].cells.len(), 1);
+    }
+
+    #[test]
+    fn test_page_cells_serde_multi_form() {
+        // Stage 1 が `{"tables": [{...}, {...}]}` を返す形式
+        let raw =
+            r#"{"tables":[{"page":1,"title":"a","cells":[]},{"page":2,"title":"b","cells":[]}]}"#;
+        let parsed: Stage1Response = serde_json::from_str(raw).unwrap();
+        let pages = match parsed {
+            Stage1Response::Single(p) => vec![p],
+            Stage1Response::Multi { tables } => tables,
+        };
+        assert_eq!(pages.len(), 2);
+        assert_eq!(pages[1].page, 2);
+        assert_eq!(pages[1].title, "b");
+    }
+
+    #[test]
+    fn test_page_cells_serde_defaults() {
+        // title / cells が欠けても OK (デフォルト空)
+        let raw = r#"{"page":1}"#;
+        let p: PageCells = serde_json::from_str(raw).unwrap();
+        assert_eq!(p.page, 1);
+        assert_eq!(p.title, "");
+        assert!(p.cells.is_empty());
+    }
+
+    #[test]
+    fn test_stage2_prompt_contains_cells_json() {
+        let prompt = stage2_prompt(
+            r#"{"page":1,"cells":[{"box_2d":[100,200,150,400],"text":"100,000円"}]}"#,
+        );
+        assert!(prompt.contains("100,000円"));
+        assert!(prompt.contains("box_2d は入力 JSON のまま使うこと"));
+    }
+
+    /// Stage 1 + Stage 2 を順次モックして `detect_amount_boxes_v2` を通す。
+    #[tokio::test]
+    async fn test_detect_amount_boxes_v2_two_stage_happy_path() {
+        use wiremock::matchers::{method, path_regex};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+
+        // Stage 1: 全セル列挙レスポンス
+        let stage1_text = r#"{"page":1,"title":"運賃明細","cells":[{"box_2d":[100,200,150,400],"text":"運賃"},{"box_2d":[100,400,150,600],"text":"100,000円"},{"box_2d":[150,200,200,400],"text":"消費税"},{"box_2d":[150,400,200,600],"text":"10,000円"}]}"#;
+        Mock::given(method("POST"))
+            .and(path_regex(r".*generateContent.*"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "candidates": [{"content": {"parts": [{"text": stage1_text}]}}]
+            })))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+
+        // Stage 2: 金額セルだけ返す
+        let stage2_text = r#"{"redactions":[{"box_2d":[100,400,150,600],"text":"100,000円"},{"box_2d":[150,400,200,600],"text":"10,000円"}]}"#;
+        Mock::given(method("POST"))
+            .and(path_regex(r".*generateContent.*"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "candidates": [{"content": {"parts": [{"text": stage2_text}]}}]
+            })))
+            .mount(&server)
+            .await;
+
+        let result = detect_amount_boxes_v2(b"fake pdf", "fake-key", None, Some(&server.uri()))
+            .await
+            .unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].text, "100,000円");
+        assert_eq!(result[0].page, 1); // PageCells.page から補完
+        assert_eq!(result[0].box_2d, [100.0, 400.0, 150.0, 600.0]);
+        assert_eq!(result[1].text, "10,000円");
+    }
+
+    #[tokio::test]
+    async fn test_detect_all_cells_multi_tables_form() {
+        use wiremock::matchers::{method, path_regex};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        // tables: [...] 形式
+        let stage1_text = r#"{"tables":[{"page":1,"title":"t1","cells":[]},{"page":2,"title":"t2","cells":[{"box_2d":[0,0,100,100],"text":"x"}]}]}"#;
+        Mock::given(method("POST"))
+            .and(path_regex(r".*generateContent.*"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "candidates": [{"content": {"parts": [{"text": stage1_text}]}}]
+            })))
+            .mount(&server)
+            .await;
+
+        let pages = detect_all_cells(b"pdf", "key", None, Some(&server.uri()))
+            .await
+            .unwrap();
+        assert_eq!(pages.len(), 2);
+        assert_eq!(pages[0].page, 1);
+        assert_eq!(pages[1].page, 2);
+        assert_eq!(pages[1].cells.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_filter_amount_cells_empty_input_short_circuits() {
+        // 空入力なら Gemini を呼ばずに空 Vec を返す
+        let empty: Vec<PageCells> = vec![];
+        let r = filter_amount_cells(&empty, "key", None, Some("http://unreachable.invalid"))
+            .await
+            .unwrap();
+        assert!(r.is_empty());
+    }
+
+    /// Stage 1 が 500 を返したら 1-stage (`detect_amount_boxes`) にフォールバック。
+    #[tokio::test]
+    async fn test_detect_amount_boxes_v2_fallback_on_stage1_error() {
+        use wiremock::matchers::{method, path_regex};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+
+        // 1 回目 (Stage 1): 500 → fallback
+        Mock::given(method("POST"))
+            .and(path_regex(r".*generateContent.*"))
+            .respond_with(ResponseTemplate::new(500).set_body_string("oops"))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+
+        // 2 回目 (1-stage): 200 + 1 件
+        let one_stage_text =
+            r#"{"redactions":[{"page":1,"box_2d":[100,200,150,400],"text":"fallback"}]}"#;
+        Mock::given(method("POST"))
+            .and(path_regex(r".*generateContent.*"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "candidates": [{"content": {"parts": [{"text": one_stage_text}]}}]
+            })))
+            .mount(&server)
+            .await;
+
+        let result = detect_amount_boxes_v2(b"pdf", "key", None, Some(&server.uri()))
+            .await
+            .unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].text, "fallback");
+    }
+
+    /// Stage 1 が 0 セルを返したら 1-stage にフォールバック。
+    #[tokio::test]
+    async fn test_detect_amount_boxes_v2_fallback_on_stage1_empty() {
+        use wiremock::matchers::{method, path_regex};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+
+        let empty_stage1 = r#"{"page":1,"title":"empty","cells":[]}"#;
+        Mock::given(method("POST"))
+            .and(path_regex(r".*generateContent.*"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "candidates": [{"content": {"parts": [{"text": empty_stage1}]}}]
+            })))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+
+        let one_stage_text =
+            r#"{"redactions":[{"page":1,"box_2d":[100,200,150,400],"text":"fb"}]}"#;
+        Mock::given(method("POST"))
+            .and(path_regex(r".*generateContent.*"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "candidates": [{"content": {"parts": [{"text": one_stage_text}]}}]
+            })))
+            .mount(&server)
+            .await;
+
+        let result = detect_amount_boxes_v2(b"pdf", "key", None, Some(&server.uri()))
+            .await
+            .unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].text, "fb");
+    }
+
+    /// Stage 2 が失敗したら 1-stage にフォールバック。
+    #[tokio::test]
+    async fn test_detect_amount_boxes_v2_fallback_on_stage2_error() {
+        use wiremock::matchers::{method, path_regex};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+
+        // Stage 1: OK + cells あり
+        let stage1_text = r#"{"page":1,"cells":[{"box_2d":[0,0,100,100],"text":"x"}]}"#;
+        Mock::given(method("POST"))
+            .and(path_regex(r".*generateContent.*"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "candidates": [{"content": {"parts": [{"text": stage1_text}]}}]
+            })))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+
+        // Stage 2: 500 → fallback
+        Mock::given(method("POST"))
+            .and(path_regex(r".*generateContent.*"))
+            .respond_with(ResponseTemplate::new(500))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+
+        // Fallback 1-stage: 1 件返す
+        let one_stage_text = r#"{"redactions":[{"page":1,"box_2d":[0,0,100,100],"text":"fb2"}]}"#;
+        Mock::given(method("POST"))
+            .and(path_regex(r".*generateContent.*"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "candidates": [{"content": {"parts": [{"text": one_stage_text}]}}]
+            })))
+            .mount(&server)
+            .await;
+
+        let result = detect_amount_boxes_v2(b"pdf", "key", None, Some(&server.uri()))
+            .await
+            .unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].text, "fb2");
+    }
+
+    #[tokio::test]
+    async fn test_detect_all_cells_http_error_propagates() {
+        use wiremock::matchers::{method, path_regex};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path_regex(r".*generateContent.*"))
+            .respond_with(ResponseTemplate::new(403).set_body_string("forbidden"))
+            .mount(&server)
+            .await;
+
+        let err = detect_all_cells(b"pdf", "key", None, Some(&server.uri()))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, RedactError::GeminiStatus(_, _)));
+    }
+
+    #[tokio::test]
+    async fn test_filter_amount_cells_http_error_propagates() {
+        use wiremock::matchers::{method, path_regex};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path_regex(r".*generateContent.*"))
+            .respond_with(ResponseTemplate::new(429).set_body_string("rate limited"))
+            .mount(&server)
+            .await;
+
+        let pages = vec![PageCells {
+            page: 1,
+            title: "t".into(),
+            cells: vec![CellBox {
+                box_2d: [0.0, 0.0, 100.0, 100.0],
+                text: "x".into(),
+            }],
+        }];
+        let err = filter_amount_cells(&pages, "key", None, Some(&server.uri()))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, RedactError::GeminiStatus(_, _)));
+    }
+
+    #[tokio::test]
+    async fn test_detect_all_cells_empty_response_text_errors() {
+        use wiremock::matchers::{method, path_regex};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        // candidates なし → GeminiEmpty
+        Mock::given(method("POST"))
+            .and(path_regex(r".*generateContent.*"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "candidates": []
+            })))
+            .mount(&server)
+            .await;
+
+        let err = detect_all_cells(b"pdf", "key", None, Some(&server.uri()))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, RedactError::GeminiEmpty));
+    }
+
+    #[tokio::test]
+    async fn test_filter_amount_cells_invalid_json_errors() {
+        use wiremock::matchers::{method, path_regex};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path_regex(r".*generateContent.*"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "candidates": [{"content": {"parts": [{"text": "not a json"}]}}]
+            })))
+            .mount(&server)
+            .await;
+
+        let pages = vec![PageCells {
+            page: 1,
+            title: "".into(),
+            cells: vec![CellBox {
+                box_2d: [0.0, 0.0, 100.0, 100.0],
+                text: "x".into(),
+            }],
+        }];
+        let err = filter_amount_cells(&pages, "key", None, Some(&server.uri()))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, RedactError::RedactionParse(_)));
     }
 }
