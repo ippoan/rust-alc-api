@@ -166,9 +166,18 @@ pub fn apply_redactions(
         return Ok(out);
     }
 
-    // 1) bbox 検証 + ページ単位にグループ化
+    // 1) bbox 検証 + パディング付与 + ページ単位にグループ化
+    //
+    // Gemini が返す bbox は数字部分にぴったり収まりがちで、3163 のように
+    // 「160,0  00 円」と数字内に空白を含む配置だと右側がはみ出す。
+    // 確実にすべての桁 + 単位を覆うため、各方向に **5% パディング** を加える
+    // (50/1000 単位なので 0-1000 の正規化座標で +50/-50)。
+    // クランプ: パディング後も 0..=1000 の範囲を維持する。
+    const PAD_PCT: f32 = 50.0; // 5% of 1000
+
     let pages: Vec<ObjectId> = doc.get_pages().into_values().collect();
-    let mut by_page: std::collections::BTreeMap<usize, Vec<&RedactionBox>> = Default::default();
+    let mut padded_redactions: Vec<RedactionBox> = Vec::with_capacity(redactions.len());
+    let mut by_page: std::collections::BTreeMap<usize, Vec<usize>> = Default::default();
     for r in redactions {
         if r.page == 0 || r.page > pages.len() {
             return Err(RedactError::PageNotFound(r.page));
@@ -183,8 +192,26 @@ pub fn apply_redactions(
         {
             return Err(RedactError::InvalidBox(r.box_2d));
         }
-        by_page.entry(r.page).or_default().push(r);
+        // パディング適用
+        let padded = RedactionBox {
+            page: r.page,
+            box_2d: [
+                (ymin - PAD_PCT).max(0.0),
+                (xmin - PAD_PCT).max(0.0),
+                (ymax + PAD_PCT).min(1000.0),
+                (xmax + PAD_PCT).min(1000.0),
+            ],
+            text: r.text.clone(),
+        };
+        let idx = padded_redactions.len();
+        padded_redactions.push(padded);
+        by_page.entry(r.page).or_default().push(idx);
     }
+    // 元の参照ベースのコードと API を合わせるため、padded を index 経由でアクセスする。
+    let by_page: std::collections::BTreeMap<usize, Vec<&RedactionBox>> = by_page
+        .into_iter()
+        .map(|(p, idxs)| (p, idxs.into_iter().map(|i| &padded_redactions[i]).collect()))
+        .collect();
 
     // 2) ページごとに、埋め込み画像 XObject を探して書き換え
     for (page_idx, redactions_on_page) in by_page {
