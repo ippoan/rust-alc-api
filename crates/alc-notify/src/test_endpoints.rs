@@ -42,6 +42,7 @@ pub fn tenant_router() -> Router<AppState> {
 #[derive(serde::Serialize, Debug)]
 struct RedactResponse {
     document_id: Uuid,
+    original_r2_key: String,
     redacted_r2_key: String,
     view_url: String,
     expire_at: chrono::DateTime<chrono::Utc>,
@@ -156,18 +157,29 @@ async fn redact_pdf_test(
         )
     })?;
 
-    // 3) R2 upload
+    // 3) R2 upload (原本 + redacted の 2 ファイル)
     let batch_id = Uuid::new_v4();
     let safe_name = sanitize_filename(&original_filename);
+    let original_r2_key = format!("{}/test/{}/original_{}", tenant.0, batch_id, safe_name);
     let r2_key = format!("{}/test/{}/redacted_{}", tenant.0, batch_id, safe_name);
+    storage
+        .upload(&original_r2_key, &pdf_bytes, "application/pdf")
+        .await
+        .map_err(|e| {
+            tracing::error!("notify_storage.upload (original): {e}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("storage upload (original) failed: {e}"),
+            )
+        })?;
     storage
         .upload(&r2_key, &redacted_bytes, "application/pdf")
         .await
         .map_err(|e| {
-            tracing::error!("notify_storage.upload: {e}");
+            tracing::error!("notify_storage.upload (redacted): {e}");
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("storage upload failed: {e}"),
+                format!("storage upload (redacted) failed: {e}"),
             )
         })?;
 
@@ -248,6 +260,7 @@ async fn redact_pdf_test(
         StatusCode::CREATED,
         Json(RedactResponse {
             document_id,
+            original_r2_key,
             redacted_r2_key: r2_key,
             view_url,
             expire_at,
