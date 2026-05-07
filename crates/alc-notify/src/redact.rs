@@ -270,12 +270,9 @@ pub fn apply_redactions(
 
         // 4) Stream content + dict 差し替え。
         //    - Flate 被せありなら Filter を /DCTDecode 単体に書き換え
-        //      (Flate 再適用しても JPEG は既に圧縮済みなのでメリット無し)
-        //    - **重要**: 元 PDF の ColorSpace が /DeviceGray のページ (3163 等) でも
-        //      我々は to_rgb8() → JPEG (RGB) を出力するので、ColorSpace を
-        //      /DeviceRGB に書き換える。これを忘れると PDF reader が JPEG 内の
-        //      RGB ピクセルを 1ch グレーと誤解釈し、文字が壊れる + 表示崩壊
-        //    - Decode 配列があれば削除 (新エンコード色域と整合しないため)
+        //    - 元の ColorSpace が /DeviceGray でも我々は RGB JPEG を出力するので
+        //      /DeviceRGB に書き換え (DeviceGray のままだと表示崩壊)
+        //    - Decode 配列があれば削除、BitsPerComponent=8 を明示
         let stream = doc.get_object_mut(image_obj_id)?.as_stream_mut()?;
         stream.set_content(new_jpeg);
         if has_flate_wrapper {
@@ -288,11 +285,92 @@ pub fn apply_redactions(
             .set("ColorSpace", Object::Name(b"DeviceRGB".to_vec()));
         stream.dict.remove(b"Decode");
         stream.dict.set("BitsPerComponent", Object::Integer(8));
+
+        // 5) **content stream にも白矩形をオーバーレイ** (defense-in-depth)。
+        //    FAX 由来 PDF は JPEG (背景) + CCITT ImageMask (黒インクの文字レイヤー)
+        //    の多層構造で、JPEG ピクセルだけ書き換えても CCITT が上から元の数字を
+        //    再描画する。content stream の末尾に PDF の白塗り矩形コマンドを追加
+        //    することで、CCITT レイヤーも含めて確実に隠す。
+        //    JPEG ピクセル書き換えと組み合わせることで:
+        //      - 元値は PDF データから完全に消える (JPEG レベル)
+        //      - レンダリング後の表示も白塗り (content stream レベル)
+        //      - PDF.js の progressive 描画でも、最後に矩形が描かれて確実に隠れる
+        let (page_w, page_h) = page_size(&doc, page_id)?;
+        for r in &redactions_on_page {
+            let [ymin, xmin, ymax, xmax] = r.box_2d;
+            // box_2d (0-1000、左上原点) → PDF 座標 (左下原点 pt) に変換
+            let x = (xmin / 1000.0) * page_w;
+            let y = page_h - (ymax / 1000.0) * page_h;
+            let bw = ((xmax - xmin) / 1000.0) * page_w;
+            let bh = ((ymax - ymin) / 1000.0) * page_h;
+
+            let cmd = format!("q 1 1 1 rg {x:.2} {y:.2} {bw:.2} {bh:.2} re f Q\n");
+            let stream = Stream::new(lopdf::dictionary! {}, cmd.into_bytes());
+            let stream_id = doc.add_object(stream);
+            append_content_stream(&mut doc, page_id, stream_id)?;
+        }
     }
 
     let mut out = Vec::new();
     doc.save_to(&mut out)?;
     Ok(out)
+}
+
+/// Page の MediaBox から (width, height) を pt 単位で取得。
+fn page_size(doc: &Document, page_id: ObjectId) -> Result<(f32, f32), RedactError> {
+    let mut current = page_id;
+    loop {
+        let dict = doc.get_object(current)?.as_dict()?;
+        if let Ok(mb) = dict.get(b"MediaBox") {
+            let arr = mb.as_array()?;
+            if arr.len() == 4 {
+                let llx = obj_to_f32(&arr[0])?;
+                let lly = obj_to_f32(&arr[1])?;
+                let urx = obj_to_f32(&arr[2])?;
+                let ury = obj_to_f32(&arr[3])?;
+                return Ok((urx - llx, ury - lly));
+            }
+        }
+        match dict.get(b"Parent") {
+            Ok(Object::Reference(parent_id)) => current = *parent_id,
+            _ => break,
+        }
+    }
+    Ok((595.0, 842.0))
+}
+
+fn obj_to_f32(o: &Object) -> Result<f32, lopdf::Error> {
+    match o {
+        Object::Integer(i) => Ok(*i as f32),
+        Object::Real(r) => Ok(*r),
+        _ => Err(lopdf::Error::ObjectNotFound),
+    }
+}
+
+/// Page の Contents 配列の末尾に新しい Stream を追加する。
+fn append_content_stream(
+    doc: &mut Document,
+    page_id: ObjectId,
+    stream_id: ObjectId,
+) -> Result<(), RedactError> {
+    let page = doc.get_object_mut(page_id)?;
+    let dict = page.as_dict_mut()?;
+
+    let new_contents = match dict.get(b"Contents") {
+        Ok(Object::Reference(existing)) => Object::Array(vec![
+            Object::Reference(*existing),
+            Object::Reference(stream_id),
+        ]),
+        Ok(Object::Array(arr)) => {
+            let mut v = arr.clone();
+            v.push(Object::Reference(stream_id));
+            Object::Array(v)
+        }
+        _ => Object::Array(vec![Object::Reference(stream_id)]),
+    };
+
+    dict.set("Contents", new_contents);
+    Ok(())
 }
 
 /// 指定ページの Resources/XObject から **DCTDecode (= JPEG) フィルタの画像のうち
