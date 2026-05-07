@@ -15,7 +15,10 @@ use base64::Engine;
 use lopdf::{dictionary, Document, Object, ObjectId, Stream};
 
 const GEMINI_DEFAULT_ENDPOINT: &str = "https://generativelanguage.googleapis.com/v1beta";
-const GEMINI_DEFAULT_MODEL: &str = "gemini-2.0-flash";
+// gemini-2.0-flash は 2026 年に新規ユーザー向け提供終了 (404)。
+// gemini-3.1-flash-lite-preview を採用 — 軽量 / 高速 / PDF inlineData + JSON 出力対応。
+// 2026-05-07 staging で実 API 200 OK 確認済み。stable suffix が付いたら更新。
+const GEMINI_DEFAULT_MODEL: &str = "gemini-3.1-flash-lite-preview";
 
 /// プロンプト本文。Gemini に「金額の bounding box だけ」を JSON で返させる。
 const REDACT_PROMPT: &str = r#"この PDF 内の「金額表記」の位置をすべて検出し、JSON で返してください。
