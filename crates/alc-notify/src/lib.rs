@@ -1,3 +1,4 @@
+pub mod background_redaction;
 pub mod clients;
 pub mod distribute;
 pub mod documents;

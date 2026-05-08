@@ -184,6 +184,12 @@ async fn handle_ingest(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
         document_ids.push(id);
+
+        // PDF だけ background redact (tokio::spawn で fire-and-forget)。
+        // FAX 由来 PDF が金額を含むため、配信前に redact 完了させる。
+        if file_name.to_lowercase().ends_with(".pdf") {
+            crate::background_redaction::spawn_redact_document(state.clone(), tenant_id, id);
+        }
     }
 
     let count = document_ids.len();

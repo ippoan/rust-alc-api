@@ -216,6 +216,17 @@ async fn distribute(
         })?
         .ok_or(StatusCode::NOT_FOUND)?;
 
+    // 配信ブロック (migration 109): redact 完了 (`completed`) または PDF 以外で
+    // skip 済 (`skipped`) のみ許可。`pending` / `processing` / `failed` は弾く。
+    // 誤って原本 PDF (金額入り) を送信しないための安全装置。
+    if !matches!(doc.redaction_status.as_str(), "completed" | "skipped") {
+        tracing::warn!(
+            "distribute: redaction not done, status={} doc={document_id}",
+            doc.redaction_status
+        );
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
     let req = body.map(|b| b.0).unwrap_or_default();
     let target = req.target.unwrap_or(DistributeTarget {
         all: true,

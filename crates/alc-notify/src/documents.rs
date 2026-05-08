@@ -1,6 +1,7 @@
 use axum::{
     extract::{Multipart, Path, Query, State},
-    http::StatusCode,
+    http::{header, HeaderMap, StatusCode},
+    response::{IntoResponse, Response},
     Extension, Json, Router,
 };
 use uuid::Uuid;
@@ -17,6 +18,14 @@ pub fn tenant_router() -> Router<AppState> {
         .route("/notify/documents/search", axum::routing::get(search))
         .route("/notify/documents/upload", axum::routing::post(upload))
         .route("/notify/documents/{id}", axum::routing::get(get))
+        .route(
+            "/notify/documents/{id}/preview",
+            axum::routing::get(preview),
+        )
+        .route(
+            "/notify/documents/{id}/redact-recompute",
+            axum::routing::post(redact_recompute),
+        )
 }
 
 #[derive(serde::Deserialize)]
@@ -212,6 +221,12 @@ async fn upload(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
         document_ids.push(id);
+
+        // PDF だけ background redact (tokio::spawn で fire-and-forget)。
+        // 結果は notify_documents.redaction_status カラムで追跡。
+        if file_name.to_lowercase().ends_with(".pdf") {
+            crate::background_redaction::spawn_redact_document(state.clone(), tenant.0, id);
+        }
     }
 
     let count = document_ids.len();
@@ -222,6 +237,93 @@ async fn upload(
             count,
         }),
     ))
+}
+
+/// admin auth 付き redacted (or 原本) PDF inline ストリーム。
+///
+/// nuxt-notify の管理者ページで「ドキュメント詳細 → プレビュー」が呼ぶ。
+/// `?original=true` で原本 PDF も取得可能 (admin 用、監査ログ用途)。
+/// `redacted_r2_key` が NULL (まだ redact してない / skipped) の場合は原本にフォールバック。
+#[derive(serde::Deserialize)]
+struct PreviewQuery {
+    original: Option<bool>,
+}
+
+async fn preview(
+    State(state): State<AppState>,
+    Extension(tenant): Extension<TenantId>,
+    Path(id): Path<Uuid>,
+    Query(q): Query<PreviewQuery>,
+) -> Result<Response, StatusCode> {
+    let doc = state
+        .notify_documents
+        .get(tenant.0, id)
+        .await
+        .map_err(|e| {
+            tracing::error!("preview: get notify_document: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    let storage = state.notify_storage.as_ref().ok_or_else(|| {
+        tracing::error!("preview: notify_storage not configured");
+        StatusCode::SERVICE_UNAVAILABLE
+    })?;
+
+    let want_original = q.original.unwrap_or(false);
+    let key = if want_original {
+        doc.r2_key.as_str()
+    } else {
+        doc.redacted_r2_key.as_deref().unwrap_or(&doc.r2_key)
+    };
+
+    let bytes = storage.download(key).await.map_err(|e| {
+        tracing::error!("preview: storage download: {e}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let mut headers = HeaderMap::new();
+    let content_type = crate::viewer::guess_content_type(doc.file_name.as_deref());
+    if let Ok(v) = content_type.parse() {
+        headers.insert(header::CONTENT_TYPE, v);
+    }
+    let cd = crate::viewer::build_inline_disposition(doc.file_name.as_deref());
+    if let Ok(v) = cd.parse() {
+        headers.insert(header::CONTENT_DISPOSITION, v);
+    }
+
+    Ok((StatusCode::OK, headers, bytes).into_response())
+}
+
+/// force re-redact: redaction_status を pending に戻して spawn。即 202 Accepted。
+///
+/// 結果は redaction_status を polling で追跡する (UI 側で 5 秒間隔リフレッシュを想定)。
+async fn redact_recompute(
+    State(state): State<AppState>,
+    Extension(tenant): Extension<TenantId>,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode, StatusCode> {
+    let doc = state
+        .notify_documents
+        .get(tenant.0, id)
+        .await
+        .map_err(|e| {
+            tracing::error!("redact_recompute: get notify_document: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    state
+        .notify_documents
+        .reset_redaction(tenant.0, doc.id)
+        .await
+        .map_err(|e| {
+            tracing::error!("redact_recompute: reset_redaction: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    crate::background_redaction::spawn_redact_document(state.clone(), tenant.0, doc.id);
+    Ok(StatusCode::ACCEPTED)
 }
 
 fn is_allowed_extension(filename: &str) -> bool {

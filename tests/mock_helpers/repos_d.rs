@@ -323,6 +323,11 @@ fn mock_document(tenant_id: Uuid) -> NotifyDocument {
         extraction_error: None,
         distribution_status: "pending".into(),
         distributed_at: None,
+        redacted_r2_key: None,
+        redacted_at: None,
+        redactions_applied: None,
+        redaction_status: "pending".into(),
+        redaction_error: None,
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
     }
@@ -383,6 +388,30 @@ impl NotifyDocumentRepository for MockNotifyDocumentRepository {
         _id: Uuid,
         _status: &str,
     ) -> Result<(), sqlx::Error> {
+        check_fail!(self);
+        Ok(())
+    }
+    async fn update_redaction_status(
+        &self,
+        _tenant_id: Uuid,
+        _id: Uuid,
+        _status: &str,
+        _error: Option<&str>,
+    ) -> Result<(), sqlx::Error> {
+        check_fail!(self);
+        Ok(())
+    }
+    async fn complete_redaction(
+        &self,
+        _tenant_id: Uuid,
+        _id: Uuid,
+        _redacted_r2_key: &str,
+        _redactions_applied: i32,
+    ) -> Result<(), sqlx::Error> {
+        check_fail!(self);
+        Ok(())
+    }
+    async fn reset_redaction(&self, _tenant_id: Uuid, _id: Uuid) -> Result<(), sqlx::Error> {
         check_fail!(self);
         Ok(())
     }

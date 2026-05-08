@@ -171,4 +171,77 @@ impl NotifyDocumentRepository for PgNotifyDocumentRepository {
         .await?;
         Ok(())
     }
+
+    async fn update_redaction_status(
+        &self,
+        tenant_id: Uuid,
+        id: Uuid,
+        status: &str,
+        error: Option<&str>,
+    ) -> Result<(), sqlx::Error> {
+        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
+        sqlx::query(
+            r#"
+            UPDATE notify_documents SET
+                redaction_status = $1,
+                redaction_error = $2,
+                updated_at = NOW()
+            WHERE id = $3
+            "#,
+        )
+        .bind(status)
+        .bind(error)
+        .bind(id)
+        .execute(&mut *tc.conn)
+        .await?;
+        Ok(())
+    }
+
+    async fn complete_redaction(
+        &self,
+        tenant_id: Uuid,
+        id: Uuid,
+        redacted_r2_key: &str,
+        redactions_applied: i32,
+    ) -> Result<(), sqlx::Error> {
+        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
+        sqlx::query(
+            r#"
+            UPDATE notify_documents SET
+                redacted_r2_key = $1,
+                redacted_at = NOW(),
+                redactions_applied = $2,
+                redaction_status = 'completed',
+                redaction_error = NULL,
+                updated_at = NOW()
+            WHERE id = $3
+            "#,
+        )
+        .bind(redacted_r2_key)
+        .bind(redactions_applied)
+        .bind(id)
+        .execute(&mut *tc.conn)
+        .await?;
+        Ok(())
+    }
+
+    async fn reset_redaction(&self, tenant_id: Uuid, id: Uuid) -> Result<(), sqlx::Error> {
+        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
+        sqlx::query(
+            r#"
+            UPDATE notify_documents SET
+                redacted_r2_key = NULL,
+                redacted_at = NULL,
+                redactions_applied = NULL,
+                redaction_status = 'pending',
+                redaction_error = NULL,
+                updated_at = NOW()
+            WHERE id = $1
+            "#,
+        )
+        .bind(id)
+        .execute(&mut *tc.conn)
+        .await?;
+        Ok(())
+    }
 }
