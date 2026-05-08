@@ -628,6 +628,13 @@ pub fn apply_redactions(
         let image_obj_id =
             find_first_image_xobject(&doc, page_id)?.ok_or(RedactError::PageNoImage(page_idx))?;
 
+        tracing::info!(
+            "redact[diag] page={} image_xobject_id={:?} num_redactions={}",
+            page_idx,
+            image_obj_id,
+            redactions_on_page.len()
+        );
+
         // XObject Image stream を取得し、JPEG bytes と寸法 (Width, Height) を読む。
         // PDF の Filter は単一名前 (e.g. /DCTDecode) または配列 (e.g. [/FlateDecode
         // /DCTDecode]) のどちらか。FAX 由来 PDF は zlib 圧縮を被せた JPEG が
@@ -677,7 +684,18 @@ pub fn apply_redactions(
             (real_w as f32, real_h as f32)
         };
 
-        for r in &redactions_on_page {
+        tracing::info!(
+            "redact[diag] image dims: dict={}x{} actual={}x{} use={}x{} flate_wrapper={}",
+            img_w,
+            img_h,
+            real_w,
+            real_h,
+            w_for_calc as u32,
+            h_for_calc as u32,
+            has_flate_wrapper
+        );
+
+        for (i, r) in redactions_on_page.iter().enumerate() {
             let [ymin, xmin, ymax, xmax] = r.box_2d;
             // box_2d (0-1000、左上原点) → 画像 pixel 座標
             let px = ((xmin / 1000.0) * w_for_calc).round().max(0.0) as u32;
@@ -687,6 +705,23 @@ pub fn apply_redactions(
 
             let x_end = (px + pw).min(real_w);
             let y_end = (py + ph).min(real_h);
+            tracing::info!(
+                "redact[diag] r[{}] text={:?} bbox=[ymin={:.1} xmin={:.1} ymax={:.1} xmax={:.1}] → JPEG px=({},{}) size=({}x{}) clipped=({},{})→({},{})",
+                i,
+                r.text,
+                ymin,
+                xmin,
+                ymax,
+                xmax,
+                px,
+                py,
+                pw,
+                ph,
+                px.min(real_w),
+                py.min(real_h),
+                x_end,
+                y_end
+            );
             for y in py.min(real_h)..y_end {
                 for x in px.min(real_w)..x_end {
                     img.put_pixel(x, y, image::Rgb([255, 255, 255]));
@@ -732,13 +767,27 @@ pub fn apply_redactions(
         //      - レンダリング後の表示も白塗り (content stream レベル)
         //      - PDF.js の progressive 描画でも、最後に矩形が描かれて確実に隠れる
         let (page_w, page_h) = page_size(&doc, page_id)?;
-        for r in &redactions_on_page {
+        tracing::info!(
+            "redact[diag] page MediaBox: {}x{} pt",
+            page_w as u32,
+            page_h as u32
+        );
+        for (i, r) in redactions_on_page.iter().enumerate() {
             let [ymin, xmin, ymax, xmax] = r.box_2d;
             // box_2d (0-1000、左上原点) → PDF 座標 (左下原点 pt) に変換
             let x = (xmin / 1000.0) * page_w;
             let y = page_h - (ymax / 1000.0) * page_h;
             let bw = ((xmax - xmin) / 1000.0) * page_w;
             let bh = ((ymax - ymin) / 1000.0) * page_h;
+
+            tracing::info!(
+                "redact[diag] r[{}] overlay PDF coord (origin=bot-left): x={:.2} y={:.2} w={:.2} h={:.2}",
+                i,
+                x,
+                y,
+                bw,
+                bh
+            );
 
             let cmd = format!("q 1 1 1 rg {x:.2} {y:.2} {bw:.2} {bh:.2} re f Q\n");
             let stream = Stream::new(lopdf::dictionary! {}, cmd.into_bytes());
