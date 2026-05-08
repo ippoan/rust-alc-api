@@ -26,6 +26,15 @@ pub fn public_router() -> Router<AppState> {
     Router::new()
         .route("/notify/v/{token}", axum::routing::get(view_metadata))
         .route("/notify/v/{token}/file", axum::routing::get(view_file))
+        // LINE Messaging API / LINE WORKS Bot は image message の
+        // `originalContentUrl` を URL の **末尾拡張子** で判定する。`/image`
+        // (拡張子なし) だと画像とみなされず URL がテキストリンクとして表示される。
+        // `.jpg` 付きに変えると両者で inline 画像展開される。
+        .route(
+            "/notify/v/{token}/image.jpg",
+            axum::routing::get(view_image),
+        )
+        // 後方互換: 旧 `/image` (拡張子なし) も残す。生成側は .jpg を新規発行。
         .route("/notify/v/{token}/image", axum::routing::get(view_image))
 }
 
