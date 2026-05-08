@@ -645,8 +645,19 @@ pub fn apply_redactions(
 ) -> Result<Vec<u8>, RedactError> {
     use pdfium_render::prelude::PdfRenderConfig;
 
-    // redactions が空なら入力をそのまま返す (pdfium 初期化を回避してホットパスを軽く)。
+    // redactions が空なら rasterize はスキップして入力 PDF をそのまま返す
+    // (lossy JPEG 化を避けて原本品質を維持)。ただし PDF 形式が壊れていれば
+    // 非空のときと同じく pdfium load_pdf エラーで失敗させたいので、parse だけ
+    // 行って中身は捨てる。
     if redactions.is_empty() {
+        let pdfium_mu = pdfium_locked()?;
+        let pdfium_guard = pdfium_mu
+            .lock()
+            .map_err(|e| RedactError::Pdfium(format!("mutex poisoned: {e}")))?;
+        let _ = pdfium_guard
+            .0
+            .load_pdf_from_byte_slice(pdf_bytes, None)
+            .map_err(|e| RedactError::Pdfium(format!("load_pdf: {e}")))?;
         return Ok(pdf_bytes.to_vec());
     }
 
