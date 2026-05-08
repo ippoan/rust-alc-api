@@ -141,10 +141,14 @@ async fn view_file(
     })?;
 
     let mut headers = HeaderMap::new();
-    let content_type = guess_content_type(info.file_name.as_deref());
+    // Content-Type は **実際の R2 key** で決める。redacted は `.jpg` (PR #327 以降)
+    // で、原本ファイル名 (info.file_name) は `.pdf` のままなので、原本名で判定
+    // すると client が PDF.js でデコード試行して "Invalid PDF structure" になる。
+    let content_type = guess_content_type(Some(&info.r2_key));
     if let Ok(v) = content_type.parse() {
         headers.insert(header::CONTENT_TYPE, v);
     }
+    // download 時のファイル名は原本ファイル名 (UX の都合で .pdf を維持)。
     let cd = build_inline_disposition(info.file_name.as_deref());
     if let Ok(v) = cd.parse() {
         headers.insert(header::CONTENT_DISPOSITION, v);

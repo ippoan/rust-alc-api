@@ -290,11 +290,16 @@ async fn preview(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
+    // Content-Type は **実際の R2 key の拡張子** で決める。
+    // doc.file_name (原本ファイル名 e.g. "3164_001.pdf") で判定すると、
+    // redacted が .jpg になっていても application/pdf が返ってフロント側の
+    // PDF.js が "Invalid PDF structure" でコケる。
     let mut headers = HeaderMap::new();
-    let content_type = crate::viewer::guess_content_type(doc.file_name.as_deref());
+    let content_type = crate::viewer::guess_content_type(Some(key));
     if let Ok(v) = content_type.parse() {
         headers.insert(header::CONTENT_TYPE, v);
     }
+    // download 時のファイル名は原本ファイル名 (UX の都合) で出す。
     let cd = crate::viewer::build_inline_disposition(doc.file_name.as_deref());
     if let Ok(v) = cd.parse() {
         headers.insert(header::CONTENT_DISPOSITION, v);
