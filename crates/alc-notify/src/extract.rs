@@ -1,8 +1,9 @@
-//! 配車系 PDF から Gemini で 8 フィールドを抽出する:
-//! 「積地・卸地・積み日時・卸し日時・注意事項・連絡先会社名・担当者・電話番号」
+//! 配車系 PDF から Gemini で 12 フィールドを抽出する:
+//! 積地 (会社名/住所/電話) ・卸地 (会社名/住所/電話) ・積み/卸し日時・注意事項・
+//! 相手先連絡先 (会社名/担当者/電話)。
 //!
 //! 受信した FAX/PDF が配車手配票だった場合、配信時の LINE 本文に要点を埋め込めるように
-//! `notify_documents.extracted_data` JSONB の `logistics` キー配下に 8 フィールドを保存する。
+//! `notify_documents.extracted_data` JSONB の `logistics` キー配下に 12 フィールドを保存する。
 //! 該当情報がない PDF (請求書・報告書等) は全フィールド `null` で確定し、配信本文は
 //! 既存テンプレ (タイトル + summary + URL) にフォールバックする。
 //!
@@ -63,16 +64,23 @@ pub(crate) fn build_logistics_prompt(self_company_hint: Option<&str>) -> String 
 
     format!(
         r#"この PDF は運送業務で受信した文書です。配車手配票・運行依頼書であれば
-以下 8 フィールドを抽出してください:
+以下 12 フィールドを抽出してください:
 
-  - loading_place    : 積地 (積み込み場所、住所か会社名のうち主要なもの 1 件)
-  - unloading_place  : 卸地 (荷卸し場所、住所か会社名のうち主要なもの 1 件)
-  - loading_at       : 積み日時 (PDF の表記をそのまま、例: "5/9 10:00" / "5月9日 午前10時" / "2026-05-09 10:00")
-  - unloading_at     : 卸し日時 (同上)
-  - notes            : 注意事項 (冷凍便、要時間厳守、要連絡など配送上の留意点。複数あれば改行で結合)
-  - contact_company  : 連絡先の会社名 (相手先 = 依頼元・発注元・お客様の会社名)
-  - contact_person   : 担当者氏名 (相手先の担当者)
-  - contact_phone    : 電話番号 (相手先の TEL/連絡先電話、PDF の表記そのまま)
+【配車情報】
+  - loading_place           : 積み込み場所の主要な識別 (会社名/施設名があればそれ、なければ住所)
+  - loading_place_address   : 積み込み場所の住所 (loading_place が会社名のとき、その下に書かれた住所)
+  - loading_place_phone     : 積み込み場所の電話番号 ("電話" "TEL" 等のラベル付きで書かれている時)
+  - loading_at              : 積み日時 (PDF の表記をそのまま、例: "5/9 10:00" / "令和8年4月17日 19時")
+  - unloading_place         : 卸し場所の主要な識別 (会社名/施設名があればそれ、なければ住所)
+  - unloading_place_address : 卸し場所の住所 (unloading_place が会社名のとき、その下の住所)
+  - unloading_place_phone   : 卸し場所の電話番号 (ラベル付きで書かれている時)
+  - unloading_at            : 卸し日時 (同上)
+  - notes                   : 注意事項 (冷凍便、要時間厳守、要連絡など配送上の留意点。複数あれば改行で結合)
+
+【相手先 (依頼元) 連絡先】
+  - contact_company         : 連絡先の会社名 (相手先 = 依頼元・発注元・お客様の会社名)
+  - contact_person          : 担当者氏名 (相手先の担当者)
+  - contact_phone           : 電話番号 (相手先の TEL/連絡先電話、PDF の表記そのまま)
 
 ## ルール
 
@@ -80,9 +88,17 @@ pub(crate) fn build_logistics_prompt(self_company_hint: Option<&str>) -> String 
     そのフィールドを null にする。**推測で埋めない、書かれていないものは null**。
   - 全フィールド null になっても OK (配信本文は既存テンプレにフォールバックする)。
   - 日付は ISO 8601 に正規化しない。PDF の表記を**そのまま**返す。
-  - 積地/卸地は住所と会社名を改行で連結したり全部入れたりせず、最も識別性の高い 1 行を選ぶ。
+  - **loading_place / unloading_place** は会社名・施設名があれば優先 (例: "イオン関西RDC")、
+    なければ住所 (例: "熊本県八代市新港町3-9-8") を入れる。両方ある時は会社名を選ぶ。
+  - **loading_place_address / unloading_place_address** は loading_place が会社名のときに
+    その下に並んで書かれた住所 (例: "京都府乙訓郡大山崎町字大山崎小字鏡田38")。
+    住所しかない場合は null (loading_place 側に既に入っているので重複させない)。
+  - **loading_place_phone / unloading_place_phone** は積み込み/卸し場所のセル内に
+    "電話" "TEL" 等のラベルで併記された電話番号。住所のすぐ下に書かれていることが多い。
+    依頼元 (相手先) の電話と混ぜないこと。
   - notes は複数項目を改行 (\n) で連結する。
   - 電話番号はハイフンの有無や市外局番形式を変更せず、PDF の表記をそのまま。
+  - 金額情報 (合計金額、運賃、消費税など)、支払方法、支払期日は **どのフィールドにも含めない**。
   - 出力はこの schema に厳密に従う JSON 1 個 (前後に余分なテキスト・markdown 装飾を一切付けない)。{self_section}"#,
         self_section = self_section
     )
@@ -92,12 +108,25 @@ pub(crate) fn build_logistics_prompt(self_company_hint: Option<&str>) -> String 
 /// `notify_documents.extracted_data.logistics` 配下に serde_json で保存する。
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, Default)]
 pub struct LogisticsFields {
-    /// 積地。例: "東京都港区" / "○○倉庫"
+    /// 積地。会社名/施設名優先 (例: "イオン関西RDC")、なければ住所そのもの。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub loading_place: Option<String>,
-    /// 卸地。
+    /// 積地の住所。`loading_place` が会社名のとき、別行に書かれた住所のみ
+    /// (例: "京都府乙訓郡大山崎町字大山崎小字鏡田38")。`loading_place` が住所そのものの場合は null。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loading_place_address: Option<String>,
+    /// 積地の電話番号 (積み込み場所セル内の TEL ラベル付き)。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loading_place_phone: Option<String>,
+    /// 卸地。会社名/施設名優先、なければ住所。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unloading_place: Option<String>,
+    /// 卸地の住所。`loading_place_address` と同じ要領。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unloading_place_address: Option<String>,
+    /// 卸地の電話番号。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unloading_place_phone: Option<String>,
     /// 積み日時。例: "5/9 10:00"
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub loading_at: Option<String>,
@@ -123,7 +152,11 @@ impl LogisticsFields {
     pub fn has_any(&self) -> bool {
         [
             &self.loading_place,
+            &self.loading_place_address,
+            &self.loading_place_phone,
             &self.unloading_place,
+            &self.unloading_place_address,
+            &self.unloading_place_phone,
             &self.loading_at,
             &self.unloading_at,
             &self.notes,
@@ -155,23 +188,28 @@ pub enum ExtractError {
 /// `responseMimeType: application/json` だけだと markdown wrap で parse 壊れる
 /// (PR #318 / `feedback_gemini_response_schema_required.md`)。schema で構造を pin する。
 ///
-/// 8 フィールドは全部 nullable な STRING。`required` には入れない (Gemini が
+/// 12 フィールドは全部 nullable な STRING。`required` には入れない (Gemini が
 /// 該当情報なしと判断した時に null にできるように)。
 fn logistics_response_schema() -> serde_json::Value {
     serde_json::json!({
         "type": "OBJECT",
         "properties": {
-            "loading_place":   { "type": "STRING", "nullable": true },
-            "unloading_place": { "type": "STRING", "nullable": true },
-            "loading_at":      { "type": "STRING", "nullable": true },
-            "unloading_at":    { "type": "STRING", "nullable": true },
-            "notes":           { "type": "STRING", "nullable": true },
-            "contact_company": { "type": "STRING", "nullable": true },
-            "contact_person":  { "type": "STRING", "nullable": true },
-            "contact_phone":   { "type": "STRING", "nullable": true }
+            "loading_place":           { "type": "STRING", "nullable": true },
+            "loading_place_address":   { "type": "STRING", "nullable": true },
+            "loading_place_phone":     { "type": "STRING", "nullable": true },
+            "unloading_place":         { "type": "STRING", "nullable": true },
+            "unloading_place_address": { "type": "STRING", "nullable": true },
+            "unloading_place_phone":   { "type": "STRING", "nullable": true },
+            "loading_at":              { "type": "STRING", "nullable": true },
+            "unloading_at":            { "type": "STRING", "nullable": true },
+            "notes":                   { "type": "STRING", "nullable": true },
+            "contact_company":         { "type": "STRING", "nullable": true },
+            "contact_person":          { "type": "STRING", "nullable": true },
+            "contact_phone":           { "type": "STRING", "nullable": true }
         },
         "propertyOrdering": [
-            "loading_place", "unloading_place",
+            "loading_place", "loading_place_address", "loading_place_phone",
+            "unloading_place", "unloading_place_address", "unloading_place_phone",
             "loading_at", "unloading_at", "notes",
             "contact_company", "contact_person", "contact_phone"
         ]
@@ -202,8 +240,8 @@ pub(crate) fn build_extract_request_body(
             "temperature": 0.0,
             "responseMimeType": "application/json",
             "responseSchema": logistics_response_schema(),
-            // 8 フィールド × 短いテキストなので 768 で十分余裕。
-            "maxOutputTokens": 768
+            // 12 フィールド × 短いテキストなので 1024 で十分余裕。
+            "maxOutputTokens": 1024
         }
     })
 }
@@ -286,12 +324,16 @@ mod tests {
     // ============================================================
 
     #[test]
-    fn schema_includes_all_eight_fields() {
+    fn schema_includes_all_twelve_fields() {
         let schema = logistics_response_schema();
         let props = schema.pointer("/properties").unwrap().as_object().unwrap();
         for k in [
             "loading_place",
+            "loading_place_address",
+            "loading_place_phone",
             "unloading_place",
+            "unloading_place_address",
+            "unloading_place_phone",
             "loading_at",
             "unloading_at",
             "notes",
@@ -305,13 +347,13 @@ mod tests {
             assert_eq!(prop["type"], "STRING");
             assert_eq!(prop["nullable"], true);
         }
-        // ordering も 8 件揃っている
+        // ordering も 12 件揃っている
         let ordering = schema
             .pointer("/propertyOrdering")
             .unwrap()
             .as_array()
             .unwrap();
-        assert_eq!(ordering.len(), 8);
+        assert_eq!(ordering.len(), 12);
     }
 
     #[test]
@@ -326,10 +368,14 @@ mod tests {
             .pointer("/contents/0/parts/1/text")
             .and_then(|v| v.as_str())
             .unwrap();
-        // 8 フィールド全て prompt 内に出現
+        // 12 フィールド全て prompt 内に出現
         for k in [
             "loading_place",
+            "loading_place_address",
+            "loading_place_phone",
             "unloading_place",
+            "unloading_place_address",
+            "unloading_place_phone",
             "loading_at",
             "unloading_at",
             "notes",
@@ -339,6 +385,8 @@ mod tests {
         ] {
             assert!(prompt.contains(k), "prompt missing field: {k}");
         }
+        // 金額除外指示も含まれていること (regression guard for prompt change)
+        assert!(prompt.contains("金額情報"));
         // Structured Output 強制 (regression guard, PR #318)
         assert_eq!(
             body.pointer("/generationConfig/responseMimeType").unwrap(),
@@ -433,6 +481,40 @@ mod tests {
         assert!(fields.contact_person.is_none());
         assert!(fields.contact_phone.is_none());
         assert!(!fields.has_any());
+    }
+
+    #[test]
+    fn parse_response_with_place_address_and_phone() {
+        // 配車手配票で積み込み場所が「会社名 + 住所 + 電話」3 段書きされているケース
+        let resp = serde_json::json!({
+            "candidates": [{
+                "content": { "parts": [{ "text":
+                    "{\"loading_place\":\"イオン関西RDC\",\
+                     \"loading_place_address\":\"京都府乙訓郡大山崎町字大山崎小字鏡田38\",\
+                     \"loading_place_phone\":\"075-959-5008\",\
+                     \"unloading_place\":\"熊本県八代市新港町3-9-8\",\
+                     \"unloading_place_address\":null,\
+                     \"unloading_place_phone\":null,\
+                     \"loading_at\":\"令和8年4月17日 (金) 19時\",\
+                     \"unloading_at\":\"令和8年4月18日 (土) 8時\"}"
+                }]}
+            }]
+        });
+        let f = parse_extract_response(&resp).unwrap();
+        assert_eq!(f.loading_place.as_deref(), Some("イオン関西RDC"));
+        assert_eq!(
+            f.loading_place_address.as_deref(),
+            Some("京都府乙訓郡大山崎町字大山崎小字鏡田38")
+        );
+        assert_eq!(f.loading_place_phone.as_deref(), Some("075-959-5008"));
+        assert_eq!(
+            f.unloading_place.as_deref(),
+            Some("熊本県八代市新港町3-9-8")
+        );
+        // 卸地は住所そのものなので _address は null (重複させない)
+        assert!(f.unloading_place_address.is_none());
+        assert!(f.unloading_place_phone.is_none());
+        assert!(f.has_any());
     }
 
     #[test]
