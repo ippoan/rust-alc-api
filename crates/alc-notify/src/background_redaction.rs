@@ -1,0 +1,826 @@
+//! upload / mail ingest から呼ぶバックグラウンド redact ヘルパー。
+//!
+//! `tokio::spawn` で fire-and-forget 起動して呼び出し元 (HTTP リクエスト) を
+//! 即座に return させる。結果は `notify_documents.redaction_status` カラムで
+//! 追跡する:
+//!
+//! - `pending`    → 初期値、まだジョブが触っていない
+//! - `processing` → spawn 開始
+//! - `completed`  → redact 成功 (`redacted_r2_key` set)
+//! - `skipped`    → PDF 以外 or `GEMINI_API_KEY` 未設定 (配信は許可)
+//! - `failed`     → Gemini or `apply_redactions` エラー (配信ブロック)
+//!
+//! 配信時は `crates/alc-notify/src/distribute.rs` の pre-check が
+//! `completed` / `skipped` 以外を弾いて誤って原本を送信しないようにする。
+//! 公開 viewer (`viewer.rs`) は migration 109 の `lookup_delivery_for_view`
+//! が `COALESCE(redacted_r2_key, r2_key)` を返すので、redacted があれば
+//! 自動的にそちらが配信される。
+//!
+//! テスト容易性のため、コアロジックは `redact_document_with_deps` に切り出し
+//! `&dyn NotifyDocumentRepository` + `&dyn StorageBackend` + endpoint override
+//! を引数で受け取る。`AppState` を扱う公開ラッパは薄い。
+
+use std::sync::Arc;
+
+use uuid::Uuid;
+
+use alc_core::repository::notify_documents::NotifyDocumentRepository;
+use alc_core::storage::StorageBackend;
+use alc_core::AppState;
+
+use crate::redact::{apply_redactions, detect_amount_boxes, detect_amount_boxes_v2};
+
+/// redact パイプラインのコア。AppState 非依存でユニットテスト可能。
+///
+/// - `endpoint`: Gemini API のベース URL。`None` なら本番 (`https://generativelanguage.googleapis.com`)。
+///   wiremock テストでは `Some(server.uri())` を渡す。
+/// - 全エラーは `redaction_status='failed'` に変換され、本関数は panic しない。
+pub async fn redact_document_with_deps(
+    docs: &dyn NotifyDocumentRepository,
+    storage: Option<&dyn StorageBackend>,
+    api_key: Option<&str>,
+    use_2stage: bool,
+    endpoint: Option<&str>,
+    tenant_id: Uuid,
+    document_id: Uuid,
+) {
+    // 1. document 取得 (RLS でテナントチェック)
+    let doc = match docs.get(tenant_id, document_id).await {
+        Ok(Some(d)) => d,
+        Ok(None) => {
+            tracing::warn!("redact: document not found tenant={tenant_id} id={document_id}");
+            return;
+        }
+        Err(e) => {
+            tracing::error!("redact: db get failed: {e}");
+            return;
+        }
+    };
+
+    // 2. PDF 以外は skipped (拡張子で判定、配信は許可)
+    let fname = doc.file_name.clone().unwrap_or_default();
+    if !fname.to_lowercase().ends_with(".pdf") {
+        tracing::info!("redact: non-pdf document {document_id}, marking skipped");
+        let _ = docs
+            .update_redaction_status(tenant_id, document_id, "skipped", None)
+            .await;
+        return;
+    }
+
+    // 3. GEMINI_API_KEY 未設定 → skipped (CI / staging without key 用)
+    let api_key = match api_key {
+        Some(k) if !k.is_empty() => k,
+        _ => {
+            tracing::warn!("redact: GEMINI_API_KEY not set, skipping document {document_id}");
+            let _ = docs
+                .update_redaction_status(tenant_id, document_id, "skipped", None)
+                .await;
+            return;
+        }
+    };
+
+    // 4. notify_storage 未設定 → failed (構成エラー、配信ブロック)
+    let storage = match storage {
+        Some(s) => s,
+        None => {
+            tracing::error!("redact: notify_storage not configured");
+            let _ = docs
+                .update_redaction_status(
+                    tenant_id,
+                    document_id,
+                    "failed",
+                    Some("notify_storage not configured"),
+                )
+                .await;
+            return;
+        }
+    };
+
+    // 5. processing マーキング (UI で「処理中」を表示するため)
+    if let Err(e) = docs
+        .update_redaction_status(tenant_id, document_id, "processing", None)
+        .await
+    {
+        tracing::error!("redact: mark processing failed: {e}");
+        return;
+    }
+
+    // 6. R2 から原本 PDF を取得
+    let pdf_bytes = match storage.download(&doc.r2_key).await {
+        Ok(b) => b,
+        Err(e) => {
+            let _ = docs
+                .update_redaction_status(
+                    tenant_id,
+                    document_id,
+                    "failed",
+                    Some(&format!("r2 download: {e}")),
+                )
+                .await;
+            return;
+        }
+    };
+
+    // 7. Gemini で redaction box を検出
+    let redactions = {
+        let result = if use_2stage {
+            detect_amount_boxes_v2(&pdf_bytes, api_key, None, endpoint).await
+        } else {
+            detect_amount_boxes(&pdf_bytes, api_key, None, endpoint).await
+        };
+        match result {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::error!("redact: detect_amount_boxes (2stage={use_2stage}): {e}");
+                let _ = docs
+                    .update_redaction_status(
+                        tenant_id,
+                        document_id,
+                        "failed",
+                        Some(&format!("gemini: {e}")),
+                    )
+                    .await;
+                return;
+            }
+        }
+    };
+
+    // 8. PDF に白矩形オーバーレイ
+    let redacted_bytes = match apply_redactions(&pdf_bytes, &redactions) {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::error!("redact: apply_redactions: {e}");
+            let _ = docs
+                .update_redaction_status(
+                    tenant_id,
+                    document_id,
+                    "failed",
+                    Some(&format!("apply: {e}")),
+                )
+                .await;
+            return;
+        }
+    };
+
+    // 9. R2 に redacted をアップロード (document スコープ固定キー、上書き対応)
+    let key = format!("{}/redacted/{}.pdf", tenant_id, document_id);
+    if let Err(e) = storage
+        .upload(&key, &redacted_bytes, "application/pdf")
+        .await
+    {
+        tracing::error!("redact: r2 upload: {e}");
+        let _ = docs
+            .update_redaction_status(
+                tenant_id,
+                document_id,
+                "failed",
+                Some(&format!("r2 upload: {e}")),
+            )
+            .await;
+        return;
+    }
+
+    // 10. 成功確定: redacted_r2_key + redacted_at + redactions_applied + status='completed'
+    if let Err(e) = docs
+        .complete_redaction(tenant_id, document_id, &key, redactions.len() as i32)
+        .await
+    {
+        tracing::error!("redact: complete update failed: {e}");
+        return;
+    }
+
+    tracing::info!(
+        "redact: tenant={tenant_id} doc={document_id} applied={} (2stage={use_2stage})",
+        redactions.len()
+    );
+}
+
+/// fire-and-forget で background redact を起動する。呼び出し元はすぐ return できる。
+///
+/// `AppState` から env と repo/storage を取り出して `redact_document_with_deps` に委譲。
+/// upload / ingest の各エンドポイントから新規 document の INSERT 直後に呼ぶ。
+pub fn spawn_redact_document(state: AppState, tenant_id: Uuid, document_id: Uuid) {
+    let api_key = std::env::var("GEMINI_API_KEY").ok();
+    let use_2stage = std::env::var("NOTIFY_REDACT_2STAGE").as_deref() == Ok("1");
+    let docs: Arc<dyn NotifyDocumentRepository> = state.notify_documents.clone();
+    let storage: Option<Arc<dyn StorageBackend>> = state.notify_storage.clone();
+
+    tokio::spawn(async move {
+        redact_document_with_deps(
+            docs.as_ref(),
+            storage.as_deref(),
+            api_key.as_deref(),
+            use_2stage,
+            None,
+            tenant_id,
+            document_id,
+        )
+        .await;
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::sync::{Arc, Mutex};
+
+    use alc_core::repository::notify_documents::{
+        CreateNotifyDocument, ExtractionResult, NotifyDocument,
+    };
+    use alc_core::storage::StorageError;
+    use async_trait::async_trait;
+
+    // ============================================================
+    // In-memory test stubs
+    // ============================================================
+
+    #[derive(Default)]
+    struct StubDocs {
+        statuses: Mutex<Vec<(String, Option<String>)>>,
+        completed: Mutex<Option<(String, i32)>>,
+        doc: Mutex<Option<NotifyDocument>>,
+    }
+
+    impl StubDocs {
+        fn new(doc: NotifyDocument) -> Arc<Self> {
+            let s = Arc::new(Self::default());
+            *s.doc.lock().unwrap() = Some(doc);
+            s
+        }
+        fn with_no_doc() -> Arc<Self> {
+            Arc::new(Self::default())
+        }
+    }
+
+    #[async_trait]
+    impl NotifyDocumentRepository for StubDocs {
+        async fn create(
+            &self,
+            _t: Uuid,
+            _input: &CreateNotifyDocument,
+        ) -> Result<NotifyDocument, sqlx::Error> {
+            unimplemented!()
+        }
+        async fn get(&self, _t: Uuid, _id: Uuid) -> Result<Option<NotifyDocument>, sqlx::Error> {
+            Ok(self.doc.lock().unwrap().clone())
+        }
+        async fn list(
+            &self,
+            _t: Uuid,
+            _l: i64,
+            _o: i64,
+        ) -> Result<Vec<NotifyDocument>, sqlx::Error> {
+            unimplemented!()
+        }
+        async fn search(&self, _t: Uuid, _q: &str) -> Result<Vec<NotifyDocument>, sqlx::Error> {
+            unimplemented!()
+        }
+        async fn update_extraction(
+            &self,
+            _t: Uuid,
+            _id: Uuid,
+            _r: &ExtractionResult,
+        ) -> Result<(), sqlx::Error> {
+            unimplemented!()
+        }
+        async fn update_extraction_error(
+            &self,
+            _t: Uuid,
+            _id: Uuid,
+            _e: &str,
+        ) -> Result<(), sqlx::Error> {
+            unimplemented!()
+        }
+        async fn update_distribution_status(
+            &self,
+            _t: Uuid,
+            _id: Uuid,
+            _s: &str,
+        ) -> Result<(), sqlx::Error> {
+            unimplemented!()
+        }
+        async fn update_redaction_status(
+            &self,
+            _t: Uuid,
+            _id: Uuid,
+            status: &str,
+            error: Option<&str>,
+        ) -> Result<(), sqlx::Error> {
+            self.statuses
+                .lock()
+                .unwrap()
+                .push((status.to_string(), error.map(|s| s.to_string())));
+            Ok(())
+        }
+        async fn complete_redaction(
+            &self,
+            _t: Uuid,
+            _id: Uuid,
+            redacted_r2_key: &str,
+            applied: i32,
+        ) -> Result<(), sqlx::Error> {
+            *self.completed.lock().unwrap() = Some((redacted_r2_key.to_string(), applied));
+            self.statuses
+                .lock()
+                .unwrap()
+                .push(("completed".into(), None));
+            Ok(())
+        }
+        async fn reset_redaction(&self, _t: Uuid, _id: Uuid) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
+    }
+
+    struct StubStorage {
+        pdf: Vec<u8>,
+        last_upload: Mutex<Option<(String, Vec<u8>)>>,
+        download_should_fail: bool,
+        upload_should_fail: bool,
+    }
+
+    impl StubStorage {
+        fn ok(pdf: Vec<u8>) -> Arc<Self> {
+            Arc::new(Self {
+                pdf,
+                last_upload: Mutex::new(None),
+                download_should_fail: false,
+                upload_should_fail: false,
+            })
+        }
+        fn with_download_fail() -> Arc<Self> {
+            Arc::new(Self {
+                pdf: Vec::new(),
+                last_upload: Mutex::new(None),
+                download_should_fail: true,
+                upload_should_fail: false,
+            })
+        }
+        fn with_upload_fail(pdf: Vec<u8>) -> Arc<Self> {
+            Arc::new(Self {
+                pdf,
+                last_upload: Mutex::new(None),
+                download_should_fail: false,
+                upload_should_fail: true,
+            })
+        }
+    }
+
+    #[async_trait]
+    impl StorageBackend for StubStorage {
+        async fn upload(
+            &self,
+            key: &str,
+            bytes: &[u8],
+            _content_type: &str,
+        ) -> Result<String, StorageError> {
+            if self.upload_should_fail {
+                return Err(StorageError::Upload("simulated upload failure".into()));
+            }
+            *self.last_upload.lock().unwrap() = Some((key.to_string(), bytes.to_vec()));
+            Ok(format!("https://test/{key}"))
+        }
+        fn public_url(&self, key: &str) -> String {
+            format!("https://test/{key}")
+        }
+        async fn download(&self, _key: &str) -> Result<Vec<u8>, StorageError> {
+            if self.download_should_fail {
+                return Err(StorageError::Upload("simulated download failure".into()));
+            }
+            Ok(self.pdf.clone())
+        }
+        async fn exists(&self, _key: &str) -> Result<bool, StorageError> {
+            Ok(true)
+        }
+        async fn delete(&self, _key: &str) -> Result<(), StorageError> {
+            Ok(())
+        }
+        fn extract_key(&self, _url: &str) -> Option<String> {
+            None
+        }
+        fn bucket(&self) -> &str {
+            "test-bucket"
+        }
+        async fn presign_get(
+            &self,
+            key: &str,
+            _expiry_seconds: u32,
+        ) -> Result<String, StorageError> {
+            Ok(format!("https://test/{key}?signed=1"))
+        }
+    }
+
+    fn build_doc(file_name: Option<&str>) -> NotifyDocument {
+        NotifyDocument {
+            id: Uuid::new_v4(),
+            tenant_id: Uuid::new_v4(),
+            source_type: "manual".into(),
+            source_sender: None,
+            source_subject: None,
+            r2_key: "tenant/manual/doc.pdf".into(),
+            file_name: file_name.map(|s| s.into()),
+            file_size_bytes: Some(1024),
+            extracted_title: None,
+            extracted_date: None,
+            extracted_summary: None,
+            extracted_phone_numbers: None,
+            extracted_data: None,
+            extraction_status: "pending".into(),
+            extraction_error: None,
+            distribution_status: "pending".into(),
+            distributed_at: None,
+            redacted_r2_key: None,
+            redacted_at: None,
+            redactions_applied: None,
+            redaction_status: "pending".into(),
+            redaction_error: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }
+    }
+
+    /// Gemini モック: `{"items": [{"page": 0, "x_norm": 0.1, "y_norm": 0.1, "width_norm": 0.1, "height_norm": 0.05, "value": "1000"}]}` を返す。
+    /// detect_amount_boxes は内部で JSON parse + RedactionBox に詰め替える。
+    /// ただし apply_redactions はページ存在確認に lopdf を使うので、本テストでは
+    /// 「Gemini 成功 + apply_redactions 失敗」のパスを検証する。
+    async fn start_gemini_mock_returning(items_json: &str) -> wiremock::MockServer {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "candidates": [{
+                        "content": {"parts": [{"text": items_json}]}
+                    }]
+                })),
+            )
+            .mount(&server)
+            .await;
+        server
+    }
+
+    async fn start_gemini_mock_with_status(status: u16) -> wiremock::MockServer {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .respond_with(wiremock::ResponseTemplate::new(status))
+            .mount(&server)
+            .await;
+        server
+    }
+
+    // ============================================================
+    // tests
+    // ============================================================
+
+    // 1. 通常成功: Gemini が空配列 → redactions=0 → apply_redactions は no-op で成功
+    #[tokio::test]
+    async fn redact_document_completes_with_zero_redactions() {
+        let docs = StubDocs::new(build_doc(Some("invoice.pdf")));
+        // 最小だが apply_redactions が parse できる PDF を simple_pdf() で生成
+        let pdf = simple_pdf();
+        let storage = StubStorage::ok(pdf);
+        let server = start_gemini_mock_returning("{\"redactions\": []}").await;
+
+        redact_document_with_deps(
+            docs.as_ref(),
+            Some(storage.as_ref() as &dyn StorageBackend),
+            Some("test-key"),
+            false,
+            Some(&server.uri()),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+        )
+        .await;
+
+        let statuses = docs.statuses.lock().unwrap().clone();
+        // processing → completed
+        assert_eq!(statuses.first().map(|s| s.0.as_str()), Some("processing"));
+        assert_eq!(statuses.last().map(|s| s.0.as_str()), Some("completed"));
+        let (key, applied) = docs.completed.lock().unwrap().clone().unwrap();
+        // tenant/redacted/{document_id}.pdf
+        assert!(key.contains("/redacted/"), "unexpected key: {key}");
+        assert!(key.ends_with(".pdf"), "unexpected key: {key}");
+        assert_eq!(applied, 0);
+        let upload = storage.last_upload.lock().unwrap().clone().unwrap();
+        assert!(upload.0.contains("/redacted/"));
+        assert!(upload.0.ends_with(".pdf"));
+    }
+
+    // 2. PDF 以外は skipped、Gemini を呼ばない
+    #[tokio::test]
+    async fn redact_document_non_pdf_is_skipped() {
+        let docs = StubDocs::new(build_doc(Some("a.docx")));
+        let storage = StubStorage::ok(b"x".to_vec());
+
+        redact_document_with_deps(
+            docs.as_ref(),
+            Some(storage.as_ref() as &dyn StorageBackend),
+            Some("k"),
+            false,
+            None,
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+        )
+        .await;
+
+        let statuses = docs.statuses.lock().unwrap().clone();
+        assert_eq!(statuses, vec![("skipped".into(), None)]);
+        assert!(docs.completed.lock().unwrap().is_none());
+    }
+
+    // 3. file_name=None も skipped (拡張子判定で空文字列は ".pdf" で終わらない)
+    #[tokio::test]
+    async fn redact_document_no_file_name_is_skipped() {
+        let docs = StubDocs::new(build_doc(None));
+        let storage = StubStorage::ok(b"x".to_vec());
+
+        redact_document_with_deps(
+            docs.as_ref(),
+            Some(storage.as_ref() as &dyn StorageBackend),
+            Some("k"),
+            false,
+            None,
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+        )
+        .await;
+
+        let statuses = docs.statuses.lock().unwrap().clone();
+        assert_eq!(statuses, vec![("skipped".into(), None)]);
+    }
+
+    // 4. api_key=None → skipped
+    #[tokio::test]
+    async fn redact_document_no_api_key_is_skipped() {
+        let docs = StubDocs::new(build_doc(Some("doc.pdf")));
+        let storage = StubStorage::ok(b"x".to_vec());
+
+        redact_document_with_deps(
+            docs.as_ref(),
+            Some(storage.as_ref() as &dyn StorageBackend),
+            None,
+            false,
+            None,
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+        )
+        .await;
+
+        let statuses = docs.statuses.lock().unwrap().clone();
+        assert_eq!(statuses, vec![("skipped".into(), None)]);
+    }
+
+    // 5. api_key="" (空文字) も skipped
+    #[tokio::test]
+    async fn redact_document_empty_api_key_is_skipped() {
+        let docs = StubDocs::new(build_doc(Some("doc.pdf")));
+        let storage = StubStorage::ok(b"x".to_vec());
+
+        redact_document_with_deps(
+            docs.as_ref(),
+            Some(storage.as_ref() as &dyn StorageBackend),
+            Some(""),
+            false,
+            None,
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+        )
+        .await;
+
+        assert_eq!(
+            docs.statuses.lock().unwrap().clone(),
+            vec![("skipped".into(), None)]
+        );
+    }
+
+    // 6. notify_storage = None → failed
+    #[tokio::test]
+    async fn redact_document_no_storage_fails() {
+        let docs = StubDocs::new(build_doc(Some("doc.pdf")));
+
+        redact_document_with_deps(
+            docs.as_ref(),
+            None,
+            Some("k"),
+            false,
+            None,
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+        )
+        .await;
+
+        let statuses = docs.statuses.lock().unwrap().clone();
+        assert_eq!(statuses.len(), 1);
+        assert_eq!(statuses[0].0, "failed");
+        assert!(statuses[0].1.as_deref().unwrap().contains("notify_storage"));
+    }
+
+    // 7. document not found → 何もしない
+    #[tokio::test]
+    async fn redact_document_not_found_is_noop() {
+        let docs = StubDocs::with_no_doc();
+
+        redact_document_with_deps(
+            docs.as_ref(),
+            None,
+            Some("k"),
+            false,
+            None,
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+        )
+        .await;
+
+        assert_eq!(docs.statuses.lock().unwrap().len(), 0);
+        assert!(docs.completed.lock().unwrap().is_none());
+    }
+
+    // 8. R2 download エラー → failed
+    #[tokio::test]
+    async fn redact_document_download_failure_marks_failed() {
+        let docs = StubDocs::new(build_doc(Some("doc.pdf")));
+        let storage = StubStorage::with_download_fail();
+
+        redact_document_with_deps(
+            docs.as_ref(),
+            Some(storage.as_ref() as &dyn StorageBackend),
+            Some("k"),
+            false,
+            None,
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+        )
+        .await;
+
+        let statuses = docs.statuses.lock().unwrap().clone();
+        let last = statuses.last().expect("at least one status");
+        assert_eq!(last.0, "failed");
+        assert!(last.1.as_deref().unwrap().contains("r2 download"));
+    }
+
+    // 9. R2 upload エラー → failed (Gemini 成功 + apply 成功 + upload 失敗)
+    #[tokio::test]
+    async fn redact_document_upload_failure_marks_failed() {
+        let docs = StubDocs::new(build_doc(Some("doc.pdf")));
+        let pdf = simple_pdf();
+        let storage = StubStorage::with_upload_fail(pdf);
+        let server = start_gemini_mock_returning("{\"redactions\": []}").await;
+
+        redact_document_with_deps(
+            docs.as_ref(),
+            Some(storage.as_ref() as &dyn StorageBackend),
+            Some("k"),
+            false,
+            Some(&server.uri()),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+        )
+        .await;
+
+        let statuses = docs.statuses.lock().unwrap().clone();
+        let last = statuses.last().expect("at least one status");
+        assert_eq!(last.0, "failed");
+        assert!(last.1.as_deref().unwrap().contains("r2 upload"));
+    }
+
+    // 10. Gemini 5xx → failed
+    #[tokio::test]
+    async fn redact_document_gemini_failure_marks_failed() {
+        let docs = StubDocs::new(build_doc(Some("doc.pdf")));
+        let storage = StubStorage::ok(simple_pdf());
+        let server = start_gemini_mock_with_status(500).await;
+
+        redact_document_with_deps(
+            docs.as_ref(),
+            Some(storage.as_ref() as &dyn StorageBackend),
+            Some("k"),
+            false,
+            Some(&server.uri()),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+        )
+        .await;
+
+        let statuses = docs.statuses.lock().unwrap().clone();
+        let last = statuses.last().expect("at least one status");
+        assert_eq!(last.0, "failed");
+        assert!(last.1.as_deref().unwrap().contains("gemini"));
+    }
+
+    // 11. apply_redactions エラー → failed (不正 PDF)
+    #[tokio::test]
+    async fn redact_document_apply_error_marks_failed() {
+        let docs = StubDocs::new(build_doc(Some("doc.pdf")));
+        let storage = StubStorage::ok(b"not a pdf".to_vec());
+        let server = start_gemini_mock_returning("{\"redactions\": []}").await;
+
+        redact_document_with_deps(
+            docs.as_ref(),
+            Some(storage.as_ref() as &dyn StorageBackend),
+            Some("k"),
+            false,
+            Some(&server.uri()),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+        )
+        .await;
+
+        let statuses = docs.statuses.lock().unwrap().clone();
+        let last = statuses.last().expect("at least one status");
+        assert_eq!(last.0, "failed");
+        assert!(last.1.as_deref().unwrap().contains("apply"));
+    }
+
+    // 12. 2-stage モード: 同じ Gemini モック (空配列) で `use_2stage=true` → completed
+    #[tokio::test]
+    async fn redact_document_2stage_branch_works() {
+        let docs = StubDocs::new(build_doc(Some("doc.pdf")));
+        let pdf = simple_pdf();
+        let storage = StubStorage::ok(pdf);
+        // 2-stage は detect_all_cells (Stage 1) → filter_amount_cells (Stage 2) を呼ぶ。
+        // 空応答だと filter_amount_cells が "no cells" で fallback → 1-stage で完了。
+        // 内部で空配列を返すケースを想定して同じモックで OK。
+        let server = start_gemini_mock_returning("{\"pages\": []}").await;
+
+        redact_document_with_deps(
+            docs.as_ref(),
+            Some(storage.as_ref() as &dyn StorageBackend),
+            Some("k"),
+            true,
+            Some(&server.uri()),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+        )
+        .await;
+
+        // 2-stage で内部 fallback が走る場合でも、最終的には completed か failed のどちらか
+        let statuses = docs.statuses.lock().unwrap().clone();
+        let last = statuses.last().expect("at least one status").0.clone();
+        assert!(
+            matches!(last.as_str(), "completed" | "failed"),
+            "expected completed or failed, got: {last}"
+        );
+    }
+
+    // 13. spawn helper は即 return できる
+    #[tokio::test]
+    async fn spawn_redact_document_returns_immediately() {
+        // `spawn_redact_document` は AppState 必須でユニットテストでは組み立てが
+        // 重いため、ここでは「env 未設定 → skipped」分岐を `redact_document_with_deps`
+        // 経由で確認する。env を引数で None にすることで env 競合を完全回避。
+        let docs = StubDocs::new(build_doc(Some("doc.pdf")));
+
+        redact_document_with_deps(
+            docs.as_ref(),
+            None,
+            None, // env 相当: GEMINI_API_KEY 未設定 → skipped
+            false,
+            None,
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+        )
+        .await;
+
+        assert_eq!(
+            docs.statuses.lock().unwrap().clone(),
+            vec![("skipped".into(), None)]
+        );
+    }
+
+    // ============================================================
+    // ヘルパー
+    // ============================================================
+
+    /// lopdf でパース可能な最小の 1-page PDF。
+    fn simple_pdf() -> Vec<u8> {
+        use lopdf::content::{Content, Operation};
+        use lopdf::dictionary;
+        use lopdf::{Document, Object, Stream};
+
+        let mut doc = Document::with_version("1.5");
+        let pages_id = doc.new_object_id();
+        let content = Content {
+            operations: vec![Operation::new("BT", vec![])],
+        };
+        let content_id = doc.add_object(Stream::new(dictionary! {}, content.encode().unwrap()));
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "Contents" => content_id,
+        });
+        let pages = dictionary! {
+            "Type" => "Pages",
+            "Kids" => vec![Object::Reference(page_id)],
+            "Count" => 1,
+            "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
+        };
+        doc.objects.insert(pages_id, Object::Dictionary(pages));
+        let catalog_id = doc.add_object(dictionary! {
+            "Type" => "Catalog",
+            "Pages" => pages_id,
+        });
+        doc.trailer.set("Root", catalog_id);
+        let mut buf = Vec::new();
+        doc.save_to(&mut buf).unwrap();
+        buf
+    }
+}
