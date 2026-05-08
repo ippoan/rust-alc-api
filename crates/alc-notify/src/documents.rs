@@ -26,6 +26,10 @@ pub fn tenant_router() -> Router<AppState> {
             "/notify/documents/{id}/redact-recompute",
             axum::routing::post(redact_recompute),
         )
+        .route(
+            "/notify/documents/{id}/extract-recompute",
+            axum::routing::post(extract_recompute),
+        )
 }
 
 #[derive(serde::Deserialize)]
@@ -227,6 +231,10 @@ async fn upload(
         if file_name.to_lowercase().ends_with(".pdf") {
             crate::background_redaction::spawn_redact_document(state.clone(), tenant.0, id);
         }
+
+        // 配車手配票 PDF の積地/卸地/日時/注意事項抽出 (LINE 本文用)。
+        // 拡張子チェックは background_extract 側でやるので毎回呼んで OK。
+        crate::background_extract::spawn_extract_document(state.clone(), tenant.0, id);
     }
 
     let count = document_ids.len();
@@ -323,6 +331,33 @@ async fn redact_recompute(
         })?;
 
     crate::background_redaction::spawn_redact_document(state.clone(), tenant.0, doc.id);
+    Ok(StatusCode::ACCEPTED)
+}
+
+/// force re-extract: extracted_data.logistics を Gemini で再抽出して spawn。即 202 Accepted。
+///
+/// 既存ドキュメントの logistics 抽出をやり直したい場合 (staging で初回反映後の確認、
+/// 本番で抽出ミスがあった場合の手動再実行) に使う。redaction_status とは独立。
+async fn extract_recompute(
+    State(state): State<AppState>,
+    Extension(tenant): Extension<TenantId>,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode, StatusCode> {
+    // 存在確認 (RLS でテナント越境はそもそも 404)
+    let _doc = state
+        .notify_documents
+        .get(tenant.0, id)
+        .await
+        .map_err(|e| {
+            tracing::error!("extract_recompute: get notify_document: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    // 既存 extraction_status / extraction_error は保持して上書きする (background が
+    // 完走時に completed/failed を再設定する)。明示的なリセット関数がないので
+    // background 内で update_extraction が走った時点で最新化される。
+    crate::background_extract::spawn_extract_document(state.clone(), tenant.0, id);
     Ok(StatusCode::ACCEPTED)
 }
 
