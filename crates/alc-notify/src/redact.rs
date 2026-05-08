@@ -161,6 +161,10 @@ pub async fn detect_amount_boxes(
         "generationConfig": {
             "temperature": 0.0,
             "responseMimeType": "application/json",
+            // Structured Output: Gemini が schema に合致する JSON を保証する。
+            // responseMimeType=json だけだと markdown wrap (```json ... ```) や
+            // 余分な前置テキストで parse 失敗するので、schema で構造を pin する。
+            "responseSchema": redact_response_schema(),
             "maxOutputTokens": 2048
         }
     });
@@ -179,8 +183,106 @@ pub async fn detect_amount_boxes(
         .and_then(|v| v.as_str())
         .ok_or(RedactError::GeminiEmpty)?;
 
-    let list: RedactionList = serde_json::from_str(text).map_err(RedactError::RedactionParse)?;
+    let list: RedactionList = serde_json::from_str(text).map_err(|e| {
+        tracing::warn!(
+            "redact 1-stage: parse failed: {e}; raw response (first 500 chars): {}",
+            text.chars().take(500).collect::<String>()
+        );
+        RedactError::RedactionParse(e)
+    })?;
     Ok(list.redactions)
+}
+
+/// 1-stage `RedactionList` 用の Gemini Structured Output schema。
+/// `RedactionBox` (page, box_2d[4], text, cell_label?) の配列を `redactions` key で返す。
+fn redact_response_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "OBJECT",
+        "properties": {
+            "redactions": {
+                "type": "ARRAY",
+                "items": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "page": { "type": "INTEGER" },
+                        "box_2d": {
+                            "type": "ARRAY",
+                            "items": { "type": "NUMBER" },
+                            "minItems": 4,
+                            "maxItems": 4
+                        },
+                        "text": { "type": "STRING" },
+                        "cell_label": { "type": "STRING", "nullable": true }
+                    },
+                    "required": ["page", "box_2d", "text"],
+                    "propertyOrdering": ["page", "box_2d", "text", "cell_label"]
+                }
+            }
+        },
+        "required": ["redactions"]
+    })
+}
+
+/// Stage 1 用 Gemini Structured Output schema。
+/// 必ず `{page, title?, cells: [{box_2d[4], text}]}` 形式で返させる。
+/// `Stage1Response::Single` variant 専用 — Multi (`{tables: [...]}`) は schema が
+/// 強制する単一 page 形式に collapse される (複数ページ PDF も同 page key で 1 ページ分のみ)。
+fn stage1_response_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "OBJECT",
+        "properties": {
+            "page": { "type": "INTEGER" },
+            "title": { "type": "STRING", "nullable": true },
+            "cells": {
+                "type": "ARRAY",
+                "items": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "box_2d": {
+                            "type": "ARRAY",
+                            "items": { "type": "NUMBER" },
+                            "minItems": 4,
+                            "maxItems": 4
+                        },
+                        "text": { "type": "STRING" }
+                    },
+                    "required": ["box_2d", "text"],
+                    "propertyOrdering": ["box_2d", "text"]
+                }
+            }
+        },
+        "required": ["page", "cells"],
+        "propertyOrdering": ["page", "title", "cells"]
+    })
+}
+
+/// Stage 2 用 Gemini Structured Output schema。
+/// `{redactions: [{box_2d[4], text}]}` を返す。Stage 1 の box_2d をそのまま流用する
+/// 設計なので page は不要 (caller が PageCells.page を補完する)。
+fn stage2_response_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "OBJECT",
+        "properties": {
+            "redactions": {
+                "type": "ARRAY",
+                "items": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "box_2d": {
+                            "type": "ARRAY",
+                            "items": { "type": "NUMBER" },
+                            "minItems": 4,
+                            "maxItems": 4
+                        },
+                        "text": { "type": "STRING" }
+                    },
+                    "required": ["box_2d", "text"],
+                    "propertyOrdering": ["box_2d", "text"]
+                }
+            }
+        },
+        "required": ["redactions"]
+    })
 }
 
 // ============================================================================
@@ -316,6 +418,11 @@ pub async fn detect_all_cells(
         "generationConfig": {
             "temperature": 0.0,
             "responseMimeType": "application/json",
+            // Structured Output: Gemini が schema に合致する JSON を保証する。
+            // 過去 staging ログで `Stage1Response` parse 失敗 → 1-stage fallback で
+            // 3164 ズレ再発する事故があり (responseMimeType だけでは markdown wrap や
+            // 余計な前置テキストが混入することがあった)、schema で完全に固定する。
+            "responseSchema": stage1_response_schema(),
             "maxOutputTokens": 8192
         }
     });
@@ -333,7 +440,15 @@ pub async fn detect_all_cells(
         .and_then(|v| v.as_str())
         .ok_or(RedactError::GeminiEmpty)?;
 
-    let stage1: Stage1Response = serde_json::from_str(text).map_err(RedactError::RedactionParse)?;
+    let stage1: Stage1Response = serde_json::from_str(text).map_err(|e| {
+        // schema で fix したはずなのに parse 失敗 = Gemini 側が schema を破った
+        // ということ。raw response の先頭 1KB を残して原因究明できるようにする。
+        tracing::warn!(
+            "redact stage1: parse failed despite responseSchema: {e}; raw text (first 1000 chars): {}",
+            text.chars().take(1000).collect::<String>()
+        );
+        RedactError::RedactionParse(e)
+    })?;
     let pages = match stage1 {
         Stage1Response::Multi { tables } => tables,
         Stage1Response::Single(p) => vec![p],
@@ -373,6 +488,8 @@ pub async fn filter_amount_cells(
         "generationConfig": {
             "temperature": 0.0,
             "responseMimeType": "application/json",
+            // Structured Output: Stage 2 出力 `{redactions: [{box_2d[4], text}]}` を schema で保証
+            "responseSchema": stage2_response_schema(),
             "maxOutputTokens": 4096
         }
     });
@@ -401,7 +518,13 @@ pub async fn filter_amount_cells(
     struct Stage2List {
         redactions: Vec<Stage2Box>,
     }
-    let list: Stage2List = serde_json::from_str(text).map_err(RedactError::RedactionParse)?;
+    let list: Stage2List = serde_json::from_str(text).map_err(|e| {
+        tracing::warn!(
+            "redact stage2: parse failed despite responseSchema: {e}; raw text (first 1000 chars): {}",
+            text.chars().take(1000).collect::<String>()
+        );
+        RedactError::RedactionParse(e)
+    })?;
 
     // page は入力 pages[0].page を採用 (現実的に通知 PDF は単一ページが大半)。
     // 複数ページ対応が必要になったら Stage 2 に page を返させる prompt 改修が必要。
@@ -1016,6 +1139,46 @@ mod tests {
         );
         assert!(prompt.contains("100,000円"));
         assert!(prompt.contains("box_2d は入力 JSON のまま使うこと"));
+    }
+
+    /// Gemini Structured Output schema が prompt 強化と一緒に保たれているか pin する。
+    ///
+    /// 過去 staging で responseMimeType=json だけでは Stage 1 の出力が時々 markdown
+    /// wrap や余分な前置テキストを含み、`Stage1Response` parse 失敗 → 1-stage fallback
+    /// (= 3164 ズレ再発) する事故があった。`responseSchema` を generationConfig に
+    /// 注入することで Gemini 側で構造を保証させる。schema を消したり field を
+    /// rename したりした場合に CI が即座に拾えるよう、構造を pin する。
+    #[test]
+    fn test_response_schemas_pin_structure() {
+        // 1-stage: redactions[].{page, box_2d[4], text, cell_label?}
+        let s = redact_response_schema();
+        assert_eq!(s["type"], "OBJECT");
+        assert_eq!(s["required"][0], "redactions");
+        let item = &s["properties"]["redactions"]["items"];
+        assert_eq!(item["properties"]["box_2d"]["minItems"], 4);
+        assert_eq!(item["properties"]["box_2d"]["maxItems"], 4);
+        assert_eq!(
+            item["required"],
+            serde_json::json!(["page", "box_2d", "text"])
+        );
+        assert_eq!(item["properties"]["cell_label"]["nullable"], true);
+
+        // Stage 1: {page, title?, cells: [{box_2d[4], text}]}
+        let s = stage1_response_schema();
+        assert_eq!(s["required"], serde_json::json!(["page", "cells"]));
+        assert_eq!(s["properties"]["title"]["nullable"], true);
+        let cell = &s["properties"]["cells"]["items"];
+        assert_eq!(cell["properties"]["box_2d"]["minItems"], 4);
+        assert_eq!(cell["properties"]["box_2d"]["maxItems"], 4);
+        assert_eq!(cell["required"], serde_json::json!(["box_2d", "text"]));
+
+        // Stage 2: {redactions: [{box_2d[4], text}]}
+        let s = stage2_response_schema();
+        assert_eq!(s["required"][0], "redactions");
+        let r = &s["properties"]["redactions"]["items"];
+        assert_eq!(r["properties"]["box_2d"]["minItems"], 4);
+        assert_eq!(r["properties"]["box_2d"]["maxItems"], 4);
+        assert_eq!(r["required"], serde_json::json!(["box_2d", "text"]));
     }
 
     /// 3164 消費税行ズレ対策: STAGE1_PROMPT が「ラベル列と値列の完全分離」を
