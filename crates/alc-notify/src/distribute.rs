@@ -299,14 +299,6 @@ async fn distribute(
 
     let api_origin =
         std::env::var("API_ORIGIN").unwrap_or_else(|_| "https://localhost:8080".into());
-    let summary = doc
-        .extracted_summary
-        .as_deref()
-        .unwrap_or("新しいドキュメントが届きました");
-    let title = doc
-        .extracted_title
-        .as_deref()
-        .unwrap_or(doc.file_name.as_deref().unwrap_or("ドキュメント"));
 
     let line_client = LineClient::new();
     let lw_client = LineworksBotClient::new();
@@ -316,7 +308,7 @@ async fn distribute(
 
     for (delivery, recipient) in deliveries.iter().zip(recipients.iter()) {
         let read_url = format!("{}/api/notify/read/{}", api_origin, delivery.read_token);
-        let message = format!("📄 {}\n\n{}\n\n▶ 詳細を見る: {}", title, summary, read_url);
+        let message = build_distribute_message(&doc, &read_url);
 
         match send_to_recipient(
             &state,
@@ -421,4 +413,235 @@ async fn test_distribute(
         "failed": failed,
         "total": sent + failed,
     })))
+}
+
+/// LINE / LINE WORKS に送信する本文を組み立てる。
+///
+/// `doc.extracted_data.logistics` (5 フィールドのいずれかが非空) があれば物流テンプレに
+/// 切り替え、なければ既存テンプレ (`title` + `summary` + URL) を返す。
+///
+/// 物流テンプレ:
+/// ```text
+/// 📄 {title}
+/// 📍 積地: {loading_place}
+/// 📦 卸地: {unloading_place}
+/// 🕐 積込: {loading_at}
+/// 🕓 卸し: {unloading_at}
+/// ⚠️ 注意: {notes}
+///
+/// ▶ 詳細: {url}
+/// ```
+/// 5 フィールドのうち存在するものだけ列挙する (一部 null OK)。
+///
+/// pure 関数として外出しすることで、4 ケース (全フィールドあり / 一部 null /
+/// logistics キーなし / extracted_data なし) を unit test で直接検証できる。
+pub(crate) fn build_distribute_message(
+    doc: &alc_core::repository::notify_documents::NotifyDocument,
+    read_url: &str,
+) -> String {
+    let title = doc
+        .extracted_title
+        .as_deref()
+        .unwrap_or(doc.file_name.as_deref().unwrap_or("ドキュメント"));
+
+    if let Some(logistics) = doc
+        .extracted_data
+        .as_ref()
+        .and_then(|d| d.get("logistics"))
+        .filter(|v| v.is_object())
+    {
+        let mut lines: Vec<String> = Vec::with_capacity(8);
+        lines.push(format!("📄 {}", title));
+
+        let push_field = |lines: &mut Vec<String>, prefix: &str, key: &str| {
+            if let Some(v) = logistics.get(key).and_then(|x| x.as_str()) {
+                let trimmed = v.trim();
+                if !trimmed.is_empty() {
+                    lines.push(format!("{} {}", prefix, trimmed));
+                }
+            }
+        };
+
+        push_field(&mut lines, "📍 積地:", "loading_place");
+        push_field(&mut lines, "📦 卸地:", "unloading_place");
+        push_field(&mut lines, "🕐 積込:", "loading_at");
+        push_field(&mut lines, "🕓 卸し:", "unloading_at");
+        push_field(&mut lines, "⚠️ 注意:", "notes");
+
+        // logistics キー自体は object だが全 string が空文字 / 欠落のとき (defensive: schema
+        // 違反値の混入対策)、本文が「📄 タイトル」だけになって URL が浮くのを避けるため
+        // 既存テンプレに fallback する。
+        if lines.len() == 1 {
+            return fallback_template(doc, read_url);
+        }
+
+        lines.push(String::new()); // 詳細リンク前の空行
+        lines.push(format!("▶ 詳細: {}", read_url));
+        lines.join("\n")
+    } else {
+        fallback_template(doc, read_url)
+    }
+}
+
+fn fallback_template(
+    doc: &alc_core::repository::notify_documents::NotifyDocument,
+    read_url: &str,
+) -> String {
+    let summary = doc
+        .extracted_summary
+        .as_deref()
+        .unwrap_or("新しいドキュメントが届きました");
+    let title = doc
+        .extracted_title
+        .as_deref()
+        .unwrap_or(doc.file_name.as_deref().unwrap_or("ドキュメント"));
+    format!("📄 {}\n\n{}\n\n▶ 詳細を見る: {}", title, summary, read_url)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alc_core::repository::notify_documents::NotifyDocument;
+
+    fn build_doc() -> NotifyDocument {
+        NotifyDocument {
+            id: Uuid::new_v4(),
+            tenant_id: Uuid::new_v4(),
+            source_type: "manual".into(),
+            source_sender: None,
+            source_subject: None,
+            r2_key: "k".into(),
+            file_name: Some("haisou.pdf".into()),
+            file_size_bytes: None,
+            extracted_title: None,
+            extracted_date: None,
+            extracted_summary: None,
+            extracted_phone_numbers: None,
+            extracted_data: None,
+            extraction_status: "pending".into(),
+            extraction_error: None,
+            distribution_status: "pending".into(),
+            distributed_at: None,
+            redacted_r2_key: None,
+            redacted_at: None,
+            redactions_applied: None,
+            redaction_status: "completed".into(),
+            redaction_error: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }
+    }
+
+    #[test]
+    fn message_uses_logistics_template_when_all_fields_present() {
+        let mut doc = build_doc();
+        doc.extracted_data = Some(serde_json::json!({
+            "logistics": {
+                "loading_place": "東京都港区",
+                "unloading_place": "大阪府大阪市",
+                "loading_at": "5/9 10:00",
+                "unloading_at": "5/10 14:00",
+                "notes": "冷凍便\n要時間厳守"
+            }
+        }));
+        let msg = build_distribute_message(&doc, "https://x/v/abc");
+        assert!(msg.contains("📄 haisou.pdf"));
+        assert!(msg.contains("📍 積地: 東京都港区"));
+        assert!(msg.contains("📦 卸地: 大阪府大阪市"));
+        assert!(msg.contains("🕐 積込: 5/9 10:00"));
+        assert!(msg.contains("🕓 卸し: 5/10 14:00"));
+        assert!(msg.contains("⚠️ 注意: 冷凍便\n要時間厳守"));
+        assert!(msg.contains("▶ 詳細: https://x/v/abc"));
+        // 「新しいドキュメントが届きました」の既定句は出ない
+        assert!(!msg.contains("新しいドキュメント"));
+    }
+
+    #[test]
+    fn message_omits_null_fields_in_logistics_template() {
+        let mut doc = build_doc();
+        doc.extracted_data = Some(serde_json::json!({
+            "logistics": {
+                "loading_place": "成田",
+                "unloading_place": null,
+                "loading_at": null,
+                "unloading_at": null,
+                "notes": null
+            }
+        }));
+        let msg = build_distribute_message(&doc, "https://x/v/abc");
+        assert!(msg.contains("📍 積地: 成田"));
+        assert!(!msg.contains("📦 卸地"));
+        assert!(!msg.contains("🕐 積込"));
+        assert!(msg.contains("▶ 詳細: https://x/v/abc"));
+    }
+
+    #[test]
+    fn message_falls_back_to_legacy_when_no_logistics_key() {
+        let mut doc = build_doc();
+        doc.extracted_title = Some("見積書".into());
+        doc.extracted_summary = Some("〇〇社からの見積です".into());
+        doc.extracted_data = Some(serde_json::json!({"phone_numbers_ext": ["090-..."]}));
+        let msg = build_distribute_message(&doc, "https://x/v/abc");
+        assert_eq!(
+            msg,
+            "📄 見積書\n\n〇〇社からの見積です\n\n▶ 詳細を見る: https://x/v/abc"
+        );
+    }
+
+    #[test]
+    fn message_falls_back_when_extracted_data_is_none() {
+        let doc = build_doc();
+        let msg = build_distribute_message(&doc, "https://x/v/abc");
+        assert!(msg.contains("📄 haisou.pdf"));
+        assert!(msg.contains("新しいドキュメントが届きました"));
+        assert!(msg.contains("▶ 詳細を見る: https://x/v/abc"));
+    }
+
+    #[test]
+    fn message_falls_back_when_logistics_object_has_only_empty_strings() {
+        // defensive: schema 違反値が混入しても既存テンプレに退避
+        let mut doc = build_doc();
+        doc.extracted_data = Some(serde_json::json!({
+            "logistics": {
+                "loading_place": "  ",
+                "unloading_place": "",
+                "loading_at": null,
+                "unloading_at": null,
+                "notes": null
+            }
+        }));
+        let msg = build_distribute_message(&doc, "https://x/v/abc");
+        // logistics テンプレ部分の絵文字は出ない
+        assert!(!msg.contains("📍 積地"));
+        assert!(msg.contains("新しいドキュメントが届きました"));
+    }
+
+    #[test]
+    fn message_falls_back_when_logistics_value_is_not_object() {
+        // defensive: extracted_data.logistics が string や array なら無視
+        let mut doc = build_doc();
+        doc.extracted_data = Some(serde_json::json!({"logistics": "broken"}));
+        let msg = build_distribute_message(&doc, "https://x/v/abc");
+        assert!(msg.contains("新しいドキュメントが届きました"));
+    }
+
+    #[test]
+    fn message_uses_extracted_title_when_available_in_logistics_path() {
+        let mut doc = build_doc();
+        doc.extracted_title = Some("配車手配票".into());
+        doc.extracted_data = Some(serde_json::json!({
+            "logistics": {"loading_place": "東京"}
+        }));
+        let msg = build_distribute_message(&doc, "https://x/v/abc");
+        assert!(msg.starts_with("📄 配車手配票"));
+        assert!(!msg.contains("haisou.pdf"));
+    }
+
+    #[test]
+    fn message_uses_doc_default_when_no_filename() {
+        let mut doc = build_doc();
+        doc.file_name = None;
+        let msg = build_distribute_message(&doc, "https://x/v/abc");
+        assert!(msg.contains("📄 ドキュメント"));
+    }
 }

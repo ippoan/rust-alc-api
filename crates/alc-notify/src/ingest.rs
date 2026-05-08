@@ -190,6 +190,10 @@ async fn handle_ingest(
         if file_name.to_lowercase().ends_with(".pdf") {
             crate::background_redaction::spawn_redact_document(state.clone(), tenant_id, id);
         }
+
+        // 配車手配票 PDF なら積地・卸地・日時・注意事項を Gemini で抽出 (LINE 本文用)。
+        // PDF 以外 / GEMINI_API_KEY 未設定でも no-op で完了する。redact と並走。
+        crate::background_extract::spawn_extract_document(state.clone(), tenant_id, id);
     }
 
     let count = document_ids.len();

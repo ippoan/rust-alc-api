@@ -1,8 +1,10 @@
+pub mod background_extract;
 pub mod background_redaction;
 pub mod clients;
 pub mod distribute;
 pub mod documents;
 pub mod email_documents;
+pub mod extract;
 pub mod groups;
 pub mod ingest;
 pub mod line_config;
