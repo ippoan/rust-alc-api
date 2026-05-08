@@ -23,8 +23,9 @@
 use base64::Engine;
 use flate2::read::ZlibDecoder;
 use image::ImageEncoder;
-use lopdf::{Document, Object, ObjectId, Stream};
+use lopdf::{dictionary, Document, Object, ObjectId, Stream};
 use std::io::Read;
+use std::sync::{Mutex, OnceLock};
 
 const GEMINI_DEFAULT_ENDPOINT: &str = "https://generativelanguage.googleapis.com/v1beta";
 // gemini-2.0-flash は 2026 年に新規ユーザー向け提供終了 (404)。
@@ -136,6 +137,35 @@ pub enum RedactError {
     PageNoImage(usize),
     #[error("image decode/encode: {0}")]
     Image(#[from] image::ImageError),
+    #[error("pdfium: {0}")]
+    Pdfium(String),
+}
+
+/// `pdfium-render::Pdfium` は内部に `Box<dyn PdfiumLibraryBindings>` を持つ。
+/// dyn trait は自動で `Send + Sync` を持たないため、そのままでは `static` に
+/// 置けない。実体は FFI でロードした共有ライブラリ (libpdfium.so) なのでプロセス
+/// 内のどのスレッドからアクセスしても問題ない。Mutex 越しに排他化することで
+/// PDFium 本体のスレッドアンセーフ性も保護する。
+struct PdfiumGuard(pdfium_render::prelude::Pdfium);
+// SAFETY: PDFium ライブラリ自体は dlopen された .so で、ハンドル + 関数ポインタは
+// プロセス全体で有効。Mutex で排他しているので並行呼び出しは発生しない。
+unsafe impl Send for PdfiumGuard {}
+unsafe impl Sync for PdfiumGuard {}
+
+/// 共有 Pdfium インスタンス。最初の `apply_redactions` 呼び出し時に
+/// `libpdfium.so` を `dlopen` する。Docker image では `/usr/lib/libpdfium.so`
+/// に bblanchon/pdfium-binaries の linux-x64 prebuilt を配置している。
+fn pdfium_locked() -> Result<&'static Mutex<PdfiumGuard>, RedactError> {
+    use pdfium_render::prelude::Pdfium;
+    static INSTANCE: OnceLock<Result<Mutex<PdfiumGuard>, String>> = OnceLock::new();
+    INSTANCE
+        .get_or_init(|| {
+            Pdfium::bind_to_system_library()
+                .map(|b| Mutex::new(PdfiumGuard(Pdfium::new(b))))
+                .map_err(|e| format!("bind_to_system_library: {e}"))
+        })
+        .as_ref()
+        .map_err(|e| RedactError::Pdfium(e.clone()))
 }
 
 /// Gemini API を叩いて、PDF 内の金額表記の bbox を取得する。
@@ -586,27 +616,45 @@ pub async fn detect_amount_boxes_v2(
 ///
 /// 元値は出力 PDF のどこにも残らないので、PDF.js progressive render でも
 /// **ちらつきは構造的に発生し得ない**。pure 関数 (HTTP / DB に触らない)。
+/// 入力 PDF を 1 ページずつ pdfium で **rasterize** → 該当ページに redaction が
+/// あれば白矩形を画素単位で焼き込む → JPEG エンコード → 新規 PDF (1 page = 1
+/// JPEG XObject) として再構築する。
+///
+/// ## なぜ rasterize か
+///
+/// 旧実装 (PR #267 以前) は「埋め込み JPEG XObject の pixel 書き換え + content
+/// stream に白矩形オーバーレイ」の 2 段構えだったが、Canon iR-ADV C5535 III 系
+/// の出力 PDF (3164_001.pdf) は次の 3 層構造で旧方式が破綻した:
+///
+/// ```text
+/// Obj4: 1240×1753 RGB JPEG (FlateDecode + DCTDecode)  ← 背景
+/// Obj5: 2408×3264 1bpc CCITT, ImageMask=true           ← 文字/罫線レイヤー (上書き描画)
+/// Obj6: 128×48 1bpc CCITT (赤ロゴ)
+/// ```
+///
+/// JPEG (Obj4) ピクセル書き換え → Obj5 ImageMask が 0.149gray で文字を上書き
+/// 描画するため見た目は変わらない。content stream overlay も多層 PDF の描画順
+/// 都合で機能しないケースがある。
+///
+/// pdfium で全レイヤー合成した後の **最終ピクセル** に対してマスクを描けば、
+/// 元 PDF のレイヤー構造に依存せず確実に隠せる。出力は 1 page = 1 JPEG
+/// XObject の単純な PDF なので、`extract_first_page_jpeg` も従来通り動作する。
 pub fn apply_redactions(
     pdf_bytes: &[u8],
     redactions: &[RedactionBox],
 ) -> Result<Vec<u8>, RedactError> {
-    let mut doc = Document::load_mem(pdf_bytes)?;
+    use pdfium_render::prelude::PdfRenderConfig;
 
+    // redactions が空なら入力をそのまま返す (pdfium 初期化を回避してホットパスを軽く)。
     if redactions.is_empty() {
-        let mut out = Vec::new();
-        doc.save_to(&mut out)?;
-        return Ok(out);
+        return Ok(pdf_bytes.to_vec());
     }
 
-    // 1) bbox 検証 + ページ単位にグループ化
-    //
-    // bbox は **Gemini が返した値をそのまま** 使う。prompt で「セル全体」の
-    // bbox を返してもらっているので、人為的なパディングは不要 (むしろ隣のセル
-    // を巻き込むので有害)。
-    let pages: Vec<ObjectId> = doc.get_pages().into_values().collect();
+    // 1) bbox 検証 + ページ単位にグループ化 (page 数チェックは pdfium で開いた後)
     let mut by_page: std::collections::BTreeMap<usize, Vec<&RedactionBox>> = Default::default();
+    let mut max_redaction_page = 0usize;
     for r in redactions {
-        if r.page == 0 || r.page > pages.len() {
+        if r.page == 0 {
             return Err(RedactError::PageNotFound(r.page));
         }
         let [ymin, xmin, ymax, xmax] = r.box_2d;
@@ -619,243 +667,140 @@ pub fn apply_redactions(
         {
             return Err(RedactError::InvalidBox(r.box_2d));
         }
+        max_redaction_page = max_redaction_page.max(r.page);
         by_page.entry(r.page).or_default().push(r);
     }
 
-    // 2) ページごとに、埋め込み画像 XObject を探して書き換え
-    for (page_idx, redactions_on_page) in by_page {
-        let page_id = pages[page_idx - 1];
-        let image_obj_id =
-            find_first_image_xobject(&doc, page_id)?.ok_or(RedactError::PageNoImage(page_idx))?;
+    // 2) Pdfium で PDF を開く (Mutex で Pdfium 全体を排他化 — PDFium 本体が
+    //    スレッドセーフではないため複数スレッド同時利用は不可)。
+    let pdfium_mu = pdfium_locked()?;
+    let pdfium_guard = pdfium_mu
+        .lock()
+        .map_err(|e| RedactError::Pdfium(format!("mutex poisoned: {e}")))?;
+    let pdfium = &pdfium_guard.0;
+    let document = pdfium
+        .load_pdf_from_byte_slice(pdf_bytes, None)
+        .map_err(|e| RedactError::Pdfium(format!("load_pdf: {e}")))?;
+    let pages = document.pages();
+    let page_count = pages.len() as usize;
+    if page_count == 0 {
+        return Err(RedactError::PageNoImage(1));
+    }
+    if max_redaction_page > page_count {
+        return Err(RedactError::PageNotFound(max_redaction_page));
+    }
 
-        tracing::info!(
-            "redact[diag] page={} image_xobject_id={:?} num_redactions={}",
-            page_idx,
-            image_obj_id,
-            redactions_on_page.len()
-        );
+    // 3) 出力 PDF を新規構築
+    let mut out_doc = Document::with_version("1.5");
+    let pages_id = out_doc.new_object_id();
+    let mut page_refs: Vec<Object> = Vec::with_capacity(page_count);
 
-        // XObject Image stream を取得し、JPEG bytes と寸法 (Width, Height) を読む。
-        // PDF の Filter は単一名前 (e.g. /DCTDecode) または配列 (e.g. [/FlateDecode
-        // /DCTDecode]) のどちらか。FAX 由来 PDF は zlib 圧縮を被せた JPEG が
-        // 多いので、配列の場合は Flate を解凍してから JPEG を取り出す。
-        let (jpeg_bytes, img_w, img_h, has_flate_wrapper) = {
-            let stream = doc.get_object(image_obj_id)?.as_stream()?;
-            let w = stream
-                .dict
-                .get(b"Width")
-                .ok()
-                .and_then(|o| o.as_i64().ok())
-                .unwrap_or(0) as u32;
-            let h = stream
-                .dict
-                .get(b"Height")
-                .ok()
-                .and_then(|o| o.as_i64().ok())
-                .unwrap_or(0) as u32;
-            let has_flate = match stream.dict.get(b"Filter") {
-                Ok(Object::Array(arr)) => arr
-                    .first()
-                    .and_then(|o| o.as_name().ok())
-                    .map(|n| n == b"FlateDecode")
-                    .unwrap_or(false),
-                _ => false,
-            };
-            let raw = stream.content.clone();
-            let jpeg = if has_flate {
-                let mut decoded = Vec::with_capacity(raw.len() * 4);
-                ZlibDecoder::new(raw.as_slice())
-                    .read_to_end(&mut decoded)
-                    .map_err(RedactError::PdfIo)?;
-                decoded
-            } else {
-                raw
-            };
-            (jpeg, w, h, has_flate)
-        };
+    // 200 DPI でレンダリング。元 FAX は ~150 dpi 相当が多いので 200 で十分鮮明、
+    // かつ A4 1 page あたり ~1654x2339 ≈ JPEG 200-400 KB に収まる。
+    const RENDER_DPI: f32 = 200.0;
+    const PT_PER_INCH: f32 = 72.0;
+    let render_config = PdfRenderConfig::new().scale_page_by_factor(RENDER_DPI / PT_PER_INCH);
 
-        // 3) JPEG decode → 白矩形描画 → JPEG re-encode
-        let mut img = image::load_from_memory(&jpeg_bytes)?.to_rgb8();
-        let (real_w, real_h) = img.dimensions();
-        // 念のため: dict の Width/Height が 0 なら decode 後の寸法を使う
-        let (w_for_calc, h_for_calc) = if img_w > 0 && img_h > 0 {
-            (img_w as f32, img_h as f32)
-        } else {
-            (real_w as f32, real_h as f32)
-        };
+    // 4) ページごとに rasterize → 白塗り → JPEG 化 → 新規 PDF に Page 追加
+    for (idx, page) in pages.iter().enumerate() {
+        let page_num = idx + 1;
+        let mb_w_pt = page.width().value;
+        let mb_h_pt = page.height().value;
 
-        tracing::info!(
-            "redact[diag] image dims: dict={}x{} actual={}x{} use={}x{} flate_wrapper={}",
-            img_w,
-            img_h,
-            real_w,
-            real_h,
-            w_for_calc as u32,
-            h_for_calc as u32,
-            has_flate_wrapper
-        );
+        let bitmap = page
+            .render_with_config(&render_config)
+            .map_err(|e| RedactError::Pdfium(format!("render p{page_num}: {e}")))?;
+        let mut rgb = bitmap.as_image().into_rgb8();
+        let (img_w, img_h) = rgb.dimensions();
 
-        for (i, r) in redactions_on_page.iter().enumerate() {
-            let [ymin, xmin, ymax, xmax] = r.box_2d;
-            // box_2d (0-1000、左上原点) → 画像 pixel 座標
-            let px = ((xmin / 1000.0) * w_for_calc).round().max(0.0) as u32;
-            let py = ((ymin / 1000.0) * h_for_calc).round().max(0.0) as u32;
-            let pw = ((xmax - xmin) / 1000.0 * w_for_calc).round().max(0.0) as u32;
-            let ph = ((ymax - ymin) / 1000.0 * h_for_calc).round().max(0.0) as u32;
-
-            let x_end = (px + pw).min(real_w);
-            let y_end = (py + ph).min(real_h);
+        if let Some(rs) = by_page.get(&page_num) {
             tracing::info!(
-                "redact[diag] r[{}] text={:?} bbox=[ymin={:.1} xmin={:.1} ymax={:.1} xmax={:.1}] → JPEG px=({},{}) size=({}x{}) clipped=({},{})→({},{})",
-                i,
-                r.text,
-                ymin,
-                xmin,
-                ymax,
-                xmax,
-                px,
-                py,
-                pw,
-                ph,
-                px.min(real_w),
-                py.min(real_h),
-                x_end,
-                y_end
+                "redact[rasterize] p{page_num}: page={mb_w_pt:.1}x{mb_h_pt:.1}pt → img={img_w}x{img_h}px, {} redaction(s)",
+                rs.len()
             );
-            for y in py.min(real_h)..y_end {
-                for x in px.min(real_w)..x_end {
-                    img.put_pixel(x, y, image::Rgb([255, 255, 255]));
+            for (i, r) in rs.iter().enumerate() {
+                let [ymin, xmin, ymax, xmax] = r.box_2d;
+                let px = ((xmin / 1000.0) * img_w as f32).round().max(0.0) as u32;
+                let py = ((ymin / 1000.0) * img_h as f32).round().max(0.0) as u32;
+                let pw = ((xmax - xmin) / 1000.0 * img_w as f32).round().max(0.0) as u32;
+                let ph = ((ymax - ymin) / 1000.0 * img_h as f32).round().max(0.0) as u32;
+                let x0 = px.min(img_w);
+                let y0 = py.min(img_h);
+                let x_end = px.saturating_add(pw).min(img_w);
+                let y_end = py.saturating_add(ph).min(img_h);
+                tracing::info!(
+                    "redact[rasterize] r[{i}] text={:?} bbox=[{ymin:.1},{xmin:.1},{ymax:.1},{xmax:.1}] → px=({x0},{y0})→({x_end},{y_end})",
+                    r.text
+                );
+                for y in y0..y_end {
+                    for x in x0..x_end {
+                        rgb.put_pixel(x, y, image::Rgb([255, 255, 255]));
+                    }
                 }
             }
         }
 
-        let mut new_jpeg = Vec::with_capacity(jpeg_bytes.len());
-        // quality 90: 元の FAX スキャンが既に低品質なので 90 で十分、ファイル膨張も
-        // 抑えられる。
-        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut new_jpeg, 90).write_image(
-            img.as_raw(),
-            real_w,
-            real_h,
+        // JPEG エンコード (quality 85: rasterize 後の画像なので少し落としても可読性十分)
+        let mut jpeg = Vec::with_capacity((img_w as usize * img_h as usize) / 8);
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 85).write_image(
+            rgb.as_raw(),
+            img_w,
+            img_h,
             image::ExtendedColorType::Rgb8,
         )?;
 
-        // 4) Stream content + dict 差し替え。
-        //    - Flate 被せありなら Filter を /DCTDecode 単体に書き換え
-        //    - 元の ColorSpace が /DeviceGray でも我々は RGB JPEG を出力するので
-        //      /DeviceRGB に書き換え (DeviceGray のままだと表示崩壊)
-        //    - Decode 配列があれば削除、BitsPerComponent=8 を明示
-        let stream = doc.get_object_mut(image_obj_id)?.as_stream_mut()?;
-        stream.set_content(new_jpeg);
-        if has_flate_wrapper {
-            stream
-                .dict
-                .set("Filter", Object::Name(b"DCTDecode".to_vec()));
-        }
-        stream
-            .dict
-            .set("ColorSpace", Object::Name(b"DeviceRGB".to_vec()));
-        stream.dict.remove(b"Decode");
-        stream.dict.set("BitsPerComponent", Object::Integer(8));
-
-        // 5) **content stream にも白矩形をオーバーレイ** (defense-in-depth)。
-        //    FAX 由来 PDF は JPEG (背景) + CCITT ImageMask (黒インクの文字レイヤー)
-        //    の多層構造で、JPEG ピクセルだけ書き換えても CCITT が上から元の数字を
-        //    再描画する。content stream の末尾に PDF の白塗り矩形コマンドを追加
-        //    することで、CCITT レイヤーも含めて確実に隠す。
-        //    JPEG ピクセル書き換えと組み合わせることで:
-        //      - 元値は PDF データから完全に消える (JPEG レベル)
-        //      - レンダリング後の表示も白塗り (content stream レベル)
-        //      - PDF.js の progressive 描画でも、最後に矩形が描かれて確実に隠れる
-        let (page_w, page_h) = page_size(&doc, page_id)?;
-        tracing::info!(
-            "redact[diag] page MediaBox: {}x{} pt",
-            page_w as u32,
-            page_h as u32
+        // 出力 PDF に Image XObject + Page 追加。
+        // Content stream は image を MediaBox 全体に拡大して描画 (`cm` で width=mb_w, height=mb_h)。
+        let image_stream = Stream::new(
+            dictionary! {
+                "Type" => "XObject",
+                "Subtype" => "Image",
+                "Width" => img_w as i64,
+                "Height" => img_h as i64,
+                "ColorSpace" => "DeviceRGB",
+                "BitsPerComponent" => 8,
+                "Filter" => "DCTDecode",
+            },
+            jpeg,
         );
-        for (i, r) in redactions_on_page.iter().enumerate() {
-            let [ymin, xmin, ymax, xmax] = r.box_2d;
-            // box_2d (0-1000、左上原点) → PDF 座標 (左下原点 pt) に変換
-            let x = (xmin / 1000.0) * page_w;
-            let y = page_h - (ymax / 1000.0) * page_h;
-            let bw = ((xmax - xmin) / 1000.0) * page_w;
-            let bh = ((ymax - ymin) / 1000.0) * page_h;
-
-            tracing::info!(
-                "redact[diag] r[{}] overlay PDF coord (origin=bot-left): x={:.2} y={:.2} w={:.2} h={:.2}",
-                i,
-                x,
-                y,
-                bw,
-                bh
-            );
-
-            let cmd = format!("q 1 1 1 rg {x:.2} {y:.2} {bw:.2} {bh:.2} re f Q\n");
-            let stream = Stream::new(lopdf::dictionary! {}, cmd.into_bytes());
-            let stream_id = doc.add_object(stream);
-            append_content_stream(&mut doc, page_id, stream_id)?;
-        }
+        let image_id = out_doc.add_object(image_stream);
+        let resources_id = out_doc.add_object(dictionary! {
+            "XObject" => dictionary! { "Im0" => image_id },
+        });
+        let content = format!("q\n{mb_w_pt:.2} 0 0 {mb_h_pt:.2} 0 0 cm\n/Im0 Do\nQ\n");
+        let content_id = out_doc.add_object(Stream::new(dictionary! {}, content.into_bytes()));
+        let page_id = out_doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "Resources" => resources_id,
+            "MediaBox" => vec![
+                Object::Real(0.0),
+                Object::Real(0.0),
+                Object::Real(mb_w_pt),
+                Object::Real(mb_h_pt),
+            ],
+            "Contents" => content_id,
+        });
+        page_refs.push(page_id.into());
     }
+
+    let catalog_id = out_doc.add_object(dictionary! {
+        "Type" => "Catalog",
+        "Pages" => pages_id,
+    });
+    out_doc.objects.insert(
+        pages_id,
+        Object::Dictionary(dictionary! {
+            "Type" => "Pages",
+            "Count" => page_count as i64,
+            "Kids" => page_refs,
+        }),
+    );
+    out_doc.trailer.set("Root", catalog_id);
 
     let mut out = Vec::new();
-    doc.save_to(&mut out)?;
+    out_doc.save_to(&mut out)?;
     Ok(out)
-}
-
-/// Page の MediaBox から (width, height) を pt 単位で取得。
-fn page_size(doc: &Document, page_id: ObjectId) -> Result<(f32, f32), RedactError> {
-    let mut current = page_id;
-    loop {
-        let dict = doc.get_object(current)?.as_dict()?;
-        if let Ok(mb) = dict.get(b"MediaBox") {
-            let arr = mb.as_array()?;
-            if arr.len() == 4 {
-                let llx = obj_to_f32(&arr[0])?;
-                let lly = obj_to_f32(&arr[1])?;
-                let urx = obj_to_f32(&arr[2])?;
-                let ury = obj_to_f32(&arr[3])?;
-                return Ok((urx - llx, ury - lly));
-            }
-        }
-        match dict.get(b"Parent") {
-            Ok(Object::Reference(parent_id)) => current = *parent_id,
-            _ => break,
-        }
-    }
-    Ok((595.0, 842.0))
-}
-
-fn obj_to_f32(o: &Object) -> Result<f32, lopdf::Error> {
-    match o {
-        Object::Integer(i) => Ok(*i as f32),
-        Object::Real(r) => Ok(*r),
-        _ => Err(lopdf::Error::ObjectNotFound),
-    }
-}
-
-/// Page の Contents 配列の末尾に新しい Stream を追加する。
-fn append_content_stream(
-    doc: &mut Document,
-    page_id: ObjectId,
-    stream_id: ObjectId,
-) -> Result<(), RedactError> {
-    let page = doc.get_object_mut(page_id)?;
-    let dict = page.as_dict_mut()?;
-
-    let new_contents = match dict.get(b"Contents") {
-        Ok(Object::Reference(existing)) => Object::Array(vec![
-            Object::Reference(*existing),
-            Object::Reference(stream_id),
-        ]),
-        Ok(Object::Array(arr)) => {
-            let mut v = arr.clone();
-            v.push(Object::Reference(stream_id));
-            Object::Array(v)
-        }
-        _ => Object::Array(vec![Object::Reference(stream_id)]),
-    };
-
-    dict.set("Contents", new_contents);
-    Ok(())
 }
 
 /// 指定ページの Resources/XObject から **DCTDecode (= JPEG) フィルタの画像のうち
@@ -1074,18 +1019,10 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_apply_redactions_no_image_returns_error() {
-        // 画像 XObject を持たない page → PageNoImage
-        let pdf = pdf_without_image();
-        let r = vec![RedactionBox {
-            page: 1,
-            box_2d: [100.0, 100.0, 200.0, 200.0],
-            text: "x".into(),
-        }];
-        let err = apply_redactions(&pdf, &r).unwrap_err();
-        assert!(matches!(err, RedactError::PageNoImage(1)));
-    }
+    // Note: test_apply_redactions_no_image_returns_error was removed when redact.rs
+    // switched to pdfium rasterize. The old code path required an embedded JPEG XObject
+    // and surfaced PageNoImage when none existed. With rasterize, even text-only PDFs
+    // (no image XObject) are rendered to a JPEG by pdfium and pass through normally.
 
     /// テスト用: A4 1 ページに `width × height` の赤い JPEG を 1 枚埋め込んだ PDF
     fn pdf_with_jpeg_image(width: u32, height: u32) -> Vec<u8> {
@@ -1123,12 +1060,19 @@ mod tests {
             "XObject" => dictionary! { "Im0" => image_id },
         });
 
+        // Contents — pdfium がレンダリング時に Im0 を MediaBox 全体に描画するように、
+        // image-space (1×1) → page-space (595×842) の CTM を載せた最小 stream。
+        // (旧テストはこの Contents を持たず pdfium レンダリング結果が空白になった。)
+        let content = b"q\n595 0 0 842 0 0 cm\n/Im0 Do\nQ\n".to_vec();
+        let content_id = doc.add_object(Stream::new(dictionary! {}, content));
+
         // Page
         let page_id = doc.add_object(dictionary! {
             "Type" => "Page",
             "Parent" => pages_id,
             "Resources" => resources_id,
             "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
+            "Contents" => content_id,
         });
 
         // Catalog + Pages tree
@@ -1146,32 +1090,6 @@ mod tests {
         );
         doc.trailer.set("Root", catalog_id);
 
-        let mut out = Vec::new();
-        doc.save_to(&mut out).unwrap();
-        out
-    }
-
-    fn pdf_without_image() -> Vec<u8> {
-        let mut doc = Document::with_version("1.5");
-        let pages_id = doc.new_object_id();
-        let page_id = doc.add_object(dictionary! {
-            "Type" => "Page",
-            "Parent" => pages_id,
-            "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
-        });
-        let catalog_id = doc.add_object(dictionary! {
-            "Type" => "Catalog",
-            "Pages" => pages_id,
-        });
-        doc.objects.insert(
-            pages_id,
-            Object::Dictionary(dictionary! {
-                "Type" => "Pages",
-                "Count" => 1,
-                "Kids" => vec![page_id.into()],
-            }),
-        );
-        doc.trailer.set("Root", catalog_id);
         let mut out = Vec::new();
         doc.save_to(&mut out).unwrap();
         out
