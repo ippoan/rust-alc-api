@@ -328,8 +328,11 @@ impl LineworksBotClient {
 
     /// ユーザーに画像メッセージを送信。
     ///
-    /// LINE WORKS Bot API は `content.type=image` + originalContentUrl + previewImgUrl
-    /// (注: LINE は previewImageUrl、LINE WORKS は previewImgUrl)。LINE WORKS サーバー
+    /// LINE WORKS Bot API は `content.type=image` + originalContentUrl + previewImageUrl
+    /// (LINE Messaging API と同じく `previewImageUrl`、age 付き)。
+    /// 旧コメントでは `previewImgUrl` (age 無し) と書いていたが、実 API は 400
+    /// `INVALID_PARAMETER: content.previewImageUrl/originalContentUrl is required`
+    /// を返す。staging ログで判明した実装ミスを修正済 (PR #330 以降)。LINE WORKS サーバー
     /// が URL を fetch して CDN 化、トークルームに inline 表示する。
     /// 仕様: <https://developers.worksmobile.com/jp/docs/bot-send-image>
     pub async fn send_image_to_user(
@@ -350,7 +353,7 @@ impl LineworksBotClient {
             "content": {
                 "type": "image",
                 "originalContentUrl": original_url,
-                "previewImgUrl": preview_url,
+                "previewImageUrl": preview_url,
             }
         });
 
@@ -391,7 +394,7 @@ impl LineworksBotClient {
             "content": {
                 "type": "image",
                 "originalContentUrl": original_url,
-                "previewImgUrl": preview_url,
+                "previewImageUrl": preview_url,
             }
         });
 
