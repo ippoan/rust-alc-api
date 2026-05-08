@@ -35,6 +35,8 @@ use crate::extract::{extract_logistics_fields_with_endpoint, ExtractError, Logis
 ///
 /// - `endpoint` / `model`: Gemini API のベース URL とモデル名。`None` なら本番デフォルト。
 ///   wiremock テストでは `Some(server.uri())` を渡す。
+/// - `self_company_hint`: 自社名 (テナント名)。`None` なら Gemini はラベル推論で
+///   自社/相手先を判定する。あれば連絡先 3 フィールドの自社除外精度が上がる。
 /// - 全エラーは `extraction_status='failed'` に変換され、本関数は panic しない。
 /// - 成功 (Gemini が全 null を返した場合も含む) は `extraction_status='completed'`、
 ///   非空のフィールドだけ `extracted_data.logistics` に格納される。
@@ -45,6 +47,7 @@ pub async fn extract_document_with_deps(
     api_key: Option<&str>,
     endpoint: Option<&str>,
     model: Option<&str>,
+    self_company_hint: Option<&str>,
     tenant_id: Uuid,
     document_id: Uuid,
 ) {
@@ -105,27 +108,34 @@ pub async fn extract_document_with_deps(
         }
     };
 
-    // 6. Gemini で 5 フィールド抽出
+    // 6. Gemini で 8 フィールド抽出 (self_company_hint で自社除外)
     let endpoint = endpoint.unwrap_or("https://generativelanguage.googleapis.com/v1beta");
     let model = model.unwrap_or("gemini-3.1-flash-lite-preview");
 
-    let fields: LogisticsFields =
-        match extract_logistics_fields_with_endpoint(endpoint, model, &pdf_bytes, api_key).await {
-            Ok(f) => f,
-            Err(e) => {
-                let err = match &e {
-                    ExtractError::GeminiHttp(_)
-                    | ExtractError::GeminiStatus(_, _)
-                    | ExtractError::GeminiEmpty
-                    | ExtractError::GeminiParse(_) => format!("gemini: {e}"),
-                    ExtractError::LogisticsParse(_) => format!("parse: {e}"),
-                };
-                let _ = docs
-                    .update_extraction_error(tenant_id, document_id, &err)
-                    .await;
-                return;
-            }
-        };
+    let fields: LogisticsFields = match extract_logistics_fields_with_endpoint(
+        endpoint,
+        model,
+        &pdf_bytes,
+        api_key,
+        self_company_hint,
+    )
+    .await
+    {
+        Ok(f) => f,
+        Err(e) => {
+            let err = match &e {
+                ExtractError::GeminiHttp(_)
+                | ExtractError::GeminiStatus(_, _)
+                | ExtractError::GeminiEmpty
+                | ExtractError::GeminiParse(_) => format!("gemini: {e}"),
+                ExtractError::LogisticsParse(_) => format!("parse: {e}"),
+            };
+            let _ = docs
+                .update_extraction_error(tenant_id, document_id, &err)
+                .await;
+            return;
+        }
+    };
 
     // 7. extracted_data の `logistics` キーを書き換え (他キーは保持)
     let merged_data = merge_logistics_into_data(doc.extracted_data.clone(), &fields);
@@ -214,20 +224,44 @@ pub(crate) fn merge_logistics_into_data(
 
 /// fire-and-forget で background extract を起動する。呼び出し元はすぐ return できる。
 ///
-/// `AppState` から env と repo/storage を取り出して `extract_document_with_deps` に委譲。
-/// upload / ingest の各エンドポイントから新規 document の INSERT 直後に呼ぶ。
+/// `AppState` から env と repo/storage/auth (テナント名取得用) を取り出して
+/// `extract_document_with_deps` に委譲。upload / ingest の各エンドポイントから新規
+/// document の INSERT 直後に呼ぶ。
+///
+/// テナント名 (`tenants.name`) は `self_company_hint` として Gemini プロンプトに
+/// 注入され、連絡先抽出時に自社情報を除外するために使われる。取得失敗時はラベル
+/// 推論にフォールバックする (extract 自体は止めない)。
 pub fn spawn_extract_document(state: AppState, tenant_id: Uuid, document_id: Uuid) {
     let api_key = std::env::var("GEMINI_API_KEY").ok();
     let docs: Arc<dyn NotifyDocumentRepository> = state.notify_documents.clone();
     let storage: Option<Arc<dyn StorageBackend>> = state.notify_storage.clone();
+    let auth = state.auth.clone();
 
     tokio::spawn(async move {
+        // tenants.name を fetch して自社除外ヒントとして渡す。失敗してもログだけ残して継続。
+        let self_company_hint: Option<String> = match auth.get_tenant_by_id(tenant_id).await {
+            Ok(Some(t)) => Some(t.name),
+            Ok(None) => {
+                tracing::warn!(
+                    "extract: tenant not found {tenant_id}, falling back to label inference"
+                );
+                None
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "extract: failed to fetch tenant name: {e}, falling back to label inference"
+                );
+                None
+            }
+        };
+
         extract_document_with_deps(
             docs.as_ref(),
             storage.as_deref(),
             api_key.as_deref(),
             None,
             None,
+            self_company_hint.as_deref(),
             tenant_id,
             document_id,
         )
@@ -535,6 +569,7 @@ mod tests {
             Some("test-key"),
             Some(&server.uri()),
             Some("test-model"),
+            None,
             Uuid::new_v4(),
             Uuid::new_v4(),
         )
@@ -567,6 +602,7 @@ mod tests {
             Some("k"),
             Some(&server.uri()),
             Some("m"),
+            None,
             Uuid::new_v4(),
             Uuid::new_v4(),
         )
@@ -587,6 +623,7 @@ mod tests {
             docs.as_ref(),
             Some(storage.as_ref() as &dyn StorageBackend),
             Some("k"),
+            None,
             None,
             None,
             Uuid::new_v4(),
@@ -611,6 +648,7 @@ mod tests {
             Some("k"),
             None,
             None,
+            None,
             Uuid::new_v4(),
             Uuid::new_v4(),
         )
@@ -629,6 +667,7 @@ mod tests {
         extract_document_with_deps(
             docs.as_ref(),
             Some(storage.as_ref() as &dyn StorageBackend),
+            None,
             None,
             None,
             None,
@@ -654,6 +693,7 @@ mod tests {
             Some(""),
             None,
             None,
+            None,
             Uuid::new_v4(),
             Uuid::new_v4(),
         )
@@ -671,6 +711,7 @@ mod tests {
             docs.as_ref(),
             None,
             Some("k"),
+            None,
             None,
             None,
             Uuid::new_v4(),
@@ -693,6 +734,7 @@ mod tests {
             Some("k"),
             None,
             None,
+            None,
             Uuid::new_v4(),
             Uuid::new_v4(),
         )
@@ -711,6 +753,7 @@ mod tests {
             docs.as_ref(),
             Some(storage.as_ref() as &dyn StorageBackend),
             Some("k"),
+            None,
             None,
             None,
             Uuid::new_v4(),
@@ -735,6 +778,7 @@ mod tests {
             Some("k"),
             Some(&server.uri()),
             Some("m"),
+            None,
             Uuid::new_v4(),
             Uuid::new_v4(),
         )
@@ -761,6 +805,7 @@ mod tests {
             Some("k"),
             Some(&server.uri()),
             Some("m"),
+            None,
             Uuid::new_v4(),
             Uuid::new_v4(),
         )
@@ -795,6 +840,7 @@ mod tests {
             Some("k"),
             Some(&server.uri()),
             Some("m"),
+            None,
             Uuid::new_v4(),
             Uuid::new_v4(),
         )
@@ -828,6 +874,7 @@ mod tests {
             Some("k"),
             Some(&server.uri()),
             Some("m"),
+            None,
             Uuid::new_v4(),
             Uuid::new_v4(),
         )
@@ -835,5 +882,49 @@ mod tests {
 
         let extractions = docs.extractions.lock().unwrap();
         assert!(extractions[0].data.get("logistics").is_none());
+    }
+
+    #[tokio::test]
+    async fn extract_passes_self_company_hint_to_gemini_request() {
+        // self_company_hint がそのまま Gemini リクエストボディに乗ることを確認。
+        // tenants.name を spawn_extract_document が fetch して渡す経路の保証。
+        let docs = StubDocs::new(build_doc(Some("doc.pdf")));
+        let storage = StubStorage::ok(b"%PDF".to_vec());
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            // request body にテナント名が含まれていることを wiremock matcher で検証
+            .and(wiremock::matchers::body_string_contains(
+                "MY_OWN_TRANSPORT_CO",
+            ))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "candidates": [{
+                        "content": {"parts": [{"text":
+                            "{\"contact_company\":\"相手先会社\",\"contact_phone\":\"03-1234-5678\"}"
+                        }]}
+                    }]
+                })),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        extract_document_with_deps(
+            docs.as_ref(),
+            Some(storage.as_ref() as &dyn StorageBackend),
+            Some("k"),
+            Some(&server.uri()),
+            Some("m"),
+            Some("MY_OWN_TRANSPORT_CO"),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+        )
+        .await;
+
+        // 抽出は完走 (mock の expect(1) が満たされた = hint がリクエストに乗った)
+        let extractions = docs.extractions.lock().unwrap();
+        assert_eq!(extractions.len(), 1);
+        let logistics = extractions[0].data.get("logistics").unwrap();
+        assert_eq!(logistics["contact_company"], "相手先会社");
     }
 }

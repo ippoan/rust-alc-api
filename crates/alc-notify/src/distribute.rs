@@ -417,7 +417,7 @@ async fn test_distribute(
 
 /// LINE / LINE WORKS に送信する本文を組み立てる。
 ///
-/// `doc.extracted_data.logistics` (5 フィールドのいずれかが非空) があれば物流テンプレに
+/// `doc.extracted_data.logistics` (8 フィールドのいずれかが非空) があれば物流テンプレに
 /// 切り替え、なければ既存テンプレ (`title` + `summary` + URL) を返す。
 ///
 /// 物流テンプレ:
@@ -428,10 +428,14 @@ async fn test_distribute(
 /// 🕐 積込: {loading_at}
 /// 🕓 卸し: {unloading_at}
 /// ⚠️ 注意: {notes}
+/// 🏢 連絡先: {contact_company}
+/// 👤 担当: {contact_person}
+/// 📞 電話: {contact_phone}
 ///
 /// ▶ 詳細: {url}
 /// ```
-/// 5 フィールドのうち存在するものだけ列挙する (一部 null OK)。
+/// 8 フィールドのうち存在するものだけ列挙する (一部 null OK)。連絡先 3 フィールドは
+/// `extract.rs` 側で「相手先」を抽出済みで自社情報は除外されている。
 ///
 /// pure 関数として外出しすることで、4 ケース (全フィールドあり / 一部 null /
 /// logistics キーなし / extracted_data なし) を unit test で直接検証できる。
@@ -450,7 +454,7 @@ pub(crate) fn build_distribute_message(
         .and_then(|d| d.get("logistics"))
         .filter(|v| v.is_object())
     {
-        let mut lines: Vec<String> = Vec::with_capacity(8);
+        let mut lines: Vec<String> = Vec::with_capacity(11);
         lines.push(format!("📄 {}", title));
 
         let push_field = |lines: &mut Vec<String>, prefix: &str, key: &str| {
@@ -462,11 +466,16 @@ pub(crate) fn build_distribute_message(
             }
         };
 
+        // 配車情報セクション
         push_field(&mut lines, "📍 積地:", "loading_place");
         push_field(&mut lines, "📦 卸地:", "unloading_place");
         push_field(&mut lines, "🕐 積込:", "loading_at");
         push_field(&mut lines, "🕓 卸し:", "unloading_at");
         push_field(&mut lines, "⚠️ 注意:", "notes");
+        // 連絡先セクション (相手先のみ、自社は extract 側で除外済)
+        push_field(&mut lines, "🏢 連絡先:", "contact_company");
+        push_field(&mut lines, "👤 担当:", "contact_person");
+        push_field(&mut lines, "📞 電話:", "contact_phone");
 
         // logistics キー自体は object だが全 string が空文字 / 欠落のとき (defensive: schema
         // 違反値の混入対策)、本文が「📄 タイトル」だけになって URL が浮くのを避けるため
@@ -541,7 +550,10 @@ mod tests {
                 "unloading_place": "大阪府大阪市",
                 "loading_at": "5/9 10:00",
                 "unloading_at": "5/10 14:00",
-                "notes": "冷凍便\n要時間厳守"
+                "notes": "冷凍便\n要時間厳守",
+                "contact_company": "ABC運送株式会社",
+                "contact_person": "田中太郎",
+                "contact_phone": "03-1234-5678"
             }
         }));
         let msg = build_distribute_message(&doc, "https://x/v/abc");
@@ -551,9 +563,51 @@ mod tests {
         assert!(msg.contains("🕐 積込: 5/9 10:00"));
         assert!(msg.contains("🕓 卸し: 5/10 14:00"));
         assert!(msg.contains("⚠️ 注意: 冷凍便\n要時間厳守"));
+        assert!(msg.contains("🏢 連絡先: ABC運送株式会社"));
+        assert!(msg.contains("👤 担当: 田中太郎"));
+        assert!(msg.contains("📞 電話: 03-1234-5678"));
         assert!(msg.contains("▶ 詳細: https://x/v/abc"));
         // 「新しいドキュメントが届きました」の既定句は出ない
         assert!(!msg.contains("新しいドキュメント"));
+    }
+
+    #[test]
+    fn message_omits_null_contact_fields() {
+        // 連絡先 3 フィールドのうち 1 つだけ。配車情報なし。配信本文は contact 1 行 + URL のみ
+        let mut doc = build_doc();
+        doc.extracted_data = Some(serde_json::json!({
+            "logistics": {
+                "contact_phone": "06-9876-5432"
+            }
+        }));
+        let msg = build_distribute_message(&doc, "https://x/v/abc");
+        assert!(msg.contains("📞 電話: 06-9876-5432"));
+        assert!(!msg.contains("🏢 連絡先"));
+        assert!(!msg.contains("👤 担当"));
+        assert!(!msg.contains("📍 積地"));
+        assert!(msg.contains("▶ 詳細: https://x/v/abc"));
+    }
+
+    #[test]
+    fn message_includes_contact_in_correct_order_after_logistics() {
+        // 物流 + 連絡先のフィールド順序を確認: notes の後に contact_company が来る
+        let mut doc = build_doc();
+        doc.extracted_data = Some(serde_json::json!({
+            "logistics": {
+                "loading_place": "東京",
+                "notes": "冷凍",
+                "contact_company": "ABC",
+                "contact_phone": "03-1234"
+            }
+        }));
+        let msg = build_distribute_message(&doc, "https://x/v/abc");
+        let i_notes = msg.find("⚠️ 注意").unwrap();
+        let i_contact = msg.find("🏢 連絡先").unwrap();
+        let i_phone = msg.find("📞 電話").unwrap();
+        let i_url = msg.find("▶ 詳細").unwrap();
+        assert!(i_notes < i_contact);
+        assert!(i_contact < i_phone);
+        assert!(i_phone < i_url);
     }
 
     #[test]
