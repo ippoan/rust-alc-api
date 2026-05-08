@@ -78,6 +78,19 @@ notify_worker_secret_name() {
   else echo "notify-worker-secret"; fi
 }
 
+notify_redact_broadcast_url() {
+  if [[ "$ENV" == "staging" ]]; then
+    echo "https://realtime.notify-staging.ippoan.org/broadcast"
+  else
+    echo "https://realtime.notify.ippoan.org/broadcast"
+  fi
+}
+
+notify_redact_broadcast_secret_name() {
+  if [[ "$ENV" == "staging" ]]; then echo "notify-redact-broadcast-secret-staging"
+  else echo "notify-redact-broadcast-secret"; fi
+}
+
 # ---------------------------------------------------------------------------
 # Per-service env vars and secrets — THE SINGLE SOURCE OF TRUTH
 # ---------------------------------------------------------------------------
@@ -104,6 +117,8 @@ emit_env_backend() {
               value: "$( [[ "$ENV" == "staging" ]] && echo "notify-files-staging" || echo "notify-files" )"
             - name: NOTIFY_FRONTEND_URL
               value: "$( [[ "$ENV" == "staging" ]] && echo "https://notify-staging.ippoan.org" || echo "https://notify.ippoan.org" )"
+            - name: NOTIFY_REDACT_BROADCAST_URL
+              value: "$(notify_redact_broadcast_url)"
             - name: SCRAPER_URL
               value: "${ENV_SCRAPER_URL:?ENV_SCRAPER_URL not set (GitHub vars.SCRAPER_URL)}"
             - name: FCM_PROJECT_ID
@@ -230,6 +245,11 @@ YAML
                 secretKeyRef:
                   key: latest
                   name: $(notify_worker_secret_name)
+            - name: NOTIFY_REDACT_BROADCAST_SECRET
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: $(notify_redact_broadcast_secret_name)
             - name: GEMINI_API_KEY
               valueFrom:
                 secretKeyRef:
