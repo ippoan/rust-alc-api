@@ -326,6 +326,93 @@ impl LineworksBotClient {
         Ok(())
     }
 
+    /// ユーザーに画像メッセージを送信。
+    ///
+    /// LINE WORKS Bot API は `content.type=image` + originalContentUrl + previewImgUrl
+    /// (注: LINE は previewImageUrl、LINE WORKS は previewImgUrl)。LINE WORKS サーバー
+    /// が URL を fetch して CDN 化、トークルームに inline 表示する。
+    /// 仕様: <https://developers.worksmobile.com/jp/docs/bot-send-image>
+    pub async fn send_image_to_user(
+        &self,
+        config_id: Uuid,
+        config: &LineworksBotConfig,
+        user_id: &str,
+        original_url: &str,
+        preview_url: &str,
+    ) -> Result<(), LineworksBotError> {
+        let token = self.get_access_token(config_id, config, "bot").await?;
+        let url = format!(
+            "{}{}/users/{}/messages",
+            self.bot_endpoint, config.bot_id, user_id
+        );
+
+        let body = serde_json::json!({
+            "content": {
+                "type": "image",
+                "originalContentUrl": original_url,
+                "previewImgUrl": preview_url,
+            }
+        });
+
+        let resp = self
+            .client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", token))
+            .json(&body)
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            tracing::error!("LINE WORKS send_image_to_user failed: {status} - {body}");
+            return Err(LineworksBotError::SendFailed(format!("{status}: {body}")));
+        }
+
+        Ok(())
+    }
+
+    /// チャネル/グループに画像メッセージを送信。
+    pub async fn send_image_to_channel(
+        &self,
+        config_id: Uuid,
+        config: &LineworksBotConfig,
+        channel_id: &str,
+        original_url: &str,
+        preview_url: &str,
+    ) -> Result<(), LineworksBotError> {
+        let token = self.get_access_token(config_id, config, "bot").await?;
+        let url = format!(
+            "{}{}/channels/{}/messages",
+            self.bot_endpoint, config.bot_id, channel_id
+        );
+
+        let body = serde_json::json!({
+            "content": {
+                "type": "image",
+                "originalContentUrl": original_url,
+                "previewImgUrl": preview_url,
+            }
+        });
+
+        let resp = self
+            .client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", token))
+            .json(&body)
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            tracing::error!("LINE WORKS send_image_to_channel failed: {status} - {body}");
+            return Err(LineworksBotError::SendFailed(format!("{status}: {body}")));
+        }
+
+        Ok(())
+    }
+
     /// 組織メンバー一覧を取得 (directory.read scope)
     pub async fn list_org_users(
         &self,

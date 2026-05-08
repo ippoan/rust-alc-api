@@ -204,6 +204,50 @@ impl LineClient {
 
         Ok(())
     }
+
+    /// ユーザーに画像メッセージを push する。
+    ///
+    /// `original_url` は最大 10 MB / 4096x4096 / JPEG-PNG (LINE 仕様)。
+    /// `preview_url` は最大 1 MB / 240x240 推奨。両方同じ URL でも構わない (LINE 側が
+    /// オリジナルから縮小して preview にも使える)。
+    /// 仕様: <https://developers.line.biz/ja/reference/messaging-api/#image-message>
+    pub async fn push_image(
+        &self,
+        config: &LineConfig,
+        user_id: &str,
+        original_url: &str,
+        preview_url: &str,
+    ) -> Result<(), LineError> {
+        let access_token = self.get_access_token(config).await?;
+
+        let body = serde_json::json!({
+            "to": user_id,
+            "messages": [
+                {
+                    "type": "image",
+                    "originalContentUrl": original_url,
+                    "previewImageUrl": preview_url,
+                }
+            ]
+        });
+
+        let resp = self
+            .client
+            .post(&self.push_endpoint)
+            .header("Authorization", format!("Bearer {}", access_token))
+            .json(&body)
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            tracing::error!("LINE push image failed: {status} - {body}");
+            return Err(LineError::SendFailed(format!("{status}: {body}")));
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -512,6 +556,117 @@ mod tests {
         );
         let err = client
             .push_text(&test_config(), "U123", "hello")
+            .await
+            .unwrap_err();
+        assert!(matches!(err, LineError::Http(_)));
+    }
+
+    // --- push_image tests (push_text と同じパターン) ---
+
+    #[tokio::test]
+    async fn push_image_success() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/oauth2/v2.1/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "tok",
+                "expires_in": 86400u64,
+                "token_type": "Bearer",
+            })))
+            .mount(&server)
+            .await;
+
+        // request body に image / originalContentUrl / previewImageUrl が乗っている
+        // ことを直接 wiremock matcher で検証 (regression guard)
+        Mock::given(method("POST"))
+            .and(path("/v2/bot/message/push"))
+            .and(header("Authorization", "Bearer tok"))
+            .and(wiremock::matchers::body_string_contains("\"image\""))
+            .and(wiremock::matchers::body_string_contains(
+                "\"originalContentUrl\":\"https://example.com/img.jpg\"",
+            ))
+            .and(wiremock::matchers::body_string_contains(
+                "\"previewImageUrl\":\"https://example.com/preview.jpg\"",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_string("{}"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = LineClient::with_endpoints(
+            format!("{}/oauth2/v2.1/token", server.uri()),
+            format!("{}/v2/bot/message/push", server.uri()),
+        );
+
+        client
+            .push_image(
+                &test_config(),
+                "U123",
+                "https://example.com/img.jpg",
+                "https://example.com/preview.jpg",
+            )
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn push_image_failure_returns_send_failed() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/oauth2/v2.1/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "tok",
+                "expires_in": 86400u64,
+                "token_type": "Bearer",
+            })))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/v2/bot/message/push"))
+            .respond_with(ResponseTemplate::new(400).set_body_string("invalid url"))
+            .mount(&server)
+            .await;
+
+        let client = LineClient::with_endpoints(
+            format!("{}/oauth2/v2.1/token", server.uri()),
+            format!("{}/v2/bot/message/push", server.uri()),
+        );
+
+        let err = client
+            .push_image(&test_config(), "U123", "https://x/o.jpg", "https://x/p.jpg")
+            .await
+            .unwrap_err();
+        match err {
+            LineError::SendFailed(msg) => {
+                assert!(msg.contains("400"));
+                assert!(msg.contains("invalid url"));
+            }
+            e => panic!("expected SendFailed, got {e:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn push_image_http_error_on_push() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/oauth2/v2.1/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "tok",
+                "expires_in": 86400u64,
+                "token_type": "Bearer",
+            })))
+            .mount(&server)
+            .await;
+
+        let client = LineClient::with_endpoints(
+            format!("{}/oauth2/v2.1/token", server.uri()),
+            "http://127.0.0.1:1/v2/bot/message/push".into(),
+        );
+        let err = client
+            .push_image(&test_config(), "U123", "https://x/o.jpg", "https://x/p.jpg")
             .await
             .unwrap_err();
         assert!(matches!(err, LineError::Http(_)));

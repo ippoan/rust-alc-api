@@ -26,6 +26,7 @@ pub fn public_router() -> Router<AppState> {
     Router::new()
         .route("/notify/v/{token}", axum::routing::get(view_metadata))
         .route("/notify/v/{token}/file", axum::routing::get(view_file))
+        .route("/notify/v/{token}/image", axum::routing::get(view_image))
 }
 
 #[derive(serde::Serialize, Debug, PartialEq)]
@@ -150,6 +151,65 @@ async fn view_file(
     }
 
     Ok((StatusCode::OK, headers, bytes).into_response())
+}
+
+/// `/api/notify/v/{token}/image` — redact 済 PDF の 1 ページ目に埋め込まれた
+/// JPEG 画像を取り出して `image/jpeg` で返す。LINE / LINE WORKS の image メッセージ
+/// (`originalContentUrl` / `previewImgUrl`) で参照される URL。
+///
+/// view_file と同じ token 認可パスを使う。lookup_delivery_for_view が返す `r2_key`
+/// は `COALESCE(redacted_r2_key, r2_key)` なので redact 済があればそれが取れる。
+///
+/// PDF が画像を持たない (テキストベース等) 場合は 415 Unsupported Media Type を返す
+/// — LINE / LINE WORKS は失敗時 image メッセージを送らないので、distribute 側で
+/// 受信ステータスを見て fallback する責任を負う (テキストだけ送り続ける)。
+async fn view_image(
+    State(state): State<AppState>,
+    Path(token): Path<Uuid>,
+) -> Result<Response, StatusCode> {
+    let info = state
+        .notify_deliveries
+        .get_for_view(token)
+        .await
+        .map_err(|e| {
+            tracing::error!("view_image: get_for_view: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    check_not_expired(info.expire_at, chrono::Utc::now())?;
+
+    let storage = state.notify_storage.as_ref().ok_or_else(|| {
+        tracing::error!("view_image: notify_storage not configured");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let pdf_bytes = storage.download(&info.r2_key).await.map_err(|e| {
+        tracing::error!("view_image: notify_storage.download: {e}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    // PDF から JPEG を取り出す。テキスト PDF / 画像なし PDF では PageNoImage が返る。
+    let jpeg_bytes = crate::redact::extract_first_page_jpeg(&pdf_bytes).map_err(|e| match &e {
+        crate::redact::RedactError::PageNoImage(_) => {
+            tracing::info!("view_image: pdf has no embedded jpeg, returning 415");
+            StatusCode::UNSUPPORTED_MEDIA_TYPE
+        }
+        _ => {
+            tracing::error!("view_image: extract_first_page_jpeg: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    })?;
+
+    let mut headers = HeaderMap::new();
+    if let Ok(v) = "image/jpeg".parse() {
+        headers.insert(header::CONTENT_TYPE, v);
+    }
+    // image はインライン表示を意図 (LINE WORKS は CDN 取り込み、ブラウザは inline 表示)
+    if let Ok(v) = "inline".parse() {
+        headers.insert(header::CONTENT_DISPOSITION, v);
+    }
+    Ok((StatusCode::OK, headers, jpeg_bytes).into_response())
 }
 
 #[cfg(test)]

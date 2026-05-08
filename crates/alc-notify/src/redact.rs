@@ -908,6 +908,49 @@ fn find_first_image_xobject(
     Ok(best.map(|(id, _)| id))
 }
 
+/// PDF の 1 ページ目に埋め込まれた最大サイズの DCTDecode (JPEG) 画像を取り出す。
+///
+/// FAX 由来 PDF が前提 (1 page = 1 image XObject、DCTDecode フィルタ)。FAX 系は
+/// JPEG の上に zlib 圧縮を被せていることが多いので、`/FlateDecode` 配列が含まれる
+/// ケースは Flate を解凍してから生 JPEG bytes を返す。
+///
+/// LINE / LINE WORKS の image メッセージで配信するため、redact 済 PDF から
+/// 「画面で見えている画像そのもの」を取り出す用途。`apply_redactions` の前半部分と
+/// 同じロジックで、書き換えはしない。
+///
+/// pure 関数 (HTTP / DB に触らない)。テキスト PDF 等で JPEG が見つからない場合は
+/// `PageNoImage(1)` を返す。
+pub fn extract_first_page_jpeg(pdf_bytes: &[u8]) -> Result<Vec<u8>, RedactError> {
+    let doc = Document::load_mem(pdf_bytes)?;
+    let pages: Vec<ObjectId> = doc.get_pages().into_values().collect();
+    if pages.is_empty() {
+        return Err(RedactError::PageNotFound(1));
+    }
+    let page_id = pages[0];
+    let image_obj_id =
+        find_first_image_xobject(&doc, page_id)?.ok_or(RedactError::PageNoImage(1))?;
+    let stream = doc.get_object(image_obj_id)?.as_stream()?;
+    let has_flate = match stream.dict.get(b"Filter") {
+        Ok(Object::Array(arr)) => arr
+            .first()
+            .and_then(|o| o.as_name().ok())
+            .map(|n| n == b"FlateDecode")
+            .unwrap_or(false),
+        _ => false,
+    };
+    let raw = stream.content.clone();
+    let jpeg = if has_flate {
+        let mut decoded = Vec::with_capacity(raw.len() * 4);
+        ZlibDecoder::new(raw.as_slice())
+            .read_to_end(&mut decoded)
+            .map_err(RedactError::PdfIo)?;
+        decoded
+    } else {
+        raw
+    };
+    Ok(jpeg)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

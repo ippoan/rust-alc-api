@@ -106,12 +106,17 @@ async fn resolve_lineworks_config(
     ))
 }
 
-/// 受信者にメッセージを送信
+/// 受信者にメッセージを送信。
+///
+/// `image_url` が `Some` の場合、テキスト送信成功後に同 URL を image メッセージとしても
+/// 送信する (テキスト → 画像の順)。画像送信が失敗してもテキストは届いているので関数全体
+/// は成功扱い (warning ログのみ) — 画像はあくまで補助。
 async fn send_to_recipient(
     state: &AppState,
     tenant_id: Uuid,
     recipient: &alc_core::repository::notify_recipients::NotifyRecipient,
     message: &str,
+    image_url: Option<&str>,
     line_client: &LineClient,
     lw_client: &LineworksBotClient,
 ) -> Result<(), String> {
@@ -119,10 +124,21 @@ async fn send_to_recipient(
         "line" => {
             let user_id = recipient.line_user_id.as_deref().ok_or("No line_user_id")?;
             let cfg = resolve_line_config(state, tenant_id).await?;
+            // 1. テキスト先行
             line_client
                 .push_text(&cfg, user_id, message)
                 .await
-                .map_err(|e| e.to_string())
+                .map_err(|e| e.to_string())?;
+            // 2. 画像 (extracted_data あり時のみ。失敗は warn のみで成功扱い)
+            if let Some(url) = image_url {
+                if let Err(e) = line_client.push_image(&cfg, user_id, url, url).await {
+                    tracing::warn!(
+                        "LINE push_image failed for recipient {} (text was sent OK): {e}",
+                        recipient.name
+                    );
+                }
+            }
+            Ok(())
         }
         "lineworks" => {
             let user_id = recipient
@@ -130,10 +146,24 @@ async fn send_to_recipient(
                 .as_deref()
                 .ok_or("No lineworks_user_id")?;
             let (config_id, cfg) = resolve_lineworks_config(state, tenant_id).await?;
+            // 1. テキスト先行
             lw_client
                 .send_text_to_user(config_id, &cfg, user_id, message)
                 .await
-                .map_err(|e| e.to_string())
+                .map_err(|e| e.to_string())?;
+            // 2. 画像
+            if let Some(url) = image_url {
+                if let Err(e) = lw_client
+                    .send_image_to_user(config_id, &cfg, user_id, url, url)
+                    .await
+                {
+                    tracing::warn!(
+                        "LINE WORKS send_image_to_user failed for recipient {} (text was sent OK): {e}",
+                        recipient.name
+                    );
+                }
+            }
+            Ok(())
         }
         other => Err(format!("Unknown provider: {other}")),
     }
@@ -303,18 +333,31 @@ async fn distribute(
     let line_client = LineClient::new();
     let lw_client = LineworksBotClient::new();
 
+    // image メッセージは PDF + extracted_data.logistics がある時のみ送る
+    // (PDF 以外、または配車手配票でない PDF は画像送信しない)
+    let send_image = should_send_image(&doc);
+
     let mut sent = 0;
     let mut failed = 0;
 
     for (delivery, recipient) in deliveries.iter().zip(recipients.iter()) {
         let read_url = format!("{}/api/notify/read/{}", api_origin, delivery.read_token);
         let message = build_distribute_message(&doc, &read_url);
+        let image_url = if send_image {
+            Some(format!(
+                "{}/api/notify/v/{}/image",
+                api_origin, delivery.read_token
+            ))
+        } else {
+            None
+        };
 
         match send_to_recipient(
             &state,
             tenant_id,
             recipient,
             &message,
+            image_url.as_deref(),
             &line_client,
             &lw_client,
         )
@@ -395,6 +438,7 @@ async fn test_distribute(
             tenant_id,
             recipient,
             &input.message,
+            None, // テスト配信は画像なし (テキストのみ)
             &line_client,
             &lw_client,
         )
@@ -544,6 +588,33 @@ pub(crate) fn build_distribute_message(
     } else {
         fallback_template(doc, read_url)
     }
+}
+
+/// 画像メッセージ (LINE / LINE WORKS の inline 表示) を送るべきかを判定する。
+///
+/// 配車手配票 PDF のように `extracted_data.logistics` が抽出済みかつ PDF 拡張子の
+/// 場合のみ true。テキスト PDF や画像なし PDF は false (extract_first_page_jpeg で
+/// 415 を返すので、無駄打ちを避ける)。
+///
+/// pure 関数。filename と extracted_data だけで判定。
+pub(crate) fn should_send_image(
+    doc: &alc_core::repository::notify_documents::NotifyDocument,
+) -> bool {
+    let is_pdf = doc
+        .file_name
+        .as_deref()
+        .map(|n| n.to_lowercase().ends_with(".pdf"))
+        .unwrap_or(false);
+    if !is_pdf {
+        return false;
+    }
+    let has_logistics = doc
+        .extracted_data
+        .as_ref()
+        .and_then(|d| d.get("logistics"))
+        .filter(|v| v.is_object())
+        .is_some();
+    has_logistics
 }
 
 fn fallback_template(
