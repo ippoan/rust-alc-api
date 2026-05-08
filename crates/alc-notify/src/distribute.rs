@@ -417,14 +417,18 @@ async fn test_distribute(
 
 /// LINE / LINE WORKS に送信する本文を組み立てる。
 ///
-/// `doc.extracted_data.logistics` (8 フィールドのいずれかが非空) があれば物流テンプレに
+/// `doc.extracted_data.logistics` (12 フィールドのいずれかが非空) があれば物流テンプレに
 /// 切り替え、なければ既存テンプレ (`title` + `summary` + URL) を返す。
 ///
 /// 物流テンプレ:
 /// ```text
 /// 📄 {title}
 /// 📍 積地: {loading_place}
+///    {loading_place_address}
+///    ☎ {loading_place_phone}
 /// 📦 卸地: {unloading_place}
+///    {unloading_place_address}
+///    ☎ {unloading_place_phone}
 /// 🕐 積込: {loading_at}
 /// 🕓 卸し: {unloading_at}
 /// ⚠️ 注意: {notes}
@@ -434,11 +438,9 @@ async fn test_distribute(
 ///
 /// ▶ 詳細: {url}
 /// ```
-/// 8 フィールドのうち存在するものだけ列挙する (一部 null OK)。連絡先 3 フィールドは
-/// `extract.rs` 側で「相手先」を抽出済みで自社情報は除外されている。
-///
-/// pure 関数として外出しすることで、4 ケース (全フィールドあり / 一部 null /
-/// logistics キーなし / extracted_data なし) を unit test で直接検証できる。
+/// 各フィールドのうち存在するものだけ列挙する (一部 null OK)。場所の住所と電話は
+/// 全角スペース 1 個 + 空白 2 個で indent して、どの場所に紐付くか視覚的に明確にする。
+/// 連絡先 3 フィールドは `extract.rs` 側で「相手先」を抽出済みで自社情報は除外されている。
 pub(crate) fn build_distribute_message(
     doc: &alc_core::repository::notify_documents::NotifyDocument,
     read_url: &str,
@@ -454,25 +456,68 @@ pub(crate) fn build_distribute_message(
         .and_then(|d| d.get("logistics"))
         .filter(|v| v.is_object())
     {
-        let mut lines: Vec<String> = Vec::with_capacity(11);
+        let mut lines: Vec<String> = Vec::with_capacity(15);
         lines.push(format!("📄 {}", title));
 
+        let get_str = |key: &str| -> Option<&str> {
+            logistics
+                .get(key)
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+        };
+
         let push_field = |lines: &mut Vec<String>, prefix: &str, key: &str| {
-            if let Some(v) = logistics.get(key).and_then(|x| x.as_str()) {
-                let trimmed = v.trim();
-                if !trimmed.is_empty() {
-                    lines.push(format!("{} {}", prefix, trimmed));
+            if let Some(v) = get_str(key) {
+                lines.push(format!("{} {}", prefix, v));
+            }
+        };
+
+        // 場所セクション (住所と電話は indent して place の下にぶら下げる)
+        let push_place = |lines: &mut Vec<String>,
+                          prefix: &str,
+                          place_key: &str,
+                          address_key: &str,
+                          phone_key: &str| {
+            if let Some(v) = get_str(place_key) {
+                lines.push(format!("{} {}", prefix, v));
+                if let Some(addr) = get_str(address_key) {
+                    lines.push(format!("　 {}", addr));
+                }
+                if let Some(phone) = get_str(phone_key) {
+                    lines.push(format!("　 ☎ {}", phone));
+                }
+            } else {
+                // place 自体が空でも address/phone が来ていたら捨てずに親なしで列挙
+                // (defensive、ほぼ起きないが念のため)
+                if let Some(addr) = get_str(address_key) {
+                    lines.push(format!("{} {}", prefix, addr));
+                }
+                if let Some(phone) = get_str(phone_key) {
+                    lines.push(format!("　 ☎ {}", phone));
                 }
             }
         };
 
-        // 配車情報セクション
-        push_field(&mut lines, "📍 積地:", "loading_place");
-        push_field(&mut lines, "📦 卸地:", "unloading_place");
+        // 配車情報
+        push_place(
+            &mut lines,
+            "📍 積地:",
+            "loading_place",
+            "loading_place_address",
+            "loading_place_phone",
+        );
+        push_place(
+            &mut lines,
+            "📦 卸地:",
+            "unloading_place",
+            "unloading_place_address",
+            "unloading_place_phone",
+        );
         push_field(&mut lines, "🕐 積込:", "loading_at");
         push_field(&mut lines, "🕓 卸し:", "unloading_at");
         push_field(&mut lines, "⚠️ 注意:", "notes");
-        // 連絡先セクション (相手先のみ、自社は extract 側で除外済)
+        // 相手先連絡先セクション (相手先のみ、自社は extract 側で除外済)
         push_field(&mut lines, "🏢 連絡先:", "contact_company");
         push_field(&mut lines, "👤 担当:", "contact_person");
         push_field(&mut lines, "📞 電話:", "contact_phone");
@@ -547,7 +592,11 @@ mod tests {
         doc.extracted_data = Some(serde_json::json!({
             "logistics": {
                 "loading_place": "東京都港区",
+                "loading_place_address": null,
+                "loading_place_phone": null,
                 "unloading_place": "大阪府大阪市",
+                "unloading_place_address": null,
+                "unloading_place_phone": null,
                 "loading_at": "5/9 10:00",
                 "unloading_at": "5/10 14:00",
                 "notes": "冷凍便\n要時間厳守",
@@ -569,6 +618,34 @@ mod tests {
         assert!(msg.contains("▶ 詳細: https://x/v/abc"));
         // 「新しいドキュメントが届きました」の既定句は出ない
         assert!(!msg.contains("新しいドキュメント"));
+    }
+
+    #[test]
+    fn message_indents_place_address_and_phone_under_place() {
+        // 積地: 会社名 + 住所 + 電話、卸地: 住所のみ (PR の代表ユースケース)
+        let mut doc = build_doc();
+        doc.extracted_data = Some(serde_json::json!({
+            "logistics": {
+                "loading_place": "イオン関西RDC",
+                "loading_place_address": "京都府乙訓郡大山崎町字大山崎小字鏡田38",
+                "loading_place_phone": "075-959-5008",
+                "unloading_place": "熊本県八代市新港町3-9-8",
+                "loading_at": "令和8年4月17日 (金) 19時"
+            }
+        }));
+        let msg = build_distribute_message(&doc, "https://x/v/abc");
+        // 積地: 会社名 → 住所 → 電話の順 (indent あり)
+        let i_place = msg.find("📍 積地: イオン関西RDC").unwrap();
+        let i_addr = msg.find("　 京都府乙訓郡").unwrap();
+        let i_phone = msg.find("　 ☎ 075-959-5008").unwrap();
+        let i_unload = msg.find("📦 卸地: 熊本県八代市").unwrap();
+        let i_loadat = msg.find("🕐 積込:").unwrap();
+        assert!(i_place < i_addr);
+        assert!(i_addr < i_phone);
+        assert!(i_phone < i_unload);
+        assert!(i_unload < i_loadat);
+        // 卸地は住所のみで電話なし → ☎ が 1 個だけ
+        assert_eq!(msg.matches('☎').count(), 1);
     }
 
     #[test]
