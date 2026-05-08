@@ -24,23 +24,50 @@ use std::sync::Arc;
 
 use uuid::Uuid;
 
+use alc_core::redact_broadcast::{RedactBroadcaster, RedactEvent};
 use alc_core::repository::notify_documents::NotifyDocumentRepository;
 use alc_core::storage::StorageBackend;
 use alc_core::AppState;
 
 use crate::redact::{apply_redactions, detect_amount_boxes, detect_amount_boxes_v2};
 
+/// terminal 状態 (`completed` / `skipped` / `failed`) で broadcaster が設定されていれば
+/// Cloudflare Worker に WS push をかける。設定されてなければ no-op。
+async fn maybe_broadcast(
+    broadcaster: Option<&RedactBroadcaster>,
+    tenant_id: Uuid,
+    document_id: Uuid,
+    status: &str,
+    redactions_applied: Option<i32>,
+    redaction_error: Option<&str>,
+) {
+    if let Some(b) = broadcaster {
+        b.broadcast(&RedactEvent {
+            tenant_id,
+            document_id,
+            status,
+            redactions_applied,
+            redaction_error,
+        })
+        .await;
+    }
+}
+
 /// redact パイプラインのコア。AppState 非依存でユニットテスト可能。
 ///
 /// - `endpoint`: Gemini API のベース URL。`None` なら本番 (`https://generativelanguage.googleapis.com`)。
 ///   wiremock テストでは `Some(server.uri())` を渡す。
+/// - `broadcaster`: terminal 状態を Realtime Worker に push するクライアント。`None` なら
+///   broadcast 自体を skip (Phase 3 デプロイ前の互換)。
 /// - 全エラーは `redaction_status='failed'` に変換され、本関数は panic しない。
+#[allow(clippy::too_many_arguments)]
 pub async fn redact_document_with_deps(
     docs: &dyn NotifyDocumentRepository,
     storage: Option<&dyn StorageBackend>,
     api_key: Option<&str>,
     use_2stage: bool,
     endpoint: Option<&str>,
+    broadcaster: Option<&RedactBroadcaster>,
     tenant_id: Uuid,
     document_id: Uuid,
 ) {
@@ -64,6 +91,7 @@ pub async fn redact_document_with_deps(
         let _ = docs
             .update_redaction_status(tenant_id, document_id, "skipped", None)
             .await;
+        maybe_broadcast(broadcaster, tenant_id, document_id, "skipped", None, None).await;
         return;
     }
 
@@ -75,6 +103,7 @@ pub async fn redact_document_with_deps(
             let _ = docs
                 .update_redaction_status(tenant_id, document_id, "skipped", None)
                 .await;
+            maybe_broadcast(broadcaster, tenant_id, document_id, "skipped", None, None).await;
             return;
         }
     };
@@ -84,14 +113,19 @@ pub async fn redact_document_with_deps(
         Some(s) => s,
         None => {
             tracing::error!("redact: notify_storage not configured");
+            let err = "notify_storage not configured";
             let _ = docs
-                .update_redaction_status(
-                    tenant_id,
-                    document_id,
-                    "failed",
-                    Some("notify_storage not configured"),
-                )
+                .update_redaction_status(tenant_id, document_id, "failed", Some(err))
                 .await;
+            maybe_broadcast(
+                broadcaster,
+                tenant_id,
+                document_id,
+                "failed",
+                None,
+                Some(err),
+            )
+            .await;
             return;
         }
     };
@@ -109,14 +143,19 @@ pub async fn redact_document_with_deps(
     let pdf_bytes = match storage.download(&doc.r2_key).await {
         Ok(b) => b,
         Err(e) => {
+            let err = format!("r2 download: {e}");
             let _ = docs
-                .update_redaction_status(
-                    tenant_id,
-                    document_id,
-                    "failed",
-                    Some(&format!("r2 download: {e}")),
-                )
+                .update_redaction_status(tenant_id, document_id, "failed", Some(&err))
                 .await;
+            maybe_broadcast(
+                broadcaster,
+                tenant_id,
+                document_id,
+                "failed",
+                None,
+                Some(&err),
+            )
+            .await;
             return;
         }
     };
@@ -132,14 +171,19 @@ pub async fn redact_document_with_deps(
             Ok(r) => r,
             Err(e) => {
                 tracing::error!("redact: detect_amount_boxes (2stage={use_2stage}): {e}");
+                let err = format!("gemini: {e}");
                 let _ = docs
-                    .update_redaction_status(
-                        tenant_id,
-                        document_id,
-                        "failed",
-                        Some(&format!("gemini: {e}")),
-                    )
+                    .update_redaction_status(tenant_id, document_id, "failed", Some(&err))
                     .await;
+                maybe_broadcast(
+                    broadcaster,
+                    tenant_id,
+                    document_id,
+                    "failed",
+                    None,
+                    Some(&err),
+                )
+                .await;
                 return;
             }
         }
@@ -150,14 +194,19 @@ pub async fn redact_document_with_deps(
         Ok(b) => b,
         Err(e) => {
             tracing::error!("redact: apply_redactions: {e}");
+            let err = format!("apply: {e}");
             let _ = docs
-                .update_redaction_status(
-                    tenant_id,
-                    document_id,
-                    "failed",
-                    Some(&format!("apply: {e}")),
-                )
+                .update_redaction_status(tenant_id, document_id, "failed", Some(&err))
                 .await;
+            maybe_broadcast(
+                broadcaster,
+                tenant_id,
+                document_id,
+                "failed",
+                None,
+                Some(&err),
+            )
+            .await;
             return;
         }
     };
@@ -169,29 +218,44 @@ pub async fn redact_document_with_deps(
         .await
     {
         tracing::error!("redact: r2 upload: {e}");
+        let err = format!("r2 upload: {e}");
         let _ = docs
-            .update_redaction_status(
-                tenant_id,
-                document_id,
-                "failed",
-                Some(&format!("r2 upload: {e}")),
-            )
+            .update_redaction_status(tenant_id, document_id, "failed", Some(&err))
             .await;
+        maybe_broadcast(
+            broadcaster,
+            tenant_id,
+            document_id,
+            "failed",
+            None,
+            Some(&err),
+        )
+        .await;
         return;
     }
 
     // 10. 成功確定: redacted_r2_key + redacted_at + redactions_applied + status='completed'
+    let applied = redactions.len() as i32;
     if let Err(e) = docs
-        .complete_redaction(tenant_id, document_id, &key, redactions.len() as i32)
+        .complete_redaction(tenant_id, document_id, &key, applied)
         .await
     {
         tracing::error!("redact: complete update failed: {e}");
         return;
     }
 
+    maybe_broadcast(
+        broadcaster,
+        tenant_id,
+        document_id,
+        "completed",
+        Some(applied),
+        None,
+    )
+    .await;
+
     tracing::info!(
-        "redact: tenant={tenant_id} doc={document_id} applied={} (2stage={use_2stage})",
-        redactions.len()
+        "redact: tenant={tenant_id} doc={document_id} applied={applied} (2stage={use_2stage})"
     );
 }
 
@@ -204,6 +268,7 @@ pub fn spawn_redact_document(state: AppState, tenant_id: Uuid, document_id: Uuid
     let use_2stage = std::env::var("NOTIFY_REDACT_2STAGE").as_deref() == Ok("1");
     let docs: Arc<dyn NotifyDocumentRepository> = state.notify_documents.clone();
     let storage: Option<Arc<dyn StorageBackend>> = state.notify_storage.clone();
+    let broadcaster: Option<Arc<RedactBroadcaster>> = state.redact_broadcaster.clone();
 
     tokio::spawn(async move {
         redact_document_with_deps(
@@ -212,6 +277,7 @@ pub fn spawn_redact_document(state: AppState, tenant_id: Uuid, document_id: Uuid
             api_key.as_deref(),
             use_2stage,
             None,
+            broadcaster.as_deref(),
             tenant_id,
             document_id,
         )
@@ -486,6 +552,7 @@ mod tests {
             Some("test-key"),
             false,
             Some(&server.uri()),
+            None,
             Uuid::new_v4(),
             Uuid::new_v4(),
         )
@@ -517,6 +584,7 @@ mod tests {
             Some("k"),
             false,
             None,
+            None,
             Uuid::new_v4(),
             Uuid::new_v4(),
         )
@@ -539,6 +607,7 @@ mod tests {
             Some("k"),
             false,
             None,
+            None,
             Uuid::new_v4(),
             Uuid::new_v4(),
         )
@@ -560,6 +629,7 @@ mod tests {
             None,
             false,
             None,
+            None,
             Uuid::new_v4(),
             Uuid::new_v4(),
         )
@@ -580,6 +650,7 @@ mod tests {
             Some(storage.as_ref() as &dyn StorageBackend),
             Some(""),
             false,
+            None,
             None,
             Uuid::new_v4(),
             Uuid::new_v4(),
@@ -603,6 +674,7 @@ mod tests {
             Some("k"),
             false,
             None,
+            None,
             Uuid::new_v4(),
             Uuid::new_v4(),
         )
@@ -625,6 +697,7 @@ mod tests {
             Some("k"),
             false,
             None,
+            None,
             Uuid::new_v4(),
             Uuid::new_v4(),
         )
@@ -645,6 +718,7 @@ mod tests {
             Some(storage.as_ref() as &dyn StorageBackend),
             Some("k"),
             false,
+            None,
             None,
             Uuid::new_v4(),
             Uuid::new_v4(),
@@ -671,6 +745,7 @@ mod tests {
             Some("k"),
             false,
             Some(&server.uri()),
+            None,
             Uuid::new_v4(),
             Uuid::new_v4(),
         )
@@ -695,6 +770,7 @@ mod tests {
             Some("k"),
             false,
             Some(&server.uri()),
+            None,
             Uuid::new_v4(),
             Uuid::new_v4(),
         )
@@ -719,6 +795,7 @@ mod tests {
             Some("k"),
             false,
             Some(&server.uri()),
+            None,
             Uuid::new_v4(),
             Uuid::new_v4(),
         )
@@ -747,6 +824,7 @@ mod tests {
             Some("k"),
             true,
             Some(&server.uri()),
+            None,
             Uuid::new_v4(),
             Uuid::new_v4(),
         )
@@ -775,6 +853,7 @@ mod tests {
             None, // env 相当: GEMINI_API_KEY 未設定 → skipped
             false,
             None,
+            None,
             Uuid::new_v4(),
             Uuid::new_v4(),
         )
@@ -784,6 +863,253 @@ mod tests {
             docs.statuses.lock().unwrap().clone(),
             vec![("skipped".into(), None)]
         );
+    }
+
+    // 14. broadcaster=Some なら skipped でも broadcast が飛ぶ (PDF 以外パス)
+    #[tokio::test]
+    async fn redact_document_broadcasts_skipped_for_non_pdf() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .and(wiremock::matchers::path("/broadcast"))
+            .and(wiremock::matchers::body_string_contains("\"skipped\""))
+            .respond_with(wiremock::ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let broadcaster =
+            RedactBroadcaster::new(format!("{}/broadcast", server.uri()), "secret".into());
+
+        let docs = StubDocs::new(build_doc(Some("a.docx")));
+
+        redact_document_with_deps(
+            docs.as_ref(),
+            None,
+            Some("k"),
+            false,
+            None,
+            Some(&broadcaster),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+        )
+        .await;
+
+        let statuses = docs.statuses.lock().unwrap().clone();
+        assert_eq!(statuses, vec![("skipped".into(), None)]);
+    }
+
+    // 15. broadcaster=Some + completed パス: redactions_applied 付きで broadcast
+    #[tokio::test]
+    async fn redact_document_broadcasts_completed_with_count() {
+        let bcast = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .and(wiremock::matchers::path("/broadcast"))
+            .and(wiremock::matchers::body_string_contains("\"completed\""))
+            .and(wiremock::matchers::body_string_contains(
+                "\"redactions_applied\":0",
+            ))
+            .respond_with(wiremock::ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&bcast)
+            .await;
+        let broadcaster =
+            RedactBroadcaster::new(format!("{}/broadcast", bcast.uri()), "secret".into());
+
+        let docs = StubDocs::new(build_doc(Some("invoice.pdf")));
+        let storage = StubStorage::ok(simple_pdf());
+        let gemini = start_gemini_mock_returning("{\"redactions\": []}").await;
+
+        redact_document_with_deps(
+            docs.as_ref(),
+            Some(storage.as_ref() as &dyn StorageBackend),
+            Some("k"),
+            false,
+            Some(&gemini.uri()),
+            Some(&broadcaster),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+        )
+        .await;
+
+        // 後ろから 1 番目が completed のはず
+        let statuses = docs.statuses.lock().unwrap().clone();
+        assert_eq!(statuses.last().map(|s| s.0.as_str()), Some("completed"));
+    }
+
+    // 16. broadcaster=Some + failed パス (notify_storage 未設定): error メッセージ含む
+    #[tokio::test]
+    async fn redact_document_broadcasts_failed_with_error_message() {
+        let bcast = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .and(wiremock::matchers::path("/broadcast"))
+            .and(wiremock::matchers::body_string_contains("\"failed\""))
+            .and(wiremock::matchers::body_string_contains(
+                "\"notify_storage not configured\"",
+            ))
+            .respond_with(wiremock::ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&bcast)
+            .await;
+        let broadcaster =
+            RedactBroadcaster::new(format!("{}/broadcast", bcast.uri()), "secret".into());
+
+        let docs = StubDocs::new(build_doc(Some("doc.pdf")));
+
+        redact_document_with_deps(
+            docs.as_ref(),
+            None, // notify_storage = None → failed
+            Some("k"),
+            false,
+            None,
+            Some(&broadcaster),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+        )
+        .await;
+
+        let statuses = docs.statuses.lock().unwrap().clone();
+        assert_eq!(statuses.last().map(|s| s.0.as_str()), Some("failed"));
+    }
+
+    // 17. broadcaster=Some + r2 download 失敗 → "r2 download" prefix で broadcast
+    #[tokio::test]
+    async fn redact_document_broadcasts_failed_on_download_error() {
+        let bcast = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .and(wiremock::matchers::path("/broadcast"))
+            .and(wiremock::matchers::body_string_contains("\"failed\""))
+            .and(wiremock::matchers::body_string_contains("r2 download"))
+            .respond_with(wiremock::ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&bcast)
+            .await;
+        let broadcaster =
+            RedactBroadcaster::new(format!("{}/broadcast", bcast.uri()), "secret".into());
+
+        let docs = StubDocs::new(build_doc(Some("doc.pdf")));
+        let storage = StubStorage::with_download_fail();
+
+        redact_document_with_deps(
+            docs.as_ref(),
+            Some(storage.as_ref() as &dyn StorageBackend),
+            Some("k"),
+            false,
+            None,
+            Some(&broadcaster),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+        )
+        .await;
+
+        let statuses = docs.statuses.lock().unwrap().clone();
+        let last = statuses.last().expect("at least one status");
+        assert_eq!(last.0, "failed");
+        assert!(last.1.as_deref().unwrap().contains("r2 download"));
+    }
+
+    // 18. broadcaster=Some + Gemini 失敗 → "gemini" prefix で broadcast
+    #[tokio::test]
+    async fn redact_document_broadcasts_failed_on_gemini_error() {
+        let bcast = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .and(wiremock::matchers::path("/broadcast"))
+            .and(wiremock::matchers::body_string_contains("\"failed\""))
+            .and(wiremock::matchers::body_string_contains("gemini"))
+            .respond_with(wiremock::ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&bcast)
+            .await;
+        let broadcaster =
+            RedactBroadcaster::new(format!("{}/broadcast", bcast.uri()), "secret".into());
+
+        let docs = StubDocs::new(build_doc(Some("doc.pdf")));
+        let storage = StubStorage::ok(simple_pdf());
+        let gemini = start_gemini_mock_with_status(500).await;
+
+        redact_document_with_deps(
+            docs.as_ref(),
+            Some(storage.as_ref() as &dyn StorageBackend),
+            Some("k"),
+            false,
+            Some(&gemini.uri()),
+            Some(&broadcaster),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+        )
+        .await;
+
+        let statuses = docs.statuses.lock().unwrap().clone();
+        assert_eq!(statuses.last().map(|s| s.0.as_str()), Some("failed"));
+    }
+
+    // 19. broadcaster=Some + apply_redactions 失敗 → "apply" prefix で broadcast
+    #[tokio::test]
+    async fn redact_document_broadcasts_failed_on_apply_error() {
+        let bcast = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .and(wiremock::matchers::path("/broadcast"))
+            .and(wiremock::matchers::body_string_contains("\"failed\""))
+            .and(wiremock::matchers::body_string_contains("apply"))
+            .respond_with(wiremock::ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&bcast)
+            .await;
+        let broadcaster =
+            RedactBroadcaster::new(format!("{}/broadcast", bcast.uri()), "secret".into());
+
+        let docs = StubDocs::new(build_doc(Some("doc.pdf")));
+        // 不正 PDF → apply_redactions エラー
+        let storage = StubStorage::ok(b"not a pdf".to_vec());
+        let gemini = start_gemini_mock_returning("{\"redactions\": []}").await;
+
+        redact_document_with_deps(
+            docs.as_ref(),
+            Some(storage.as_ref() as &dyn StorageBackend),
+            Some("k"),
+            false,
+            Some(&gemini.uri()),
+            Some(&broadcaster),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+        )
+        .await;
+
+        let statuses = docs.statuses.lock().unwrap().clone();
+        assert_eq!(statuses.last().map(|s| s.0.as_str()), Some("failed"));
+    }
+
+    // 20. broadcaster=Some + R2 upload 失敗 → "r2 upload" prefix で broadcast
+    #[tokio::test]
+    async fn redact_document_broadcasts_failed_on_upload_error() {
+        let bcast = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .and(wiremock::matchers::path("/broadcast"))
+            .and(wiremock::matchers::body_string_contains("\"failed\""))
+            .and(wiremock::matchers::body_string_contains("r2 upload"))
+            .respond_with(wiremock::ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&bcast)
+            .await;
+        let broadcaster =
+            RedactBroadcaster::new(format!("{}/broadcast", bcast.uri()), "secret".into());
+
+        let docs = StubDocs::new(build_doc(Some("doc.pdf")));
+        let storage = StubStorage::with_upload_fail(simple_pdf());
+        let gemini = start_gemini_mock_returning("{\"redactions\": []}").await;
+
+        redact_document_with_deps(
+            docs.as_ref(),
+            Some(storage.as_ref() as &dyn StorageBackend),
+            Some("k"),
+            false,
+            Some(&gemini.uri()),
+            Some(&broadcaster),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+        )
+        .await;
+
+        let statuses = docs.statuses.lock().unwrap().clone();
+        assert_eq!(statuses.last().map(|s| s.0.as_str()), Some("failed"));
     }
 
     // ============================================================

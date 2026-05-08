@@ -51,6 +51,10 @@ type = "combined"
 path = "crates/alc-core/src/webhook.rs"
 type = "combined"
 
+[[files]]
+path = "crates/alc-core/src/redact_broadcast.rs"
+type = "unit"
+
 # --- alc-carins ---
 
 [[files]]
