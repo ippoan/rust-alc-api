@@ -342,7 +342,10 @@ async fn distribute(
 
     for (delivery, recipient) in deliveries.iter().zip(recipients.iter()) {
         let read_url = format!("{}/api/notify/read/{}", api_origin, delivery.read_token);
-        let message = build_distribute_message(&doc, &read_url);
+        // 画像を併送する場合は本文の「▶ 詳細: {url}」行を省く (画像 inline で見えるので冗長)。
+        // 画像なし (テキストのみ) の場合は従来通り URL を入れる。
+        let message_url: Option<&str> = if send_image { None } else { Some(&read_url) };
+        let message = build_distribute_message(&doc, message_url);
         // 注: URL を `.jpg` 終わりにするのは必須。LINE Messaging API / LINE WORKS
         // Bot は image message の `originalContentUrl` を **拡張子で** 画像判定
         // するため、`/image` (拡張子なし) だと URL がテキストリンクとして表示される。
@@ -488,9 +491,12 @@ async fn test_distribute(
 /// 各フィールドのうち存在するものだけ列挙する (一部 null OK)。場所の住所と電話は
 /// 全角スペース 1 個 + 空白 2 個で indent して、どの場所に紐付くか視覚的に明確にする。
 /// 連絡先 3 フィールドは `extract.rs` 側で「相手先」を抽出済みで自社情報は除外されている。
+/// `read_url` が `None` のときは「▶ 詳細: ...」行を省く。
+/// 画像メッセージを併送する場合 (LINE/LINE WORKS が画像を inline 展開する) は
+/// 詳細リンクが冗長になるので、呼び出し側で None を渡す。
 pub(crate) fn build_distribute_message(
     doc: &alc_core::repository::notify_documents::NotifyDocument,
-    read_url: &str,
+    read_url: Option<&str>,
 ) -> String {
     let title = doc
         .extracted_title
@@ -585,8 +591,12 @@ pub(crate) fn build_distribute_message(
             return fallback_template(doc, read_url);
         }
 
-        lines.push(String::new()); // 詳細リンク前の空行
-        lines.push(format!("▶ 詳細: {}", read_url));
+        // read_url=Some のときだけ「▶ 詳細: …」を追加。画像メッセージを併送する
+        // 場合 (image inline 展開される) は読者が直接見えるので URL は冗長。
+        if let Some(url) = read_url {
+            lines.push(String::new()); // 詳細リンク前の空行
+            lines.push(format!("▶ 詳細: {}", url));
+        }
         lines.join("\n")
     } else {
         fallback_template(doc, read_url)
@@ -622,7 +632,7 @@ pub(crate) fn should_send_image(
 
 fn fallback_template(
     doc: &alc_core::repository::notify_documents::NotifyDocument,
-    read_url: &str,
+    read_url: Option<&str>,
 ) -> String {
     let summary = doc
         .extracted_summary
@@ -632,7 +642,10 @@ fn fallback_template(
         .extracted_title
         .as_deref()
         .unwrap_or(doc.file_name.as_deref().unwrap_or("ドキュメント"));
-    format!("📄 {}\n\n{}\n\n▶ 詳細を見る: {}", title, summary, read_url)
+    match read_url {
+        Some(url) => format!("📄 {}\n\n{}\n\n▶ 詳細を見る: {}", title, summary, url),
+        None => format!("📄 {}\n\n{}", title, summary),
+    }
 }
 
 #[cfg(test)]
@@ -690,7 +703,7 @@ mod tests {
                 "contact_phone": "03-1234-5678"
             }
         }));
-        let msg = build_distribute_message(&doc, "https://x/v/abc");
+        let msg = build_distribute_message(&doc, Some("https://x/v/abc"));
         assert!(msg.contains("📄 haisou.pdf"));
         assert!(msg.contains("📍 積地: 東京都港区"));
         assert!(msg.contains("📦 卸地: 大阪府大阪市"));
@@ -719,7 +732,7 @@ mod tests {
                 "loading_at": "令和8年4月17日 (金) 19時"
             }
         }));
-        let msg = build_distribute_message(&doc, "https://x/v/abc");
+        let msg = build_distribute_message(&doc, Some("https://x/v/abc"));
         // 積地: 会社名 → 住所 → 👤 担当 → ☎ 電話の順 (indent あり)
         let i_place = msg.find("📍 積地: イオン関西RDC").unwrap();
         let i_addr = msg.find("　 京都府乙訓郡").unwrap();
@@ -746,7 +759,7 @@ mod tests {
                 "contact_phone": "06-9876-5432"
             }
         }));
-        let msg = build_distribute_message(&doc, "https://x/v/abc");
+        let msg = build_distribute_message(&doc, Some("https://x/v/abc"));
         assert!(msg.contains("📞 電話: 06-9876-5432"));
         assert!(!msg.contains("🏢 連絡先"));
         assert!(!msg.contains("👤 担当"));
@@ -766,7 +779,7 @@ mod tests {
                 "contact_phone": "03-1234"
             }
         }));
-        let msg = build_distribute_message(&doc, "https://x/v/abc");
+        let msg = build_distribute_message(&doc, Some("https://x/v/abc"));
         let i_notes = msg.find("⚠️ 注意").unwrap();
         let i_contact = msg.find("🏢 連絡先").unwrap();
         let i_phone = msg.find("📞 電話").unwrap();
@@ -788,7 +801,7 @@ mod tests {
                 "notes": null
             }
         }));
-        let msg = build_distribute_message(&doc, "https://x/v/abc");
+        let msg = build_distribute_message(&doc, Some("https://x/v/abc"));
         assert!(msg.contains("📍 積地: 成田"));
         assert!(!msg.contains("📦 卸地"));
         assert!(!msg.contains("🕐 積込"));
@@ -801,7 +814,7 @@ mod tests {
         doc.extracted_title = Some("見積書".into());
         doc.extracted_summary = Some("〇〇社からの見積です".into());
         doc.extracted_data = Some(serde_json::json!({"phone_numbers_ext": ["090-..."]}));
-        let msg = build_distribute_message(&doc, "https://x/v/abc");
+        let msg = build_distribute_message(&doc, Some("https://x/v/abc"));
         assert_eq!(
             msg,
             "📄 見積書\n\n〇〇社からの見積です\n\n▶ 詳細を見る: https://x/v/abc"
@@ -811,7 +824,7 @@ mod tests {
     #[test]
     fn message_falls_back_when_extracted_data_is_none() {
         let doc = build_doc();
-        let msg = build_distribute_message(&doc, "https://x/v/abc");
+        let msg = build_distribute_message(&doc, Some("https://x/v/abc"));
         assert!(msg.contains("📄 haisou.pdf"));
         assert!(msg.contains("新しいドキュメントが届きました"));
         assert!(msg.contains("▶ 詳細を見る: https://x/v/abc"));
@@ -830,7 +843,7 @@ mod tests {
                 "notes": null
             }
         }));
-        let msg = build_distribute_message(&doc, "https://x/v/abc");
+        let msg = build_distribute_message(&doc, Some("https://x/v/abc"));
         // logistics テンプレ部分の絵文字は出ない
         assert!(!msg.contains("📍 積地"));
         assert!(msg.contains("新しいドキュメントが届きました"));
@@ -841,7 +854,7 @@ mod tests {
         // defensive: extracted_data.logistics が string や array なら無視
         let mut doc = build_doc();
         doc.extracted_data = Some(serde_json::json!({"logistics": "broken"}));
-        let msg = build_distribute_message(&doc, "https://x/v/abc");
+        let msg = build_distribute_message(&doc, Some("https://x/v/abc"));
         assert!(msg.contains("新しいドキュメントが届きました"));
     }
 
@@ -852,7 +865,7 @@ mod tests {
         doc.extracted_data = Some(serde_json::json!({
             "logistics": {"loading_place": "東京"}
         }));
-        let msg = build_distribute_message(&doc, "https://x/v/abc");
+        let msg = build_distribute_message(&doc, Some("https://x/v/abc"));
         assert!(msg.starts_with("📄 配車手配票"));
         assert!(!msg.contains("haisou.pdf"));
     }
@@ -861,7 +874,7 @@ mod tests {
     fn message_uses_doc_default_when_no_filename() {
         let mut doc = build_doc();
         doc.file_name = None;
-        let msg = build_distribute_message(&doc, "https://x/v/abc");
+        let msg = build_distribute_message(&doc, Some("https://x/v/abc"));
         assert!(msg.contains("📄 ドキュメント"));
     }
 }
