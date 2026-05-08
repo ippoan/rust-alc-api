@@ -204,6 +204,50 @@ impl LineClient {
 
         Ok(())
     }
+
+    /// ユーザーに画像メッセージを push する。
+    ///
+    /// `original_url` は最大 10 MB / 4096x4096 / JPEG-PNG (LINE 仕様)。
+    /// `preview_url` は最大 1 MB / 240x240 推奨。両方同じ URL でも構わない (LINE 側が
+    /// オリジナルから縮小して preview にも使える)。
+    /// 仕様: <https://developers.line.biz/ja/reference/messaging-api/#image-message>
+    pub async fn push_image(
+        &self,
+        config: &LineConfig,
+        user_id: &str,
+        original_url: &str,
+        preview_url: &str,
+    ) -> Result<(), LineError> {
+        let access_token = self.get_access_token(config).await?;
+
+        let body = serde_json::json!({
+            "to": user_id,
+            "messages": [
+                {
+                    "type": "image",
+                    "originalContentUrl": original_url,
+                    "previewImageUrl": preview_url,
+                }
+            ]
+        });
+
+        let resp = self
+            .client
+            .post(&self.push_endpoint)
+            .header("Authorization", format!("Bearer {}", access_token))
+            .json(&body)
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            tracing::error!("LINE push image failed: {status} - {body}");
+            return Err(LineError::SendFailed(format!("{status}: {body}")));
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
