@@ -213,17 +213,33 @@ const STAGE1_PROMPT: &str = r#"この PDF は表形式の業務帳票 (FAX ス�
 - 罫線が薄い / かすれていても、テキストが 2 行以上ある領域は **別セル** として分割する
 - 1 セルの text に「\n (改行)」が入ったら粒度が粗すぎる → 行ごとに分割すること
 
+【ラベル列と値列の完全分離 (重要)】
+- 業務帳票では「ラベル文字列だけが入ったセル」(例: 運賃 / 消費税 / 合計額 / 支払額 /
+  支払運賃 / 高速代 / 搬出料 / 燃料サーチャージ / 駐車代 / 待機料 / 通関料 /
+  付帯作業料 / 入金予定日) とその隣の「金額が入った値セル」(例: 100,000円 / 11,500円)
+  は **必ず別の box_2d** として返すこと。1 つの box_2d にラベル文字 + 金額を
+  同時に含めてはならない。
+- 縦罫線が薄くて視覚的に連続して見えても、**列境界で必ず分割** する。
+- ラベルセルの xmax と値セルの xmin の関係は **xmax_label <= xmin_value** を
+  必ず満たす (両 bbox が水平方向に 1 ピクセルも重ならない)。
+- 「N円」を含む text は **単独のセル** として返し、隣のラベル文字を絶対に
+  同じ box_2d に含めないこと。
+- これは特に消費税行 ("消費税" + "11,500円") のような **ラベルが短くて
+  値セルが横に長い** 行で誤検出が発生しやすい。同じ row でも必ず 2 つの cell として返す。
+
 出力形式 (これ以外の文字を一切出力しない):
 {
   "page": 1,
   "title": "運賃明細",
   "cells": [
-    {"box_2d": [ymin, xmin, ymax, xmax], "text": "運賃"},
-    {"box_2d": [ymin, xmin, ymax, xmax], "text": "100,000円"},
-    {"box_2d": [ymin, xmin, ymax, xmax], "text": "消費税"},
-    {"box_2d": [ymin, xmin, ymax, xmax], "text": "11,500円"}
+    {"box_2d": [120, 50, 180, 240], "text": "運賃"},
+    {"box_2d": [120, 240, 180, 480], "text": "100,000円"},
+    {"box_2d": [180, 50, 240, 240], "text": "消費税"},
+    {"box_2d": [180, 240, 240, 480], "text": "11,500円"}
   ]
 }
+↑ この例で xmax_label=240 == xmin_value=240 となっており、ラベルと値の bbox は
+  完全に分離している (重複ゼロ)。実際の出力でも必ずこの構造を守ること。
 
 ルール:
 - box_2d は 0-1000 で正規化された [ymin, xmin, ymax, xmax] (左上原点)
@@ -233,6 +249,10 @@ const STAGE1_PROMPT: &str = r#"この PDF は表形式の業務帳票 (FAX ス�
 - **text に改行 (\n) を含めてはならない**。複数行に見えるなら別セル
 - **金額判定はしない**: ラベルセル ("運賃" / "消費税" / "合計") も値セル
   ("100,000円" / "11,500円") もすべて等しく列挙する
+- **ラベルと値の bbox 重複禁止**: text に「円」を含むセルは、同じ row の
+  隣接ラベルセル (運賃 / 消費税 / 合計額 等) の bbox と水平方向に重なって
+  はならない。重なって見える場合は罫線位置を疑い、必ず column 境界で
+  bbox を切り直すこと (xmax_label <= xmin_value)。
 - 全セルを順番に左上から右下へ (行優先)
 - 罫線をたどって表全体を網羅 (取りこぼし禁止)"#;
 
@@ -998,6 +1018,25 @@ mod tests {
         assert!(prompt.contains("box_2d は入力 JSON のまま使うこと"));
     }
 
+    /// 3164 消費税行ズレ対策: STAGE1_PROMPT が「ラベル列と値列の完全分離」を
+    /// 明示しているか。Gemini への指示が薄れると 3164 で消費税ラベルと
+    /// 値が同一 bbox に merge される回帰が起きるため、prompt 内容自体を
+    /// regression-guard する。
+    #[test]
+    fn test_stage1_prompt_enforces_label_value_separation() {
+        // 完全分離ブロック自体
+        assert!(STAGE1_PROMPT.contains("ラベル列と値列の完全分離"));
+        // 不等式の数式表現で意図を pinning
+        assert!(STAGE1_PROMPT.contains("xmax_label <= xmin_value"));
+        // 消費税行が誤検出されやすい旨の言及
+        assert!(STAGE1_PROMPT.contains("消費税"));
+        // few-shot example が「消費税 / 11,500円」の 2 セルを別 bbox で示すこと
+        assert!(STAGE1_PROMPT.contains(r#""text": "消費税""#));
+        assert!(STAGE1_PROMPT.contains(r#""text": "11,500円""#));
+        // ルール末尾の重複禁止条項
+        assert!(STAGE1_PROMPT.contains("ラベルと値の bbox 重複禁止"));
+    }
+
     /// Stage 1 + Stage 2 を順次モックして `detect_amount_boxes_v2` を通す。
     #[tokio::test]
     async fn test_detect_amount_boxes_v2_two_stage_happy_path() {
@@ -1035,6 +1074,77 @@ mod tests {
         assert_eq!(result[0].page, 1); // PageCells.page から補完
         assert_eq!(result[0].box_2d, [100.0, 400.0, 150.0, 600.0]);
         assert_eq!(result[1].text, "10,000円");
+    }
+
+    /// 3164 消費税行 regression: Stage 1 が「消費税 (ラベル) / 11,500円 (値)」
+    /// を別 bbox で返したとき、Stage 2 は値 bbox のみを抽出し、ラベル文字を
+    /// 一切 redaction 対象に含めないこと。さらに redaction 対象 bbox が
+    /// ラベル bbox と水平方向に重ならないこと (xmax_label <= xmin_value) を
+    /// 構造的に検証する。本来 prompt と Gemini が守るべき不等式だが、
+    /// テストで pinning することで Stage 2 の出力経路の回帰も捕捉できる。
+    #[tokio::test]
+    async fn test_detect_amount_boxes_v2_3164_taxrow_no_label_redaction() {
+        use wiremock::matchers::{method, path_regex};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+
+        // Stage 1: 3164 想定 — 消費税行はラベル "消費税" と値 "11,500円" の 2 cell。
+        // ラベル xmax = 240, 値 xmin = 240 で完全分離。
+        let stage1_text = r#"{"page":1,"title":"運賃及び料金","cells":[{"box_2d":[120,50,180,240],"text":"運賃"},{"box_2d":[120,240,180,480],"text":"100,000円"},{"box_2d":[180,50,240,240],"text":"消費税"},{"box_2d":[180,240,240,480],"text":"11,500円"},{"box_2d":[240,50,300,240],"text":"合計額"},{"box_2d":[240,240,300,480],"text":"111,500円"}]}"#;
+        Mock::given(method("POST"))
+            .and(path_regex(r".*generateContent.*"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "candidates": [{"content": {"parts": [{"text": stage1_text}]}}]
+            })))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+
+        // Stage 2: 円を含む 3 cell だけを返す (Gemini が prompt 通りに
+        // ラベルセルを除外した想定)。
+        let stage2_text = r#"{"redactions":[{"box_2d":[120,240,180,480],"text":"100,000円"},{"box_2d":[180,240,240,480],"text":"11,500円"},{"box_2d":[240,240,300,480],"text":"111,500円"}]}"#;
+        Mock::given(method("POST"))
+            .and(path_regex(r".*generateContent.*"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "candidates": [{"content": {"parts": [{"text": stage2_text}]}}]
+            })))
+            .mount(&server)
+            .await;
+
+        let result = detect_amount_boxes_v2(b"fake pdf", "fake-key", None, Some(&server.uri()))
+            .await
+            .unwrap();
+
+        // 値セル 3 個だけ
+        assert_eq!(result.len(), 3);
+
+        // ラベル文字列は redaction に含まれない
+        for r in &result {
+            assert!(
+                !r.text.contains("消費税") && !r.text.contains("運賃") && !r.text.contains("合計"),
+                "label text leaked into redaction: {}",
+                r.text
+            );
+        }
+
+        // 各 redaction が円を含む値であること
+        for r in &result {
+            assert!(r.text.contains("円"), "non-amount in redaction: {}", r.text);
+        }
+
+        // 構造的検証: 消費税行の値 bbox (xmin=240) が同行ラベル bbox (xmax=240) と
+        // 水平方向に重ならない。これは Stage 1 prompt の "xmax_label <= xmin_value"
+        // 制約が保たれているかを assert する代理。
+        let tax_value = result
+            .iter()
+            .find(|r| r.text == "11,500円")
+            .expect("tax value");
+        let [_ymin, xmin, _ymax, _xmax] = tax_value.box_2d;
+        assert!(
+            xmin >= 240.0,
+            "tax value bbox xmin ({xmin}) must be >= label xmax (240) — bbox overlapping the label cell will paint white over '消費税' instead of '11,500円'"
+        );
     }
 
     #[tokio::test]

@@ -119,6 +119,8 @@ emit_env_backend() {
               value: "$( [[ "$ENV" == "staging" ]] && echo "https://notify-staging.ippoan.org" || echo "https://notify.ippoan.org" )"
             - name: NOTIFY_REDACT_BROADCAST_URL
               value: "$(notify_redact_broadcast_url)"
+            - name: NOTIFY_REDACT_2STAGE
+              value: "1"
             - name: SCRAPER_URL
               value: "${ENV_SCRAPER_URL:?ENV_SCRAPER_URL not set (GitHub vars.SCRAPER_URL)}"
             - name: FCM_PROJECT_ID
