@@ -219,6 +219,16 @@ jobs:
         with:
           tool: cargo-llvm-cov@0.8.4,cargo-nextest
 
+      # alc-notify::redact が pdfium-render 経由で libpdfium.so を dlopen するので、
+      # テスト実行ホスト (ubuntu-latest) にも prebuilt PDFium を配置する。
+      # bblanchon/pdfium-binaries chromium/7825 (linux-x64.tgz, ~3.5 MB) を /usr/lib/ に展開。
+      - name: Install PDFium (for redact tests)
+        run: |
+          curl -fsSL "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/7825/pdfium-linux-x64.tgz" \
+            | sudo tar -xz -C /tmp
+          sudo cp /tmp/lib/libpdfium.so /usr/lib/libpdfium.so
+          sudo ldconfig
+
       - name: Init DB
         run: psql "postgresql://postgres:test@localhost:5432/postgres" -f scripts/init_local_db.sql
 
