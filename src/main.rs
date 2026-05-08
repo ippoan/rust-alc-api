@@ -299,6 +299,7 @@ async fn main() -> anyhow::Result<()> {
         notify_line_config,
         lineworks_channels,
         notify_storage,
+        redact_broadcaster: alc_core::redact_broadcast::RedactBroadcaster::from_env().map(Arc::new),
         trouble_tickets,
         trouble_files,
         trouble_workflow,

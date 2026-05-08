@@ -361,6 +361,7 @@ fn build_app_state(
         notify_line_config,
         lineworks_channels,
         notify_storage: None,
+        redact_broadcaster: None,
         trouble_tickets,
         trouble_files,
         trouble_workflow,

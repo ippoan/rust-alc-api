@@ -72,6 +72,7 @@ pub fn setup_mock_app_state() -> AppState {
         notify_line_config: Arc::new(MockNotifyLineConfigRepository::default()),
         lineworks_channels: Arc::new(MockLineworksChannelsRepository::default()),
         notify_storage: None,
+        redact_broadcaster: None,
         trouble_tickets: Arc::new(MockTroubleTicketsRepository::default()),
         trouble_files: Arc::new(MockTroubleFilesRepository::default()),
         trouble_workflow: Arc::new(MockTroubleWorkflowRepository::default()),

@@ -12,6 +12,7 @@ pub mod auth_middleware;
 pub mod fcm;
 pub mod middleware;
 pub mod models;
+pub mod redact_broadcast;
 pub mod repo;
 pub mod repository;
 pub mod serde_helpers;
@@ -95,6 +96,11 @@ pub struct AppState {
     pub notify_line_config: Arc<dyn NotifyLineConfigRepository>,
     pub lineworks_channels: Arc<dyn LineworksChannelsRepository>,
     pub notify_storage: Option<Arc<dyn StorageBackend>>,
+    /// `RedactBroadcaster::from_env()` で env vars (`NOTIFY_REDACT_BROADCAST_URL` /
+    /// `NOTIFY_REDACT_BROADCAST_SECRET`) が揃った時のみ Some。background_redaction.rs
+    /// が terminal 状態で呼び、Cloudflare Worker (notify-realtime-bus) の DO 経由で
+    /// admin ブラウザに WS push する。未設定なら no-op (Phase 3 デプロイ前は空でも安全)。
+    pub redact_broadcaster: Option<Arc<redact_broadcast::RedactBroadcaster>>,
     pub trouble_tickets: Arc<dyn TroubleTicketsRepository>,
     pub trouble_files: Arc<dyn TroubleFilesRepository>,
     pub trouble_workflow: Arc<dyn TroubleWorkflowRepository>,
