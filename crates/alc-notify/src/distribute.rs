@@ -343,9 +343,12 @@ async fn distribute(
     for (delivery, recipient) in deliveries.iter().zip(recipients.iter()) {
         let read_url = format!("{}/api/notify/read/{}", api_origin, delivery.read_token);
         let message = build_distribute_message(&doc, &read_url);
+        // 注: URL を `.jpg` 終わりにするのは必須。LINE Messaging API / LINE WORKS
+        // Bot は image message の `originalContentUrl` を **拡張子で** 画像判定
+        // するため、`/image` (拡張子なし) だと URL がテキストリンクとして表示される。
         let image_url = if send_image {
             Some(format!(
-                "{}/api/notify/v/{}/image",
+                "{}/api/notify/v/{}/image.jpg",
                 api_origin, delivery.read_token
             ))
         } else {
