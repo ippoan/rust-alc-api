@@ -153,16 +153,11 @@ async fn view_file(
     Ok((StatusCode::OK, headers, bytes).into_response())
 }
 
-/// `/api/notify/v/{token}/image` — redact 済 PDF の 1 ページ目に埋め込まれた
-/// JPEG 画像を取り出して `image/jpeg` で返す。LINE / LINE WORKS の image メッセージ
-/// (`originalContentUrl` / `previewImgUrl`) で参照される URL。
+/// `/api/notify/v/{token}/image` — `image/jpeg` を返す。
 ///
-/// view_file と同じ token 認可パスを使う。lookup_delivery_for_view が返す `r2_key`
-/// は `COALESCE(redacted_r2_key, r2_key)` なので redact 済があればそれが取れる。
-///
-/// PDF が画像を持たない (テキストベース等) 場合は 415 Unsupported Media Type を返す
-/// — LINE / LINE WORKS は失敗時 image メッセージを送らないので、distribute 側で
-/// 受信ステータスを見て fallback する責任を負う (テキストだけ送り続ける)。
+/// `lookup_delivery_for_view` の `r2_key` は `COALESCE(redacted_r2_key, r2_key)`。
+/// redacted_r2_key が set されていれば既に `.jpg` (黒塗り済 JPEG) なのでそのまま返す。
+/// 原本だけの場合は `.pdf` なので pdfium で 1 ページ目を rasterize して JPEG 化。
 async fn view_image(
     State(state): State<AppState>,
     Path(token): Path<Uuid>,
@@ -184,28 +179,33 @@ async fn view_image(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    let pdf_bytes = storage.download(&info.r2_key).await.map_err(|e| {
+    let bytes = storage.download(&info.r2_key).await.map_err(|e| {
         tracing::error!("view_image: notify_storage.download: {e}");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    // PDF から JPEG を取り出す。テキスト PDF / 画像なし PDF では PageNoImage が返る。
-    let jpeg_bytes = crate::redact::extract_first_page_jpeg(&pdf_bytes).map_err(|e| match &e {
-        crate::redact::RedactError::PageNoImage(_) => {
-            tracing::info!("view_image: pdf has no embedded jpeg, returning 415");
-            StatusCode::UNSUPPORTED_MEDIA_TYPE
-        }
-        _ => {
-            tracing::error!("view_image: extract_first_page_jpeg: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        }
-    })?;
+    // r2_key の拡張子で分岐:
+    //  - .jpg / .jpeg → 既に redacted JPEG (apply_redactions の出力) → そのまま返す
+    //  - その他 (.pdf 等) → pdfium で page 1 を rasterize → JPEG
+    let jpeg_bytes = if info.r2_key.ends_with(".jpg") || info.r2_key.ends_with(".jpeg") {
+        bytes
+    } else {
+        crate::redact::rasterize_first_page_jpeg(&bytes).map_err(|e| match &e {
+            crate::redact::RedactError::PageNoImage(_) => {
+                tracing::info!("view_image: pdf has no renderable page, returning 415");
+                StatusCode::UNSUPPORTED_MEDIA_TYPE
+            }
+            _ => {
+                tracing::error!("view_image: rasterize_first_page_jpeg: {e}");
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
+        })?
+    };
 
     let mut headers = HeaderMap::new();
     if let Ok(v) = "image/jpeg".parse() {
         headers.insert(header::CONTENT_TYPE, v);
     }
-    // image はインライン表示を意図 (LINE WORKS は CDN 取り込み、ブラウザは inline 表示)
     if let Ok(v) = "inline".parse() {
         headers.insert(header::CONTENT_DISPOSITION, v);
     }

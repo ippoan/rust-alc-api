@@ -23,7 +23,9 @@
 use base64::Engine;
 use flate2::read::ZlibDecoder;
 use image::ImageEncoder;
-use lopdf::{dictionary, Document, Object, ObjectId, Stream};
+#[cfg(test)]
+use lopdf::Stream;
+use lopdf::{Document, Object, ObjectId};
 use std::io::Read;
 use std::sync::{Mutex, OnceLock};
 
@@ -33,45 +35,49 @@ const GEMINI_DEFAULT_ENDPOINT: &str = "https://generativelanguage.googleapis.com
 // 2026-05-07 staging で実 API 200 OK 確認済み。stable suffix が付いたら更新。
 const GEMINI_DEFAULT_MODEL: &str = "gemini-3.1-flash-lite-preview";
 
-/// プロンプト本文。Gemini に「金額が入った **表のセル全体** の bbox」を返させる。
+/// プロンプト本文 — **「円」を含むテキストの bbox** を直接返してもらう方式。
 ///
-/// 数字に密着した bbox を返してもらうと、配置のばらつき (例: 3163 で「160,0  00 円」と
-/// 数字内に空白がある) で覆い切れないケースが出る。代わりに **罫線で囲まれたセル全体**
-/// を返してもらう = ラベル列にはみ出さず、かつセル内のどこに数字があっても確実に覆える。
-/// セル境界は表が必ず矩形の罫線で区切られているという前提に依存。
-const REDACT_PROMPT: &str = r#"この PDF は表形式の業務帳票です。
-表の罫線で囲まれた **セル単位** で「金額 (円) が入っているセル」を検出し、
-セル全体の矩形を返してください。
+/// 旧版は「金額が入った表のセル全体の bbox」を要求していたが、Gemini はセル境界
+/// 判定を時々間違えて隣のラベル行/担当者行に bbox を置いてしまう問題があった
+/// (3164_001.pdf の 11,500円 が 担当者情報 行に飛ぶ等)。
+///
+/// 新方式: **画像から「N円」を含む文字列を OCR 的に検出してその文字バウンディング
+/// ボックスをそのまま返してもらう**。セル罫線解釈に依存しないので誤行に飛ぶことが
+/// 構造的に発生しない。bbox に少し padding を足すのは呼び出し側 (apply_redactions)
+/// で対応する。
+const REDACT_PROMPT: &str = r#"この画像は業務帳票 (1 ページ) の rasterize 画像です。
+**画像中に印字または手書きされた「N円」表記の金額** を全て検出し、その文字列の
+バウンディングボックスをそのまま返してください。表のセル全体ではなく、文字列の
+タイトな矩形 (上下左右に最小限のマージン付き) で十分です。
 
-対象例: 「運賃」「代金」「消費税」「合計」「合計金額」「合算」「支払額」「支払運賃」
-「総額」「請求額」「サーチャージ」「高速代」「付帯費用」など金額が入っているセル。
-形式: 「N円」「￥N」「JPY N」「N円(税別)」「N円(税込)」。
+対象パターン (これらに合致するテキストは全て検出):
+- 「123,456円」「12,345円(税別)」「12,345円(税込)」
+- 「￥123,456」「JPY 12,345」
+- 数字とカンマと「円」「￥」「JPY」がセットで現れた箇所すべて
 
-**N円パターンは漏らさず必ず検出**: PDF 内のどこにあっても「数字 + 円」で表記された
-セルは全て対象。表の右下や小さいセルに入っていても見落とさないこと
-(例: 「合計金額: 127,000円」のような単独行も必ず検出する)。
+検出しないもの:
+- 「3,200 kg」「9PL」「10t」「10:00」など「円/￥/JPY」が無い数字
+- 氏名・電話番号・FAX 番号・郵便番号・車両ナンバー・住所
+- 日付 (例: "2026/06/30")
 
-出力形式 (これ以外の文字を一切出力しない):
+出力形式 (Structured Output 強制、ストリーミング外文字は出さない):
 {
   "redactions": [
     {
       "page": 1,
       "box_2d": [ymin, xmin, ymax, xmax],
-      "text": "160,000円",
-      "cell_label": "代金(税抜)"
+      "text": "115,000円",
+      "cell_label": "運賃 (任意)"
     }
   ]
 }
 
 ルール:
-- box_2d は 0-1000 で正規化された [ymin, xmin, ymax, xmax] (Gemini 標準 bbox 形式)
-- page は 1-origin
-- **数字に密着した bbox ではなく、表の罫線で囲まれたセル領域全体** を返す
-- 隣接するラベル列 (例: 「代金(税抜)」のラベル自体) は含めない、値が入っているセルだけ
-- 金額が空のセルは無視
-- 氏名・電話番号・FAX 番号・郵便番号・車両ナンバー・住所のセルは含めない
-- 「3,200 kg」「9PL」「10t」「10:00」など金額でない数字は含めない
-- 金額が見つからない場合は {"redactions": []} を返す"#;
+- box_2d は 0-1000 で正規化された [ymin, xmin, ymax, xmax] (左上原点、Gemini 標準形式)
+- page は常に 1
+- **bbox は必ず実際の文字列の上にあること** (空白セルを返さない)
+- text に「円/￥/JPY」のいずれかが含まれること
+- 該当が無ければ {"redactions": []} を返す"#;
 
 /// Gemini が返す bounding box 1 件。
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize, PartialEq)]
@@ -168,7 +174,52 @@ fn pdfium_locked() -> Result<&'static Mutex<PdfiumGuard>, RedactError> {
         .map_err(|e| RedactError::Pdfium(e.clone()))
 }
 
+/// PDF 1 ページ目を pdfium で 200 DPI ラスタライズして JPEG bytes を返す。
+///
+/// 用途: Gemini に「PDF」ではなく「rasterize 済 JPEG」を送るため。元の PDF が
+/// 多層構造 (Obj4 JPEG + Obj5 CCITT ImageMask など) の場合、Gemini に PDF を
+/// inlineData で渡すと内部のレンダリング基準が不明で bbox が現実のレイアウト
+/// とズレるケースがある (3164_001.pdf で実測 ~5pp ズレ)。同じ pdfium で
+/// rasterize した JPEG を bbox 検出にも mask 適用にも使えば、座標系が完全に
+/// 揃うため必ず一致する。
+pub fn rasterize_first_page_jpeg(pdf_bytes: &[u8]) -> Result<Vec<u8>, RedactError> {
+    use pdfium_render::prelude::PdfRenderConfig;
+    let pdfium_mu = pdfium_locked()?;
+    let pdfium_guard = pdfium_mu
+        .lock()
+        .map_err(|e| RedactError::Pdfium(format!("mutex poisoned: {e}")))?;
+    let document = pdfium_guard
+        .0
+        .load_pdf_from_byte_slice(pdf_bytes, None)
+        .map_err(|e| RedactError::Pdfium(format!("load_pdf: {e}")))?;
+    let pages = document.pages();
+    if pages.is_empty() {
+        return Err(RedactError::PageNoImage(1));
+    }
+    let page = pages
+        .get(0)
+        .map_err(|e| RedactError::Pdfium(format!("get page 0: {e}")))?;
+    let render_config = PdfRenderConfig::new().scale_page_by_factor(300.0 / 72.0);
+    let bitmap = page
+        .render_with_config(&render_config)
+        .map_err(|e| RedactError::Pdfium(format!("render p1: {e}")))?;
+    let rgb = bitmap.as_image().into_rgb8();
+    let (w, h) = rgb.dimensions();
+    let mut jpeg = Vec::with_capacity((w as usize * h as usize) / 8);
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 90).write_image(
+        rgb.as_raw(),
+        w,
+        h,
+        image::ExtendedColorType::Rgb8,
+    )?;
+    Ok(jpeg)
+}
+
 /// Gemini API を叩いて、PDF 内の金額表記の bbox を取得する。
+///
+/// 内部的には PDF を pdfium で 200 DPI rasterize して JPEG にしてから送る。
+/// この同じ JPEG (の同じピクセル座標系) を `apply_redactions` も使うので、
+/// Gemini が返した bbox は必ずマスク描画位置と整合する。
 ///
 /// `endpoint` には prod では `GEMINI_DEFAULT_ENDPOINT` を、テストでは
 /// `wiremock::MockServer::uri()` を渡すことで wiremock 化が可能。
@@ -183,13 +234,16 @@ pub async fn detect_amount_boxes(
     let endpoint = endpoint.unwrap_or(GEMINI_DEFAULT_ENDPOINT);
 
     let url = format!("{endpoint}/models/{model}:generateContent?key={api_key}");
-    let pdf_b64 = base64::engine::general_purpose::STANDARD.encode(pdf_bytes);
+    // PDF ではなく **rasterize 済 JPEG** を送る (3164 系 multi-layer PDF で bbox が
+    // ズレる問題の根治: rasterize → 同じ JPEG で bbox 取得 → 同じ JPEG にマスク)。
+    let jpeg = rasterize_first_page_jpeg(pdf_bytes)?;
+    let img_b64 = base64::engine::general_purpose::STANDARD.encode(&jpeg);
 
     let body = serde_json::json!({
         "contents": [{
             "role": "user",
             "parts": [
-                { "inlineData": { "mimeType": "application/pdf", "data": pdf_b64 } },
+                { "inlineData": { "mimeType": "image/jpeg", "data": img_b64 } },
                 { "text": REDACT_PROMPT }
             ]
         }],
@@ -443,14 +497,16 @@ pub async fn detect_all_cells(
     let endpoint = endpoint.unwrap_or(GEMINI_DEFAULT_ENDPOINT);
 
     let url = format!("{endpoint}/models/{model}:generateContent?key={api_key}");
-    let pdf_b64 = base64::engine::general_purpose::STANDARD.encode(pdf_bytes);
+    // PDF ではなく rasterize 済 JPEG を送る (詳細は detect_amount_boxes コメント)。
+    let jpeg = rasterize_first_page_jpeg(pdf_bytes)?;
+    let img_b64 = base64::engine::general_purpose::STANDARD.encode(&jpeg);
 
-    // Stage 1 は全セル列挙なので token 上限を多めに (PDF によっては 50+ セル)
+    // Stage 1 は全セル列挙なので token 上限を多めに (帳票によっては 50+ セル)
     let body = serde_json::json!({
         "contents": [{
             "role": "user",
             "parts": [
-                { "inlineData": { "mimeType": "application/pdf", "data": pdf_b64 } },
+                { "inlineData": { "mimeType": "image/jpeg", "data": img_b64 } },
                 { "text": STAGE1_PROMPT }
             ]
         }],
@@ -616,56 +672,35 @@ pub async fn detect_amount_boxes_v2(
 ///
 /// 元値は出力 PDF のどこにも残らないので、PDF.js progressive render でも
 /// **ちらつきは構造的に発生し得ない**。pure 関数 (HTTP / DB に触らない)。
-/// 入力 PDF を 1 ページずつ pdfium で **rasterize** → 該当ページに redaction が
-/// あれば白矩形を画素単位で焼き込む → JPEG エンコード → 新規 PDF (1 page = 1
-/// JPEG XObject) として再構築する。
+/// 入力 PDF の 1 ページ目を pdfium で rasterize → 黒矩形を画素単位で焼き込む
+/// → JPEG (quality 85) を返す。**出力は PDF ではなく JPEG bytes**。
 ///
-/// ## なぜ rasterize か
+/// ## 設計判断
 ///
-/// 旧実装 (PR #267 以前) は「埋め込み JPEG XObject の pixel 書き換え + content
-/// stream に白矩形オーバーレイ」の 2 段構えだったが、Canon iR-ADV C5535 III 系
-/// の出力 PDF (3164_001.pdf) は次の 3 層構造で旧方式が破綻した:
+/// 1. **PDF wrapping を廃止**: 配信先 (LINE / LINE WORKS / nuxt-notify viewer)
+///    は最終的に画像 1 枚を見せるだけなので、PDF 再構築の overhead と複雑性を
+///    削った。多ページ PDF はとりあえず page 1 のみ対応。
 ///
-/// ```text
-/// Obj4: 1240×1753 RGB JPEG (FlateDecode + DCTDecode)  ← 背景
-/// Obj5: 2408×3264 1bpc CCITT, ImageMask=true           ← 文字/罫線レイヤー (上書き描画)
-/// Obj6: 128×48 1bpc CCITT (赤ロゴ)
-/// ```
+/// 2. **rasterize で全レイヤー合成**: Canon iR-ADV C5535 III 系 (3164_001.pdf)
+///    のような Obj4 JPEG + Obj5 CCITT ImageMask + Obj6 ロゴ多層 PDF も、pdfium が
+///    全レイヤーを合成した最終ピクセルにマスクを焼き込むので確実に隠せる。
 ///
-/// JPEG (Obj4) ピクセル書き換え → Obj5 ImageMask が 0.149gray で文字を上書き
-/// 描画するため見た目は変わらない。content stream overlay も多層 PDF の描画順
-/// 都合で機能しないケースがある。
-///
-/// pdfium で全レイヤー合成した後の **最終ピクセル** に対してマスクを描けば、
-/// 元 PDF のレイヤー構造に依存せず確実に隠せる。出力は 1 page = 1 JPEG
-/// XObject の単純な PDF なので、`extract_first_page_jpeg` も従来通り動作する。
+/// 3. **bbox 整合**: bbox は `detect_amount_boxes` 系が同じ pdfium で rasterize した
+///    JPEG を Gemini に送って取得した値。同じ JPEG (= 同じピクセル座標系) に
+///    マスクを描くので必ず正しい位置に揃う。
 pub fn apply_redactions(
     pdf_bytes: &[u8],
     redactions: &[RedactionBox],
 ) -> Result<Vec<u8>, RedactError> {
     use pdfium_render::prelude::PdfRenderConfig;
 
-    // redactions が空なら rasterize はスキップして入力 PDF をそのまま返す
-    // (lossy JPEG 化を避けて原本品質を維持)。ただし PDF 形式が壊れていれば
-    // 非空のときと同じく pdfium load_pdf エラーで失敗させたいので、parse だけ
-    // 行って中身は捨てる。
-    if redactions.is_empty() {
-        let pdfium_mu = pdfium_locked()?;
-        let pdfium_guard = pdfium_mu
-            .lock()
-            .map_err(|e| RedactError::Pdfium(format!("mutex poisoned: {e}")))?;
-        let _ = pdfium_guard
-            .0
-            .load_pdf_from_byte_slice(pdf_bytes, None)
-            .map_err(|e| RedactError::Pdfium(format!("load_pdf: {e}")))?;
-        return Ok(pdf_bytes.to_vec());
-    }
-
-    // 1) bbox 検証 + ページ単位にグループ化 (page 数チェックは pdfium で開いた後)
-    let mut by_page: std::collections::BTreeMap<usize, Vec<&RedactionBox>> = Default::default();
-    let mut max_redaction_page = 0usize;
+    // 1) bbox 検証
     for r in redactions {
         if r.page == 0 {
+            return Err(RedactError::PageNotFound(r.page));
+        }
+        if r.page != 1 {
+            // 多ページ PDF は将来対応。当面 page 1 以外は弾く。
             return Err(RedactError::PageNotFound(r.page));
         }
         let [ymin, xmin, ymax, xmax] = r.box_2d;
@@ -678,140 +713,70 @@ pub fn apply_redactions(
         {
             return Err(RedactError::InvalidBox(r.box_2d));
         }
-        max_redaction_page = max_redaction_page.max(r.page);
-        by_page.entry(r.page).or_default().push(r);
     }
 
-    // 2) Pdfium で PDF を開く (Mutex で Pdfium 全体を排他化 — PDFium 本体が
-    //    スレッドセーフではないため複数スレッド同時利用は不可)。
+    // 2) Pdfium で PDF を開いて 1 ページ目を 200 DPI rasterize
     let pdfium_mu = pdfium_locked()?;
     let pdfium_guard = pdfium_mu
         .lock()
         .map_err(|e| RedactError::Pdfium(format!("mutex poisoned: {e}")))?;
-    let pdfium = &pdfium_guard.0;
-    let document = pdfium
+    let document = pdfium_guard
+        .0
         .load_pdf_from_byte_slice(pdf_bytes, None)
         .map_err(|e| RedactError::Pdfium(format!("load_pdf: {e}")))?;
     let pages = document.pages();
-    let page_count = pages.len() as usize;
-    if page_count == 0 {
+    if pages.is_empty() {
         return Err(RedactError::PageNoImage(1));
     }
-    if max_redaction_page > page_count {
-        return Err(RedactError::PageNotFound(max_redaction_page));
-    }
+    let page = pages
+        .get(0)
+        .map_err(|e| RedactError::Pdfium(format!("get page 0: {e}")))?;
+    let mb_w_pt = page.width().value;
+    let mb_h_pt = page.height().value;
 
-    // 3) 出力 PDF を新規構築
-    let mut out_doc = Document::with_version("1.5");
-    let pages_id = out_doc.new_object_id();
-    let mut page_refs: Vec<Object> = Vec::with_capacity(page_count);
+    let render_config = PdfRenderConfig::new().scale_page_by_factor(300.0 / 72.0);
+    let bitmap = page
+        .render_with_config(&render_config)
+        .map_err(|e| RedactError::Pdfium(format!("render p1: {e}")))?;
+    let mut rgb = bitmap.as_image().into_rgb8();
+    let (img_w, img_h) = rgb.dimensions();
 
-    // 200 DPI でレンダリング。元 FAX は ~150 dpi 相当が多いので 200 で十分鮮明、
-    // かつ A4 1 page あたり ~1654x2339 ≈ JPEG 200-400 KB に収まる。
-    const RENDER_DPI: f32 = 200.0;
-    const PT_PER_INCH: f32 = 72.0;
-    let render_config = PdfRenderConfig::new().scale_page_by_factor(RENDER_DPI / PT_PER_INCH);
+    tracing::info!(
+        "redact[rasterize] page={mb_w_pt:.1}x{mb_h_pt:.1}pt → img={img_w}x{img_h}px, {} redaction(s)",
+        redactions.len()
+    );
 
-    // 4) ページごとに rasterize → 白塗り → JPEG 化 → 新規 PDF に Page 追加
-    for (idx, page) in pages.iter().enumerate() {
-        let page_num = idx + 1;
-        let mb_w_pt = page.width().value;
-        let mb_h_pt = page.height().value;
-
-        let bitmap = page
-            .render_with_config(&render_config)
-            .map_err(|e| RedactError::Pdfium(format!("render p{page_num}: {e}")))?;
-        let mut rgb = bitmap.as_image().into_rgb8();
-        let (img_w, img_h) = rgb.dimensions();
-
-        if let Some(rs) = by_page.get(&page_num) {
-            tracing::info!(
-                "redact[rasterize] p{page_num}: page={mb_w_pt:.1}x{mb_h_pt:.1}pt → img={img_w}x{img_h}px, {} redaction(s)",
-                rs.len()
-            );
-            for (i, r) in rs.iter().enumerate() {
-                let [ymin, xmin, ymax, xmax] = r.box_2d;
-                let px = ((xmin / 1000.0) * img_w as f32).round().max(0.0) as u32;
-                let py = ((ymin / 1000.0) * img_h as f32).round().max(0.0) as u32;
-                let pw = ((xmax - xmin) / 1000.0 * img_w as f32).round().max(0.0) as u32;
-                let ph = ((ymax - ymin) / 1000.0 * img_h as f32).round().max(0.0) as u32;
-                let x0 = px.min(img_w);
-                let y0 = py.min(img_h);
-                let x_end = px.saturating_add(pw).min(img_w);
-                let y_end = py.saturating_add(ph).min(img_h);
-                tracing::info!(
-                    "redact[rasterize] r[{i}] text={:?} bbox=[{ymin:.1},{xmin:.1},{ymax:.1},{xmax:.1}] → px=({x0},{y0})→({x_end},{y_end})",
-                    r.text
-                );
-                for y in y0..y_end {
-                    for x in x0..x_end {
-                        rgb.put_pixel(x, y, image::Rgb([255, 255, 255]));
-                    }
-                }
+    // 3) 黒矩形でマスク
+    for (i, r) in redactions.iter().enumerate() {
+        let [ymin, xmin, ymax, xmax] = r.box_2d;
+        let px = ((xmin / 1000.0) * img_w as f32).round().max(0.0) as u32;
+        let py = ((ymin / 1000.0) * img_h as f32).round().max(0.0) as u32;
+        let pw = ((xmax - xmin) / 1000.0 * img_w as f32).round().max(0.0) as u32;
+        let ph = ((ymax - ymin) / 1000.0 * img_h as f32).round().max(0.0) as u32;
+        let x0 = px.min(img_w);
+        let y0 = py.min(img_h);
+        let x_end = px.saturating_add(pw).min(img_w);
+        let y_end = py.saturating_add(ph).min(img_h);
+        tracing::info!(
+            "redact[rasterize] r[{i}] text={:?} bbox=[{ymin:.1},{xmin:.1},{ymax:.1},{xmax:.1}] → px=({x0},{y0})→({x_end},{y_end})",
+            r.text
+        );
+        for y in y0..y_end {
+            for x in x0..x_end {
+                rgb.put_pixel(x, y, image::Rgb([0, 0, 0]));
             }
         }
-
-        // JPEG エンコード (quality 85: rasterize 後の画像なので少し落としても可読性十分)
-        let mut jpeg = Vec::with_capacity((img_w as usize * img_h as usize) / 8);
-        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 85).write_image(
-            rgb.as_raw(),
-            img_w,
-            img_h,
-            image::ExtendedColorType::Rgb8,
-        )?;
-
-        // 出力 PDF に Image XObject + Page 追加。
-        // Content stream は image を MediaBox 全体に拡大して描画 (`cm` で width=mb_w, height=mb_h)。
-        let image_stream = Stream::new(
-            dictionary! {
-                "Type" => "XObject",
-                "Subtype" => "Image",
-                "Width" => img_w as i64,
-                "Height" => img_h as i64,
-                "ColorSpace" => "DeviceRGB",
-                "BitsPerComponent" => 8,
-                "Filter" => "DCTDecode",
-            },
-            jpeg,
-        );
-        let image_id = out_doc.add_object(image_stream);
-        let resources_id = out_doc.add_object(dictionary! {
-            "XObject" => dictionary! { "Im0" => image_id },
-        });
-        let content = format!("q\n{mb_w_pt:.2} 0 0 {mb_h_pt:.2} 0 0 cm\n/Im0 Do\nQ\n");
-        let content_id = out_doc.add_object(Stream::new(dictionary! {}, content.into_bytes()));
-        let page_id = out_doc.add_object(dictionary! {
-            "Type" => "Page",
-            "Parent" => pages_id,
-            "Resources" => resources_id,
-            "MediaBox" => vec![
-                Object::Real(0.0),
-                Object::Real(0.0),
-                Object::Real(mb_w_pt),
-                Object::Real(mb_h_pt),
-            ],
-            "Contents" => content_id,
-        });
-        page_refs.push(page_id.into());
     }
 
-    let catalog_id = out_doc.add_object(dictionary! {
-        "Type" => "Catalog",
-        "Pages" => pages_id,
-    });
-    out_doc.objects.insert(
-        pages_id,
-        Object::Dictionary(dictionary! {
-            "Type" => "Pages",
-            "Count" => page_count as i64,
-            "Kids" => page_refs,
-        }),
-    );
-    out_doc.trailer.set("Root", catalog_id);
-
-    let mut out = Vec::new();
-    out_doc.save_to(&mut out)?;
-    Ok(out)
+    // 4) JPEG エンコード (quality 85)
+    let mut jpeg = Vec::with_capacity((img_w as usize * img_h as usize) / 8);
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 85).write_image(
+        rgb.as_raw(),
+        img_w,
+        img_h,
+        image::ExtendedColorType::Rgb8,
+    )?;
+    Ok(jpeg)
 }
 
 /// 指定ページの Resources/XObject から **DCTDecode (= JPEG) フィルタの画像のうち
@@ -998,16 +963,19 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_redactions_empty_passthrough() {
+    fn test_apply_redactions_empty_returns_clean_jpeg() {
+        // redactions=空でも apply_redactions は rasterize → JPEG を返す
+        // (出力 PDF wrapping を廃止したので空時のショートカット返しは無し)。
         let pdf = pdf_with_jpeg_image(50, 50);
         let out = apply_redactions(&pdf, &[]).unwrap();
-        // 出力 PDF は valid (再 load できる) こと
-        let _doc = Document::load_mem(&out).unwrap();
+        // 出力は JPEG (SOI = 0xFFD8FF...)
+        assert!(out.len() > 100, "output too short: {}", out.len());
+        assert_eq!(&out[0..3], &[0xFF, 0xD8, 0xFF], "expected JPEG SOI marker");
     }
 
     #[test]
-    fn test_apply_redactions_paints_white_on_jpeg() {
-        // 元画像は全面赤。bbox = 全面。redact 後の画像は全面 白 になっているはず。
+    fn test_apply_redactions_paints_black_on_jpeg() {
+        // 元画像は全面赤。bbox = 全面。redact 後の JPEG は全面 黒 になっているはず。
         let pdf = pdf_with_jpeg_image(40, 40);
         let r = vec![RedactionBox {
             page: 1,
@@ -1015,17 +983,13 @@ mod tests {
             text: "x".into(),
         }];
         let out = apply_redactions(&pdf, &r).unwrap();
-        let doc = Document::load_mem(&out).unwrap();
-        // 出力 PDF から再度 image stream を抽出し、ピクセル平均が白に近いことを確認
-        let pages: Vec<ObjectId> = doc.get_pages().into_values().collect();
-        let img_id = find_first_image_xobject(&doc, pages[0]).unwrap().unwrap();
-        let stream = doc.get_object(img_id).unwrap().as_stream().unwrap();
-        let img = image::load_from_memory(&stream.content).unwrap().to_rgb8();
-        // 中央ピクセルが白 (255,255,255) であること
-        let center = img.get_pixel(20, 20);
+        // 出力 JPEG を decode して中央ピクセルが黒 (0,0,0) であることを確認
+        let img = image::load_from_memory(&out).unwrap().to_rgb8();
+        let (w, h) = img.dimensions();
+        let center = img.get_pixel(w / 2, h / 2);
         assert!(
-            center.0[0] > 240 && center.0[1] > 240 && center.0[2] > 240,
-            "center pixel should be white, got {:?}",
+            center.0[0] < 30 && center.0[1] < 30 && center.0[2] < 30,
+            "center pixel should be black, got {:?}",
             center.0
         );
     }
@@ -1259,9 +1223,14 @@ mod tests {
             .mount(&server)
             .await;
 
-        let result = detect_amount_boxes_v2(b"fake pdf", "fake-key", None, Some(&server.uri()))
-            .await
-            .unwrap();
+        let result = detect_amount_boxes_v2(
+            &pdf_with_jpeg_image(40, 40),
+            "fake-key",
+            None,
+            Some(&server.uri()),
+        )
+        .await
+        .unwrap();
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].text, "100,000円");
         assert_eq!(result[0].page, 1); // PageCells.page から補完
@@ -1305,9 +1274,14 @@ mod tests {
             .mount(&server)
             .await;
 
-        let result = detect_amount_boxes_v2(b"fake pdf", "fake-key", None, Some(&server.uri()))
-            .await
-            .unwrap();
+        let result = detect_amount_boxes_v2(
+            &pdf_with_jpeg_image(40, 40),
+            "fake-key",
+            None,
+            Some(&server.uri()),
+        )
+        .await
+        .unwrap();
 
         // 値セル 3 個だけ
         assert_eq!(result.len(), 3);
@@ -1356,9 +1330,14 @@ mod tests {
             .mount(&server)
             .await;
 
-        let pages = detect_all_cells(b"pdf", "key", None, Some(&server.uri()))
-            .await
-            .unwrap();
+        let pages = detect_all_cells(
+            &pdf_with_jpeg_image(40, 40),
+            "key",
+            None,
+            Some(&server.uri()),
+        )
+        .await
+        .unwrap();
         assert_eq!(pages.len(), 2);
         assert_eq!(pages[0].page, 1);
         assert_eq!(pages[1].page, 2);
@@ -1402,9 +1381,14 @@ mod tests {
             .mount(&server)
             .await;
 
-        let result = detect_amount_boxes_v2(b"pdf", "key", None, Some(&server.uri()))
-            .await
-            .unwrap();
+        let result = detect_amount_boxes_v2(
+            &pdf_with_jpeg_image(40, 40),
+            "key",
+            None,
+            Some(&server.uri()),
+        )
+        .await
+        .unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].text, "fallback");
     }
@@ -1437,9 +1421,14 @@ mod tests {
             .mount(&server)
             .await;
 
-        let result = detect_amount_boxes_v2(b"pdf", "key", None, Some(&server.uri()))
-            .await
-            .unwrap();
+        let result = detect_amount_boxes_v2(
+            &pdf_with_jpeg_image(40, 40),
+            "key",
+            None,
+            Some(&server.uri()),
+        )
+        .await
+        .unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].text, "fb");
     }
@@ -1481,9 +1470,14 @@ mod tests {
             .mount(&server)
             .await;
 
-        let result = detect_amount_boxes_v2(b"pdf", "key", None, Some(&server.uri()))
-            .await
-            .unwrap();
+        let result = detect_amount_boxes_v2(
+            &pdf_with_jpeg_image(40, 40),
+            "key",
+            None,
+            Some(&server.uri()),
+        )
+        .await
+        .unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].text, "fb2");
     }
@@ -1500,9 +1494,14 @@ mod tests {
             .mount(&server)
             .await;
 
-        let err = detect_all_cells(b"pdf", "key", None, Some(&server.uri()))
-            .await
-            .unwrap_err();
+        let err = detect_all_cells(
+            &pdf_with_jpeg_image(40, 40),
+            "key",
+            None,
+            Some(&server.uri()),
+        )
+        .await
+        .unwrap_err();
         assert!(matches!(err, RedactError::GeminiStatus(_, _)));
     }
 
@@ -1547,9 +1546,14 @@ mod tests {
             .mount(&server)
             .await;
 
-        let err = detect_all_cells(b"pdf", "key", None, Some(&server.uri()))
-            .await
-            .unwrap_err();
+        let err = detect_all_cells(
+            &pdf_with_jpeg_image(40, 40),
+            "key",
+            None,
+            Some(&server.uri()),
+        )
+        .await
+        .unwrap_err();
         assert!(matches!(err, RedactError::GeminiEmpty));
     }
 

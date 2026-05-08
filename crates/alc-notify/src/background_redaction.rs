@@ -189,7 +189,7 @@ pub async fn redact_document_with_deps(
         }
     };
 
-    // 8. PDF に白矩形オーバーレイ
+    // 8. rasterize → 黒矩形マスク → JPEG (PDF 再構築は廃止、画像 1 枚で配信する)
     let redacted_bytes = match apply_redactions(&pdf_bytes, &redactions) {
         Ok(b) => b,
         Err(e) => {
@@ -211,12 +211,9 @@ pub async fn redact_document_with_deps(
         }
     };
 
-    // 9. R2 に redacted をアップロード (document スコープ固定キー、上書き対応)
-    let key = format!("{}/redacted/{}.pdf", tenant_id, document_id);
-    if let Err(e) = storage
-        .upload(&key, &redacted_bytes, "application/pdf")
-        .await
-    {
+    // 9. R2 に redacted JPEG をアップロード (document スコープ固定キー、上書き対応)
+    let key = format!("{}/redacted/{}.jpg", tenant_id, document_id);
+    if let Err(e) = storage.upload(&key, &redacted_bytes, "image/jpeg").await {
         tracing::error!("redact: r2 upload: {e}");
         let err = format!("r2 upload: {e}");
         let _ = docs
@@ -563,13 +560,13 @@ mod tests {
         assert_eq!(statuses.first().map(|s| s.0.as_str()), Some("processing"));
         assert_eq!(statuses.last().map(|s| s.0.as_str()), Some("completed"));
         let (key, applied) = docs.completed.lock().unwrap().clone().unwrap();
-        // tenant/redacted/{document_id}.pdf
+        // tenant/redacted/{document_id}.jpg (PDF wrapping を廃止 → JPEG 直保存)
         assert!(key.contains("/redacted/"), "unexpected key: {key}");
-        assert!(key.ends_with(".pdf"), "unexpected key: {key}");
+        assert!(key.ends_with(".jpg"), "unexpected key: {key}");
         assert_eq!(applied, 0);
         let upload = storage.last_upload.lock().unwrap().clone().unwrap();
         assert!(upload.0.contains("/redacted/"));
-        assert!(upload.0.ends_with(".pdf"));
+        assert!(upload.0.ends_with(".jpg"));
     }
 
     // 2. PDF 以外は skipped、Gemini を呼ばない
@@ -782,9 +779,12 @@ mod tests {
         assert!(last.1.as_deref().unwrap().contains("gemini"));
     }
 
-    // 11. apply_redactions エラー → failed (不正 PDF)
+    // 11. 不正 PDF → failed
+    //     旧アーキテクチャは「detect は raw PDF を投げる → apply で rasterize 失敗」
+    //     だったが、新アーキは detect も内部で rasterize する (Gemini に JPEG を送る
+    //     ため) なので、不正 PDF は detect で先に失敗 → "gemini:" prefix で wrap される。
     #[tokio::test]
-    async fn redact_document_apply_error_marks_failed() {
+    async fn redact_document_invalid_pdf_marks_failed() {
         let docs = StubDocs::new(build_doc(Some("doc.pdf")));
         let storage = StubStorage::ok(b"not a pdf".to_vec());
         let server = start_gemini_mock_returning("{\"redactions\": []}").await;
@@ -804,7 +804,12 @@ mod tests {
         let statuses = docs.statuses.lock().unwrap().clone();
         let last = statuses.last().expect("at least one status");
         assert_eq!(last.0, "failed");
-        assert!(last.1.as_deref().unwrap().contains("apply"));
+        // detect 内 rasterize 失敗 → "gemini: pdfium: load_pdf: ..." になる。
+        let err_msg = last.1.as_deref().unwrap();
+        assert!(
+            err_msg.contains("gemini") || err_msg.contains("apply") || err_msg.contains("pdfium"),
+            "unexpected err: {err_msg}"
+        );
     }
 
     // 12. 2-stage モード: 同じ Gemini モック (空配列) で `use_2stage=true` → completed
@@ -1048,7 +1053,8 @@ mod tests {
         wiremock::Mock::given(wiremock::matchers::method("POST"))
             .and(wiremock::matchers::path("/broadcast"))
             .and(wiremock::matchers::body_string_contains("\"failed\""))
-            .and(wiremock::matchers::body_string_contains("apply"))
+            // 新アーキでは detect 内で rasterize 失敗 → "gemini:" prefix
+            .and(wiremock::matchers::body_string_contains("gemini"))
             .respond_with(wiremock::ResponseTemplate::new(200))
             .expect(1)
             .mount(&bcast)
@@ -1057,7 +1063,7 @@ mod tests {
             RedactBroadcaster::new(format!("{}/broadcast", bcast.uri()), "secret".into());
 
         let docs = StubDocs::new(build_doc(Some("doc.pdf")));
-        // 不正 PDF → apply_redactions エラー
+        // 不正 PDF → detect_amount_boxes 内で rasterize エラー
         let storage = StubStorage::ok(b"not a pdf".to_vec());
         let gemini = start_gemini_mock_returning("{\"redactions\": []}").await;
 
