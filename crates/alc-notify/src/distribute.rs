@@ -473,25 +473,32 @@ pub(crate) fn build_distribute_message(
             }
         };
 
-        // 場所セクション (住所と電話は indent して place の下にぶら下げる)
+        // 場所セクション (住所/担当/電話は indent して place の下にぶら下げる)
         let push_place = |lines: &mut Vec<String>,
                           prefix: &str,
                           place_key: &str,
                           address_key: &str,
-                          phone_key: &str| {
+                          phone_key: &str,
+                          person_key: &str| {
             if let Some(v) = get_str(place_key) {
                 lines.push(format!("{} {}", prefix, v));
                 if let Some(addr) = get_str(address_key) {
                     lines.push(format!("　 {}", addr));
                 }
+                if let Some(person) = get_str(person_key) {
+                    lines.push(format!("　 👤 {}", person));
+                }
                 if let Some(phone) = get_str(phone_key) {
                     lines.push(format!("　 ☎ {}", phone));
                 }
             } else {
-                // place 自体が空でも address/phone が来ていたら捨てずに親なしで列挙
+                // place 自体が空でも address/phone/person が来ていたら捨てずに親なしで列挙
                 // (defensive、ほぼ起きないが念のため)
                 if let Some(addr) = get_str(address_key) {
                     lines.push(format!("{} {}", prefix, addr));
+                }
+                if let Some(person) = get_str(person_key) {
+                    lines.push(format!("　 👤 {}", person));
                 }
                 if let Some(phone) = get_str(phone_key) {
                     lines.push(format!("　 ☎ {}", phone));
@@ -506,6 +513,7 @@ pub(crate) fn build_distribute_message(
             "loading_place",
             "loading_place_address",
             "loading_place_phone",
+            "loading_place_person",
         );
         push_place(
             &mut lines,
@@ -513,6 +521,7 @@ pub(crate) fn build_distribute_message(
             "unloading_place",
             "unloading_place_address",
             "unloading_place_phone",
+            "unloading_place_person",
         );
         push_field(&mut lines, "🕐 積込:", "loading_at");
         push_field(&mut lines, "🕓 卸し:", "unloading_at");
@@ -594,9 +603,11 @@ mod tests {
                 "loading_place": "東京都港区",
                 "loading_place_address": null,
                 "loading_place_phone": null,
+                "loading_place_person": null,
                 "unloading_place": "大阪府大阪市",
                 "unloading_place_address": null,
                 "unloading_place_phone": null,
+                "unloading_place_person": null,
                 "loading_at": "5/9 10:00",
                 "unloading_at": "5/10 14:00",
                 "notes": "冷凍便\n要時間厳守",
@@ -621,31 +632,35 @@ mod tests {
     }
 
     #[test]
-    fn message_indents_place_address_and_phone_under_place() {
-        // 積地: 会社名 + 住所 + 電話、卸地: 住所のみ (PR の代表ユースケース)
+    fn message_indents_place_address_phone_and_person_under_place() {
+        // 積地: 会社名 + 住所 + 担当 + 電話、卸地: 住所のみ
         let mut doc = build_doc();
         doc.extracted_data = Some(serde_json::json!({
             "logistics": {
                 "loading_place": "イオン関西RDC",
                 "loading_place_address": "京都府乙訓郡大山崎町字大山崎小字鏡田38",
                 "loading_place_phone": "075-959-5008",
+                "loading_place_person": "佐藤",
                 "unloading_place": "熊本県八代市新港町3-9-8",
                 "loading_at": "令和8年4月17日 (金) 19時"
             }
         }));
         let msg = build_distribute_message(&doc, "https://x/v/abc");
-        // 積地: 会社名 → 住所 → 電話の順 (indent あり)
+        // 積地: 会社名 → 住所 → 👤 担当 → ☎ 電話の順 (indent あり)
         let i_place = msg.find("📍 積地: イオン関西RDC").unwrap();
         let i_addr = msg.find("　 京都府乙訓郡").unwrap();
+        let i_person = msg.find("　 👤 佐藤").unwrap();
         let i_phone = msg.find("　 ☎ 075-959-5008").unwrap();
         let i_unload = msg.find("📦 卸地: 熊本県八代市").unwrap();
         let i_loadat = msg.find("🕐 積込:").unwrap();
         assert!(i_place < i_addr);
-        assert!(i_addr < i_phone);
+        assert!(i_addr < i_person);
+        assert!(i_person < i_phone);
         assert!(i_phone < i_unload);
         assert!(i_unload < i_loadat);
-        // 卸地は住所のみで電話なし → ☎ が 1 個だけ
+        // 卸地は住所のみ → ☎ が 1 個、👤 も 1 個 (積地のみ)
         assert_eq!(msg.matches('☎').count(), 1);
+        assert_eq!(msg.matches("👤 ").count(), 1);
     }
 
     #[test]
