@@ -21,3 +21,4 @@ node_modules/
 MODULE.bazel.lock
 backup/
 setup-bazel
+incus-sandbox
