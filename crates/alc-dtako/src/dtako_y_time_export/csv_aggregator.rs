@@ -66,8 +66,10 @@ pub fn build_kudgivt_key(tenant_id: uuid::Uuid, unko_no: &str, r2_prefix: Option
 
 /// 1 運行の KUDGIVT.csv を取得して該当 crew_role の events を返す。
 ///
-/// CSV は Shift-JIS の場合と UTF-8 の場合がある (実装の歴史)。SHIFT_JIS の
-/// `(decoded, _, had_errors)` を見て、文字化けが多い場合のみ utf8 fallback。
+/// `split_csv_from_r2` (dtako_upload.rs) で per-unko CSV は **UTF-8 で保存**される
+/// (元 ZIP 内が Shift-JIS でも、split 時に decode_shift_jis を通して UTF-8 化済み)。
+/// なので UTF-8 として読む。後方互換のため Shift-JIS もフォールバックで試す
+/// (元 R2 に Shift-JIS のまま置かれた古いデータ用)。
 pub async fn fetch_and_parse_kudgivt(
     storage: &dyn StorageBackend,
     tenant_id: uuid::Uuid,
@@ -77,7 +79,11 @@ pub async fn fetch_and_parse_kudgivt(
 ) -> Result<Vec<KudgivtRow>, AggregatorError> {
     let key = build_kudgivt_key(tenant_id, unko_no, r2_prefix);
     let bytes = storage.download(&key).await?;
-    let text = decode_shift_jis(&bytes);
+    // まず UTF-8 として試す。失敗したら (= 古い Shift-JIS データ) decode_shift_jis にフォールバック
+    let text = match std::str::from_utf8(&bytes) {
+        Ok(s) => s.to_owned(),
+        Err(_) => decode_shift_jis(&bytes),
+    };
     let rows = parse_kudgivt(&text).map_err(|e| AggregatorError::Parse(e.to_string()))?;
     Ok(rows
         .into_iter()
@@ -85,24 +91,13 @@ pub async fn fetch_and_parse_kudgivt(
         .collect())
 }
 
-/// segment 内 (`[seg_start, seg_end]`) の event_cd=301 events の duration_minutes を sum。
-fn sum_break_minutes(
-    events: &[KudgivtRow],
-    seg_start: NaiveDateTime,
-    seg_end: NaiveDateTime,
-) -> i32 {
-    events
-        .iter()
-        .filter(|e| e.event_cd == "301")
-        .filter(|e| e.start_at >= seg_start && e.start_at <= seg_end)
-        .map(|e| e.duration_minutes.unwrap_or(0))
-        .sum()
-}
-
 /// 1 運行 (KUDGIVT events + departure/return) を `Vec<SegmentInput>` に変換する。
 ///
 /// - `split_by_rest` で WorkSegment を出す
 /// - 各 segment 内の 301 events を sum し rest_minutes として付与
+/// - 1 segment が 24h を超えた場合 (= 休息イベント無しで 24h+ 連続労働、改善基準告示違反データ) は
+///   **24h で強制 cut**。各 sub-segment の rest_minutes は該当範囲の 301 events を sum しなおす。
+///   これにより builder 側 ((A) bucketing) が前日/当日/翌日 (3 暦日) の範囲で対応できる
 pub fn build_segment_inputs(
     events: &[KudgivtRow],
     departure_at: NaiveDateTime,
@@ -119,11 +114,62 @@ pub fn build_segment_inputs(
 
     segments
         .into_iter()
-        .map(|s| SegmentInput {
-            start: s.start,
-            end: s.end,
-            rest_minutes: sum_break_minutes(events, s.start, s.end),
+        .flat_map(|s| split_at_24h(events, s.start, s.end))
+        .collect()
+}
+
+/// 1 WorkSegment を 24h 境界で分割。`end - start <= 24h` ならそのまま 1 個。
+fn split_at_24h(
+    events: &[KudgivtRow],
+    start: NaiveDateTime,
+    end: NaiveDateTime,
+) -> Vec<SegmentInput> {
+    let mut out = Vec::new();
+    let mut cur = start;
+    while cur < end {
+        let chunk_end = std::cmp::min(cur + chrono::Duration::hours(24), end);
+        let intervals = collect_break_intervals(events, cur, chunk_end);
+        let rest_minutes = intervals
+            .iter()
+            .map(|(s, e)| (*e - *s).num_minutes() as i32)
+            .sum();
+        out.push(SegmentInput {
+            start: cur,
+            end: chunk_end,
+            rest_minutes,
+            rest_intervals: intervals,
             note: None,
+        });
+        cur = chunk_end;
+    }
+    out
+}
+
+/// `[seg_start, seg_end]` 内の event_cd=301 の (start, end) を集める。
+/// duration_minutes が None の場合はその event は無視 (期間 0 とみなす)。
+fn collect_break_intervals(
+    events: &[KudgivtRow],
+    seg_start: NaiveDateTime,
+    seg_end: NaiveDateTime,
+) -> Vec<(NaiveDateTime, NaiveDateTime)> {
+    events
+        .iter()
+        .filter(|e| e.event_cd == "301")
+        .filter(|e| e.start_at >= seg_start && e.start_at <= seg_end)
+        .filter_map(|e| {
+            let dur = e.duration_minutes?;
+            if dur <= 0 {
+                return None;
+            }
+            let s = e.start_at;
+            let raw_end = s + chrono::Duration::minutes(dur as i64);
+            // segment 末尾でクリップ (segment 跨ぎ休憩は途中で切る)
+            let e_clip = raw_end.min(seg_end);
+            if e_clip <= s {
+                None
+            } else {
+                Some((s, e_clip))
+            }
         })
         .collect()
 }
@@ -186,18 +232,23 @@ mod tests {
     }
 
     #[test]
-    fn sum_break_minutes_filters_by_event_cd_and_range() {
+    fn collect_break_intervals_filters_by_event_cd_and_range() {
         let events = vec![
             ev("301", dt((2024, 4, 15), (10, 0, 0)), Some(30)),
             ev("301", dt((2024, 4, 15), (14, 0, 0)), Some(15)),
             ev("301", dt((2024, 4, 15), (20, 0, 0)), Some(60)), // 範囲外
             ev("302", dt((2024, 4, 15), (12, 0, 0)), Some(540)), // event_cd 違い
         ];
-        let total = sum_break_minutes(
+        let intervals = collect_break_intervals(
             &events,
             dt((2024, 4, 15), (8, 0, 0)),
             dt((2024, 4, 15), (18, 0, 0)),
         );
+        assert_eq!(intervals.len(), 2);
+        let total: i32 = intervals
+            .iter()
+            .map(|(s, e)| (*e - *s).num_minutes() as i32)
+            .sum();
         assert_eq!(total, 30 + 15);
     }
 

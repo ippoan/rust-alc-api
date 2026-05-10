@@ -10,16 +10,29 @@ use serde::{Deserialize, Serialize};
 pub struct YTimeRow {
     /// A 列とマッチングする bucket date (yyyy-mm-dd)
     pub date: NaiveDate,
-    /// F 列: true → `1`、false → 空。1 暦日 2 始業ケースの「終業日側」で true。
+    /// F 列: true → `1`、false → 空。1 暦日 2 始業ケース or 深夜跨ぎ + 勤務 ≥ 7h の終業日側で true。
     pub previous_day_start: bool,
-    /// G 列の元値: 始業時刻の 0:00 からの分 (0..=1439)
+    /// G 列の元値: 始業時刻の 0:00 からの分 (0..=1439)。
+    /// F=1 のとき: 前日始業時刻 (前日 0:00 起点)。
     pub start_minutes_of_day: i32,
     /// H 列の元値: 終業時刻の bucket_date 0:00 からの分。
     /// 24h 越え時は 1440 以上 (例: 翌日 09:30 → 33h30m → 2010)。
     pub end_minutes_from_bucket_date: i32,
-    /// I 列: 休憩時間 (event_cd=301 の duration sum)、分
-    pub rest_minutes: i32,
-    /// C 列: 自由文 (オプション)
+    /// I 列 (前日 5-22時): 休憩時間 (分)
+    pub rest_prev_5_22: i32,
+    /// J 列 (前日 22-0時): 休憩時間 (分)
+    pub rest_prev_22_0: i32,
+    /// K 列 (当日 0-5時): 休憩時間 (分)
+    pub rest_today_0_5: i32,
+    /// L 列 (当日 5-22時): 休憩時間 (分)
+    pub rest_today_5_22: i32,
+    /// M 列 (当日 22-0時): 休憩時間 (分)
+    pub rest_today_22_0: i32,
+    /// N 列 (翌日 0-5時): 休憩時間 (分)
+    pub rest_next_0_5: i32,
+    /// O 列 (翌日 5-22時): 休憩時間 (分)
+    pub rest_next_5_22: i32,
+    /// C 列: 自由文 (オプション)。同 bucket 結合や 24h cut 時の備考も入れる
     pub note: Option<String>,
 }
 

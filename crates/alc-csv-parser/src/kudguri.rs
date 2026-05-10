@@ -77,8 +77,18 @@ fn build_column_index(headers: &[&str]) -> Result<ColumnIndex, String> {
     let office_name = require_col(headers, "事業所名", &mut missing);
     let vehicle_cd = require_col(headers, "車輌CD", &mut missing);
     let vehicle_name = require_col(headers, "車輌名", &mut missing);
-    let driver_cd = require_col(headers, "乗務員CD1", &mut missing);
-    let driver_name = require_col(headers, "乗務員名１", &mut missing);
+    // 「乗務員CD1」は運行 primary driver で、KUDGURI の全行で同じ値になる。
+    // 行ごとの「対象」は「対象乗務員CD」 (subject driver of this row) で、これを
+    // 採用しないと crew_role=2 副運転手の行も primary driver として登録されてしまう。
+    // 対象乗務員CD/名 が無い古い CSV (1人乗務) は乗務員CD1 にフォールバック。
+    let driver_cd = find_col(headers, "対象乗務員CD").or_else(|| find_col(headers, "乗務員CD1"));
+    if driver_cd.is_none() {
+        missing.push("対象乗務員CD or 乗務員CD1");
+    }
+    let driver_name = find_col(headers, "対象乗務員名").or_else(|| find_col(headers, "乗務員名１"));
+    if driver_name.is_none() {
+        missing.push("対象乗務員名 or 乗務員名１");
+    }
     let crew_role = require_col(headers, "対象乗務員区分", &mut missing);
 
     if !missing.is_empty() {
