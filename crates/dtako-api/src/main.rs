@@ -85,7 +85,6 @@ async fn main() {
         dtako_work_times: Arc::new(PgDtakoWorkTimesRepository::new(pool.clone())),
         dtako_y_time_export: Arc::new(PgDtakoYTimeExportRepository::new(pool.clone())),
         dtako_storage,
-        realtime_bus: alc_core::realtime_bus::RealtimeBus::from_env().map(Arc::new),
     };
 
     let tenant_protected = Router::new()

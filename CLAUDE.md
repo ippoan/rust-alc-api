@@ -521,48 +521,53 @@ example で挙動を確認したら、本体コードを次の粒度で分ける
 - **「外部 API なのでテスト不可能」で放置しない** — pure 関数切り出し + wiremock で 100% 到達できる (今回の例が証拠)
 - **token/URL を const にして直接叩く** — テスト時に差し替えられない。必ず struct フィールド化する
 
-## 外部 API 連携 (notify-realtime-bus + async job 完了通知)
+## 長時間 compute と Cloud Run の罠
 
-長時間 compute (Y時間 export 13ヶ月分で 5-15s 等) を HTTP request で同期保持すると
-Cloudflare proxy timeout や Cloud Run wall-time 超過のリスクがある。これを避けるため、
-`notify-realtime-bus` Worker (DurableObject + hibernated WS、`workers/realtime-bus/` in
-nuxt-notify repo) を共有 broadcaster として使い、async job pattern で frontend に
-完了通知する仕組みがある。
+### 結論: `tokio::spawn` で background compute → fire-and-forget broadcast はやらない
 
-### 使い方 (新しい async endpoint を増やすとき)
+Cloud Run **default で CPU throttling が有効** (`--no-cpu-throttling` 指定なし) のため、
+HTTP response 返却後は CPU 割当が瞬時に~0% に落とされる。`tokio::spawn(async move { ... })`
+した background task は **HTTP 200/202 直後に CPU 停止 → 完走しない**。
 
-1. **`crates/alc-core/src/realtime_bus.rs::RealtimeBus`** を AppState 経由で取得
-   - env vars: `NOTIFY_REDACT_BROADCAST_URL` / `NOTIFY_REDACT_BROADCAST_SECRET` を共有
-     (RedactBroadcaster と同一 Worker / 同一 secret)
-   - `from_env()` で None になり得る → endpoint 側で 503 を返して silent failure を防ぐ
-2. **POST /jobs ハンドラ**: 即時 `202 { job_id: Uuid }` を返し、`tokio::spawn` で compute
-3. **完了時に `bus.broadcast(&event)` を呼ぶ**。event は `Serialize` で以下の必須 field を含む:
-   - `tenant_id: Uuid` — Worker が DurableObject id を引くキー
-   - `document_id: Uuid` — Worker validation 必須 (subject id を入れる、job_id でも OK)
-   - `status: &str` — `"completed"` / `"failed"` 等
-   - 加えて `kind: &'static str` (channel discriminator) と `result` / `error` を含めると frontend が filter できる
-4. **frontend** (Nuxt) は `useYTimeExportJob` 等の composable で `wss://realtime.../subscribe`
-   に `Sec-WebSocket-Protocol: bearer, <jwt>` で接続し、`kind` + `job_id` でメッセージを filter
+検証経緯 (2026-05-10): Y時間 export を `POST /jobs` + WebSocket 完了通知の async pattern
+で実装 (PR #340) → 本番で `job spawned` ログだけ出て `job completed` が来ない →
+frontend の WS が 120s timeout で fail。実害発覚後 PR で revert (sync GET + parallel R2
+fetch のみに戻す)。
 
-### 既存の利用例
+### `tokio::spawn` を使いたい場合の選択肢 (どれもコスト or 実装コスト発生)
 
-| crate | event 型 | 用途 |
-|---|---|---|
-| `alc-notify` | `RedactEvent` (`crates/alc-core/src/redact_broadcast.rs`) | 文書 redact 完了通知 (PR #314 phase 2.5) |
-| `alc-dtako` | `YTimeJobEvent` (`crates/alc-dtako/src/dtako_y_time_export/mod.rs`) | Y時間 export 完了通知 (PR perf/y-time-async-job、2026-05-10) |
+1. **`gcloud run services update --no-cpu-throttling`** (instance-based billing)
+   - asia-northeast1 で **+$20-60/月** (request 頻度依存、24/7 alive で +$63/月)
+   - `deploy.sh` に固定する場合 user 承認必須
+   - 注意: `redact_broadcast.rs` (alc-notify の redact pipeline) は同じ pattern で動いている
+     はずなので、production で本当に最後まで完走しているか要検証 (Y時間と同様に部分失敗
+     している可能性あり)
+2. **Cloud Tasks queue + 別 Cloud Run worker サービス**
+   - Tasks にタスク push → 別 worker が処理 → broadcast
+   - 別サービス追加。月数 cents 〜 $1 程度
+3. **Cloudflare DurableObject 内で compute**
+   - alc_csv_parser 等を TS/WASM 移植が必要、DB 直接アクセス不可 (rust-alc-api 経由)
+   - 1-2 日 rewrite work、ほぼ無料
 
-### 罠
+### sync HTTP で許容できる長さ
 
-- **Worker `/broadcast` は `tenant_id` / `document_id` / `status` を strict validate する**
-  → どの event 型でもこの 3 field を必ず含めること
-- **WebSocket payload size**: CF DurableObject の text fan-out は 1 MB 上限。`YTimeExportResponse`
-  (~288 KB max) は問題ないが、巨大 result を inline で運ぶ前に必ずサイズ想定を確認する
-- **in-memory job state**: result は WS 1 発で運ぶだけで DB 永続化していない。reload や Cloud Run
-  再起動で結果ロスト → user は再 export。許容できないユースケースなら DB job table を別途設計する
-- **`realtime_bus` None 時の挙動**: silent に compute だけ走らせると result 行方不明で UX 最悪 →
-  POST /jobs ハンドラ側で 503 を返して frontend が同期 GET にフォールバック (or エラー表示) できるようにする
-- **タグリリース必須**: deploy には realtime-bus URL/secret が Cloud Run env として注入されている
-  必要がある (`/tag-release patch` で CI 自動デプロイ → user 指示)
+- Cloudflare proxy edge timeout: **100s**
+- Cloud Run request timeout: default 60min (調整可)
+- 5-15s なら sync HTTP で問題なし (Y時間 export は parallel R2 fetch 後 5-15s で済むため
+  async 化せず sync で配信)
+
+### `crates/alc-core/src/realtime_bus.rs::RealtimeBus`
+
+汎用 broadcaster client (notify-realtime-bus Worker `/broadcast` への POST)。
+`RedactBroadcaster` (`crates/alc-core/src/redact_broadcast.rs`) と同 env vars
+(`NOTIFY_REDACT_BROADCAST_URL` / `NOTIFY_REDACT_BROADCAST_SECRET`) を共有。
+
+**現状の使用箇所**: なし (Y時間 export での利用は revert 済)。将来 Cloud Tasks や DO 経由
+の async pattern を再導入する際に再利用可能なように残してある (テスト 11 件付き)。
+
+新規 async endpoint を増やす際は、上記 3 選択肢のいずれかを採用すること。
+**`tokio::spawn` + `bus.broadcast()` を Cloud Run service の HTTP handler 内で直接
+呼び出さない** こと (background task が確実には完走しない)。
 
 ### 並列 R2 fetch のパターン (Y時間 export 高速化、2026-05-10)
 
@@ -571,8 +576,8 @@ nuxt-notify repo) を共有 broadcaster として使い、async job pattern で 
 
 - `R2_FETCH_CONCURRENCY = 16` (200/16 = 12.5 並列ラウンド ≈ 3.75s 想定)
 - `pool.close()` / DB error injection は対象外 (R2 fetch は DB connection 不要)
-- mock 統合テストは `crates/alc-storage::MockStorage` + wiremock realtime-bus で構築可
-  (`tests/mock_tests/mock_dtako_y_time_export_test.rs::post_jobs_returns_202_and_broadcasts_completed_event` 参照)
+- 想定: 13ヶ月レンジで 41-107s → **5-15s** (~85% 削減)
+- これだけで Cloudflare proxy 100s timeout 内に収まるので、async 化不要
 
 ## テスト
 

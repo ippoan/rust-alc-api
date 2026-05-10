@@ -1,27 +1,35 @@
 //! Y時間 export JSON エンドポイント。
 //!
-//! 同期 GET と async job (POST + WS 完了通知) の 2 系統を提供する。
+//! `GET /api/dtako/y-time-export?driver_cd=X&from=YYYY-MM-DD&to=YYYY-MM-DD`
 //!
-//! - **同期 GET** `GET /api/dtako/y-time-export?driver_cd=X&from=YYYY-MM-DD&to=YYYY-MM-DD`
-//!   従来通り compute → JSON return。Cloud Run wall time が長い (13ヶ月で 5-15s)
-//!   ため Cloudflare proxy 経由 frontend からは推奨しない。後方互換のため残置。
-//!
-//! - **async job** `POST /api/dtako/y-time-export/jobs?driver_cd=X&from=...&to=...`
-//!   即時 `202 { job_id }` を返し、background tokio::spawn で compute → 完了時に
-//!   `realtime_bus` (notify-realtime-bus Worker) へ result を inline broadcast。
-//!   frontend (`useYTimeExportJob` composable) が `Sec-WebSocket-Protocol: bearer,<jwt>`
-//!   で `wss://realtime.../subscribe` を listen し、`kind="y_time_export"` &
-//!   `job_id` 一致のイベントで result を受け取る。HTTP の長時間保持を回避し、
-//!   202 から WS event 到着まで通常 5-15 秒。
-//!
-//! 共通 compute 部:
 //! 1. driver_cd → employees.id を解決
 //! 2. dtako_operations から期間内 (`reading_date ± 1 day`) の運行を列挙
 //! 3. 各 unko_no について R2 から KUDGIVT.csv を **並列 fetch** (buffer_unordered 16)
 //! 4. `split_by_rest` で segment 化、event_cd=301 を sum して rest_minutes 算出
 //! 5. 1 暦日 2 始業 ルールで bucketing
+//! 6. JSON で返す
 //!
 //! xlsx 生成は frontend Worker 側 (nuxt-dtako-admin) で行う。
+//!
+//! ## 設計補足: 同期 GET だけにした経緯 (2026-05-10)
+//!
+//! 一時期 `POST /jobs` + WebSocket 完了通知 (notify-realtime-bus) で async job 化を
+//! 試みたが、**Cloud Run の CPU throttling (default ON) により `tokio::spawn` した
+//! background compute が HTTP 200/202 後に CPU 停止 → 完走しない**ことが発覚し撤回した。
+//!
+//! 撤回判断:
+//! - parallel R2 fetch だけで 41-107s → 5-15s に短縮 (Cloudflare proxy 100s timeout 内)
+//! - async pattern は `--no-cpu-throttling` (instance-based billing、月 ~$60 増) か
+//!   Cloud Tasks queue / DurableObject compute への移行が必要
+//! - 5-15s なら sync HTTP で十分、複雑性に見合うリターンなし
+//!
+//! 将来 async pattern を再導入するなら:
+//! - Cloud Run `--no-cpu-throttling` を deploy.sh に固定 + コスト承認
+//! - もしくは Cloudflare DurableObject 内で compute (R2 binding native、ただし alc-csv-parser
+//!   の TS/WASM 移植 + DB query 分離が必要)
+//! - もしくは Cloud Tasks 経由の別 worker サービス
+//!
+//! `crates/alc-core/src/realtime_bus.rs` の `RealtimeBus` 汎用 client は将来用に残してある。
 
 pub mod builder;
 pub mod csv_aggregator;
@@ -33,12 +41,11 @@ use alc_core::storage::StorageBackend;
 use axum::{
     extract::{Query, State},
     http::StatusCode,
-    routing::{get, post},
+    routing::get,
     Json, Router,
 };
 use chrono::{DateTime, Utc};
 use futures::stream::StreamExt;
-use serde::Serialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -57,12 +64,10 @@ where
     DtakoState: axum::extract::FromRef<S>,
     S: Clone + Send + Sync + 'static,
 {
-    Router::new()
-        .route("/dtako/y-time-export", get(get_y_time_export))
-        .route("/dtako/y-time-export/jobs", post(post_y_time_export_job))
+    Router::new().route("/dtako/y-time-export", get(get_y_time_export))
 }
 
-/// 同期 GET: 後方互換用。compute 完了まで HTTP を保持する。
+/// 同期 GET。compute 完了まで HTTP を保持する (5-15s 想定、Cloudflare proxy 100s 内)。
 async fn get_y_time_export(
     State(state): State<DtakoState>,
     tenant: axum::Extension<TenantId>,
@@ -75,89 +80,10 @@ async fn get_y_time_export(
     Ok(Json(resp))
 }
 
-/// async job: 即 202 を返して background で compute → realtime_bus へ result を broadcast。
+/// 共通 compute コア。テストはこの関数単位で書ける。
 ///
-/// `realtime_bus` 未設定 (env vars 欠落) の場合、silent に compute だけ走って
-/// result が行方不明になるのを避けるため `503` を返す。
-async fn post_y_time_export_job(
-    State(state): State<DtakoState>,
-    tenant: axum::Extension<TenantId>,
-    Query(q): Query<YTimeExportQuery>,
-) -> Result<(StatusCode, Json<StartJobResponse>), (StatusCode, String)> {
-    let tenant_id = tenant.0 .0;
-
-    // 即時バリデーション (compute 内でも再度確認するが、202 を返してから報告するより
-    // 400 で即落としたほうが UX 良い)
-    if q.from > q.to {
-        return Err((StatusCode::BAD_REQUEST, "from > to".to_string()));
-    }
-
-    // realtime_bus がないと job 完了通知ができない → 503 で失敗を返す
-    let bus = state.realtime_bus.clone().ok_or((
-        StatusCode::SERVICE_UNAVAILABLE,
-        "realtime_bus not configured (NOTIFY_REDACT_BROADCAST_URL/SECRET 未設定)".to_string(),
-    ))?;
-
-    let job_id = Uuid::new_v4();
-    tracing::info!(
-        job_id = %job_id,
-        tenant_id = %tenant_id,
-        driver_cd = %q.driver_cd,
-        "y-time-export: job spawned"
-    );
-
-    let bg_state = state.clone();
-    let bg_query = q.clone();
-    tokio::spawn(async move {
-        let started = std::time::Instant::now();
-        let outcome = compute_y_time_export(&bg_state, tenant_id, bg_query).await;
-        let elapsed_ms = started.elapsed().as_millis();
-
-        let event = match outcome {
-            Ok(result) => {
-                tracing::info!(
-                    job_id = %job_id,
-                    rows = result.rows.len(),
-                    warnings = result.warnings.len(),
-                    elapsed_ms,
-                    "y-time-export: job completed"
-                );
-                YTimeJobEvent {
-                    kind: "y_time_export",
-                    tenant_id,
-                    document_id: job_id,
-                    job_id,
-                    status: "completed",
-                    result: Some(result),
-                    error: None,
-                }
-            }
-            Err(err) => {
-                let msg = compute_error_to_message(&err);
-                tracing::warn!(
-                    job_id = %job_id,
-                    error = %msg,
-                    elapsed_ms,
-                    "y-time-export: job failed"
-                );
-                YTimeJobEvent {
-                    kind: "y_time_export",
-                    tenant_id,
-                    document_id: job_id,
-                    job_id,
-                    status: "failed",
-                    result: None,
-                    error: Some(msg),
-                }
-            }
-        };
-        bus.broadcast(&event).await;
-    });
-
-    Ok((StatusCode::ACCEPTED, Json(StartJobResponse { job_id })))
-}
-
-/// 同期 / async 共通の compute コア。テストはこの関数単位で書く。
+/// `get_y_time_export` ハンドラ + 将来の async 系 (DO compute / Cloud Tasks 等)
+/// から再利用可能なように分離してある。
 pub async fn compute_y_time_export(
     state: &DtakoState,
     tenant_id: Uuid,
@@ -321,38 +247,6 @@ fn compute_error_to_response(err: ComputeError) -> (StatusCode, String) {
     }
 }
 
-fn compute_error_to_message(err: &ComputeError) -> String {
-    err.to_string()
-}
-
-/// async job 起動時の即時レスポンス。
-#[derive(Debug, Clone, Serialize)]
-pub struct StartJobResponse {
-    pub job_id: Uuid,
-}
-
-/// realtime-bus Worker `/broadcast` に送る Y時間 export 用イベント。
-///
-/// Worker は `tenant_id` / `document_id` / `status` を必須要求するため、
-/// `document_id` には `job_id` (UUID) を入れて満たす。frontend は `kind` &
-/// `job_id` で disambiguate する。
-///
-/// `result` は完了時のみ Some、288 KB 程度までの JSON を inline で運ぶ。
-#[derive(Debug, Clone, Serialize)]
-pub struct YTimeJobEvent {
-    pub kind: &'static str,
-    pub tenant_id: Uuid,
-    /// Worker validation を通すため必須。`job_id` と同値を入れる。
-    pub document_id: Uuid,
-    pub job_id: Uuid,
-    /// `completed` | `failed`
-    pub status: &'static str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<YTimeExportResponse>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-}
-
 /// 並列 fetch のための target tuple。
 struct FetchTarget {
     unko_no: String,
@@ -398,68 +292,10 @@ mod tests {
     }
 
     #[test]
-    fn compute_error_message_passthrough() {
-        assert_eq!(
-            compute_error_to_message(&ComputeError::BadRequest("x".into())),
-            "x"
-        );
-        assert_eq!(
-            compute_error_to_message(&ComputeError::NotFound("y".into())),
-            "y"
-        );
-        assert_eq!(
-            compute_error_to_message(&ComputeError::Internal("z".into())),
-            "z"
-        );
-    }
-
-    #[test]
-    fn y_time_job_event_serialization_includes_kind_and_job_id() {
-        let job_id = Uuid::nil();
-        let tenant_id = Uuid::nil();
-        let ev = YTimeJobEvent {
-            kind: "y_time_export",
-            tenant_id,
-            document_id: job_id,
-            job_id,
-            status: "failed",
-            result: None,
-            error: Some("oops".to_string()),
-        };
-        let json = serde_json::to_string(&ev).expect("serialize");
-        assert!(
-            json.contains("\"kind\":\"y_time_export\""),
-            "kind discriminator missing in {json}"
-        );
-        assert!(
-            json.contains("\"job_id\""),
-            "job_id field missing in {json}"
-        );
-        assert!(
-            json.contains("\"document_id\""),
-            "document_id field required by realtime-bus Worker missing in {json}"
-        );
-        assert!(
-            json.contains("\"status\":\"failed\""),
-            "status missing in {json}"
-        );
-        // result が None のときは skip_serializing_if で消える
-        assert!(
-            !json.contains("\"result\""),
-            "result should be omitted when None: {json}"
-        );
-    }
-
-    #[test]
-    fn start_job_response_shape() {
-        let r = StartJobResponse {
-            job_id: Uuid::nil(),
-        };
-        let json = serde_json::to_string(&r).expect("serialize");
-        assert_eq!(
-            json,
-            "{\"job_id\":\"00000000-0000-0000-0000-000000000000\"}"
-        );
+    fn compute_error_display_passthrough() {
+        assert_eq!(ComputeError::BadRequest("x".into()).to_string(), "x");
+        assert_eq!(ComputeError::NotFound("y".into()).to_string(), "y");
+        assert_eq!(ComputeError::Internal("z".into()).to_string(), "z");
     }
 
     #[test]
