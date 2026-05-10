@@ -19,6 +19,9 @@ use rust_alc_api::db::repository::dtako_upload::{
 };
 use rust_alc_api::db::repository::dtako_vehicles::DtakoVehiclesRepository;
 use rust_alc_api::db::repository::dtako_work_times::{DtakoWorkTimesRepository, WorkTimeItem};
+use rust_alc_api::db::repository::dtako_y_time_export::{
+    DtakoYTimeExportRepository, YTimeExportOperation,
+};
 use rust_alc_api::db::repository::employees::EmployeeRepository;
 use rust_alc_api::db::repository::equipment_failures::EquipmentFailuresRepository;
 use rust_alc_api::db::repository::guidance_records::{
@@ -739,6 +742,61 @@ impl DtakoWorkTimesRepository for MockDtakoWorkTimesRepository {
     ) -> Result<Vec<WorkTimeItem>, sqlx::Error> {
         check_fail!(self);
         Ok(vec![])
+    }
+}
+
+// =============================================================================
+// MockDtakoYTimeExportRepository
+// =============================================================================
+
+pub struct MockDtakoYTimeExportRepository {
+    pub fail_next: AtomicBool,
+    pub driver: std::sync::Mutex<Option<(Uuid, String)>>,
+    pub operations: std::sync::Mutex<Vec<YTimeExportOperation>>,
+}
+
+impl Default for MockDtakoYTimeExportRepository {
+    fn default() -> Self {
+        Self {
+            fail_next: AtomicBool::new(false),
+            driver: std::sync::Mutex::new(None),
+            operations: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+}
+
+impl MockDtakoYTimeExportRepository {
+    pub fn with_driver(self, id: Uuid, name: impl Into<String>) -> Self {
+        *self.driver.lock().unwrap() = Some((id, name.into()));
+        self
+    }
+
+    pub fn with_operations(self, ops: Vec<YTimeExportOperation>) -> Self {
+        *self.operations.lock().unwrap() = ops;
+        self
+    }
+}
+
+#[async_trait::async_trait]
+impl DtakoYTimeExportRepository for MockDtakoYTimeExportRepository {
+    async fn lookup_driver(
+        &self,
+        _tenant_id: Uuid,
+        _driver_cd: &str,
+    ) -> Result<Option<(Uuid, String)>, sqlx::Error> {
+        check_fail!(self);
+        Ok(self.driver.lock().unwrap().clone())
+    }
+
+    async fn list_operations(
+        &self,
+        _tenant_id: Uuid,
+        _driver_id: Uuid,
+        _from: NaiveDate,
+        _to: NaiveDate,
+    ) -> Result<Vec<YTimeExportOperation>, sqlx::Error> {
+        check_fail!(self);
+        Ok(self.operations.lock().unwrap().clone())
     }
 }
 

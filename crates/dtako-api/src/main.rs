@@ -15,7 +15,7 @@ use alc_dtako::repo::{
     PgDtakoEventClassificationsRepository, PgDtakoLogsRepository, PgDtakoOperationsRepository,
     PgDtakoRestraintReportPdfRepository, PgDtakoRestraintReportRepository,
     PgDtakoScraperRepository, PgDtakoUploadRepository, PgDtakoVehiclesRepository,
-    PgDtakoWorkTimesRepository,
+    PgDtakoWorkTimesRepository, PgDtakoYTimeExportRepository,
 };
 use alc_dtako::DtakoState;
 
@@ -83,6 +83,7 @@ async fn main() {
         dtako_upload: Arc::new(PgDtakoUploadRepository::new(pool.clone())),
         dtako_vehicles: Arc::new(PgDtakoVehiclesRepository::new(pool.clone())),
         dtako_work_times: Arc::new(PgDtakoWorkTimesRepository::new(pool.clone())),
+        dtako_y_time_export: Arc::new(PgDtakoYTimeExportRepository::new(pool.clone())),
         dtako_storage,
     };
 

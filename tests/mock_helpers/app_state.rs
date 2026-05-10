@@ -45,6 +45,7 @@ pub fn setup_mock_app_state() -> AppState {
         dtako_upload: Arc::new(MockDtakoUploadRepository::default()),
         dtako_vehicles: Arc::new(MockDtakoVehiclesRepository::default()),
         dtako_work_times: Arc::new(MockDtakoWorkTimesRepository::default()),
+        dtako_y_time_export: Arc::new(MockDtakoYTimeExportRepository::default()),
         employees: Arc::new(MockEmployeeRepository::default()),
         equipment_failures: Arc::new(MockEquipmentFailuresRepository::default()),
         guidance_records: Arc::new(MockGuidanceRecordsRepository::default()),

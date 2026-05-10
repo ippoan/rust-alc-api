@@ -29,12 +29,12 @@ use rust_alc_api::db::repository::{
     PgDtakoDailyHoursRepository, PgDtakoDriversRepository, PgDtakoEventClassificationsRepository,
     PgDtakoLogsRepository, PgDtakoOperationsRepository, PgDtakoRestraintReportPdfRepository,
     PgDtakoRestraintReportRepository, PgDtakoScraperRepository, PgDtakoUploadRepository,
-    PgDtakoVehiclesRepository, PgDtakoWorkTimesRepository, PgEmployeeRepository,
-    PgEquipmentFailuresRepository, PgGuidanceRecordsRepository, PgHealthBaselinesRepository,
-    PgItemFilesRepository, PgItemsRepository, PgMeasurementsRepository, PgNfcTagRepository,
-    PgSsoAdminRepository, PgTenantUsersRepository, PgTenkoCallRepository, PgTenkoRecordsRepository,
-    PgTenkoSchedulesRepository, PgTenkoSessionRepository, PgTenkoWebhooksRepository,
-    PgTimecardRepository,
+    PgDtakoVehiclesRepository, PgDtakoWorkTimesRepository, PgDtakoYTimeExportRepository,
+    PgEmployeeRepository, PgEquipmentFailuresRepository, PgGuidanceRecordsRepository,
+    PgHealthBaselinesRepository, PgItemFilesRepository, PgItemsRepository,
+    PgMeasurementsRepository, PgNfcTagRepository, PgSsoAdminRepository, PgTenantUsersRepository,
+    PgTenkoCallRepository, PgTenkoRecordsRepository, PgTenkoSchedulesRepository,
+    PgTenkoSessionRepository, PgTenkoWebhooksRepository, PgTimecardRepository,
 };
 use rust_alc_api::storage::StorageBackend;
 use rust_alc_api::AppState;
@@ -124,23 +124,40 @@ async fn main() -> anyhow::Result<()> {
             ) as Arc<dyn StorageBackend>
         });
 
-    // dtako (digitacho) 用 R2 (ohishi-dtako バケット、別 API トークン)
+    // dtako (digitacho) 用 R2 (ohishi-dtako バケット、別 API トークン)。
+    //
+    // dev サンドボックス (Incus) では `DTAKO_STORAGE_HTTP_PROXY` を設定すると、ホスト側の
+    // `wrangler dev --local --port 8788` (R2 binding 付き) 経由で R2 にアクセスする。
+    // この場合 Incus に R2 keys を投入する必要が無い (本番 R2 は `R2_ACCESS_KEY` 等 経由のみ)。
     let dtako_storage: Option<Arc<dyn StorageBackend>> =
-        std::env::var("DTAKO_R2_BUCKET").ok().map(|bucket| {
-            let account_id =
-                std::env::var("R2_ACCOUNT_ID").expect("R2_ACCOUNT_ID required for DTAKO_R2_BUCKET");
-            let access_key =
-                std::env::var("DTAKO_R2_ACCESS_KEY").expect("DTAKO_R2_ACCESS_KEY required");
-            let secret_key =
-                std::env::var("DTAKO_R2_SECRET_KEY").expect("DTAKO_R2_SECRET_KEY required");
-            tracing::info!("Dtako storage: R2 (bucket={})", bucket);
-            Arc::new(
-                rust_alc_api::storage::R2Backend::new(
-                    bucket, account_id, access_key, secret_key, None,
-                )
-                .expect("Failed to init dtako R2 backend"),
-            ) as Arc<dyn StorageBackend>
-        });
+        if let Ok(proxy_base) = std::env::var("DTAKO_STORAGE_HTTP_PROXY") {
+            let bucket =
+                std::env::var("DTAKO_R2_BUCKET").unwrap_or_else(|_| "dtako-uploads".to_string());
+            tracing::info!(
+                "Dtako storage: HTTP proxy at {} (bucket label={})",
+                proxy_base,
+                bucket
+            );
+            Some(Arc::new(rust_alc_api::storage::HttpProxyBackend::new(
+                proxy_base, bucket,
+            )) as Arc<dyn StorageBackend>)
+        } else {
+            std::env::var("DTAKO_R2_BUCKET").ok().map(|bucket| {
+                let account_id = std::env::var("R2_ACCOUNT_ID")
+                    .expect("R2_ACCOUNT_ID required for DTAKO_R2_BUCKET");
+                let access_key =
+                    std::env::var("DTAKO_R2_ACCESS_KEY").expect("DTAKO_R2_ACCESS_KEY required");
+                let secret_key =
+                    std::env::var("DTAKO_R2_SECRET_KEY").expect("DTAKO_R2_SECRET_KEY required");
+                tracing::info!("Dtako storage: R2 (bucket={})", bucket);
+                Arc::new(
+                    rust_alc_api::storage::R2Backend::new(
+                        bucket, account_id, access_key, secret_key, None,
+                    )
+                    .expect("Failed to init dtako R2 backend"),
+                ) as Arc<dyn StorageBackend>
+            })
+        };
 
     // FCM (optional — disabled if FCM_PROJECT_ID is not set)
     let fcm = std::env::var("FCM_PROJECT_ID").ok().map(|project_id| {
@@ -176,6 +193,7 @@ async fn main() -> anyhow::Result<()> {
     let dtako_upload = Arc::new(PgDtakoUploadRepository::new(pool.clone()));
     let dtako_vehicles = Arc::new(PgDtakoVehiclesRepository::new(pool.clone()));
     let dtako_work_times = Arc::new(PgDtakoWorkTimesRepository::new(pool.clone()));
+    let dtako_y_time_export = Arc::new(PgDtakoYTimeExportRepository::new(pool.clone()));
     let employees = Arc::new(PgEmployeeRepository::new(pool.clone()));
     let equipment_failures = Arc::new(PgEquipmentFailuresRepository::new(pool.clone()));
     let guidance_records = Arc::new(PgGuidanceRecordsRepository::new(pool.clone()));
@@ -272,6 +290,7 @@ async fn main() -> anyhow::Result<()> {
         dtako_upload,
         dtako_vehicles,
         dtako_work_times,
+        dtako_y_time_export,
         employees,
         equipment_failures,
         guidance_records,
