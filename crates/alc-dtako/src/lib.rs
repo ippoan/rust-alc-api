@@ -21,6 +21,7 @@ pub mod dtako_y_time_export;
 
 use std::sync::Arc;
 
+use alc_core::realtime_bus::RealtimeBus;
 use alc_core::repository::{
     DtakoCsvProxyRepository, DtakoDailyHoursRepository, DtakoDriversRepository,
     DtakoEventClassificationsRepository, DtakoLogsRepository, DtakoOperationsRepository,
@@ -48,6 +49,10 @@ pub struct DtakoState {
     pub dtako_work_times: Arc<dyn DtakoWorkTimesRepository>,
     pub dtako_y_time_export: Arc<dyn DtakoYTimeExportRepository>,
     pub dtako_storage: Option<Arc<dyn StorageBackend>>,
+    /// Y時間 export async job の完了通知を notify-realtime-bus に流すための共有
+    /// クライアント。env vars 未設定 (ローカル / sandbox) なら None で、POST /jobs
+    /// は 503 を返す。`AppState.realtime_bus` の参照を持ち回すだけ。
+    pub realtime_bus: Option<Arc<RealtimeBus>>,
 }
 
 impl axum::extract::FromRef<alc_core::AppState> for DtakoState {
@@ -67,6 +72,7 @@ impl axum::extract::FromRef<alc_core::AppState> for DtakoState {
             dtako_work_times: state.dtako_work_times.clone(),
             dtako_y_time_export: state.dtako_y_time_export.clone(),
             dtako_storage: state.dtako_storage.clone(),
+            realtime_bus: state.realtime_bus.clone(),
         }
     }
 }
