@@ -228,6 +228,14 @@ async fn happy_path_with_kudgivt_yields_one_row() {
     // → だが actual_end は events で計算され departure 9:00 → return 18:00 だが
     //   実際には max(start_at + duration) = 12:00+60 = 13:00。よって segment.end = 13:00
     assert_eq!(r["end_minutes_from_bucket_date"].as_i64().unwrap(), 13 * 60);
-    // 301 が 1 件、duration 60 分
-    assert_eq!(r["rest_minutes"].as_i64().unwrap(), 60);
+    // 301 が 1 件、duration 60 分。12:00 開始なので「当日 5-22 時」バケットに入る
+    // (旧 rest_minutes 単一フィールドから 7-cell split に移行)
+    assert_eq!(r["rest_today_5_22"].as_i64().unwrap(), 60);
+    // 他 6 バケットは 0
+    assert_eq!(r["rest_prev_5_22"].as_i64().unwrap(), 0);
+    assert_eq!(r["rest_prev_22_0"].as_i64().unwrap(), 0);
+    assert_eq!(r["rest_today_0_5"].as_i64().unwrap(), 0);
+    assert_eq!(r["rest_today_22_0"].as_i64().unwrap(), 0);
+    assert_eq!(r["rest_next_0_5"].as_i64().unwrap(), 0);
+    assert_eq!(r["rest_next_5_22"].as_i64().unwrap(), 0);
 }
