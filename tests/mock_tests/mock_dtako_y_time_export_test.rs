@@ -239,3 +239,217 @@ async fn happy_path_with_kudgivt_yields_one_row() {
     assert_eq!(r["rest_next_0_5"].as_i64().unwrap(), 0);
     assert_eq!(r["rest_next_5_22"].as_i64().unwrap(), 0);
 }
+
+// --- async job (POST /jobs) ---
+//
+// 仕様:
+//   POST /api/dtako/y-time-export/jobs
+//   - 即時 202 { job_id } を返す
+//   - background tokio::spawn で compute → realtime_bus へ broadcast
+//   - realtime_bus 未設定なら 503 (silent failure 防止)
+
+#[tokio::test]
+async fn post_jobs_returns_503_when_realtime_bus_not_configured() {
+    let state = setup_mock_app_state();
+    // realtime_bus は default で None
+
+    let base_url = crate::common::spawn_test_server(state).await;
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!(
+            "{base_url}/api/dtako/y-time-export/jobs?driver_cd=D1&from=2024-04-01&to=2024-04-30"
+        ))
+        .header("Authorization", test_auth_header())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 503);
+}
+
+#[tokio::test]
+async fn post_jobs_returns_400_when_from_after_to_even_with_bus() {
+    let mut state = setup_mock_app_state();
+    state.realtime_bus = Some(Arc::new(alc_core::realtime_bus::RealtimeBus::new(
+        "http://127.0.0.1:1/broadcast".into(),
+        "s".into(),
+    )));
+
+    let base_url = crate::common::spawn_test_server(state).await;
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!(
+            "{base_url}/api/dtako/y-time-export/jobs?driver_cd=D1&from=2024-04-30&to=2024-04-01"
+        ))
+        .header("Authorization", test_auth_header())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 400);
+}
+
+#[tokio::test]
+async fn post_jobs_returns_202_and_broadcasts_completed_event() {
+    use wiremock::matchers::{header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    // wiremock /broadcast を立てて realtime_bus を向ける
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/broadcast"))
+        .and(header("X-Broadcast-Secret", "s3cret"))
+        .and(wiremock::matchers::body_string_contains(
+            "\"kind\":\"y_time_export\"",
+        ))
+        .and(wiremock::matchers::body_string_contains("\"completed\""))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let bus = Arc::new(alc_core::realtime_bus::RealtimeBus::new(
+        format!("{}/broadcast", server.uri()),
+        "s3cret".into(),
+    ));
+
+    // happy path 用の DB / R2 を構築 (既存 happy_path_with_kudgivt_yields_one_row と同じ)
+    let mut state = setup_mock_app_state();
+    state.realtime_bus = Some(bus);
+    let driver_id = uuid::Uuid::new_v4();
+    let tenant_id = test_tenant_id();
+    let unko_no = "U_OK_JOB";
+
+    upload_kudgivt(
+        state.dtako_storage.as_ref().unwrap().as_ref(),
+        &tenant_id,
+        unko_no,
+        &minimal_kudgivt_csv(),
+    )
+    .await;
+
+    let mock = MockDtakoYTimeExportRepository::default()
+        .with_driver(driver_id, "テスト 一郎")
+        .with_operations(vec![YTimeExportOperation {
+            unko_no: unko_no.into(),
+            crew_role: 1,
+            departure_at: Some(chrono::Utc.with_ymd_and_hms(2024, 4, 15, 9, 0, 0).unwrap()),
+            return_at: Some(chrono::Utc.with_ymd_and_hms(2024, 4, 15, 18, 0, 0).unwrap()),
+            r2_key_prefix: None,
+        }]);
+    state.dtako_y_time_export = Arc::new(mock);
+
+    let base_url = crate::common::spawn_test_server(state).await;
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!(
+            "{base_url}/api/dtako/y-time-export/jobs?driver_cd=D1&from=2024-04-15&to=2024-04-15"
+        ))
+        .header("Authorization", test_auth_header())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 202);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert!(body.get("job_id").and_then(|v| v.as_str()).is_some());
+
+    // background spawn → broadcast 到達まで少し待機。
+    // wiremock の expect(1) が満たされない場合 server.verify() で panic する。
+    for _ in 0..50 {
+        if !server
+            .received_requests()
+            .await
+            .unwrap_or_default()
+            .is_empty()
+        {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    let received = server.received_requests().await.unwrap();
+    assert!(
+        !received.is_empty(),
+        "expected at least 1 broadcast call within 2.5s"
+    );
+    let payload = std::str::from_utf8(&received[0].body).unwrap();
+    assert!(
+        payload.contains("\"kind\":\"y_time_export\""),
+        "kind missing in {payload}"
+    );
+    assert!(
+        payload.contains("\"status\":\"completed\""),
+        "status not completed in {payload}"
+    );
+    assert!(
+        payload.contains("\"job_id\""),
+        "job_id missing in {payload}"
+    );
+    // result inline で運ばれている
+    assert!(
+        payload.contains("\"result\""),
+        "result inline missing in {payload}"
+    );
+    assert!(
+        payload.contains("\"rows\""),
+        "rows missing in result of {payload}"
+    );
+}
+
+#[tokio::test]
+async fn post_jobs_broadcasts_failed_event_when_driver_unknown() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/broadcast"))
+        .and(wiremock::matchers::body_string_contains("\"failed\""))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let mut state = setup_mock_app_state();
+    state.realtime_bus = Some(Arc::new(alc_core::realtime_bus::RealtimeBus::new(
+        format!("{}/broadcast", server.uri()),
+        "s".into(),
+    )));
+    // dtako_y_time_export は default → driver lookup で None → failed
+
+    let base_url = crate::common::spawn_test_server(state).await;
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!(
+            "{base_url}/api/dtako/y-time-export/jobs?driver_cd=NOPE&from=2024-04-01&to=2024-04-30"
+        ))
+        .header("Authorization", test_auth_header())
+        .send()
+        .await
+        .unwrap();
+    // job 起動自体は成功 (realtime_bus 設定済) → 202、failure は WS event で返す
+    assert_eq!(res.status(), 202);
+
+    for _ in 0..50 {
+        if !server
+            .received_requests()
+            .await
+            .unwrap_or_default()
+            .is_empty()
+        {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    let received = server.received_requests().await.unwrap();
+    assert!(
+        !received.is_empty(),
+        "expected failed broadcast within 2.5s"
+    );
+    let payload = std::str::from_utf8(&received[0].body).unwrap();
+    assert!(
+        payload.contains("\"status\":\"failed\""),
+        "expected failed in {payload}"
+    );
+    assert!(
+        payload.contains("\"error\""),
+        "expected error message in {payload}"
+    );
+}

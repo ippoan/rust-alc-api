@@ -12,6 +12,7 @@ pub mod auth_middleware;
 pub mod fcm;
 pub mod middleware;
 pub mod models;
+pub mod realtime_bus;
 pub mod redact_broadcast;
 pub mod repo;
 pub mod repository;
@@ -102,6 +103,12 @@ pub struct AppState {
     /// が terminal 状態で呼び、Cloudflare Worker (notify-realtime-bus) の DO 経由で
     /// admin ブラウザに WS push する。未設定なら no-op (Phase 3 デプロイ前は空でも安全)。
     pub redact_broadcaster: Option<Arc<redact_broadcast::RedactBroadcaster>>,
+    /// 任意の Serialize ペイロードを同 notify-realtime-bus Worker に流す汎用クライアント。
+    /// `RedactBroadcaster` と同じ env vars / 同じ Worker / 同じ secret を共有するが、
+    /// payload 型を選ばないので redact 以外の async job 完了通知 (Y時間 export 等)
+    /// にも使える。env vars 未設定なら None で no-op (POST /jobs 系は 503 返却で
+    /// 検知すること、silent に compute しないため)。
+    pub realtime_bus: Option<Arc<realtime_bus::RealtimeBus>>,
     pub trouble_tickets: Arc<dyn TroubleTicketsRepository>,
     pub trouble_files: Arc<dyn TroubleFilesRepository>,
     pub trouble_workflow: Arc<dyn TroubleWorkflowRepository>,
