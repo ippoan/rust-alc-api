@@ -29,3 +29,5 @@ mod mock_dtako_upload_test;
 mod mock_dtako_vehicles_test;
 #[path = "../mock_tests/mock_dtako_work_times_test.rs"]
 mod mock_dtako_work_times_test;
+#[path = "../mock_tests/mock_dtako_y_time_export_test.rs"]
+mod mock_dtako_y_time_export_test;

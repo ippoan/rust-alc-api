@@ -6,13 +6,13 @@ pub use alc_core::repository::{
     DtakoDailyHoursRepository, DtakoDriversRepository, DtakoEventClassificationsRepository,
     DtakoLogsRepository, DtakoOperationsRepository, DtakoRestraintReportPdfRepository,
     DtakoRestraintReportRepository, DtakoScraperRepository, DtakoUploadRepository,
-    DtakoVehiclesRepository, DtakoWorkTimesRepository, EmployeeRepository,
-    EquipmentFailuresRepository, GuidanceRecordsRepository, HealthBaselinesRepository,
-    ItemFilesRepository, ItemsRepository, LineworksChannelsRepository, MeasurementsRepository,
-    NfcTagRepository, NotifyDeliveryRepository, NotifyDocumentRepository, NotifyGroupRepository,
-    NotifyLineConfigRepository, NotifyRecipientRepository, SsoAdminRepository,
-    TenantUsersRepository, TenkoCallRepository, TenkoRecordsRepository, TenkoSchedulesRepository,
-    TenkoSessionRepository, TenkoWebhooksRepository, TimecardRepository,
+    DtakoVehiclesRepository, DtakoWorkTimesRepository, DtakoYTimeExportRepository,
+    EmployeeRepository, EquipmentFailuresRepository, GuidanceRecordsRepository,
+    HealthBaselinesRepository, ItemFilesRepository, ItemsRepository, LineworksChannelsRepository,
+    MeasurementsRepository, NfcTagRepository, NotifyDeliveryRepository, NotifyDocumentRepository,
+    NotifyGroupRepository, NotifyLineConfigRepository, NotifyRecipientRepository,
+    SsoAdminRepository, TenantUsersRepository, TenkoCallRepository, TenkoRecordsRepository,
+    TenkoSchedulesRepository, TenkoSessionRepository, TenkoWebhooksRepository, TimecardRepository,
     TroubleCategoriesRepository, TroubleFilesRepository, TroubleNotificationPrefsRepository,
     TroubleOfficesRepository, TroubleProgressStatusesRepository, TroubleSchedulesRepository,
     TroubleTaskStatusesRepository, TroubleTaskTypesRepository, TroubleTasksFilter,
@@ -31,7 +31,7 @@ pub use alc_devices::repo::devices;
 pub use alc_dtako::repo::{
     dtako_csv_proxy, dtako_daily_hours, dtako_drivers, dtako_event_classifications, dtako_logs,
     dtako_operations, dtako_restraint_report, dtako_restraint_report_pdf, dtako_scraper,
-    dtako_upload, dtako_vehicles, dtako_work_times,
+    dtako_upload, dtako_vehicles, dtako_work_times, dtako_y_time_export,
 };
 pub use alc_misc::repo::{
     bot_admin, carrying_items, communication_items, driver_info, employees, guidance_records,
@@ -63,7 +63,7 @@ pub use alc_dtako::repo::{
     PgDtakoEventClassificationsRepository, PgDtakoLogsRepository, PgDtakoOperationsRepository,
     PgDtakoRestraintReportPdfRepository, PgDtakoRestraintReportRepository,
     PgDtakoScraperRepository, PgDtakoUploadRepository, PgDtakoVehiclesRepository,
-    PgDtakoWorkTimesRepository,
+    PgDtakoWorkTimesRepository, PgDtakoYTimeExportRepository,
 };
 pub use alc_misc::repo::{
     PgApiTokensRepository, PgBotAdminRepository, PgCarryingItemsRepository,

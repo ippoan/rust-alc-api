@@ -17,6 +17,7 @@ pub use alc_dtako::dtako_scraper;
 pub use alc_dtako::dtako_upload;
 pub use alc_dtako::dtako_vehicles;
 pub use alc_dtako::dtako_work_times;
+pub use alc_dtako::dtako_y_time_export;
 pub use alc_misc::access_requests;
 pub use alc_misc::api_tokens;
 pub use alc_misc::bot_admin;
@@ -126,6 +127,7 @@ pub fn router() -> Router<AppState> {
         .merge(dtako_upload::tenant_router())
         .merge(dtako_vehicles::tenant_router())
         .merge(dtako_event_classifications::tenant_router())
+        .merge(dtako_y_time_export::tenant_router())
         .nest("/dtako-logs", dtako_logs::tenant_router())
         .merge(notify_recipients::tenant_router())
         .merge(notify_groups::tenant_router())

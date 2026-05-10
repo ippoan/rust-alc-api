@@ -21,16 +21,17 @@ use rust_alc_api::db::repository::{
     PgDtakoDailyHoursRepository, PgDtakoDriversRepository, PgDtakoEventClassificationsRepository,
     PgDtakoLogsRepository, PgDtakoOperationsRepository, PgDtakoRestraintReportPdfRepository,
     PgDtakoRestraintReportRepository, PgDtakoScraperRepository, PgDtakoUploadRepository,
-    PgDtakoVehiclesRepository, PgDtakoWorkTimesRepository, PgEmployeeRepository,
-    PgEquipmentFailuresRepository, PgGuidanceRecordsRepository, PgHealthBaselinesRepository,
-    PgItemFilesRepository, PgItemsRepository, PgLineworksChannelsRepository,
-    PgMeasurementsRepository, PgNfcTagRepository, PgNotifyDeliveryRepository,
-    PgNotifyDocumentRepository, PgNotifyGroupRepository, PgNotifyLineConfigRepository,
-    PgNotifyRecipientRepository, PgSsoAdminRepository, PgTenantUsersRepository,
-    PgTenkoCallRepository, PgTenkoRecordsRepository, PgTenkoSchedulesRepository,
-    PgTenkoSessionRepository, PgTenkoWebhooksRepository, PgTimecardRepository,
-    PgTroubleCategoriesRepository, PgTroubleFilesRepository, PgTroubleNotificationPrefsRepository,
-    PgTroubleOfficesRepository, PgTroubleProgressStatusesRepository, PgTroubleSchedulesRepository,
+    PgDtakoVehiclesRepository, PgDtakoWorkTimesRepository, PgDtakoYTimeExportRepository,
+    PgEmployeeRepository, PgEquipmentFailuresRepository, PgGuidanceRecordsRepository,
+    PgHealthBaselinesRepository, PgItemFilesRepository, PgItemsRepository,
+    PgLineworksChannelsRepository, PgMeasurementsRepository, PgNfcTagRepository,
+    PgNotifyDeliveryRepository, PgNotifyDocumentRepository, PgNotifyGroupRepository,
+    PgNotifyLineConfigRepository, PgNotifyRecipientRepository, PgSsoAdminRepository,
+    PgTenantUsersRepository, PgTenkoCallRepository, PgTenkoRecordsRepository,
+    PgTenkoSchedulesRepository, PgTenkoSessionRepository, PgTenkoWebhooksRepository,
+    PgTimecardRepository, PgTroubleCategoriesRepository, PgTroubleFilesRepository,
+    PgTroubleNotificationPrefsRepository, PgTroubleOfficesRepository,
+    PgTroubleProgressStatusesRepository, PgTroubleSchedulesRepository,
     PgTroubleTaskStatusesRepository, PgTroubleTaskTypesRepository, PgTroubleTasksRepository,
     PgTroubleTicketsRepository, PgTroubleWorkflowRepository,
 };
@@ -274,6 +275,7 @@ fn build_app_state(
     let dtako_upload = Arc::new(PgDtakoUploadRepository::new(pool.clone()));
     let dtako_vehicles = Arc::new(PgDtakoVehiclesRepository::new(pool.clone()));
     let dtako_work_times = Arc::new(PgDtakoWorkTimesRepository::new(pool.clone()));
+    let dtako_y_time_export = Arc::new(PgDtakoYTimeExportRepository::new(pool.clone()));
     let employees = Arc::new(PgEmployeeRepository::new(pool.clone()));
     let equipment_failures = Arc::new(PgEquipmentFailuresRepository::new(pool.clone()));
     let guidance_records = Arc::new(PgGuidanceRecordsRepository::new(pool.clone()));
@@ -334,6 +336,7 @@ fn build_app_state(
         dtako_upload,
         dtako_vehicles,
         dtako_work_times,
+        dtako_y_time_export,
         employees,
         equipment_failures,
         guidance_records,
