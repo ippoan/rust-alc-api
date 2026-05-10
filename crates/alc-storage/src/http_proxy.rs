@@ -1,12 +1,12 @@
 //! `HttpProxyBackend` — Incus dev サンドボックス用の R2 アクセス backend。
 //!
 //! ホスト側で wrangler dev に R2 binding を持つ極小 worker を立て (例: `~/js/.dev-proxy/r2-proxy/`)、
-//! Incus 内の rust-alc-api は本 backend 経由でその HTTP サーバーから R2 オブジェクトを取得する。
+//! Incus 内の rust-alc-api は本 backend 経由でその HTTP サーバー越しに R2 を読み書きする。
 //! これにより本番 R2 keys を Incus に投入することなく、ホストの wrangler CLI 認証だけで
 //! R2 アクセスが完結する。
 //!
-//! 本 backend は **download / exists / public_url 専用**。upload / delete / presign_get は
-//! 呼び出されないことを前提に簡易 stub を返す (dev 環境でしか使わない)。
+//! GET / HEAD / PUT / DELETE をサポート。dev 環境専用。`presign_get` は未対応 (proxy では
+//! 署名 URL を発行できないため、必要なら別途公開 URL を組む)。
 
 use alc_core::storage::{StorageBackend, StorageError};
 
@@ -39,13 +39,26 @@ impl HttpProxyBackend {
 impl StorageBackend for HttpProxyBackend {
     async fn upload(
         &self,
-        _key: &str,
-        _data: &[u8],
-        _content_type: &str,
+        key: &str,
+        data: &[u8],
+        content_type: &str,
     ) -> Result<String, StorageError> {
-        Err(StorageError::Config(
-            "HttpProxyBackend is read-only (upload not supported)".to_string(),
-        ))
+        let resp = self
+            .client
+            .put(self.url(key))
+            .header("content-type", content_type)
+            .body(data.to_vec())
+            .send()
+            .await
+            .map_err(|e| StorageError::Upload(format!("proxy PUT: {e}")))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(StorageError::Upload(format!(
+                "proxy PUT status {status}: {body}"
+            )));
+        }
+        Ok(self.public_url(key))
     }
 
     fn public_url(&self, key: &str) -> String {
@@ -82,10 +95,21 @@ impl StorageBackend for HttpProxyBackend {
         Ok(bytes.to_vec())
     }
 
-    async fn delete(&self, _key: &str) -> Result<(), StorageError> {
-        Err(StorageError::Config(
-            "HttpProxyBackend is read-only (delete not supported)".to_string(),
-        ))
+    async fn delete(&self, key: &str) -> Result<(), StorageError> {
+        let resp = self
+            .client
+            .delete(self.url(key))
+            .send()
+            .await
+            .map_err(|e| StorageError::Upload(format!("proxy DELETE: {e}")))?;
+        let status = resp.status();
+        if !status.is_success() && status.as_u16() != 404 {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(StorageError::Upload(format!(
+                "proxy DELETE status {status}: {body}"
+            )));
+        }
+        Ok(())
     }
 
     fn extract_key(&self, url: &str) -> Option<String> {

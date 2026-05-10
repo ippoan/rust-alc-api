@@ -48,14 +48,18 @@ impl DtakoYTimeExportRepository for PgDtakoYTimeExportRepository {
         let from_widened = from - chrono::Duration::days(1);
         let to_widened = to + chrono::Duration::days(1);
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
+        // 同じ driver_id が同じ unko_no で crew_role 1 (運転手) と 2 (副運転手) の
+        // 両方に登録されているケースがある (KUDGURI データ起因)。物理的に同じ運行な
+        // ので 1 行にまとめる必要がある。crew_role=1 を優先 (なければ 2) して 1 件のみ採用。
         sqlx::query_as::<_, YTimeExportOperation>(
-            "SELECT unko_no, crew_role, departure_at, return_at, r2_key_prefix \
+            "SELECT DISTINCT ON (unko_no) \
+                    unko_no, crew_role, departure_at, return_at, r2_key_prefix \
              FROM alc_api.dtako_operations \
              WHERE tenant_id = $1 \
                AND driver_id = $2 \
                AND reading_date BETWEEN $3 AND $4 \
                AND has_kudgivt = TRUE \
-             ORDER BY departure_at NULLS LAST",
+             ORDER BY unko_no, crew_role ASC, departure_at NULLS LAST",
         )
         .bind(tenant_id)
         .bind(driver_id)
