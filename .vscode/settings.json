@@ -10,7 +10,9 @@
     "nuxt-dtako-admin",
     "daiun-salary",
     "ci-dashboard",
-    "front/nuxt-pwa-carins"
+    "front/nuxt-pwa-carins",
+    "incus-sandbox",
+    "nuxt-ichibanboshi"
   ],
   "git.autoRepositoryDetection": true
 }
