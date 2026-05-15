@@ -40,7 +40,7 @@ use repository::{
     TroubleCategoriesRepository, TroubleFilesRepository, TroubleNotificationPrefsRepository,
     TroubleOfficesRepository, TroubleProgressStatusesRepository, TroubleSchedulesRepository,
     TroubleTaskStatusesRepository, TroubleTaskTypesRepository, TroubleTasksRepository,
-    TroubleTicketsRepository, TroubleWorkflowRepository,
+    TroubleTicketsRepository, TroubleWorkflowRepository, VehicleSettingsDumpsRepository,
 };
 use storage::StorageBackend;
 
@@ -70,6 +70,7 @@ pub struct AppState {
     pub dtako_vehicles: Arc<dyn DtakoVehiclesRepository>,
     pub dtako_work_times: Arc<dyn DtakoWorkTimesRepository>,
     pub dtako_y_time_export: Arc<dyn DtakoYTimeExportRepository>,
+    pub vehicle_settings_dumps: Arc<dyn VehicleSettingsDumpsRepository>,
     pub employees: Arc<dyn EmployeeRepository>,
     pub equipment_failures: Arc<dyn EquipmentFailuresRepository>,
     pub guidance_records: Arc<dyn GuidanceRecordsRepository>,

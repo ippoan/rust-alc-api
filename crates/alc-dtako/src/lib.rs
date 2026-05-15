@@ -18,6 +18,7 @@ pub mod dtako_upload;
 pub mod dtako_vehicles;
 pub mod dtako_work_times;
 pub mod dtako_y_time_export;
+pub mod vehicle_settings_dumps;
 
 use std::sync::Arc;
 
@@ -26,7 +27,7 @@ use alc_core::repository::{
     DtakoEventClassificationsRepository, DtakoLogsRepository, DtakoOperationsRepository,
     DtakoRestraintReportPdfRepository, DtakoRestraintReportRepository, DtakoScraperRepository,
     DtakoUploadRepository, DtakoVehiclesRepository, DtakoWorkTimesRepository,
-    DtakoYTimeExportRepository,
+    DtakoYTimeExportRepository, VehicleSettingsDumpsRepository,
 };
 use alc_core::storage::StorageBackend;
 
@@ -47,6 +48,7 @@ pub struct DtakoState {
     pub dtako_vehicles: Arc<dyn DtakoVehiclesRepository>,
     pub dtako_work_times: Arc<dyn DtakoWorkTimesRepository>,
     pub dtako_y_time_export: Arc<dyn DtakoYTimeExportRepository>,
+    pub vehicle_settings_dumps: Arc<dyn VehicleSettingsDumpsRepository>,
     pub dtako_storage: Option<Arc<dyn StorageBackend>>,
 }
 
@@ -66,6 +68,7 @@ impl axum::extract::FromRef<alc_core::AppState> for DtakoState {
             dtako_vehicles: state.dtako_vehicles.clone(),
             dtako_work_times: state.dtako_work_times.clone(),
             dtako_y_time_export: state.dtako_y_time_export.clone(),
+            vehicle_settings_dumps: state.vehicle_settings_dumps.clone(),
             dtako_storage: state.dtako_storage.clone(),
         }
     }

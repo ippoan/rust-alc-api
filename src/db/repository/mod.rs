@@ -17,7 +17,7 @@ pub use alc_core::repository::{
     TroubleOfficesRepository, TroubleProgressStatusesRepository, TroubleSchedulesRepository,
     TroubleTaskStatusesRepository, TroubleTaskTypesRepository, TroubleTasksFilter,
     TroubleTasksRepository, TroubleTasksSortBy, TroubleTicketsRepository,
-    TroubleWorkflowRepository, WebhookRepository,
+    TroubleWorkflowRepository, VehicleSettingsDumpsRepository, WebhookRepository,
 };
 
 // Re-export TenantConn from alc-core
@@ -31,7 +31,7 @@ pub use alc_devices::repo::devices;
 pub use alc_dtako::repo::{
     dtako_csv_proxy, dtako_daily_hours, dtako_drivers, dtako_event_classifications, dtako_logs,
     dtako_operations, dtako_restraint_report, dtako_restraint_report_pdf, dtako_scraper,
-    dtako_upload, dtako_vehicles, dtako_work_times, dtako_y_time_export,
+    dtako_upload, dtako_vehicles, dtako_work_times, dtako_y_time_export, vehicle_settings_dumps,
 };
 pub use alc_misc::repo::{
     bot_admin, carrying_items, communication_items, driver_info, employees, guidance_records,
@@ -63,7 +63,7 @@ pub use alc_dtako::repo::{
     PgDtakoEventClassificationsRepository, PgDtakoLogsRepository, PgDtakoOperationsRepository,
     PgDtakoRestraintReportPdfRepository, PgDtakoRestraintReportRepository,
     PgDtakoScraperRepository, PgDtakoUploadRepository, PgDtakoVehiclesRepository,
-    PgDtakoWorkTimesRepository, PgDtakoYTimeExportRepository,
+    PgDtakoWorkTimesRepository, PgDtakoYTimeExportRepository, PgVehicleSettingsDumpsRepository,
 };
 pub use alc_misc::repo::{
     PgApiTokensRepository, PgBotAdminRepository, PgCarryingItemsRepository,

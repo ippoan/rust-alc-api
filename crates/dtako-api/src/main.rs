@@ -15,7 +15,7 @@ use alc_dtako::repo::{
     PgDtakoEventClassificationsRepository, PgDtakoLogsRepository, PgDtakoOperationsRepository,
     PgDtakoRestraintReportPdfRepository, PgDtakoRestraintReportRepository,
     PgDtakoScraperRepository, PgDtakoUploadRepository, PgDtakoVehiclesRepository,
-    PgDtakoWorkTimesRepository, PgDtakoYTimeExportRepository,
+    PgDtakoWorkTimesRepository, PgDtakoYTimeExportRepository, PgVehicleSettingsDumpsRepository,
 };
 use alc_dtako::DtakoState;
 
@@ -82,6 +82,7 @@ async fn main() {
         dtako_scraper: Arc::new(PgDtakoScraperRepository::new(pool.clone())),
         dtako_upload: Arc::new(PgDtakoUploadRepository::new(pool.clone())),
         dtako_vehicles: Arc::new(PgDtakoVehiclesRepository::new(pool.clone())),
+        vehicle_settings_dumps: Arc::new(PgVehicleSettingsDumpsRepository::new(pool.clone())),
         dtako_work_times: Arc::new(PgDtakoWorkTimesRepository::new(pool.clone())),
         dtako_y_time_export: Arc::new(PgDtakoYTimeExportRepository::new(pool.clone())),
         dtako_storage,
@@ -98,6 +99,7 @@ async fn main() {
         .merge(alc_dtako::dtako_scraper::tenant_router())
         .merge(alc_dtako::dtako_upload::tenant_router())
         .merge(alc_dtako::dtako_vehicles::tenant_router())
+        .merge(alc_dtako::vehicle_settings_dumps::tenant_router())
         .merge(alc_dtako::dtako_work_times::tenant_router())
         .nest("/dtako-logs", alc_dtako::dtako_logs::tenant_router())
         .layer(axum_middleware::from_fn(require_tenant_header));
