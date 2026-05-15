@@ -91,10 +91,7 @@ impl VehicleSettingsDumpsRepository for PgVehicleSettingsDumpsRepository {
         .await
     }
 
-    async fn confirmed_vehicle_cds(
-        &self,
-        tenant_id: Uuid,
-    ) -> Result<Vec<String>, sqlx::Error> {
+    async fn confirmed_vehicle_cds(&self, tenant_id: Uuid) -> Result<Vec<String>, sqlx::Error> {
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
         let rows: Vec<(String,)> = sqlx::query_as(
             "SELECT DISTINCT vehicle_cd \

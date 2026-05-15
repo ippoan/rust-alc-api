@@ -29,18 +29,9 @@ where
     S: Clone + Send + Sync + 'static,
 {
     Router::new()
-        .route(
-            "/vehicle-settings-dumps",
-            post(register_dump),
-        )
-        .route(
-            "/vehicle-settings-dumps/summary",
-            get(list_summary),
-        )
-        .route(
-            "/vehicle-settings-dumps/:vehicle_cd",
-            get(list_by_vehicle),
-        )
+        .route("/vehicle-settings-dumps", post(register_dump))
+        .route("/vehicle-settings-dumps/summary", get(list_summary))
+        .route("/vehicle-settings-dumps/:vehicle_cd", get(list_by_vehicle))
 }
 
 #[derive(Debug, Deserialize)]

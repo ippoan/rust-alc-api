@@ -30,10 +30,7 @@ pub trait VehicleSettingsDumpsRepository: Send + Sync {
     ) -> Result<Vec<VehicleSettingsDumpSummary>, sqlx::Error>;
 
     /// テナントに dump が存在する vehicle_cd 集合 (未確認車輛抽出用)。
-    async fn confirmed_vehicle_cds(
-        &self,
-        tenant_id: Uuid,
-    ) -> Result<Vec<String>, sqlx::Error>;
+    async fn confirmed_vehicle_cds(&self, tenant_id: Uuid) -> Result<Vec<String>, sqlx::Error>;
 }
 
 #[derive(Debug, Clone)]
