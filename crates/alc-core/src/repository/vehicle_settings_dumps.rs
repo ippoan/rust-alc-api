@@ -47,7 +47,10 @@ pub struct VehicleSettingsDumpInput {
     pub uploaded_by: Option<Uuid>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+// FromRow を derive しておくことで query_as が使える。
+// trait 定義と一緒に alc-core 側に記述して、orphan rule 違反を避ける
+// (同じコードによって PgVehicleSettingsDumpsRepository が summary_by_vehicle を query_as で使える)。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, sqlx::FromRow)]
 pub struct VehicleSettingsDumpSummary {
     pub vehicle_cd: String,
     pub count: i64,

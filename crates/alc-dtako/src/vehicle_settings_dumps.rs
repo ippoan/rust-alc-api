@@ -15,7 +15,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
-use alc_core::auth_middleware::{AuthUser, TenantId};
+use alc_core::auth_middleware::TenantId;
 use alc_core::models::VehicleSettingsDump;
 use alc_core::repository::vehicle_settings_dumps::{
     VehicleSettingsDumpInput, VehicleSettingsDumpSummary,
@@ -62,11 +62,9 @@ pub struct RegisterResponse {
 async fn register_dump(
     State(state): State<DtakoState>,
     tenant: axum::Extension<TenantId>,
-    user: Option<axum::Extension<AuthUser>>,
     Json(body): Json<RegisterRequest>,
 ) -> Result<Json<RegisterResponse>, StatusCode> {
     let tenant_id = tenant.0 .0;
-    let uploaded_by = user.and_then(|u| u.0.id);
 
     // 入力バリデーション: empty / 制限超え
     if body.vehicle_cd.is_empty() || body.vehicle_cd.len() > 32 {
@@ -81,6 +79,8 @@ async fn register_dump(
         return Err(StatusCode::BAD_REQUEST);
     }
 
+    // uploaded_by は現時点では記録しない (AuthUser の user_id は String だがカラムは UUID
+    // なので、パース処理をそろえるまでは保留)。Phase 4 で考える。
     let input = VehicleSettingsDumpInput {
         vehicle_cd: body.vehicle_cd,
         dump_dir: body.dump_dir,
@@ -88,7 +88,7 @@ async fn register_dump(
         firm_main_app: body.firm_main_app,
         r2_json_key: body.r2_json_key,
         r2_cfg_key: body.r2_cfg_key,
-        uploaded_by,
+        uploaded_by: None,
     };
 
     let dump = state

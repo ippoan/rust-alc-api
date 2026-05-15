@@ -107,16 +107,3 @@ impl VehicleSettingsDumpsRepository for PgVehicleSettingsDumpsRepository {
         Ok(rows.into_iter().map(|(cd,)| cd).collect())
     }
 }
-
-// VehicleSettingsDumpSummary は serde デリーブだけだと query_as に使えないので
-// ここで FromRow を手動実装する。trait 側に記述すると alc-core に sqlx 依存が漏れるため。
-impl<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow> for VehicleSettingsDumpSummary {
-    fn from_row(row: &'r sqlx::postgres::PgRow) -> Result<Self, sqlx::Error> {
-        use sqlx::Row;
-        Ok(VehicleSettingsDumpSummary {
-            vehicle_cd: row.try_get("vehicle_cd")?,
-            count: row.try_get("count")?,
-            latest_uploaded_at: row.try_get("latest_uploaded_at")?,
-        })
-    }
-}
