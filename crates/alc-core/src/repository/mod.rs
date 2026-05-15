@@ -53,6 +53,7 @@ pub mod trouble_task_types;
 pub mod trouble_tasks;
 pub mod trouble_tickets;
 pub mod trouble_workflow;
+pub mod vehicle_settings_dumps;
 pub mod webhook;
 
 pub use api_tokens::{ApiTokenRow, ApiTokensRepository};
@@ -110,4 +111,7 @@ pub use trouble_task_types::TroubleTaskTypesRepository;
 pub use trouble_tasks::{TroubleTasksFilter, TroubleTasksRepository, TroubleTasksSortBy};
 pub use trouble_tickets::TroubleTicketsRepository;
 pub use trouble_workflow::TroubleWorkflowRepository;
+pub use vehicle_settings_dumps::{
+    VehicleSettingsDumpInput, VehicleSettingsDumpSummary, VehicleSettingsDumpsRepository,
+};
 pub use webhook::WebhookRepository;

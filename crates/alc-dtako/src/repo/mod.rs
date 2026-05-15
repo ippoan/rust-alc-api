@@ -11,6 +11,7 @@ pub mod dtako_upload;
 pub mod dtako_vehicles;
 pub mod dtako_work_times;
 pub mod dtako_y_time_export;
+pub mod vehicle_settings_dumps;
 
 pub use dtako_csv_proxy::PgDtakoCsvProxyRepository;
 pub use dtako_daily_hours::PgDtakoDailyHoursRepository;
@@ -25,3 +26,4 @@ pub use dtako_upload::PgDtakoUploadRepository;
 pub use dtako_vehicles::PgDtakoVehiclesRepository;
 pub use dtako_work_times::PgDtakoWorkTimesRepository;
 pub use dtako_y_time_export::PgDtakoYTimeExportRepository;
+pub use vehicle_settings_dumps::PgVehicleSettingsDumpsRepository;
