@@ -17,7 +17,7 @@ pub use alc_core::repository::{
     TroubleOfficesRepository, TroubleProgressStatusesRepository, TroubleSchedulesRepository,
     TroubleTaskStatusesRepository, TroubleTaskTypesRepository, TroubleTasksFilter,
     TroubleTasksRepository, TroubleTasksSortBy, TroubleTicketsRepository,
-    VehicleSettingsDumpsRepository, TroubleWorkflowRepository, WebhookRepository,
+    TroubleWorkflowRepository, VehicleSettingsDumpsRepository, WebhookRepository,
 };
 
 // Re-export TenantConn from alc-core
