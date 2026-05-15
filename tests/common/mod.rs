@@ -33,7 +33,7 @@ use rust_alc_api::db::repository::{
     PgTroubleNotificationPrefsRepository, PgTroubleOfficesRepository,
     PgTroubleProgressStatusesRepository, PgTroubleSchedulesRepository,
     PgTroubleTaskStatusesRepository, PgTroubleTaskTypesRepository, PgTroubleTasksRepository,
-    PgTroubleTicketsRepository, PgTroubleWorkflowRepository,
+    PgTroubleTicketsRepository, PgTroubleWorkflowRepository, PgVehicleSettingsDumpsRepository,
 };
 use rust_alc_api::AppState;
 
@@ -276,6 +276,7 @@ fn build_app_state(
     let dtako_vehicles = Arc::new(PgDtakoVehiclesRepository::new(pool.clone()));
     let dtako_work_times = Arc::new(PgDtakoWorkTimesRepository::new(pool.clone()));
     let dtako_y_time_export = Arc::new(PgDtakoYTimeExportRepository::new(pool.clone()));
+    let vehicle_settings_dumps = Arc::new(PgVehicleSettingsDumpsRepository::new(pool.clone()));
     let employees = Arc::new(PgEmployeeRepository::new(pool.clone()));
     let equipment_failures = Arc::new(PgEquipmentFailuresRepository::new(pool.clone()));
     let guidance_records = Arc::new(PgGuidanceRecordsRepository::new(pool.clone()));
@@ -337,6 +338,7 @@ fn build_app_state(
         dtako_vehicles,
         dtako_work_times,
         dtako_y_time_export,
+        vehicle_settings_dumps,
         employees,
         equipment_failures,
         guidance_records,
