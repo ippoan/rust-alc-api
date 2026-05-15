@@ -743,6 +743,23 @@ pub struct DtakoVehicle {
     pub vehicle_name: String,
 }
 
+// --- Vehicle Settings Dump (R2 車輛設定 dump メタデータ) ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct VehicleSettingsDump {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub vehicle_cd: String,
+    pub dump_dir: String,
+    pub machine_id: Option<String>,
+    pub firm_main_app: Option<String>,
+    pub r2_json_key: String,
+    pub r2_cfg_key: String,
+    pub uploaded_at: DateTime<Utc>,
+    pub uploaded_by: Option<Uuid>,
+    pub created_at: DateTime<Utc>,
+}
+
 // --- Dtako: Event Classification ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
