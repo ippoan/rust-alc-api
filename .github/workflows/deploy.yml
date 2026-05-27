@@ -12,6 +12,8 @@ on:
     secrets:
       GCP_SA_KEY:
         required: true
+      NOTIFY_WORKER_SECRET_STAGING:
+        required: false
 
 # Environment is derived from github context:
 #   pull_request → staging
@@ -345,6 +347,59 @@ jobs:
             --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
             --format 'value(status.url)')
           echo "::notice ::Gateway URL: $URL"
+
+  # ---------------------------------------------------------------------------
+  # Staging: smoke test /api/notify/ingest after staging deploy
+  #
+  # email-receiver Worker から backend に届く shared secret 経路の検証。
+  # GitHub Actions secret NOTIFY_WORKER_SECRET_STAGING の値で
+  # rust-alc-api-staging /api/notify/ingest を叩く:
+  #   - 401 -> secret drift (GCP / Cloud Run env binding / GitHub org secret のどこかで不一致) -> fail
+  #   - 404 -> auth pass、tenant 存在しない (= 期待) -> pass
+  #   - 400 -> auth pass、body 検証で reject -> pass
+  #   - 200 -> auth pass、何かが起きた (smoke tenant が偶然存在) -> pass
+  # ingest は gateway を経由せず backend に直接届く設計 (email-receiver Worker
+  # の INGEST_ENDPOINT_STAGING と同じ URL)。
+  # ---------------------------------------------------------------------------
+  smoke-staging-ingest:
+    name: "Smoke /api/notify/ingest on staging"
+    needs: [deploy-services]
+    if: >-
+      always() &&
+      github.event_name == 'pull_request' &&
+      needs.deploy-services.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST /api/notify/ingest with NOTIFY_WORKER_SECRET_STAGING
+        env:
+          SECRET: ${{ secrets.NOTIFY_WORKER_SECRET_STAGING }}
+          INGEST_URL: https://rust-alc-api-staging-566bls5vfq-an.a.run.app/api/notify/ingest
+        run: |
+          set -eu
+          if [ -z "${SECRET:-}" ]; then
+            echo "::error::NOTIFY_WORKER_SECRET_STAGING is empty — check org secret sync (secrets-inventory sync-from-gcp ... ?targets=gh)"
+            exit 1
+          fi
+          # tenant_short_id に意図的に存在しない 8 文字 hex を渡し、
+          # auth 通過後 404 (tenant not found) で返ることを期待する。
+          http=$(curl -sS -o /tmp/body -w "%{http_code}" -X POST \
+            "$INGEST_URL" \
+            -H "x-worker-secret: $SECRET" \
+            -H "Content-Type: application/json" \
+            --data-binary '{"tenant_short_id":"smk00000"}')
+          echo "HTTP $http"
+          head -c 500 /tmp/body || true
+          echo
+          if [ "$http" = "401" ]; then
+            echo "::error::auth failed — NOTIFY_WORKER_SECRET_STAGING in this repo does not match the value bound to rust-alc-api-staging (Cloud Run env -> GCP notify-worker-secret-staging). Check secrets-inventory get_drift."
+            exit 1
+          fi
+          # 4xx (other than 401) / 200 はすべて auth 通過 = secret OK
+          if [ "$http" -lt 200 ] || [ "$http" -ge 500 ]; then
+            echo "::error::unexpected HTTP $http (5xx implies backend not yet ready or other issue)"
+            exit 1
+          fi
+          echo "::notice::ingest auth accepted (HTTP $http) — NOTIFY_WORKER_SECRET_STAGING OK"
 
   # ---------------------------------------------------------------------------
   # Production: update archive job
