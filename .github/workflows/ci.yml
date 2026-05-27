@@ -458,6 +458,7 @@ jobs:
       ref_name: ${{ github.ref_name }}
     secrets:
       GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+      NOTIFY_WORKER_SECRET_STAGING: ${{ secrets.NOTIFY_WORKER_SECRET_STAGING }}
 
   auto-merge:
     name: Auto Merge
