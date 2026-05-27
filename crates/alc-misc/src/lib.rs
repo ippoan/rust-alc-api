@@ -7,6 +7,7 @@ pub mod driver_info;
 pub mod employees;
 pub mod guidance_records;
 pub mod health;
+pub mod health_canary;
 pub mod items;
 pub mod measurements;
 pub mod members;

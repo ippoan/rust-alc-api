@@ -28,6 +28,7 @@ pub use alc_misc::driver_info;
 pub use alc_misc::employees;
 pub use alc_misc::guidance_records;
 pub use alc_misc::health;
+pub use alc_misc::health_canary;
 pub use alc_misc::items;
 pub use alc_misc::measurements;
 pub use alc_misc::members;
@@ -90,6 +91,7 @@ pub fn router() -> Router<AppState> {
     // 内部 API ルート (auth-worker 等の信頼できる呼び出し元のみ、aud=alc-api-internal)
     let internal_protected = Router::new()
         .merge(notify_lineworks_channels::internal_router())
+        .merge(health_canary::internal_router())
         .layer(axum_middleware::from_fn(require_internal_jwt));
 
     // テナント対応ルート (JWT or X-Tenant-ID)
