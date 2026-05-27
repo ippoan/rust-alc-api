@@ -23,11 +23,32 @@ pub struct AppClaims {
     pub org_slug: Option<String>,
     pub iat: i64,
     pub exp: i64,
+    /// 発行環境 (`"staging"` / `"prod"`)。Refs #218 — auth-worker と JWT_SECRET を
+    /// 共有しているため、staging で発行された token が prod の verifier を素通り
+    /// しないよう、token に発行環境を載せて verify 側で `current_env_label()` と
+    /// 一致を強制する。Option なのは旧 token 互換性のため (未設定なら一致チェック
+    /// を skip。deploy 後 1h で旧 token expire するので実質必須化と等価)。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env: Option<String>,
 }
 
 /// JWT シークレットのラッパー
 #[derive(Clone)]
 pub struct JwtSecret(pub String);
+
+/// 現在の Cloud Run 環境ラベルを `"staging"` / `"prod"` で返す。Refs #218。
+///
+/// 判定は `cloudrun/render.sh` で注入される `STAGING_MODE` env var ベース:
+///   - `STAGING_MODE=true` → `"staging"`
+///   - それ以外 (未設定 / `"false"`) → `"prod"`
+///
+/// JWT の `env` claim に書き込み、verify 時にも同関数の戻り値と比較する。
+pub fn current_env_label() -> &'static str {
+    match std::env::var("STAGING_MODE").as_deref() {
+        Ok("true") => "staging",
+        _ => "prod",
+    }
+}
 
 /// Access token を発行
 pub fn create_access_token(
@@ -45,6 +66,7 @@ pub fn create_access_token(
         org_slug,
         iat: now.timestamp(),
         exp: (now + Duration::seconds(ACCESS_TOKEN_EXPIRY_SECS)).timestamp(),
+        env: Some(current_env_label().to_string()),
     };
 
     encode(
@@ -54,7 +76,8 @@ pub fn create_access_token(
     )
 }
 
-/// Access token を検証してクレームを返す
+/// Access token を検証してクレームを返す。Refs #218 — token の `env` claim と
+/// `current_env_label()` の一致を強制する (旧 token 互換のため env 未設定は通す)。
 pub fn verify_access_token(
     token: &str,
     secret: &JwtSecret,
@@ -67,6 +90,15 @@ pub fn verify_access_token(
         &DecodingKey::from_secret(secret.0.as_bytes()),
         &validation,
     )?;
+
+    if let Some(token_env) = token_data.claims.env.as_deref() {
+        let expected = current_env_label();
+        if token_env != expected {
+            return Err(jsonwebtoken::errors::Error::from(
+                jsonwebtoken::errors::ErrorKind::InvalidIssuer,
+            ));
+        }
+    }
 
     Ok(token_data.claims)
 }
@@ -82,6 +114,13 @@ pub struct InternalClaims {
     pub aud: String,
     pub iat: i64,
     pub exp: i64,
+    /// 発行環境 (`"staging"` / `"prod"`)。Refs #218 — auth-worker と JWT_SECRET を
+    /// 共有しているため、staging で発行された internal token が prod で素通り
+    /// しないよう、token に発行環境を載せて verify 側で `current_env_label()` と
+    /// 一致を強制する。Option なのは旧 token 互換性のため (実 lifetime は 60s
+    /// なので 1 分で旧 token は expire し実質必須化)。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env: Option<String>,
 }
 
 /// 内部 API 用 JWT を発行 (主に rust-alc-api 内テストや CLI から auth-worker 用 JWT を生成する用途)
@@ -96,6 +135,7 @@ pub fn create_internal_token(
         aud: INTERNAL_AUD.to_string(),
         iat: now.timestamp(),
         exp: (now + Duration::seconds(ttl_seconds)).timestamp(),
+        env: Some(current_env_label().to_string()),
     };
     encode(
         &Header::new(Algorithm::HS256),
@@ -104,7 +144,8 @@ pub fn create_internal_token(
     )
 }
 
-/// 内部 API 用 JWT を検証
+/// 内部 API 用 JWT を検証。Refs #218 — token の `env` claim と `current_env_label()`
+/// の一致を強制する (旧 token 互換のため env 未設定は通す)。
 pub fn verify_internal_token(
     token: &str,
     secret: &JwtSecret,
@@ -118,6 +159,15 @@ pub fn verify_internal_token(
         &DecodingKey::from_secret(secret.0.as_bytes()),
         &validation,
     )?;
+
+    if let Some(token_env) = token_data.claims.env.as_deref() {
+        let expected = current_env_label();
+        if token_env != expected {
+            return Err(jsonwebtoken::errors::Error::from(
+                jsonwebtoken::errors::ErrorKind::InvalidIssuer,
+            ));
+        }
+    }
 
     Ok(token_data.claims)
 }
@@ -146,6 +196,11 @@ pub fn hash_refresh_token(token: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    /// JWT 関連テストで `STAGING_MODE` env var を触る (current_env_label() 経由で
+    /// 暗黙参照される)。並列実行で値が leak しないよう本ファイル内テストを直列化する。
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn test_user() -> User {
         User {
@@ -167,6 +222,9 @@ mod tests {
 
     #[test]
     fn test_create_and_verify_access_token() {
+        // STAGING_MODE が並列テストで変わると create と verify で env 値が
+        // ずれて InvalidIssuer になるので serialize (Refs #218)。
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         test_group!("JWTトークン");
         test_case!("アクセストークンの生成と検証", {
             let user = test_user();
@@ -197,6 +255,7 @@ mod tests {
 
     #[test]
     fn test_create_and_verify_internal_token() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         test_group!("内部JWT");
         test_case!(
             "内部トークンの生成と検証 (aud=alc-api-internal)",
@@ -250,6 +309,7 @@ mod tests {
                 aud: "wrong-aud".to_string(),
                 iat: now.timestamp(),
                 exp: (now + Duration::seconds(60)).timestamp(),
+                env: None,
             };
             let token = jwt_encode(
                 &Header::new(Algorithm::HS256),
@@ -274,6 +334,7 @@ mod tests {
                 aud: INTERNAL_AUD.to_string(),
                 iat: (now - Duration::seconds(7200)).timestamp(),
                 exp: (now - Duration::seconds(3600)).timestamp(),
+                env: None,
             };
             let token = jwt_encode(
                 &Header::new(Algorithm::HS256),
@@ -304,5 +365,178 @@ mod tests {
             let hash2 = hash_refresh_token(token);
             assert_eq!(hash1, hash2);
         });
+    }
+
+    // -------------------------------------------------------------------
+    // Refs #218: env claim による cross-env token replay 防止のテスト
+    // -------------------------------------------------------------------
+
+    /// ENV_LOCK 取得 + `STAGING_MODE` env var の書き換え + Drop で復元する RAII guard。
+    /// 本ファイル内のテストで `current_env_label()` が安定するよう必ず使う。
+    struct EnvGuard {
+        _lock: std::sync::MutexGuard<'static, ()>,
+        prev: Option<String>,
+    }
+    impl EnvGuard {
+        /// STAGING_MODE を `value` に設定 (`"true"` / `"false"` 等)。lock 取得込み。
+        fn set(value: &str) -> Self {
+            let lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let prev = std::env::var("STAGING_MODE").ok();
+            // SAFETY: ENV_LOCK で本ファイル内テストの STAGING_MODE 操作を直列化済。
+            unsafe {
+                std::env::set_var("STAGING_MODE", value);
+            }
+            Self { _lock: lock, prev }
+        }
+    }
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            unsafe {
+                if let Some(prev) = &self.prev {
+                    std::env::set_var("STAGING_MODE", prev);
+                } else {
+                    std::env::remove_var("STAGING_MODE");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_current_env_label_staging() {
+        let _g = EnvGuard::set("true");
+        assert_eq!(current_env_label(), "staging");
+    }
+
+    #[test]
+    fn test_current_env_label_prod() {
+        let _g = EnvGuard::set("false");
+        assert_eq!(current_env_label(), "prod");
+    }
+
+    #[test]
+    fn test_current_env_label_unknown_value_defaults_to_prod() {
+        let _g = EnvGuard::set("anything-else");
+        assert_eq!(current_env_label(), "prod");
+    }
+
+    #[test]
+    fn test_access_token_carries_env_claim_staging() {
+        let _g = EnvGuard::set("true");
+        let user = test_user();
+        let secret = JwtSecret("test-secret-key-256-bits-long!!!".to_string());
+        let token = create_access_token(&user, &secret, None).unwrap();
+        let claims = verify_access_token(&token, &secret).unwrap();
+        assert_eq!(claims.env.as_deref(), Some("staging"));
+    }
+
+    #[test]
+    fn test_access_token_carries_env_claim_prod() {
+        let _g = EnvGuard::set("false");
+        let user = test_user();
+        let secret = JwtSecret("test-secret-key-256-bits-long!!!".to_string());
+        let token = create_access_token(&user, &secret, None).unwrap();
+        let claims = verify_access_token(&token, &secret).unwrap();
+        assert_eq!(claims.env.as_deref(), Some("prod"));
+    }
+
+    #[test]
+    fn test_internal_token_carries_env_claim() {
+        let _g = EnvGuard::set("true");
+        let secret = JwtSecret("test-secret-key-256-bits-long!!!".to_string());
+        let token = create_internal_token(&secret, "auth-worker", 60).unwrap();
+        let claims = verify_internal_token(&token, &secret).unwrap();
+        assert_eq!(claims.env.as_deref(), Some("staging"));
+    }
+
+    #[test]
+    fn test_access_token_env_mismatch_rejected() {
+        // staging で発行 → prod で verify (= cross-env replay) は reject
+        let secret = JwtSecret("shared-secret-key-256-bits-long!".to_string());
+        let user = test_user();
+
+        // sign 時は staging
+        let _g_sign = EnvGuard::set("true");
+        let token = create_access_token(&user, &secret, None).unwrap();
+        drop(_g_sign);
+
+        // verify 時は prod
+        let _g_verify = EnvGuard::set("false");
+        let err = verify_access_token(&token, &secret).unwrap_err();
+        assert!(matches!(
+            err.kind(),
+            jsonwebtoken::errors::ErrorKind::InvalidIssuer
+        ));
+    }
+
+    #[test]
+    fn test_internal_token_env_mismatch_rejected() {
+        let secret = JwtSecret("shared-secret-key-256-bits-long!".to_string());
+
+        let _g_sign = EnvGuard::set("true");
+        let token = create_internal_token(&secret, "auth-worker", 60).unwrap();
+        drop(_g_sign);
+
+        let _g_verify = EnvGuard::set("false");
+        let err = verify_internal_token(&token, &secret).unwrap_err();
+        assert!(matches!(
+            err.kind(),
+            jsonwebtoken::errors::ErrorKind::InvalidIssuer
+        ));
+    }
+
+    #[test]
+    fn test_access_token_without_env_claim_accepted_for_compat() {
+        // 旧 token (env field 無し) は backward compat のため、いずれの env でも通す
+        use jsonwebtoken::{encode as jwt_encode, EncodingKey, Header};
+        let secret = JwtSecret("test-secret-key-256-bits-long!!!".to_string());
+        let user = test_user();
+        let now = Utc::now();
+        let claims_without_env = AppClaims {
+            sub: user.id,
+            email: user.email.clone(),
+            name: user.name.clone(),
+            tenant_id: user.tenant_id,
+            role: user.role.clone(),
+            org_slug: None,
+            iat: now.timestamp(),
+            exp: (now + Duration::seconds(60)).timestamp(),
+            env: None,
+        };
+        let token = jwt_encode(
+            &Header::new(Algorithm::HS256),
+            &claims_without_env,
+            &EncodingKey::from_secret(secret.0.as_bytes()),
+        )
+        .unwrap();
+        let _g = EnvGuard::set("true");
+        assert!(verify_access_token(&token, &secret).is_ok());
+        drop(_g);
+        let _g = EnvGuard::set("false");
+        assert!(verify_access_token(&token, &secret).is_ok());
+    }
+
+    #[test]
+    fn test_internal_token_without_env_claim_accepted_for_compat() {
+        use jsonwebtoken::{encode as jwt_encode, EncodingKey, Header};
+        let secret = JwtSecret("test-secret-key-256-bits-long!!!".to_string());
+        let now = Utc::now();
+        let claims_without_env = InternalClaims {
+            iss: "auth-worker".to_string(),
+            aud: INTERNAL_AUD.to_string(),
+            iat: now.timestamp(),
+            exp: (now + Duration::seconds(60)).timestamp(),
+            env: None,
+        };
+        let token = jwt_encode(
+            &Header::new(Algorithm::HS256),
+            &claims_without_env,
+            &EncodingKey::from_secret(secret.0.as_bytes()),
+        )
+        .unwrap();
+        let _g = EnvGuard::set("true");
+        assert!(verify_internal_token(&token, &secret).is_ok());
+        drop(_g);
+        let _g = EnvGuard::set("false");
+        assert!(verify_internal_token(&token, &secret).is_ok());
     }
 }
