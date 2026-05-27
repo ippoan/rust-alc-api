@@ -1,0 +1,168 @@
+name: Migration Safety Check
+
+# PR で追加された migration SQL に rollback 不可な contract パターンが含まれていないか検査する。
+# warning only (block しない)。判定ロジックは .github/scripts/migration-safety-check.sh に切り出し。
+# 将来 sqlparser-rs (AST ベース) に差し替え予定。
+
+on:
+  pull_request:
+    paths:
+      - 'migrations/**.sql'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Collect added migration files
+        id: collect
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          # SHA は GitHub 生成の 40-char hex で injection リスクなしだが、念のため env 経由で受ける。
+          # PR で追加 (Added) されたファイルのみ対象。変更 (Modified) は適用済み migration の
+          # 改変禁止ルールで別途禁じているのでここでは扱わない。
+          added=$(git diff --name-only --diff-filter=A "$BASE_SHA"..."$HEAD_SHA" -- 'migrations/*.sql' || true)
+          if [[ -z "$added" ]]; then
+            echo "added_count=0" >> "$GITHUB_OUTPUT"
+            echo "no added migrations"
+            exit 0
+          fi
+          {
+            echo "added_count=$(echo "$added" | wc -l | tr -d ' ')"
+            echo 'added_files<<EOF_ADDED'
+            echo "$added"
+            echo 'EOF_ADDED'
+          } >> "$GITHUB_OUTPUT"
+          echo "added files:"
+          echo "$added"
+
+      - name: Run safety check
+        id: check
+        if: steps.collect.outputs.added_count != '0'
+        env:
+          ADDED_FILES: ${{ steps.collect.outputs.added_files }}
+        run: |
+          set -euo pipefail
+          # ファイル名は git tracked path だが PR 作成者が任意のファイル名を選べるので
+          # ${{ }} 直接展開ではなく env 経由で受ける (command injection 防止)。
+          # mapfile + quoted "${files[@]}" で空白/特殊文字を含むパスも安全に渡す。
+          mapfile -t files <<< "$ADDED_FILES"
+          report=$(bash .github/scripts/migration-safety-check.sh "${files[@]}")
+          {
+            echo 'report<<EOF_REPORT'
+            echo "$report"
+            echo 'EOF_REPORT'
+          } >> "$GITHUB_OUTPUT"
+          echo "$report"
+
+      - name: Post sticky PR comment
+        if: steps.collect.outputs.added_count != '0'
+        uses: actions/github-script@v7
+        env:
+          REPORT: ${{ steps.check.outputs.report }}
+          UNSAFE_COUNT: ${{ steps.check.outputs.unsafe_count }}
+        with:
+          script: |
+            const marker = '<!-- migration-safety-check -->';
+            const unsafe = parseInt(process.env.UNSAFE_COUNT || '0', 10);
+            const heading = unsafe > 0
+              ? `### Migration Safety Check — needs-rollback-review (${unsafe} pattern${unsafe > 1 ? 's' : ''})`
+              : '### Migration Safety Check — rollback-safe';
+            const body = [
+              marker,
+              heading,
+              '',
+              process.env.REPORT || '(no report)',
+              '',
+              '> 正規表現ベースの検査 (false-positive 含む)。warning only — block はしない。',
+              '> 将来 sqlparser-rs で AST ベースに差し替え予定。',
+              '> Refs ippoan/ci-dashboard#137',
+            ].join('\n');
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              per_page: 100,
+            });
+            const existing = comments.find(c => (c.body || '').startsWith(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+      - name: Apply labels
+        if: steps.collect.outputs.added_count != '0'
+        uses: actions/github-script@v7
+        env:
+          UNSAFE_COUNT: ${{ steps.check.outputs.unsafe_count }}
+        with:
+          script: |
+            const unsafe = parseInt(process.env.UNSAFE_COUNT || '0', 10);
+            const toAdd = unsafe > 0 ? 'needs-rollback-review' : 'rollback-safe';
+            const toRemove = unsafe > 0 ? 'rollback-safe' : 'needs-rollback-review';
+
+            // ラベルが repo に存在しなければ作成
+            const labelSpec = {
+              'rollback-safe':           { color: '0e8a16', description: 'PR の追加 migration が rollback-safe と判定された' },
+              'needs-rollback-review':   { color: 'd93f0b', description: 'PR の追加 migration に rollback 不可な contract パターンを検出' },
+            };
+            for (const [name, spec] of Object.entries(labelSpec)) {
+              try {
+                await github.rest.issues.getLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name,
+                });
+              } catch (e) {
+                if (e.status === 404) {
+                  await github.rest.issues.createLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    name,
+                    color: spec.color,
+                    description: spec.description,
+                  });
+                } else { throw e; }
+              }
+            }
+
+            // 排他: 反対ラベルが付いていれば剥がす
+            try {
+              await github.rest.issues.removeLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                name: toRemove,
+              });
+            } catch (e) {
+              if (e.status !== 404) throw e;
+            }
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              labels: [toAdd],
+            });
