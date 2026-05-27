@@ -69,8 +69,12 @@ fi
 # Shared secrets (same Secret Manager names for staging and production)
 # ---------------------------------------------------------------------------
 jwt_secret_name() {
-  if [[ "$ENV" == "staging" ]]; then echo "alc-api-staging-jwt-secret"
-  else echo "JWT_SECRET"; fi
+  # Refs #218: auth-worker 側は staging / prod 共に CF Secrets Store の
+  # `JWT_SECRET` 同 entry を bind しており (= 環境統合)、rust-alc-api だけ
+  # staging 専用 `alc-api-staging-jwt-secret` を見ていたため必ず drift していた
+  # (jwt_secret_drift probe で 401 検出)。auth-worker と環境統合 intent を
+  # 揃え、prod / staging とも同じ GCP `JWT_SECRET` を見る。
+  echo "JWT_SECRET"
 }
 
 notify_worker_secret_name() {
