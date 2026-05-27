@@ -408,6 +408,36 @@ mod tests {
     }
 
     #[test]
+    fn test_env_guard_restores_previous_value_on_drop() {
+        // Drop の `Some(prev)` 分岐をカバー: STAGING_MODE が pre-set されている
+        // 状態で EnvGuard::set → drop → 元値に復元されることを確認する。
+        // ENV_LOCK は EnvGuard 内で取り直すので、setup/cleanup でのみ取得する。
+        {
+            let _setup = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            unsafe {
+                std::env::set_var("STAGING_MODE", "preset-value");
+            }
+        }
+
+        {
+            let _g = EnvGuard::set("override-value");
+            assert_eq!(
+                std::env::var("STAGING_MODE").as_deref(),
+                Ok("override-value")
+            );
+        }
+        // Drop が `Some(prev)` 分岐に入って "preset-value" を復元するはず
+        assert_eq!(std::env::var("STAGING_MODE").as_deref(), Ok("preset-value"));
+
+        {
+            let _cleanup = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            unsafe {
+                std::env::remove_var("STAGING_MODE");
+            }
+        }
+    }
+
+    #[test]
     fn test_current_env_label_prod() {
         let _g = EnvGuard::set("false");
         assert_eq!(current_env_label(), "prod");
