@@ -425,3 +425,65 @@ jobs:
             --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
             --image "$AR_IMAGE"
           echo "::notice ::Archive Job updated"
+
+  # ---------------------------------------------------------------------------
+  # Production: verify the tag release did NOT flip traffic
+  #
+  # deploy/release 分離の invariant チェック: tag (v*) release は新 revision を
+  # deploy するだけで、トラフィックは旧 revision に残す (= 切替は Release Wave
+  # flip で別途行う) のが正しい。各 production service について「最新 revision の
+  # traffic % が 0 か」を確認し、0 でなければ (= release が勝手にフリップした)
+  # FAIL する。
+  #
+  # 注意: 現状の deploy-services は render.sh (traffic ブロック無し) を
+  # `gcloud run services replace` するため 100% latest にフリップする。よって
+  # 本 check は現状の release では FAIL する想定 — それがまさに検出したい挙動。
+  # release を no-traffic 化する (render.sh に traffic ピン / --no-traffic 相当)
+  # のは別 PR で対応する。
+  # ---------------------------------------------------------------------------
+  verify-no-traffic:
+    name: "Verify release did not flip traffic"
+    needs: [deploy-services, deploy-gateway]
+    if: >-
+      always() &&
+      startsWith(github.ref, 'refs/tags/v') &&
+      needs.deploy-services.result == 'success' &&
+      needs.deploy-gateway.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Assert latest revision receives 0% traffic
+        run: |
+          set -euo pipefail
+          SERVICES="rust-alc-api rust-alc-api-gateway rust-alc-api-tenko rust-alc-api-carins rust-alc-api-dtako rust-alc-api-trouble"
+          fail=0
+          for SVC in $SERVICES; do
+            echo "::group::$SVC traffic split"
+            JSON=$(gcloud run services describe "$SVC" \
+              --region ${{ env.REGION }} --project ${{ env.PROJECT }} --format=json)
+            LATEST=$(printf '%s' "$JSON" | jq -r '.status.latestReadyRevisionName // ""')
+            # 最新 revision に向いている traffic を集計する。traffic entry は
+            # revisionName 指定 or latestRevision:true のどちらでも latest を指し得る。
+            PCT=$(printf '%s' "$JSON" | jq --arg r "$LATEST" \
+              '[.status.traffic[]? | select(.revisionName == $r or .latestRevision == true) | (.percent // 0)] | add // 0')
+            echo "latest ready revision: $LATEST"
+            printf '%s' "$JSON" | jq -r '.status.traffic[]? | "  \(.percent // 0)% -> \(.revisionName // "@latest")\(if .tag then " (tag: \(.tag))" else "" end)"'
+            if [ "${PCT:-0}" != "0" ]; then
+              echo "::error::$SVC: newly released revision ($LATEST) is serving ${PCT}% traffic. A tag release must NOT flip traffic — traffic switching is the Release Wave flip's job. Make the production deploy no-traffic."
+              fail=1
+            else
+              echo "OK: latest revision serves 0% (no auto-flip)"
+            fi
+            echo "::endgroup::"
+          done
+          if [ "$fail" != "0" ]; then
+            exit 1
+          fi
+          echo "✅ All services: the released revision receives 0% traffic (deploy/release separation holds)."
