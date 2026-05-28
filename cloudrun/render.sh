@@ -27,10 +27,20 @@ fi
 
 STAGING_URL=""
 DB_IMAGE=""
+# production no-traffic deploy 用 (Refs #137 Phase 5 / ci-dashboard#157):
+#   --pin-traffic-revision <rev>  現在 100% を受けている revision。指定すると新
+#       revision は 0% で deploy され、traffic は <rev> に残る (= release は flip
+#       しない、切替は Release Wave flip に委ねる)。空なら従来どおり latest に 100%。
+#   --pending-tag <tag>  新 revision に付ける Cloud Run revision tag。Release Wave
+#       flip が `--to-revision-tag <tag>` で切替対象にする (例: pending-v1-42-0)。
+PIN_TRAFFIC_REVISION=""
+PENDING_TAG=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --staging-url) STAGING_URL="$2"; shift 2 ;;
     --db-image) DB_IMAGE="$2"; shift 2 ;;
+    --pin-traffic-revision) PIN_TRAFFIC_REVISION="$2"; shift 2 ;;
+    --pending-tag) PENDING_TAG="$2"; shift 2 ;;
     *) echo "Unknown option: $1" >&2; exit 1 ;;
   esac
 done
@@ -519,5 +529,27 @@ if [[ "$ENV" == "staging" && "$SERVICE" != "gateway" ]]; then
         - name: pg-data
           emptyDir:
             sizeLimit: 1Gi
+YAML
+fi
+
+# ---------------------------------------------------------------------------
+# Traffic block (production no-traffic release)
+#
+# PIN_TRAFFIC_REVISION が指定されている時のみ emit する。新 revision (latest) を
+# 0% + pending tag で deploy し、traffic は現行 revision に 100% 残す。これで
+# `gcloud run services replace` が release で勝手にフリップするのを防ぎ、実際の
+# 切替は Release Wave flip (= revision tag 指定の update-traffic) に委ねる。
+#   - PIN_TRAFFIC_REVISION 空 (初回 deploy 等) → traffic block を出さない =
+#     Cloud Run default の「latest に 100%」に従う (= 初回は flip 許容)。
+#   - staging では指定しない (= staging は latest が常に live で良い)。
+# Refs ippoan/ci-dashboard#137 Phase 5 / #157。
+# ---------------------------------------------------------------------------
+if [[ -n "$PIN_TRAFFIC_REVISION" ]]; then
+  cat <<YAML
+  traffic:
+    - revisionName: ${PIN_TRAFFIC_REVISION}
+      percent: 100
+    - latestRevision: true
+      percent: 0$( [[ -n "$PENDING_TAG" ]] && printf '\n      tag: %s' "$PENDING_TAG" )
 YAML
 fi
