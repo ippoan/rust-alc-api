@@ -441,6 +441,17 @@ jobs:
             docker push "${REPO}${suffix}:latest"
           done
 
+      # 新しい :latest dev image (= frontend の integration test が相手にする
+      # image) を ci-dashboard の compatibility matrix に記録する。current_image
+      # は main commit SHA。本番トラフィックには一切触れない (Refs ippoan/ci-dashboard#157)。
+      - name: Report backend dev image (compatibility)
+        uses: ippoan/ci-workflows/.github/actions/report-backend-deploy@main
+        with:
+          repo: ${{ github.repository }}
+          current_image: ${{ github.sha }}
+          deployed_by: rust-alc-api-dev-latest
+          webhook_secret: ${{ secrets.RELEASE_WAVE_WEBHOOK_SECRET }}
+
   deploy:
     name: Deploy
     needs: [build-image, coverage-check]
