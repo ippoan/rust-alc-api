@@ -414,19 +414,6 @@ jobs:
             docker push "${REPO}${suffix}:dev"
           done
 
-      # :dev image (= frontend の integration test が相手にする dev image) を
-      # 更新したので、ci-dashboard の compatibility matrix に現 dev image を記録する。
-      # docker-latest は現 CI 構造では走らない (main push で check/coverage が skip
-      # される) ため、確実に走る本 job (PR) を hook にする。current_image は当該
-      # commit SHA。本番トラフィックには一切触れない (Refs ippoan/ci-dashboard#157)。
-      - name: Report backend dev image (compatibility)
-        uses: ippoan/ci-workflows/.github/actions/report-backend-deploy@main
-        with:
-          repo: ${{ github.repository }}
-          current_image: ${{ github.sha }}
-          deployed_by: rust-alc-api-dev
-          webhook_secret: ${{ secrets.RELEASE_WAVE_WEBHOOK_SECRET }}
-
   docker-latest:
     name: Tag latest
     if: "always() && github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.check.result == 'success' && needs.coverage-check.result == 'success'"
@@ -472,6 +459,30 @@ jobs:
     secrets:
       GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
       NOTIFY_WORKER_SECRET_STAGING: ${{ secrets.NOTIFY_WORKER_SECRET_STAGING }}
+
+  # staging への deploy(cutover)が成功した時に、staging の現 backend image を
+  # ci-dashboard の compatibility matrix に記録する。これは "build を記録" では
+  # なく "staging 環境への deploy event を記録" で、Pact の
+  # record-deployment --environment staging と同義 (= 前バージョンを supersede し
+  # 「staging の現 image」が一意に保たれる)。frontend は integration test を
+  # この staging image 相手に走らせるので突合基準として整合する。
+  # current_image は deploy した image tag (= github.sha)。production (v* tag) では
+  # 打たない (本番トラフィックを伴う release の記録は別経路 = Release Wave flip)。
+  report-backend-compat:
+    name: Report backend image (staging)
+    needs: [deploy]
+    if: >-
+      always() &&
+      github.event_name == 'pull_request' &&
+      needs.deploy.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ippoan/ci-workflows/.github/actions/report-backend-deploy@main
+        with:
+          repo: ${{ github.repository }}
+          current_image: ${{ github.sha }}
+          deployed_by: rust-alc-api-staging
+          webhook_secret: ${{ secrets.RELEASE_WAVE_WEBHOOK_SECRET }}
 
   auto-merge:
     name: Auto Merge
