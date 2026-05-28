@@ -499,4 +499,10 @@ jobs:
       contents: write
       pull-requests: write
     secrets:
+      # GitHub App installation token を優先 (ci-workflows#65)。App は独自の
+      # rate-limit bucket を持つので、user PAT の GraphQL quota を食わず
+      # "API rate limit already exceeded for user ID" の intermittent fail を
+      # 回避できる。org に CI_APP_ID/KEY が無ければ自動で AUTO_MERGE_PAT に fallback。
+      CI_APP_ID: ${{ secrets.CI_APP_ID }}
+      CI_APP_PRIVATE_KEY: ${{ secrets.CI_APP_PRIVATE_KEY }}
       AUTO_MERGE_PAT: ${{ secrets.TAG_RELEASE_PAT }}
