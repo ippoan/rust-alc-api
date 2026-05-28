@@ -459,6 +459,7 @@ jobs:
     secrets:
       GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
       NOTIFY_WORKER_SECRET_STAGING: ${{ secrets.NOTIFY_WORKER_SECRET_STAGING }}
+      RELEASE_WAVE_WEBHOOK_SECRET: ${{ secrets.RELEASE_WAVE_WEBHOOK_SECRET }}
 
   auto-merge:
     name: Auto Merge

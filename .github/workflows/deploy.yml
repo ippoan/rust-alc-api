@@ -14,6 +14,8 @@ on:
         required: true
       NOTIFY_WORKER_SECRET_STAGING:
         required: false
+      RELEASE_WAVE_WEBHOOK_SECRET:
+        required: false
 
 # Environment is derived from github context:
 #   pull_request → staging
@@ -347,6 +349,31 @@ jobs:
             --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
             --format 'value(status.url)')
           echo "::notice ::Gateway URL: $URL"
+
+  # ---------------------------------------------------------------------------
+  # Production: report current prod image to ci-dashboard compatibility (Refs #157)
+  #
+  # production (v* tag) deploy が全 service + gateway 成功した後、現 prod image
+  # = version tag を ci-dashboard の backend-deploy-report webhook に記録する。
+  # これで Release Wave compatibility matrix が「consumer frontend がこの image を
+  # test 済みか」を突合できるようになる。staging (PR) deploy では打たない
+  # (compatibility は production image 基準のため)。
+  # ---------------------------------------------------------------------------
+  report-backend-deploy:
+    name: "Report backend deploy (compatibility)"
+    needs: [deploy-gateway]
+    if: >-
+      always() &&
+      startsWith(github.ref, 'refs/tags/v') &&
+      needs.deploy-gateway.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ippoan/ci-workflows/.github/actions/report-backend-deploy@main
+        with:
+          repo: ${{ github.repository }}
+          current_image: ${{ inputs.ref_name }}
+          deployed_by: rust-alc-api-deploy
+          webhook_secret: ${{ secrets.RELEASE_WAVE_WEBHOOK_SECRET }}
 
   # ---------------------------------------------------------------------------
   # Staging: smoke test /api/notify/ingest after staging deploy
