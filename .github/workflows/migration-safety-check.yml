@@ -55,7 +55,7 @@ jobs:
         run: |
           set -euo pipefail
           # ファイル名は git tracked path だが PR 作成者が任意のファイル名を選べるので
-          # ${{ }} 直接展開ではなく env 経由で受ける (command injection 防止)。
+          # GitHub Actions 式で直接展開せず env 経由で受ける (command injection 防止)。
           # mapfile + quoted "${files[@]}" で空白/特殊文字を含むパスも安全に渡す。
           mapfile -t files <<< "$ADDED_FILES"
           report=$(bash .github/scripts/migration-safety-check.sh "${files[@]}")
