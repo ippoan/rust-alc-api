@@ -1,7 +1,7 @@
 name: Release Wave
 
 # Release Wave 機構の caller (薄い ~10 行 wrapper)。
-# ci-dashboard から repository_dispatch で stage / flip / rollback event を
+# ci-dashboard から repository_dispatch で flip / rollback event を
 # 受けて、ci-workflows の release-wave-handler.yml reusable に処理を委譲する。
 #
 # 親 issue: ippoan/ci-dashboard#137 / #237
@@ -9,21 +9,20 @@ name: Release Wave
 # Repo config: ippoan/ci-workflows/config/release-wave-targets.yaml の
 #              `ippoan/rust-alc-api` entry (platform=cloudrun, 6 service)
 #
-# cloudrun path の stage は「tag push のみ」実施し、実 deploy (no-traffic
-# --tag pending-...) は本 repo の deploy.yml (on: push: tags: ['v*']) に委譲、
-# release-wave-gcp /cloudrun/stage-check を poll して staged を confirm する。
+# stage 段は ci-workflows#96 で撤去した。no-traffic revision (--tag pending-...)
+# の用意は本 repo の deploy.yml (on: push: tags: ['v*']) に委譲し、wave は
+# Pending releases を flip するだけ。
 
 on:
   repository_dispatch:
     types:
-      - release-wave-stage
       - release-wave-flip
       - release-wave-rollback
       - release-wave-traffic-rollback   # frontend 単独 rollback (cloudflare-workers)
       - release-wave-backend-rollback    # backend 単独 rollback (cloudrun)
 
 permissions:
-  contents: write     # tag push (stage 時)
+  contents: write     # tag push
   id-token: write     # GCP WIF (cloudrun path)
   packages: read      # @ippoan/* GitHub Packages dep install
 
