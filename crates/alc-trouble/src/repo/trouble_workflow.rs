@@ -248,12 +248,16 @@ impl TroubleWorkflowRepository for PgTroubleWorkflowRepository {
         }
 
         // デフォルト遷移を作成
+        // (0,3) / (1,3) を含めることで、任意の非 terminal 状態から
+        // terminal (完了) へ直接遷移できるようにする。(2,3) は既存なので重複させない。
         let transitions = [
             (0, 1, "対応開始"),
             (1, 2, "解決"),
             (2, 3, "完了"),
             (1, 0, "差し戻し"),
             (2, 1, "再対応"),
+            (0, 3, "完了"),
+            (1, 3, "完了"),
         ];
 
         for (from_idx, to_idx, label) in &transitions {
