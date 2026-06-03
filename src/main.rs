@@ -379,6 +379,9 @@ async fn main() -> anyhow::Result<()> {
         .nest("/api", rust_alc_api::routes::router())
         .layer(Extension(google_verifier))
         .layer(Extension(jwt_secret))
+        .layer(Extension(
+            rust_alc_api::middleware::auth::TenantValidationPool(state.pool.clone()),
+        ))
         .layer(Extension(rust_alc_api::routes::dtako_scraper::ScraperUrl(
             scraper_url,
         )))

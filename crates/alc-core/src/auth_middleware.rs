@@ -5,6 +5,42 @@ use uuid::Uuid;
 
 use crate::auth_jwt::{verify_access_token, verify_internal_token, JwtSecret};
 
+/// `require_tenant` が tenant の実在確認に使う DB pool を Extension で受け渡すための newtype。
+///
+/// `AppState.pool` と同じ `Option<PgPool>` を保持する。`None` の場合 (mock テスト等で
+/// DB を持たないケース) は実在確認をスキップする (= fail-open)。
+/// main / テストハーネスの router 構築時に `Extension(TenantValidationPool(state.pool.clone()))`
+/// を layer する。
+#[derive(Clone)]
+pub struct TenantValidationPool(pub Option<sqlx::PgPool>);
+
+/// resolve 済みの tenant_id が `tenants` テーブルに実在するか確認する。
+///
+/// 揮発性 staging DB で tenant が消えると、ブラウザの JWT は古い tenant_id を持つが
+/// `tenants` に無く、`*_tenant_id_fkey` FK 違反で INSERT が 500 にラップされる。
+/// ここで先に 401 を返すことで、フロント (nuxt-trouble) の `onUnauthorized` →
+/// `clearAuth()` → `/login` 自動再ログインフローに乗せ、新 tenant 作成で回復させる。
+///
+/// pool が `None` (DB 無し) の場合は確認できないので `true` を返してスキップする。
+async fn tenant_exists(pool: Option<&sqlx::PgPool>, tenant_id: Uuid) -> bool {
+    let Some(pool) = pool else {
+        return true;
+    };
+    match sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM tenants WHERE id = $1)")
+        .bind(tenant_id)
+        .fetch_one(pool)
+        .await
+    {
+        Ok(exists) => exists,
+        // DB エラー時は実在確認自体が失敗しているだけなので fail-open。
+        // (FK 違反由来の 500 はこの後の handler 側で従来どおり起きる)
+        Err(e) => {
+            tracing::warn!("tenant existence check query failed: {e}");
+            true
+        }
+    }
+}
+
 /// JWT 必須ミドルウェア — 管理ページ用
 ///
 /// Authorization: Bearer <jwt> ヘッダーから JWT を検証し、
@@ -41,14 +77,28 @@ pub async fn require_jwt(
 /// 2. なければ X-Tenant-ID ヘッダーにフォールバック (キオスクモード)
 pub async fn require_tenant(
     jwt_secret: Option<Extension<JwtSecret>>,
+    validation_pool: Option<Extension<TenantValidationPool>>,
     mut req: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
+    let pool = validation_pool
+        .as_ref()
+        .and_then(|Extension(p)| p.0.as_ref());
+
     // まず JWT を試行 (フラット化: 閉じ括弧の llvm-cov 問題回避)
     if let Some(Ok(claims)) = extract_bearer_token(&req)
         .zip(jwt_secret.as_ref())
         .map(|(token, Extension(secret))| verify_access_token(token, secret))
     {
+        // tenant が DB に実在しないなら 401 を返す (揮発性 staging で tenant が消えた
+        // ケース。フロントの自動 logout → 再ログインで回復させる)。
+        if !tenant_exists(pool, claims.tenant_id).await {
+            // 一行 warn! に収めるため tenant_id を一旦束縛 (複数行 `tracing::warn!` は
+            // llvm-cov が format 引数行を別 region 0 カウントし coverage 100% を割る、PR #364)。
+            let tid = claims.tenant_id;
+            tracing::warn!("tenant {tid} not in tenants table (JWT); returning 401");
+            return Err(StatusCode::UNAUTHORIZED);
+        }
         let auth_user = AuthUser {
             user_id: claims.sub,
             email: claims.email,
@@ -69,6 +119,12 @@ pub async fn require_tenant(
         .and_then(|v| v.to_str().ok())
         .and_then(|v| Uuid::parse_str(v).ok())
         .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    if !tenant_exists(pool, tenant_id).await {
+        // 一行に収める (上記 JWT 経路と同理由: 複数行 warn! は llvm-cov で uncovered 計上)。
+        tracing::warn!("tenant {tenant_id} not in tenants table (X-Tenant-ID); returning 401");
+        return Err(StatusCode::UNAUTHORIZED);
+    }
 
     req.extensions_mut().insert(TenantId(tenant_id));
     Ok(next.run(req).await)

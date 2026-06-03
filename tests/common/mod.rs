@@ -616,6 +616,9 @@ pub async fn spawn_test_server_with_scraper(state: AppState, scraper_url: &str) 
         .nest("/api", rust_alc_api::routes::router())
         .layer(Extension(google_verifier))
         .layer(Extension(jwt_secret))
+        .layer(Extension(
+            rust_alc_api::middleware::auth::TenantValidationPool(state.pool.clone()),
+        ))
         .layer(Extension(ScraperUrl(scraper_url.to_string())))
         .layer(cors)
         .with_state(state);
