@@ -484,6 +484,54 @@ jobs:
           deployed_by: rust-alc-api-staging
           webhook_secret: ${{ secrets.RELEASE_WAVE_WEBHOOK_SECRET }}
 
+  # production (v* tag) deploy 成功時、no-traffic で上がった pending revision を
+  # ci-dashboard の「Pending releases」に登録する。これで cloudrun も Pending
+  # releases に出て、単一 Flip / Flip all (wave) で release-wave-flip が dispatch
+  # され、handler の flip-cloudrun が pending-<tag> revision を 100% traffic に
+  # flip する。workers と違い cloudrun は frontend-ci を通らないので、ここで報告
+  # する必要がある。Refs ippoan/ci-dashboard#237。
+  report-pending-release:
+    name: Report pending release (production)
+    needs: [deploy]
+    if: >-
+      always() &&
+      startsWith(github.ref, 'refs/tags/v') && github.event_name == 'push' &&
+      needs.deploy.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST pending-release to ci-dashboard
+        env:
+          CI_DASHBOARD_BASE: https://ci-dashboard.ippoan.org
+          RELEASE_WAVE_WEBHOOK_SECRET: ${{ secrets.RELEASE_WAVE_WEBHOOK_SECRET }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -uo pipefail
+          if [ -z "${RELEASE_WAVE_WEBHOOK_SECRET:-}" ]; then
+            echo "::warning::RELEASE_WAVE_WEBHOOK_SECRET 未設定のため pending-release report を skip"
+            exit 0
+          fi
+          # cloudrun の no-traffic revision tag。handler flip-cloudrun の sanitize
+          # (tr 'A-Z' 'a-z' | tr '.' '-') と揃える。version_id は表示/識別用で、
+          # 実 flip 対象は handler が target_tag (= record.tag) から pending-<tag>
+          # を再計算するため、ここで完全一致している必要はない。
+          sanitized=$(printf '%s' "$TAG" | tr 'A-Z' 'a-z' | tr '.' '-')
+          version_id="pending-${sanitized}"
+          payload=$(jq -nc \
+            --arg repo "$REPO" --arg version_id "$version_id" --arg tag "$TAG" \
+            '{repo: $repo, version_id: $version_id, tag: $tag}')
+          echo "reporting pending release: repo=$REPO tag=$TAG version_id=$version_id"
+          # best-effort: deploy は既に成功しているので、報告失敗で CI を赤くしない。
+          if curl -fsS -X POST "$CI_DASHBOARD_BASE/webhooks/release-wave/pending-release" \
+            -H "X-Release-Wave-Webhook-Secret: $RELEASE_WAVE_WEBHOOK_SECRET" \
+            -H "Content-Type: application/json" \
+            -d "$payload"; then
+            echo ""
+            echo "✅ pending-release reported"
+          else
+            echo "::warning::pending-release report POST 失敗 (best-effort)"
+          fi
+
   auto-merge:
     name: Auto Merge
     needs: [snapshot-check, check, coverage-check, build-image]
