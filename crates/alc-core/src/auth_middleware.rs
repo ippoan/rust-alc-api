@@ -93,10 +93,10 @@ pub async fn require_tenant(
         // tenant が DB に実在しないなら 401 を返す (揮発性 staging で tenant が消えた
         // ケース。フロントの自動 logout → 再ログインで回復させる)。
         if !tenant_exists(pool, claims.tenant_id).await {
-            tracing::warn!(
-                "tenant {} from JWT not found in tenants table; returning 401",
-                claims.tenant_id
-            );
+            // 一行 warn! に収めるため tenant_id を一旦束縛 (複数行 `tracing::warn!` は
+            // llvm-cov が format 引数行を別 region 0 カウントし coverage 100% を割る、PR #364)。
+            let tid = claims.tenant_id;
+            tracing::warn!("tenant {tid} not in tenants table (JWT); returning 401");
             return Err(StatusCode::UNAUTHORIZED);
         }
         let auth_user = AuthUser {
@@ -121,9 +121,8 @@ pub async fn require_tenant(
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
     if !tenant_exists(pool, tenant_id).await {
-        tracing::warn!(
-            "tenant {tenant_id} from X-Tenant-ID header not found in tenants table; returning 401"
-        );
+        // 一行に収める (上記 JWT 経路と同理由: 複数行 warn! は llvm-cov で uncovered 計上)。
+        tracing::warn!("tenant {tenant_id} not in tenants table (X-Tenant-ID); returning 401");
         return Err(StatusCode::UNAUTHORIZED);
     }
 
