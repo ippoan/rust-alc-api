@@ -521,16 +521,23 @@ jobs:
             --arg repo "$REPO" --arg version_id "$version_id" --arg tag "$TAG" \
             '{repo: $repo, version_id: $version_id, tag: $tag}')
           echo "reporting pending release: repo=$REPO tag=$TAG version_id=$version_id"
-          # best-effort: deploy は既に成功しているので、報告失敗で CI を赤くしない。
-          if curl -fsS -X POST "$CI_DASHBOARD_BASE/webhooks/release-wave/pending-release" \
+          # fail-loud: 報告に失敗すると Pending releases に出ず flip できないのに、
+          # best-effort(warning) だと緑のまま気付けなかった (Refs ippoan/ci-dashboard#237)。
+          # 4xx/5xx で job を fail させる (-f) ことで release CI で即検知する。
+          # http_code も出して原因切り分けしやすくする。
+          code=$(curl -sS -o /tmp/pending_resp.txt -w '%{http_code}' \
+            -X POST "$CI_DASHBOARD_BASE/webhooks/release-wave/pending-release" \
             -H "X-Release-Wave-Webhook-Secret: $RELEASE_WAVE_WEBHOOK_SECRET" \
             -H "Content-Type: application/json" \
-            -d "$payload"; then
-            echo ""
-            echo "✅ pending-release reported"
-          else
-            echo "::warning::pending-release report POST 失敗 (best-effort)"
+            -d "$payload") || { echo "::error::pending-release POST に到達できません (network)"; exit 1; }
+          echo "pending-release response: HTTP $code"
+          cat /tmp/pending_resp.txt || true
+          echo ""
+          if [ "$code" != "200" ]; then
+            echo "::error::pending-release report が HTTP $code で失敗。Pending releases に登録されず flip できません。"
+            exit 1
           fi
+          echo "✅ pending-release reported"
 
   auto-merge:
     name: Auto Merge
