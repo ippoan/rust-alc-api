@@ -228,11 +228,9 @@ jobs:
               CURRENT_REV=$(printf '%s' "$SVC_JSON" | jq -r \
                 '(([.status.traffic[]? | select((.percent // 0) > 0) | .revisionName] | map(select(. != null)))[0]) // .status.latestReadyRevisionName // ""')
             fi
-            # tag を Cloud Run revision tag charset (lowercase [a-z0-9-]) に正規化
-            SANITIZED=$(printf '%s' "${REF_NAME:-}" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9-' '-' | sed 's/-\{2,\}/-/g; s/^-//; s/-$//')
             if [ -n "$CURRENT_REV" ]; then
-              RENDER_ARGS="${RENDER_ARGS} --pin-traffic-revision ${CURRENT_REV} --pending-tag pending-${SANITIZED}"
-              echo "::notice::production no-traffic deploy: keep 100% on ${CURRENT_REV}; new revision -> 0% (tag pending-${SANITIZED}). Release Wave flip will switch traffic."
+              RENDER_ARGS="${RENDER_ARGS} --pin-traffic-revision ${CURRENT_REV}"
+              echo "::notice::production no-traffic deploy: keep 100% on ${CURRENT_REV}; new revision -> 0%. Release Wave flip が最新 ready revision に traffic を振る。"
             else
               echo "::warning::no current revision for ${PROD_SVC} (first deploy?) — deploying with Cloud Run default traffic (latest 100%)."
             fi
@@ -348,10 +346,9 @@ jobs:
               CURRENT_REV=$(printf '%s' "$GW_JSON" | jq -r \
                 '(([.status.traffic[]? | select((.percent // 0) > 0) | .revisionName] | map(select(. != null)))[0]) // .status.latestReadyRevisionName // ""')
             fi
-            SANITIZED=$(printf '%s' "${REF_NAME:-}" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9-' '-' | sed 's/-\{2,\}/-/g; s/^-//; s/-$//')
             if [ -n "$CURRENT_REV" ]; then
-              GW_RENDER_ARGS="${GW_RENDER_ARGS} --pin-traffic-revision ${CURRENT_REV} --pending-tag pending-${SANITIZED}"
-              echo "::notice::gateway production no-traffic deploy: keep 100% on ${CURRENT_REV}; new revision -> 0% (tag pending-${SANITIZED})."
+              GW_RENDER_ARGS="${GW_RENDER_ARGS} --pin-traffic-revision ${CURRENT_REV}"
+              echo "::notice::gateway production no-traffic deploy: keep 100% on ${CURRENT_REV}; new revision -> 0%."
             else
               echo "::warning::no current revision for rust-alc-api-gateway (first deploy?) — default traffic (latest 100%)."
             fi
