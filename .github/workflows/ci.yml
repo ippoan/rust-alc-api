@@ -511,12 +511,11 @@ jobs:
             echo "::warning::RELEASE_WAVE_WEBHOOK_SECRET 未設定のため pending-release report を skip"
             exit 0
           fi
-          # cloudrun の no-traffic revision tag。handler flip-cloudrun の sanitize
-          # (tr 'A-Z' 'a-z' | tr '.' '-') と揃える。version_id は表示/識別用で、
-          # 実 flip 対象は handler が target_tag (= record.tag) から pending-<tag>
-          # を再計算するため、ここで完全一致している必要はない。
-          sanitized=$(printf '%s' "$TAG" | tr 'A-Z' 'a-z' | tr '.' '-')
-          version_id="pending-${sanitized}"
+          # version_id は ci-dashboard の Pending releases 表示/識別用。cloudrun の
+          # flip は release-wave-gcp proxy が service の latestReadyRevision を anchor
+          # にするため version_id を読まない (Refs ippoan/ci-dashboard#248)。よって
+          # ダミーの pending-<tag> ではなく release tag をそのまま入れる。
+          version_id="$TAG"
           payload=$(jq -nc \
             --arg repo "$REPO" --arg version_id "$version_id" --arg tag "$TAG" \
             '{repo: $repo, version_id: $version_id, tag: $tag}')
