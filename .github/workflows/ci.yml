@@ -538,6 +538,24 @@ jobs:
           fi
           echo "✅ pending-release reported"
 
+      # deploy 直後 (flip 前) の実 traffic split を ci-dashboard に報告する。
+      # production の no-traffic deploy 直後は「旧 revision 100% + 新 pending 0%」
+      # 状態なので、それを GCP 実態として Backend traffic 表に出す
+      # (Refs ippoan/ci-dashboard#256)。services は release-wave-targets.yaml と揃える。
+      # best-effort: pending-release は上で報告済みなので、ここの失敗は action 内で
+      # warning 止まり (job は fail させない)。
+      - name: Report backend traffic split (pre-flip pending)
+        uses: ippoan/ci-workflows/.github/actions/report-backend-traffic-split@main
+        with:
+          repo: ${{ github.repository }}
+          gcp_project: cloudsql-sv
+          gcp_region: asia-northeast1
+          services_json: '["rust-alc-api","rust-alc-api-gateway","rust-alc-api-tenko","rust-alc-api-carins","rust-alc-api-dtako","rust-alc-api-trouble"]'
+          release_wave_gcp_base_url: https://release-wave-gcp-staging-566bls5vfq-an.a.run.app
+          gcp_api_key: ${{ secrets.RELEASE_WAVE_GCP_API_KEY }}
+          ci_dashboard_base_url: https://ci-dashboard.ippoan.org
+          webhook_secret: ${{ secrets.RELEASE_WAVE_WEBHOOK_SECRET }}
+
   auto-merge:
     name: Auto Merge
     needs: [snapshot-check, check, coverage-check, build-image]
