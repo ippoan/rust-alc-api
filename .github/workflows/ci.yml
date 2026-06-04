@@ -499,12 +499,26 @@ jobs:
       needs.deploy.result == 'success'
     runs-on: ubuntu-latest
     steps:
+      # gateway の no-traffic (0%) revision に付いた preview tag (block A, deploy.yml)
+      # の URL を解決して pending-release の preview_url に載せるため GCP に auth する。
+      # frontends は production で alc-api.ippoan.org (= gateway) を叩くので、admin が
+      # flip 前 E2E に使う preview URL は gateway の tagged URL を採る (Refs ci-dashboard#260)。
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
       - name: POST pending-release to ci-dashboard
         env:
           CI_DASHBOARD_BASE: https://ci-dashboard.ippoan.org
           RELEASE_WAVE_WEBHOOK_SECRET: ${{ secrets.RELEASE_WAVE_WEBHOOK_SECRET }}
           REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
+          GCP_PROJECT: cloudsql-sv
+          GCP_REGION: asia-northeast1
         run: |
           set -uo pipefail
           if [ -z "${RELEASE_WAVE_WEBHOOK_SECRET:-}" ]; then
@@ -516,9 +530,25 @@ jobs:
           # にするため version_id を読まない (Refs ippoan/ci-dashboard#248)。よって
           # ダミーの pending-<tag> ではなく release tag をそのまま入れる。
           version_id="$TAG"
+          # preview_url: gateway の no-traffic revision に付いた preview tag の URL を
+          # GCP から解決する (deploy.yml が付ける tag = release タグの sanitize 版)。
+          # admin が CF Access (preview-*.ippoan.org) 経由で flip 前 E2E に使う。
+          # best-effort: 解決できなくても pending-release 自体は preview_url 無しで送る。
+          preview_tag="$(printf '%s' "${TAG##*/}" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9' '-' | sed -e 's/-\{2,\}/-/g' -e 's/^-//' -e 's/-$//' | cut -c1-60)"
+          preview_url=$(gcloud run services describe rust-alc-api-gateway \
+            --region "$GCP_REGION" --project "$GCP_PROJECT" --format=json 2>/dev/null \
+            | jq -r --arg t "$preview_tag" '.status.traffic[]? | select(.tag==$t) | .url' \
+            | head -1 || true)
+          if [ -n "${preview_url:-}" ]; then
+            echo "resolved preview_url=$preview_url (tag=$preview_tag)"
+          else
+            echo "::notice::gateway preview URL (tag=$preview_tag) を解決できず。preview_url 無しで報告。"
+          fi
           payload=$(jq -nc \
             --arg repo "$REPO" --arg version_id "$version_id" --arg tag "$TAG" \
-            '{repo: $repo, version_id: $version_id, tag: $tag}')
+            --arg preview_url "${preview_url:-}" \
+            '{repo: $repo, version_id: $version_id, tag: $tag, preview_url: $preview_url}
+             | with_entries(select(.value != ""))')
           echo "reporting pending release: repo=$REPO tag=$TAG version_id=$version_id"
           # fail-loud: 報告に失敗すると Pending releases に出ず flip できないのに、
           # best-effort(warning) だと緑のまま気付けなかった (Refs ippoan/ci-dashboard#237)。
