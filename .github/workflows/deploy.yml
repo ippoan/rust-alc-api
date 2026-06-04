@@ -230,7 +230,15 @@ jobs:
             fi
             if [ -n "$CURRENT_REV" ]; then
               RENDER_ARGS="${RENDER_ARGS} --pin-traffic-revision ${CURRENT_REV}"
-              echo "::notice::production no-traffic deploy: keep 100% on ${CURRENT_REV}; new revision -> 0%. Release Wave flip が最新 ready revision に traffic を振る。"
+              # no-traffic (0%) revision に release タグ由来の Cloud Run revision tag を
+              # 付ける (tag は dot 不可なので v1.42.0 -> v1-42-0 にサニタイズ)。admin が
+              # preview-*.ippoan.org (CF Access) 経由でこの tagged URL に到達して flip 前に
+              # E2E 検証する。front↔backend のペアリング/互換は既存の retest
+              # (compat_backend_repo) が担うので別 config は不要。Refs ippoan/ci-dashboard#260。
+              # tag は preview 到達専用 (flip は最新 ready revision を anchor にする)。
+              PREVIEW_TAG="$(printf '%s' "${REF_NAME##*/}" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9' '-' | sed -e 's/-\{2,\}/-/g' -e 's/^-//' -e 's/-$//' | cut -c1-60)"
+              RENDER_ARGS="${RENDER_ARGS} --pending-tag ${PREVIEW_TAG}"
+              echo "::notice::production no-traffic deploy: keep 100% on ${CURRENT_REV}; new revision -> 0% (preview tag=${PREVIEW_TAG}). Release Wave flip が最新 ready revision に traffic を振る。"
             else
               echo "::warning::no current revision for ${PROD_SVC} (first deploy?) — deploying with Cloud Run default traffic (latest 100%)."
             fi
@@ -273,6 +281,23 @@ jobs:
             --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
             --format 'value(status.url)')
           echo "::notice ::${{ matrix.service }} URL: $URL"
+
+      - name: Print preview URL (production no-traffic tag)
+        if: github.event_name != 'pull_request'
+        run: |
+          case "${{ matrix.service }}" in
+            backend) SVC="rust-alc-api" ;;
+            *)       SVC="rust-alc-api-${{ matrix.service }}" ;;
+          esac
+          # tagged (= preview) traffic target の URL を列挙する。pending-* tag が
+          # 付いた 0% revision がここに出る。admin はこの URL を CF Access 配下の
+          # preview-*.ippoan.org にマップして flip 前 E2E に使う (Refs ci-dashboard#260)。
+          gcloud run services describe "$SVC" \
+            --region ${{ env.REGION }} --project ${{ env.PROJECT }} --format=json 2>/dev/null \
+            | jq -r '.status.traffic[]? | select(.tag != null) | "preview tag=\(.tag) url=\(.url)"' \
+            | while IFS= read -r line; do
+                [ -n "$line" ] && echo "::notice ::${{ matrix.service }} $line"
+              done || true
 
   # ---------------------------------------------------------------------------
   # Deploy gateway (after other services, needs their URLs)
@@ -348,7 +373,11 @@ jobs:
             fi
             if [ -n "$CURRENT_REV" ]; then
               GW_RENDER_ARGS="${GW_RENDER_ARGS} --pin-traffic-revision ${CURRENT_REV}"
-              echo "::notice::gateway production no-traffic deploy: keep 100% on ${CURRENT_REV}; new revision -> 0%."
+              # gateway も no-traffic (0%) revision に release タグ由来の revision tag を付ける
+              # (admin が CF Access 経由で flip 前 E2E 検証する。Refs ippoan/ci-dashboard#260)。
+              GW_PREVIEW_TAG="$(printf '%s' "${REF_NAME##*/}" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9' '-' | sed -e 's/-\{2,\}/-/g' -e 's/^-//' -e 's/-$//' | cut -c1-60)"
+              GW_RENDER_ARGS="${GW_RENDER_ARGS} --pending-tag ${GW_PREVIEW_TAG}"
+              echo "::notice::gateway production no-traffic deploy: keep 100% on ${CURRENT_REV}; new revision -> 0% (preview tag=${GW_PREVIEW_TAG})."
             else
               echo "::warning::no current revision for rust-alc-api-gateway (first deploy?) — default traffic (latest 100%)."
             fi
@@ -390,6 +419,18 @@ jobs:
             --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
             --format 'value(status.url)')
           echo "::notice ::Gateway URL: $URL"
+
+      - name: Print gateway preview URL (production no-traffic tag)
+        if: github.event_name != 'pull_request'
+        run: |
+          # gateway の tagged (= preview) traffic target URL を列挙
+          # (Refs ippoan/ci-dashboard#260)。
+          gcloud run services describe rust-alc-api-gateway \
+            --region ${{ env.REGION }} --project ${{ env.PROJECT }} --format=json 2>/dev/null \
+            | jq -r '.status.traffic[]? | select(.tag != null) | "preview tag=\(.tag) url=\(.url)"' \
+            | while IFS= read -r line; do
+                [ -n "$line" ] && echo "::notice ::gateway $line"
+              done || true
 
   # ---------------------------------------------------------------------------
   # Staging: smoke test /api/notify/ingest after staging deploy
