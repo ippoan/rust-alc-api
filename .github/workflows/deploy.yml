@@ -256,6 +256,25 @@ jobs:
               CURRENT_REV=$(printf '%s' "$SVC_JSON" | jq -r \
                 '(([.status.traffic[]? | select((.percent // 0) > 0) | .revisionName] | map(select(. != null)))[0]) // .status.latestReadyRevisionName // ""')
             fi
+            if [ -z "$CURRENT_REV" ]; then
+              # 新規 service の初回 production deploy。Cloud Run は単一 revision を必ず
+              # 100% で配信するため、release revision をそのまま deploy すると 100% に
+              # フリップし release/flip 分離不変条件 (verify-no-traffic) を破る。先に
+              # 使い捨ての placeholder revision (gcr.io/cloudrun/hello) を 100% で立て、
+              # それを anchor に release revision を 0% (no-traffic) で重ねる。placeholder
+              # は実 release image とは別 template なので必ず別 revision として作られ、
+              # 最初の Release Wave flip で release revision に traffic が移るまでの暫定
+              # serving となる。新規 service は flip 前に実トラフィックを受けないので影響なし。
+              echo "::notice::first production deploy for ${PROD_SVC} — bootstrapping a throwaway placeholder revision (gcr.io/cloudrun/hello) so the release revision can land at 0% (no-traffic)."
+              gcloud run deploy "$PROD_SVC" \
+                --image=gcr.io/cloudrun/hello \
+                --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
+                --ingress=all --quiet
+              CURRENT_REV=$(gcloud run services describe "$PROD_SVC" \
+                --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
+                --format='value(status.latestReadyRevisionName)')
+              echo "::notice::placeholder revision ready: ${CURRENT_REV} (serves 100% only until the first Release Wave flip moves traffic to the release revision)."
+            fi
             if [ -n "$CURRENT_REV" ]; then
               RENDER_ARGS="${RENDER_ARGS} --pin-traffic-revision ${CURRENT_REV}"
               # no-traffic (0%) revision に release タグ由来の Cloud Run revision tag を
@@ -268,7 +287,7 @@ jobs:
               RENDER_ARGS="${RENDER_ARGS} --pending-tag ${PREVIEW_TAG}"
               echo "::notice::production no-traffic deploy: keep 100% on ${CURRENT_REV}; new revision -> 0% (preview tag=${PREVIEW_TAG}). Release Wave flip が最新 ready revision に traffic を振る。"
             else
-              echo "::warning::no current revision for ${PROD_SVC} (first deploy?) — deploying with Cloud Run default traffic (latest 100%)."
+              echo "::warning::no current revision for ${PROD_SVC} even after placeholder bootstrap — deploying with Cloud Run default traffic (latest 100%)."
             fi
           fi
 
@@ -598,11 +617,11 @@ jobs:
   # traffic % が 0 か」を確認し、0 でなければ (= release が勝手にフリップした)
   # FAIL する。
   #
-  # 注意: 現状の deploy-services は render.sh (traffic ブロック無し) を
-  # `gcloud run services replace` するため 100% latest にフリップする。よって
-  # 本 check は現状の release では FAIL する想定 — それがまさに検出したい挙動。
-  # release を no-traffic 化する (render.sh に traffic ピン / --no-traffic 相当)
-  # のは別 PR で対応する。
+  # deploy-services は production では --pin-traffic-revision で新 revision を 0%
+  # に固定するため、通常 release ではここを通る。新規 service の初回 deploy だけは
+  # anchor となる旧 revision が無く Cloud Run が latest を 100% にしてしまうので、
+  # deploy-services 側で placeholder revision (gcr.io/cloudrun/hello) を先に立てて
+  # から release を 0% で重ねる (= このガードを新規 service でも満たす)。
   # ---------------------------------------------------------------------------
   verify-no-traffic:
     name: "Verify release did not flip traffic"
