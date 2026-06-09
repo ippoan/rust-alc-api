@@ -517,6 +517,29 @@ async fn test_fcm_notify_call_no_fcm() {
 }
 
 #[tokio::test]
+async fn test_fcm_notify_call_secret_unset_fail_closed() {
+    // FCM_INTERNAL_SECRET 未設定 → fail-closed で 503 (Refs #392)。
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::remove_var("FCM_INTERNAL_SECRET");
+
+    let mock = Arc::new(MockDeviceRepository::default());
+    let mut state = setup_mock_app_state();
+    state.devices = mock;
+    state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/devices/fcm-notify-call"))
+        .json(&serde_json::json!({ "room_ids": ["room-1"] }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 503);
+}
+
+#[tokio::test]
 async fn test_fcm_notify_call_empty_rooms() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
