@@ -295,6 +295,10 @@ mod tests {
         assert!(!validate_webhook_url("https://user@example.com/")); // userinfo
         assert!(!validate_webhook_url("https://u:p@example.com/"));
         assert!(!validate_webhook_url("not-a-url"));
+        // host を持たない (host_str()==None) scheme は弾く: parse は成功するが
+        // authority が無いので reject されること (line 232 の None 経路)。
+        assert!(!validate_webhook_url("data:text/html,evil"));
+        assert!(!validate_webhook_url("mailto:admin@ippoan.org"));
     }
 
     #[test]
