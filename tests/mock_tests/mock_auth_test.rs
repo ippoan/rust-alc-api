@@ -77,15 +77,16 @@ async fn test_google_login_existing_user() {
 }
 
 // ============================================================
-// POST /api/auth/google — google_login (new user, new tenant)
+// POST /api/auth/google — google_login (new user, no invitation/domain → 403)
 // ============================================================
 
 #[tokio::test]
-async fn test_google_login_new_user_new_tenant() {
+async fn test_google_login_new_user_no_invitation_rejected() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
 
-    // return_user = None → no invitation → no domain tenant → create new tenant + user
+    // return_user = None → no invitation → no domain tenant
+    // → 勝手に新テナントを作らず 403 で拒否する (Refs #332)
     let mock = Arc::new(MockAuthRepository::default());
     let mut state = setup_mock_app_state();
     state.auth = mock;
@@ -99,11 +100,7 @@ async fn test_google_login_new_user_new_tenant() {
         .await
         .unwrap();
 
-    assert_eq!(res.status(), 200);
-    let body: Value = res.json().await.unwrap();
-    assert!(body["access_token"].is_string());
-    assert_eq!(body["user"]["email"], "google-test@example.com");
-    assert_eq!(body["user"]["role"], "admin"); // new tenant → admin
+    assert_eq!(res.status(), 403);
 }
 
 // ============================================================
@@ -792,6 +789,15 @@ async fn test_google_code_login_valid_code() {
 
     // GoogleTokenVerifier in test mode accepts "test-valid-code"
     let mock = Arc::new(MockAuthRepository::default());
+    // 招待もドメイン一致もないと #332 で 403 になるため、ドメイン一致を設定する。
+    *mock.return_domain_tenant.lock().unwrap() = Some(Tenant {
+        id: Uuid::new_v4(),
+        name: "Domain Tenant".to_string(),
+        slug: Some("domain-tenant".to_string()),
+        email_domain: Some("example.com".to_string()),
+        short_id: "abcd1234".to_string(),
+        created_at: chrono::Utc::now(),
+    });
     let mut state = setup_mock_app_state();
     state.auth = mock;
     let base_url = crate::common::spawn_test_server(state).await;
@@ -1277,8 +1283,17 @@ async fn test_google_callback_new_user() {
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
     std::env::set_var("OAUTH_STATE_SECRET", "test-state-secret");
 
-    // return_user = None → new user → new tenant
+    // return_user = None → new user。招待もドメイン一致もないと #332 で 403 に
+    // なるため、ドメイン一致を設定して 307 redirect 経路を検証する。
     let mock = Arc::new(MockAuthRepository::default());
+    *mock.return_domain_tenant.lock().unwrap() = Some(Tenant {
+        id: Uuid::new_v4(),
+        name: "Domain Tenant".to_string(),
+        slug: Some("domain-tenant".to_string()),
+        email_domain: Some("example.com".to_string()),
+        short_id: "abcd1234".to_string(),
+        created_at: chrono::Utc::now(),
+    });
     let mut state = setup_mock_app_state();
     state.auth = mock;
     let base_url = crate::common::spawn_test_server(state).await;
@@ -2226,6 +2241,15 @@ async fn test_google_callback_two_part_domain() {
     std::env::set_var("OAUTH_STATE_SECRET", "test-state-secret");
 
     let mock = Arc::new(MockAuthRepository::default());
+    // 招待もドメイン一致もないと #332 で 403 になるため、ドメイン一致を設定する。
+    *mock.return_domain_tenant.lock().unwrap() = Some(Tenant {
+        id: Uuid::new_v4(),
+        name: "Domain Tenant".to_string(),
+        slug: Some("domain-tenant".to_string()),
+        email_domain: Some("example.com".to_string()),
+        short_id: "abcd1234".to_string(),
+        created_at: chrono::Utc::now(),
+    });
     let mut state = setup_mock_app_state();
     state.auth = mock;
     let base_url = crate::common::spawn_test_server(state).await;
@@ -2269,6 +2293,16 @@ async fn test_google_callback_http_redirect_uri() {
     std::env::set_var("OAUTH_STATE_SECRET", "test-state-secret");
 
     let mock = Arc::new(MockAuthRepository::default());
+    // 招待もドメイン一致もないと #332 で 403 になるため、ドメイン一致を設定して
+    // callback が成功 (307 redirect) する経路を検証する。
+    *mock.return_domain_tenant.lock().unwrap() = Some(Tenant {
+        id: Uuid::new_v4(),
+        name: "Domain Tenant".to_string(),
+        slug: Some("domain-tenant".to_string()),
+        email_domain: Some("example.com".to_string()),
+        short_id: "abcd1234".to_string(),
+        created_at: chrono::Utc::now(),
+    });
     let mut state = setup_mock_app_state();
     state.auth = mock;
     let base_url = crate::common::spawn_test_server(state).await;

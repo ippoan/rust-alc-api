@@ -29,8 +29,25 @@ pub struct NotifyDocument {
     /// 'pending' | 'processing' | 'completed' | 'skipped' | 'failed'
     pub redaction_status: String,
     pub redaction_error: Option<String>,
+    // redact stage 別レイテンシ (ms, migration 112)。complete_redaction で書き込む。
+    // 旧データ (migration 前に redact 済み) は NULL。UI デバッグ表示用 (Refs #334)。
+    pub redact_dl_ms: Option<i32>,
+    pub redact_llm_ms: Option<i32>,
+    pub redact_render_ms: Option<i32>,
+    pub redact_upload_ms: Option<i32>,
+    pub redact_total_ms: Option<i32>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// redact パイプラインの stage 別レイテンシ (ms)。`complete_redaction` で DB に保存する。
+#[derive(Debug, Default, Clone, Copy)]
+pub struct RedactTiming {
+    pub dl_ms: i32,
+    pub llm_ms: i32,
+    pub render_ms: i32,
+    pub upload_ms: i32,
+    pub total_ms: i32,
 }
 
 #[derive(Debug)]
@@ -105,13 +122,15 @@ pub trait NotifyDocumentRepository: Send + Sync {
         error: Option<&str>,
     ) -> Result<(), sqlx::Error>;
 
-    /// completed への遷移。redacted_r2_key + redacted_at + redactions_applied を同時更新。
+    /// completed への遷移。redacted_r2_key + redacted_at + redactions_applied +
+    /// stage 別レイテンシ (`RedactTiming`) を同時更新する。
     async fn complete_redaction(
         &self,
         tenant_id: Uuid,
         id: Uuid,
         redacted_r2_key: &str,
         redactions_applied: i32,
+        timing: &RedactTiming,
     ) -> Result<(), sqlx::Error>;
 
     /// force re-redact 用: redaction_status='pending' に戻し、redacted_* を NULL に。

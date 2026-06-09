@@ -42,7 +42,12 @@ use rust_alc_api::AppState;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // JSON formatter: Cloud Run Logging が severity (info/warn/error) を解釈でき、
+    // jsonPayload.<field> で構造化ログ (redact_pipeline_done の llm_ms 等) を
+    // クエリできるようにする (Refs #333)。text formatter だと severity が常に
+    // DEFAULT 扱いになり `severity>=ERROR` が 0 件になる。
     tracing_subscriber::fmt()
+        .json()
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
         .init();
 

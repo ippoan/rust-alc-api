@@ -328,6 +328,11 @@ fn mock_document(tenant_id: Uuid) -> NotifyDocument {
         redactions_applied: None,
         redaction_status: "pending".into(),
         redaction_error: None,
+        redact_dl_ms: None,
+        redact_llm_ms: None,
+        redact_render_ms: None,
+        redact_upload_ms: None,
+        redact_total_ms: None,
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
     }
@@ -407,6 +412,7 @@ impl NotifyDocumentRepository for MockNotifyDocumentRepository {
         _id: Uuid,
         _redacted_r2_key: &str,
         _redactions_applied: i32,
+        _timing: &alc_core::repository::notify_documents::RedactTiming,
     ) -> Result<(), sqlx::Error> {
         check_fail!(self);
         Ok(())
