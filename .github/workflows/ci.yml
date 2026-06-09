@@ -133,17 +133,6 @@ jobs:
           fi
           echo "::endgroup::"
 
-  snapshot-check:
-    name: Snapshot Check
-    needs: [pr-limit]
-    if: "always() && !(github.ref == 'refs/heads/main' && github.event_name == 'push') && (needs.pr-limit.result == 'success' || needs.pr-limit.result == 'skipped')"
-    permissions:
-      contents: read
-      packages: read
-    uses: ippoan/ci-workflows/.github/workflows/snapshot-check.yml@main
-    secrets:
-      PAT: ${{ secrets.GITHUB_TOKEN }}
-
   check:
     name: Format & Lint
     needs: [pr-limit]
@@ -588,11 +577,10 @@ jobs:
 
   auto-merge:
     name: Auto Merge
-    needs: [snapshot-check, check, coverage-check, build-image]
+    needs: [check, coverage-check, build-image]
     if: >-
       always() &&
       github.event_name == 'pull_request' &&
-      needs.snapshot-check.result == 'success' &&
       needs.check.result == 'success' &&
       needs.coverage-check.result == 'success' &&
       needs.build-image.result == 'success'

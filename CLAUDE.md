@@ -635,44 +635,6 @@ fetch のみに戻す)。
 - **DB エラー注入**: `BEGIN → ALTER TABLE RENAME → テスト → ROLLBACK` パターン (PostgreSQL DDL は ROLLBACK 可能)
 - **SSE テスト**: コアロジックを `pub async fn xxx_core()` に抽出し、SSE ラッパーとは別にテスト可能にする
 
-## Plan / Snapshot 管理
-
-`ippoan/ippoan-dev-plans` repo で管理している plan/feature flag を本 repo の `manifests/production.snapshot.json` に複製し、pre-commit hook + CI で整合性を機械的に保証する。
-
-### 仕組み
-
-| layer | 役割 |
-|---|---|
-| `ippoan/ippoan-dev-plans` Issue (`label:plan` + `scope:rust-alc-api` or `scope:cross-repo`) | plan/flag の正本 |
-| `manifests/production.snapshot.json` | 上の Issue を fetch して固めたスナップショット (per-flag SHA 付き) |
-| `npm run snapshot` (= `npx dev-plans-snapshot build`) | snapshot 再生成 |
-| `npm run snapshot:check` | drift 検出 + コードの `if_flag!("name#sha")` 参照が snapshot と一致するか検証 |
-| `.githooks/pre-commit` | commit 前に snapshot:check + cargo fmt/clippy |
-| `.github/workflows/ci.yml` の `snapshot-check` job | PR で同じチェックを CI 防衛線として再実行 (auto-merge の必須 needs) |
-
-### flag 識別子は `name#sha` ハイブリッド
-
-```rust
-if_flag!("trouble_ack_modal#9f1c3a8b")
-```
-
-- `name`: human-readable snake_case
-- `sha`: `sha256("${plan_id}|${id}|${source_issue}").hex.slice(0,8)` — Issue の identity が変わると SHA も変わるので、code 側の旧参照が即座に検出される
-- snapshot に同 name 複数 entry (異 SHA) が並んでも、code は SHA で disambiguate される
-
-### 日常運用ルール
-
-- **新規 flag を導入する前に必ず plan Issue を立てる**: `ippoan/ippoan-dev-plans` で `scope:rust-alc-api` (または `scope:cross-repo`) ラベル付き Issue を作成 → 本文の YAML block に `id` / `plan_id` を書く → `npm run snapshot` で取り込む
-- **commit する前に hook を有効化**: `git config core.hooksPath .githooks` (clone 直後 1 度だけ)
-- **`npm install` が前提**: `.npmrc` で `@ippoan` scope を GHCR に向けている。`NODE_AUTH_TOKEN` (PAT with `read:packages`) が必要
-- **drift で落ちたら**: `npm run snapshot && git add manifests/production.snapshot.json && git commit ...`
-- **stale sha で落ちたら**: snapshot を再生成するか、code 側を新 sha に書き換える
-- **clippy 重い時**: `SKIP_CLIPPY=1 git commit ...` で skip 可、CI で必ず走る
-
-### マクロ実装
-
-`if_flag!()` マクロ本体は `alc-core` (`ippoan/ippoan-dev-plans#6` で計画中) で定義予定。本 PR (#2) ではマクロは不要 — hook の grep 用 regex (`/\bif_flag!\(\s*"([a-z][a-z0-9_]+)#([a-f0-9]{8})"/g`) と snapshot 機構のレールだけ敷く。
-
 ## ブランチワークフロー
 
 **main に直接 merge/push してはいけない。** 複数の Claude が並行作業しているため、main を直接変更すると他の worktree や作業に影響する。

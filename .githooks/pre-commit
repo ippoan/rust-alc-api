@@ -1,11 +1,8 @@
 #!/usr/bin/env bash
 # rust-alc-api pre-commit hook
 #
-# 1. plan/snapshot 整合性 (npx dev-plans-snapshot check)
-#    - drift 検出 (snapshot ↔ ippoan/ippoan-dev-plans の Issue 状態)
-#    - if_flag!("name#sha") の name+sha が snapshot に登録済みか
-# 2. cargo fmt --check
-# 3. cargo clippy --workspace --all-targets -- -D warnings
+# 1. cargo fmt --check
+# 2. cargo clippy --workspace --all-targets -- -D warnings
 #
 # 有効化: git config core.hooksPath .githooks
 # 無効化: git config --unset core.hooksPath
@@ -15,33 +12,7 @@ set -euo pipefail
 ROOT=$(git rev-parse --show-toplevel)
 cd "$ROOT"
 
-# --- 1. snapshot 整合性 ----------------------------------------------------
-
-if [[ ! -d node_modules ]]; then
-  echo "[pre-commit] node_modules がありません。先に 'npm install' を実行してください。" >&2
-  exit 1
-fi
-
-if [[ -z "${GITHUB_TOKEN:-}${GH_TOKEN:-}" ]]; then
-  if command -v gh >/dev/null 2>&1; then
-    GITHUB_TOKEN=$(gh auth token 2>/dev/null || true)
-    export GITHUB_TOKEN
-  fi
-fi
-
-if [[ -z "${GITHUB_TOKEN:-}${GH_TOKEN:-}" ]]; then
-  echo "[pre-commit] GITHUB_TOKEN unavailable, skipping snapshot:check (CI で確実に走るので OK)" >&2
-else
-  if ! npx --no-install dev-plans-snapshot check; then
-    echo "" >&2
-    echo "[pre-commit] snapshot 整合性チェック失敗" >&2
-    echo "  drift の場合: npm run snapshot && git add manifests/production.snapshot.json" >&2
-    echo "  flag 未登録の場合: ippoan/ippoan-dev-plans に scope:rust-alc-api ラベル付き Issue を作成" >&2
-    exit 1
-  fi
-fi
-
-# --- 2. cargo fmt ---------------------------------------------------------
+# --- 1. cargo fmt ---------------------------------------------------------
 
 if command -v cargo >/dev/null 2>&1; then
   if ! cargo fmt --check; then
@@ -51,7 +22,7 @@ if command -v cargo >/dev/null 2>&1; then
   fi
 fi
 
-# --- 3. cargo clippy ------------------------------------------------------
+# --- 2. cargo clippy ------------------------------------------------------
 # 重い (~30s+) ので SKIP_CLIPPY=1 でスキップ可。CI では必ず走る。
 
 if [[ "${SKIP_CLIPPY:-0}" != "1" ]] && command -v cargo >/dev/null 2>&1; then
