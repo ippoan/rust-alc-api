@@ -151,6 +151,15 @@ pub async fn redact_document_with_deps(
         Ok(b) => b,
         Err(e) => {
             let err = format!("r2 download: {e}");
+            tracing::warn!(
+                document_id = %document_id,
+                tenant_id = %tenant_id,
+                stage = "download",
+                dl_ms = t_dl.elapsed().as_millis() as u64,
+                total_ms = t_total.elapsed().as_millis() as u64,
+                error = %err,
+                "redact_pipeline_failed"
+            );
             let _ = docs
                 .update_redaction_status(tenant_id, document_id, "failed", Some(&err))
                 .await;
@@ -179,7 +188,18 @@ pub async fn redact_document_with_deps(
         match result {
             Ok(r) => r,
             Err(e) => {
-                tracing::error!("redact: detect_amount_boxes (2stage={use_2stage}): {e}");
+                tracing::warn!(
+                    document_id = %document_id,
+                    tenant_id = %tenant_id,
+                    stage = "llm",
+                    use_2stage,
+                    pdf_bytes = pdf_bytes.len(),
+                    dl_ms = dl_ms as u64,
+                    llm_ms = t_llm.elapsed().as_millis() as u64,
+                    total_ms = t_total.elapsed().as_millis() as u64,
+                    error = %format!("detect_amount_boxes (2stage={use_2stage}): {e}"),
+                    "redact_pipeline_failed"
+                );
                 let err = format!("gemini: {e}");
                 let _ = docs
                     .update_redaction_status(tenant_id, document_id, "failed", Some(&err))
@@ -204,7 +224,18 @@ pub async fn redact_document_with_deps(
     let redacted_bytes = match apply_redactions(&pdf_bytes, &redactions) {
         Ok(b) => b,
         Err(e) => {
-            tracing::error!("redact: apply_redactions: {e}");
+            tracing::warn!(
+                document_id = %document_id,
+                tenant_id = %tenant_id,
+                stage = "render",
+                pdf_bytes = pdf_bytes.len(),
+                dl_ms = dl_ms as u64,
+                llm_ms = llm_ms as u64,
+                render_ms = t_render.elapsed().as_millis() as u64,
+                total_ms = t_total.elapsed().as_millis() as u64,
+                error = %format!("apply_redactions: {e}"),
+                "redact_pipeline_failed"
+            );
             let err = format!("apply: {e}");
             let _ = docs
                 .update_redaction_status(tenant_id, document_id, "failed", Some(&err))
@@ -227,7 +258,19 @@ pub async fn redact_document_with_deps(
     let t_up = Instant::now();
     let key = format!("{}/redacted/{}.jpg", tenant_id, document_id);
     if let Err(e) = storage.upload(&key, &redacted_bytes, "image/jpeg").await {
-        tracing::error!("redact: r2 upload: {e}");
+        tracing::warn!(
+            document_id = %document_id,
+            tenant_id = %tenant_id,
+            stage = "upload",
+            pdf_bytes = pdf_bytes.len(),
+            dl_ms = dl_ms as u64,
+            llm_ms = llm_ms as u64,
+            render_ms = render_ms as u64,
+            up_ms = t_up.elapsed().as_millis() as u64,
+            total_ms = t_total.elapsed().as_millis() as u64,
+            error = %format!("r2 upload: {e}"),
+            "redact_pipeline_failed"
+        );
         let err = format!("r2 upload: {e}");
         let _ = docs
             .update_redaction_status(tenant_id, document_id, "failed", Some(&err))

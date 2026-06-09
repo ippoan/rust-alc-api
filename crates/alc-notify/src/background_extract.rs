@@ -22,6 +22,7 @@
 //! を引数で受け取る。`AppState` を扱う公開ラッパは薄い。
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use uuid::Uuid;
 
@@ -51,6 +52,8 @@ pub async fn extract_document_with_deps(
     tenant_id: Uuid,
     document_id: Uuid,
 ) {
+    let t_total = Instant::now();
+
     // 1. document 取得 (RLS でテナントチェック)
     let doc = match docs.get(tenant_id, document_id).await {
         Ok(Some(d)) => d,
@@ -97,21 +100,33 @@ pub async fn extract_document_with_deps(
     };
 
     // 5. R2 から PDF 取得
+    let t_dl = Instant::now();
     let pdf_bytes = match storage.download(&doc.r2_key).await {
         Ok(b) => b,
         Err(e) => {
             let err = format!("r2 download: {e}");
+            tracing::warn!(
+                document_id = %document_id,
+                tenant_id = %tenant_id,
+                stage = "download",
+                dl_ms = t_dl.elapsed().as_millis() as u64,
+                total_ms = t_total.elapsed().as_millis() as u64,
+                error = %err,
+                "extract_pipeline_failed"
+            );
             let _ = docs
                 .update_extraction_error(tenant_id, document_id, &err)
                 .await;
             return;
         }
     };
+    let dl_ms = t_dl.elapsed().as_millis() as u64;
 
     // 6. Gemini で 8 フィールド抽出 (self_company_hint で自社除外)
     let endpoint = endpoint.unwrap_or("https://generativelanguage.googleapis.com/v1beta");
     let model = model.unwrap_or("gemini-3.1-flash-lite-preview");
 
+    let t_llm = Instant::now();
     let fields: LogisticsFields = match extract_logistics_fields_with_endpoint(
         endpoint,
         model,
@@ -130,12 +145,24 @@ pub async fn extract_document_with_deps(
                 | ExtractError::GeminiParse(_) => format!("gemini: {e}"),
                 ExtractError::LogisticsParse(_) => format!("parse: {e}"),
             };
+            tracing::warn!(
+                document_id = %document_id,
+                tenant_id = %tenant_id,
+                stage = "llm",
+                pdf_bytes = pdf_bytes.len(),
+                dl_ms,
+                llm_ms = t_llm.elapsed().as_millis() as u64,
+                total_ms = t_total.elapsed().as_millis() as u64,
+                error = %err,
+                "extract_pipeline_failed"
+            );
             let _ = docs
                 .update_extraction_error(tenant_id, document_id, &err)
                 .await;
             return;
         }
     };
+    let llm_ms = t_llm.elapsed().as_millis() as u64;
 
     // 7. extracted_data の `logistics` キーを書き換え (他キーは保持)
     let merged_data = merge_logistics_into_data(doc.extracted_data.clone(), &fields);
@@ -148,22 +175,39 @@ pub async fn extract_document_with_deps(
         phone_numbers: doc.extracted_phone_numbers.clone().unwrap_or_default(),
         data: merged_data,
     };
+    let t_db = Instant::now();
     if let Err(e) = docs
         .update_extraction(tenant_id, document_id, &result)
         .await
     {
-        tracing::error!("extract: update_extraction failed: {e}");
+        tracing::warn!(
+            document_id = %document_id,
+            tenant_id = %tenant_id,
+            stage = "db_update",
+            pdf_bytes = pdf_bytes.len(),
+            dl_ms,
+            llm_ms,
+            db_update_ms = t_db.elapsed().as_millis() as u64,
+            total_ms = t_total.elapsed().as_millis() as u64,
+            error = %format!("{e}"),
+            "extract_pipeline_failed"
+        );
         return;
     }
+    let db_update_ms = t_db.elapsed().as_millis() as u64;
 
+    // stage 別 + total を構造化 field で残す (Refs ippoan/nuxt-notify#71)。
+    // redact パイプラインの redact_pipeline_done と対になる extract 側の計測。
     tracing::info!(
-        "extract: tenant={tenant_id} doc={document_id} has_logistics={} (fields: lp={} ulp={} la={} ula={} n={})",
-        fields.has_any(),
-        fields.loading_place.is_some(),
-        fields.unloading_place.is_some(),
-        fields.loading_at.is_some(),
-        fields.unloading_at.is_some(),
-        fields.notes.is_some(),
+        document_id = %document_id,
+        tenant_id = %tenant_id,
+        has_logistics = fields.has_any(),
+        pdf_bytes = pdf_bytes.len(),
+        dl_ms,
+        llm_ms,
+        db_update_ms,
+        total_ms = t_total.elapsed().as_millis() as u64,
+        "extract_pipeline_done"
     );
 }
 
