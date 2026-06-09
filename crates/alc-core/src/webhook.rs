@@ -225,30 +225,29 @@ pub fn validate_webhook_url(raw: &str) -> bool {
         Ok(u) => u,
         Err(_) => return false,
     };
+    // host を scheme 判定より先に取る (host を持たない scheme = data:/javascript:
+    // 等を None 経路で拒否しつつ、その経路を到達可能に保つ)。
+    let host = match url.host_str() {
+        Some(h) => h.trim_end_matches('.').to_ascii_lowercase(),
+        None => return false,
+    };
     if url.scheme() != "https" {
         return false;
     }
     if !url.username().is_empty() || url.password().is_some() {
         return false;
     }
-    // url::Host を使う (IPv6 のブラケット付与/未付与や host 抽出の差異を吸収)。
-    match url.host() {
-        Some(url::Host::Ipv4(v4)) => is_global_ip(std::net::IpAddr::V4(v4)),
-        Some(url::Host::Ipv6(v6)) => is_global_ip(std::net::IpAddr::V6(v6)),
-        Some(url::Host::Domain(d)) => {
-            let host = d.trim_end_matches('.').to_ascii_lowercase();
-            if host.is_empty() {
-                return false;
-            }
-            // ホスト名ベースの明示ブロック
-            !(host == "localhost"
-                || host.ends_with(".localhost")
-                || host.ends_with(".internal")
-                || host.ends_with(".local")
-                || host == "metadata.google.internal")
-        }
-        None => false,
+    // IPv6 は host_str がブラケット付き ("[::1]") で返るため外してから IP 判定。
+    let ip_candidate = host.trim_start_matches('[').trim_end_matches(']');
+    if let Ok(ip) = ip_candidate.parse::<std::net::IpAddr>() {
+        return is_global_ip(ip);
     }
+    // ホスト名ベースの明示ブロック
+    !(host == "localhost"
+        || host.ends_with(".localhost")
+        || host.ends_with(".internal")
+        || host.ends_with(".local")
+        || host == "metadata.google.internal")
 }
 
 /// IP が外部到達可能 (loopback/private/link-local/unspecified でない) か。
