@@ -77,15 +77,16 @@ async fn test_google_login_existing_user() {
 }
 
 // ============================================================
-// POST /api/auth/google — google_login (new user, new tenant)
+// POST /api/auth/google — google_login (new user, no invitation/domain → 403)
 // ============================================================
 
 #[tokio::test]
-async fn test_google_login_new_user_new_tenant() {
+async fn test_google_login_new_user_no_invitation_rejected() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
 
-    // return_user = None → no invitation → no domain tenant → create new tenant + user
+    // return_user = None → no invitation → no domain tenant
+    // → 勝手に新テナントを作らず 403 で拒否する (Refs #332)
     let mock = Arc::new(MockAuthRepository::default());
     let mut state = setup_mock_app_state();
     state.auth = mock;
@@ -99,11 +100,7 @@ async fn test_google_login_new_user_new_tenant() {
         .await
         .unwrap();
 
-    assert_eq!(res.status(), 200);
-    let body: Value = res.json().await.unwrap();
-    assert!(body["access_token"].is_string());
-    assert_eq!(body["user"]["email"], "google-test@example.com");
-    assert_eq!(body["user"]["role"], "admin"); // new tenant → admin
+    assert_eq!(res.status(), 403);
 }
 
 // ============================================================

@@ -158,12 +158,14 @@ async fn issue_tokens_for_google_claims(
                 if let Some(t) = domain_tenant {
                     (t.id, "admin".to_string())
                 } else {
-                    // 3. 新テナント作成 (従来の動作)
-                    let new_tenant = repo
-                        .create_tenant_with_domain(&email_domain)
-                        .await
-                        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-                    (new_tenant.id, "admin".to_string())
+                    // 3. 招待もドメイン一致もない → ログイン拒否 (テナントを勝手に作らない)
+                    //    勝手に新テナントを作ると、招待前に踏んだユーザーがゴミテナントに
+                    //    固定され、後から正しいテナントに招待しても紐づかなくなる (Refs #332)。
+                    tracing::warn!(
+                        "Login rejected: no invitation or domain match for email={}",
+                        google_claims.email
+                    );
+                    return Err(StatusCode::FORBIDDEN);
                 }
             };
 
