@@ -868,7 +868,7 @@ async fn test_lineworks_redirect_missing_domain() {
         .unwrap();
     let res = client
         .get(format!(
-            "{base_url}/api/auth/lineworks/redirect?redirect_uri=https://example.com"
+            "{base_url}/api/auth/lineworks/redirect?redirect_uri=https://app.ippoan.org"
         ))
         .send()
         .await
@@ -900,7 +900,7 @@ async fn test_lineworks_redirect_sso_not_found() {
         .unwrap();
     let res = client
         .get(format!(
-            "{base_url}/api/auth/lineworks/redirect?domain=unknown&redirect_uri=https://example.com"
+            "{base_url}/api/auth/lineworks/redirect?domain=unknown&redirect_uri=https://app.ippoan.org"
         ))
         .send()
         .await
@@ -938,7 +938,7 @@ async fn test_lineworks_redirect_success() {
         .unwrap();
     let res = client
         .get(format!(
-            "{base_url}/api/auth/lineworks/redirect?domain=test&redirect_uri=https://example.com"
+            "{base_url}/api/auth/lineworks/redirect?domain=test&redirect_uri=https://app.ippoan.org"
         ))
         .send()
         .await
@@ -980,7 +980,7 @@ async fn test_lineworks_redirect_with_address() {
     // address=user@test-domain → domain extracted as "test-domain"
     let res = client
         .get(format!(
-            "{base_url}/api/auth/lineworks/redirect?address=user@test-domain&redirect_uri=https://example.com"
+            "{base_url}/api/auth/lineworks/redirect?address=user@test-domain&redirect_uri=https://app.ippoan.org"
         ))
         .send()
         .await
@@ -1011,7 +1011,7 @@ async fn test_lineworks_redirect_db_error() {
         .unwrap();
     let res = client
         .get(format!(
-            "{base_url}/api/auth/lineworks/redirect?domain=test&redirect_uri=https://example.com"
+            "{base_url}/api/auth/lineworks/redirect?domain=test&redirect_uri=https://app.ippoan.org"
         ))
         .send()
         .await
@@ -1041,7 +1041,7 @@ async fn test_google_redirect_success() {
         .unwrap();
     let res = client
         .get(format!(
-            "{base_url}/api/auth/google/redirect?redirect_uri=https://example.com/callback"
+            "{base_url}/api/auth/google/redirect?redirect_uri=https://app.ippoan.org/callback"
         ))
         .send()
         .await
@@ -1074,7 +1074,7 @@ async fn test_google_redirect_missing_state_secret() {
         .unwrap();
     let res = client
         .get(format!(
-            "{base_url}/api/auth/google/redirect?redirect_uri=https://example.com/callback"
+            "{base_url}/api/auth/google/redirect?redirect_uri=https://app.ippoan.org/callback"
         ))
         .send()
         .await
@@ -1349,7 +1349,7 @@ async fn test_lineworks_redirect_missing_state_secret() {
         .unwrap();
     let res = client
         .get(format!(
-            "{base_url}/api/auth/lineworks/redirect?domain=test&redirect_uri=https://example.com"
+            "{base_url}/api/auth/lineworks/redirect?domain=test&redirect_uri=https://app.ippoan.org"
         ))
         .send()
         .await
@@ -2529,7 +2529,7 @@ async fn test_line_redirect_success() {
         .unwrap();
     let res = client
         .get(format!(
-            "{base_url}/api/auth/line/redirect?redirect_uri=https://example.com/callback"
+            "{base_url}/api/auth/line/redirect?redirect_uri=https://app.ippoan.org/callback"
         ))
         .send()
         .await
@@ -2567,7 +2567,7 @@ async fn test_line_redirect_with_tenant_id() {
         .unwrap();
     let res = client
         .get(format!(
-            "{base_url}/api/auth/line/redirect?redirect_uri=https://example.com/callback&tenant_id={}",
+            "{base_url}/api/auth/line/redirect?redirect_uri=https://app.ippoan.org/callback&tenant_id={}",
             tenant_id
         ))
         .send()
@@ -2603,7 +2603,7 @@ async fn test_line_redirect_missing_state_secret() {
         .unwrap();
     let res = client
         .get(format!(
-            "{base_url}/api/auth/line/redirect?redirect_uri=https://example.com/callback"
+            "{base_url}/api/auth/line/redirect?redirect_uri=https://app.ippoan.org/callback"
         ))
         .send()
         .await
@@ -2636,7 +2636,7 @@ async fn test_line_redirect_missing_channel_id() {
         .unwrap();
     let res = client
         .get(format!(
-            "{base_url}/api/auth/line/redirect?redirect_uri=https://example.com/callback"
+            "{base_url}/api/auth/line/redirect?redirect_uri=https://app.ippoan.org/callback"
         ))
         .send()
         .await
