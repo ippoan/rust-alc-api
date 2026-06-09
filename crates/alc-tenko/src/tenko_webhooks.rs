@@ -48,6 +48,13 @@ async fn upsert_webhook(
         return Err(StatusCode::BAD_REQUEST);
     }
 
+    // SSRF 対策: 配信先 URL を allowlist 検証 (https のみ / 内部 IP・メタデータ拒否)。
+    // Refs #390。
+    if !alc_core::webhook::validate_webhook_url(&body.url) {
+        tracing::warn!("rejected webhook config with disallowed url");
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
     let config = state
         .tenko_webhooks
         .upsert(tenant_id, &body)
