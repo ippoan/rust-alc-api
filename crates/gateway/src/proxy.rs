@@ -18,6 +18,7 @@ pub struct ProxyState {
     pub carins_url: Option<String>,
     pub dtako_url: Option<String>,
     pub trouble_url: Option<String>,
+    pub camera_url: Option<String>,
 }
 
 /// パスに応じてバックエンド URL を選択する
@@ -48,6 +49,8 @@ fn resolve_backend<'a>(path: &str, state: &'a ProxyState) -> &'a str {
         state.dtako_url.as_deref().unwrap_or(&state.backend_url)
     } else if api_path.starts_with("/trouble") {
         state.trouble_url.as_deref().unwrap_or(&state.backend_url)
+    } else if api_path.starts_with("/cameras") {
+        state.camera_url.as_deref().unwrap_or(&state.backend_url)
     } else {
         &state.backend_url
     }
@@ -169,6 +172,7 @@ mod tests {
             carins_url: Some("http://carins:8083".to_string()),
             dtako_url: Some("http://dtako:8084".to_string()),
             trouble_url: Some("http://trouble:8085".to_string()),
+            camera_url: Some("http://camera:8086".to_string()),
         }
     }
 
@@ -285,6 +289,7 @@ mod tests {
             carins_url: None,
             dtako_url: None,
             trouble_url: None,
+            camera_url: None,
         };
         assert_eq!(
             resolve_backend("/api/tenko/sessions", &state),

@@ -47,6 +47,9 @@ async fn main() {
     if let Some(ref trouble_url) = config.trouble_url {
         tracing::info!("trouble-api: {trouble_url}");
     }
+    if let Some(ref camera_url) = config.camera_url {
+        tracing::info!("alc-camera-api: {camera_url}");
+    }
 
     let proxy_state = ProxyState {
         client,
@@ -56,6 +59,7 @@ async fn main() {
         carins_url: config.carins_url,
         dtako_url: config.dtako_url,
         trouble_url: config.trouble_url,
+        camera_url: config.camera_url,
     };
 
     let cors = CorsLayer::new()

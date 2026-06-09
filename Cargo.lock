@@ -56,6 +56,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "alc-camera"
+version = "0.1.0"
+dependencies = [
+ "alc-core",
+ "async-trait",
+ "axum",
+ "chrono",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "alc-camera-api"
+version = "0.1.0"
+dependencies = [
+ "alc-camera",
+ "alc-core",
+ "alc-trouble",
+ "axum",
+ "sqlx",
+ "tokio",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "alc-carins"
 version = "0.1.0"
 dependencies = [

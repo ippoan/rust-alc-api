@@ -65,6 +65,7 @@ jobs:
           - { service: carins,  suffix: "-carins", binary: carins-api }
           - { service: dtako,   suffix: "-dtako",   binary: dtako-api }
           - { service: trouble, suffix: "-trouble", binary: trouble-api }
+          - { service: camera,  suffix: "-camera",  binary: alc-camera-api }
     steps:
       - uses: actions/checkout@v4
       - uses: docker/login-action@v3
@@ -121,7 +122,7 @@ jobs:
           REPO="${{ env.REPO }}"
           TAG="${{ inputs.ref_name }}"
           SHA="${{ inputs.image_sha }}"
-          for suffix in "" "-gateway" "-tenko" "-carins" "-dtako" "-trouble"; do
+          for suffix in "" "-gateway" "-tenko" "-carins" "-dtako" "-trouble" "-camera"; do
             docker pull "${REPO}${suffix}:dev"
             docker tag "${REPO}${suffix}:dev" "${REPO}${suffix}:${TAG}"
             docker tag "${REPO}${suffix}:dev" "${REPO}${suffix}:${SHA}"
@@ -186,7 +187,7 @@ jobs:
       # 独立してロールバックする (Refs #375)。
       fail-fast: false
       matrix:
-        service: [backend, tenko, carins, dtako, trouble]
+        service: [backend, tenko, carins, dtako, trouble, camera]
     steps:
       - uses: actions/checkout@v4
 
@@ -401,6 +402,9 @@ jobs:
             TROUBLE_URL=$(gcloud run services describe rust-alc-api-staging-trouble \
               --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
               --format 'value(status.url)' 2>/dev/null || echo "")
+            CAMERA_URL=$(gcloud run services describe rust-alc-api-staging-camera \
+              --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
+              --format 'value(status.url)' 2>/dev/null || echo "")
           else
             BACKEND_URL=$(gcloud run services describe rust-alc-api \
               --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
@@ -415,6 +419,9 @@ jobs:
               --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
               --format 'value(status.url)' 2>/dev/null || echo "")
             TROUBLE_URL=$(gcloud run services describe rust-alc-api-trouble \
+              --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
+              --format 'value(status.url)' 2>/dev/null || echo "")
+            CAMERA_URL=$(gcloud run services describe rust-alc-api-camera \
               --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
               --format 'value(status.url)' 2>/dev/null || echo "")
           fi
@@ -452,6 +459,7 @@ jobs:
             -e "s|PLACEHOLDER_CARINS_URL|${CARINS_URL}|" \
             -e "s|PLACEHOLDER_DTAKO_URL|${DTAKO_URL}|" \
             -e "s|PLACEHOLDER_TROUBLE_URL|${TROUBLE_URL}|" \
+            -e "s|PLACEHOLDER_CAMERA_URL|${CAMERA_URL}|" \
             /tmp/gateway.yaml
 
           echo "=== Gateway YAML ==="
@@ -617,7 +625,7 @@ jobs:
       - name: Assert latest revision receives 0% traffic
         run: |
           set -euo pipefail
-          SERVICES="rust-alc-api rust-alc-api-gateway rust-alc-api-tenko rust-alc-api-carins rust-alc-api-dtako rust-alc-api-trouble"
+          SERVICES="rust-alc-api rust-alc-api-gateway rust-alc-api-tenko rust-alc-api-carins rust-alc-api-dtako rust-alc-api-trouble rust-alc-api-camera"
           fail=0
           for SVC in $SERVICES; do
             echo "::group::$SVC traffic split"
