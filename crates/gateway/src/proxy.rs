@@ -172,6 +172,7 @@ mod tests {
             carins_url: Some("http://carins:8083".to_string()),
             dtako_url: Some("http://dtako:8084".to_string()),
             trouble_url: Some("http://trouble:8085".to_string()),
+            camera_url: Some("http://camera:8086".to_string()),
         }
     }
 
@@ -288,6 +289,7 @@ mod tests {
             carins_url: None,
             dtako_url: None,
             trouble_url: None,
+            camera_url: None,
         };
         assert_eq!(
             resolve_backend("/api/tenko/sessions", &state),
