@@ -495,7 +495,7 @@ async fn test_update_last_login_success() {
 async fn test_fcm_notify_call_no_fcm() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
-    std::env::remove_var("FCM_INTERNAL_SECRET");
+    std::env::set_var("FCM_INTERNAL_SECRET", "test-fcm-secret");
 
     let mock = Arc::new(MockDeviceRepository::default());
     let mut state = setup_mock_app_state();
@@ -506,6 +506,7 @@ async fn test_fcm_notify_call_no_fcm() {
     let client = reqwest::Client::new();
     let res = client
         .post(format!("{base_url}/api/devices/fcm-notify-call"))
+        .header("X-Internal-Secret", "test-fcm-secret")
         .json(&serde_json::json!({
             "room_ids": ["room-1"]
         }))
@@ -516,7 +517,8 @@ async fn test_fcm_notify_call_no_fcm() {
 }
 
 #[tokio::test]
-async fn test_fcm_notify_call_empty_rooms() {
+async fn test_fcm_notify_call_secret_unset_fail_closed() {
+    // FCM_INTERNAL_SECRET 未設定 → fail-closed で 503 (Refs #392)。
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
     std::env::remove_var("FCM_INTERNAL_SECRET");
@@ -530,6 +532,29 @@ async fn test_fcm_notify_call_empty_rooms() {
     let client = reqwest::Client::new();
     let res = client
         .post(format!("{base_url}/api/devices/fcm-notify-call"))
+        .json(&serde_json::json!({ "room_ids": ["room-1"] }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 503);
+}
+
+#[tokio::test]
+async fn test_fcm_notify_call_empty_rooms() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("FCM_INTERNAL_SECRET", "test-fcm-secret");
+
+    let mock = Arc::new(MockDeviceRepository::default());
+    let mut state = setup_mock_app_state();
+    state.devices = mock;
+    state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/devices/fcm-notify-call"))
+        .header("X-Internal-Secret", "test-fcm-secret")
         .json(&serde_json::json!({
             "room_ids": []
         }))
@@ -547,7 +572,7 @@ async fn test_fcm_notify_call_empty_rooms() {
 async fn test_fcm_notify_call_with_devices() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
-    std::env::remove_var("FCM_INTERNAL_SECRET");
+    std::env::set_var("FCM_INTERNAL_SECRET", "test-fcm-secret");
 
     let mock = Arc::new(MockDeviceRepository::default());
     mock.return_data.store(true, Ordering::SeqCst);
@@ -559,6 +584,7 @@ async fn test_fcm_notify_call_with_devices() {
     let client = reqwest::Client::new();
     let res = client
         .post(format!("{base_url}/api/devices/fcm-notify-call"))
+        .header("X-Internal-Secret", "test-fcm-secret")
         .json(&serde_json::json!({
             "room_ids": ["room-1"],
             "exclude_device_ids": []
@@ -2438,7 +2464,7 @@ async fn test_report_watchdog_db_error() {
 async fn test_fcm_notify_call_disabled_device_skipped() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
-    std::env::remove_var("FCM_INTERNAL_SECRET");
+    std::env::set_var("FCM_INTERNAL_SECRET", "test-fcm-secret");
 
     let mock = Arc::new(MockDeviceRepository::default());
     mock.return_data.store(true, Ordering::SeqCst);
@@ -2451,6 +2477,7 @@ async fn test_fcm_notify_call_disabled_device_skipped() {
     let client = reqwest::Client::new();
     let res = client
         .post(format!("{base_url}/api/devices/fcm-notify-call"))
+        .header("X-Internal-Secret", "test-fcm-secret")
         .json(&serde_json::json!({ "room_ids": ["room-1"] }))
         .send()
         .await
@@ -2469,7 +2496,7 @@ async fn test_fcm_notify_call_disabled_device_skipped() {
 async fn test_fcm_notify_call_schedule_disabled_skipped() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
-    std::env::remove_var("FCM_INTERNAL_SECRET");
+    std::env::set_var("FCM_INTERNAL_SECRET", "test-fcm-secret");
 
     let mock = Arc::new(MockDeviceRepository::default());
     mock.return_data.store(true, Ordering::SeqCst);
@@ -2482,6 +2509,7 @@ async fn test_fcm_notify_call_schedule_disabled_skipped() {
     let client = reqwest::Client::new();
     let res = client
         .post(format!("{base_url}/api/devices/fcm-notify-call"))
+        .header("X-Internal-Secret", "test-fcm-secret")
         .json(&serde_json::json!({ "room_ids": ["room-1"] }))
         .send()
         .await
@@ -2500,7 +2528,7 @@ async fn test_fcm_notify_call_schedule_disabled_skipped() {
 async fn test_fcm_notify_call_schedule_with_days_sent() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
-    std::env::remove_var("FCM_INTERNAL_SECRET");
+    std::env::set_var("FCM_INTERNAL_SECRET", "test-fcm-secret");
 
     let mock = Arc::new(MockDeviceRepository::default());
     mock.return_data.store(true, Ordering::SeqCst);
@@ -2513,6 +2541,7 @@ async fn test_fcm_notify_call_schedule_with_days_sent() {
     let client = reqwest::Client::new();
     let res = client
         .post(format!("{base_url}/api/devices/fcm-notify-call"))
+        .header("X-Internal-Secret", "test-fcm-secret")
         .json(&serde_json::json!({ "room_ids": ["room-1"] }))
         .send()
         .await
@@ -2530,7 +2559,7 @@ async fn test_fcm_notify_call_schedule_with_days_sent() {
 async fn test_fcm_notify_call_fcm_error() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
-    std::env::remove_var("FCM_INTERNAL_SECRET");
+    std::env::set_var("FCM_INTERNAL_SECRET", "test-fcm-secret");
 
     let mock = Arc::new(MockDeviceRepository::default());
     mock.return_data.store(true, Ordering::SeqCst);
@@ -2542,6 +2571,7 @@ async fn test_fcm_notify_call_fcm_error() {
     let client = reqwest::Client::new();
     let res = client
         .post(format!("{base_url}/api/devices/fcm-notify-call"))
+        .header("X-Internal-Secret", "test-fcm-secret")
         .json(&serde_json::json!({ "room_ids": ["room-1"] }))
         .send()
         .await
@@ -2560,7 +2590,7 @@ async fn test_fcm_notify_call_fcm_error() {
 async fn test_fcm_notify_call_db_error() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
-    std::env::remove_var("FCM_INTERNAL_SECRET");
+    std::env::set_var("FCM_INTERNAL_SECRET", "test-fcm-secret");
 
     let mock = Arc::new(MockDeviceRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
@@ -2572,6 +2602,7 @@ async fn test_fcm_notify_call_db_error() {
     let client = reqwest::Client::new();
     let res = client
         .post(format!("{base_url}/api/devices/fcm-notify-call"))
+        .header("X-Internal-Secret", "test-fcm-secret")
         .json(&serde_json::json!({ "room_ids": ["room-1"] }))
         .send()
         .await
@@ -2587,7 +2618,7 @@ async fn test_fcm_notify_call_db_error() {
 async fn test_fcm_notify_call_with_exclude() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
-    std::env::remove_var("FCM_INTERNAL_SECRET");
+    std::env::set_var("FCM_INTERNAL_SECRET", "test-fcm-secret");
 
     let mock = Arc::new(MockDeviceRepository::default());
     mock.return_data.store(true, Ordering::SeqCst);
@@ -2600,6 +2631,7 @@ async fn test_fcm_notify_call_with_exclude() {
     // Exclude the nil UUID device
     let res = client
         .post(format!("{base_url}/api/devices/fcm-notify-call"))
+        .header("X-Internal-Secret", "test-fcm-secret")
         .json(&serde_json::json!({
             "room_ids": ["room-1"],
             "exclude_device_ids": [Uuid::nil().to_string()]
@@ -3478,7 +3510,7 @@ async fn test_report_version_update_db_error() {
 async fn test_fcm_notify_call_schedule_days_mismatch_skipped() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
-    std::env::remove_var("FCM_INTERNAL_SECRET");
+    std::env::set_var("FCM_INTERNAL_SECRET", "test-fcm-secret");
 
     let mock = Arc::new(MockDeviceRepository::default());
     mock.return_data.store(true, Ordering::SeqCst);
@@ -3492,6 +3524,7 @@ async fn test_fcm_notify_call_schedule_days_mismatch_skipped() {
     let client = reqwest::Client::new();
     let res = client
         .post(format!("{base_url}/api/devices/fcm-notify-call"))
+        .header("X-Internal-Secret", "test-fcm-secret")
         .json(&serde_json::json!({ "room_ids": ["room-1"] }))
         .send()
         .await
@@ -3510,7 +3543,7 @@ async fn test_fcm_notify_call_schedule_days_mismatch_skipped() {
 async fn test_fcm_notify_call_schedule_overnight_sent() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
-    std::env::remove_var("FCM_INTERNAL_SECRET");
+    std::env::set_var("FCM_INTERNAL_SECRET", "test-fcm-secret");
 
     let mock = Arc::new(MockDeviceRepository::default());
     mock.return_data.store(true, Ordering::SeqCst);
@@ -3523,6 +3556,7 @@ async fn test_fcm_notify_call_schedule_overnight_sent() {
     let client = reqwest::Client::new();
     let res = client
         .post(format!("{base_url}/api/devices/fcm-notify-call"))
+        .header("X-Internal-Secret", "test-fcm-secret")
         .json(&serde_json::json!({ "room_ids": ["room-1"] }))
         .send()
         .await

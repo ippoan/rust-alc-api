@@ -2,9 +2,11 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
     routing::{delete, get, post},
-    Json, Router,
+    Extension, Json, Router,
 };
 use serde::{Deserialize, Serialize};
+
+use alc_core::middleware::TenantId;
 
 use crate::TenkoState;
 
@@ -177,7 +179,10 @@ async fn list_numbers(
 #[derive(Debug, Deserialize)]
 struct CreateNumberRequest {
     call_number: String,
-    tenant_id: Option<String>,
+    // NOTE: 旧 client は tenant_id を送ってくるが **無視** する (Refs #387)。
+    // テナントは JWT 由来の `Extension<TenantId>` のみを信頼し、body 値は
+    // cross-tenant write を招くため採用しない。`deny_unknown_fields` は
+    // 付けず、未知/旧フィールドは silently drop する。
     label: Option<String>,
 }
 
@@ -189,12 +194,17 @@ struct CreateNumberResponse {
 
 async fn create_number(
     State(state): State<TenkoState>,
+    Extension(TenantId(tenant_id)): Extension<TenantId>,
     Json(body): Json<CreateNumberRequest>,
 ) -> Result<Json<CreateNumberResponse>, StatusCode> {
-    let tenant = body.tenant_id.unwrap_or_else(|| "default".into());
+    // body.tenant_id ではなく認証済みテナントを使う (RLS で正しく attribute される)。
     let id = state
         .tenko_call
-        .create_number(&body.call_number, &tenant, body.label.as_deref())
+        .create_number(
+            &body.call_number,
+            &tenant_id.to_string(),
+            body.label.as_deref(),
+        )
         .await
         .map_err(|e| {
             tracing::error!("tenko_call create_number error: {e}");

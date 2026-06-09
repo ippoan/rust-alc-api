@@ -51,6 +51,7 @@ dependencies = [
  "sqlx",
  "tracing",
  "ts-rs",
+ "url",
  "urlencoding",
  "uuid",
 ]
@@ -141,6 +142,7 @@ dependencies = [
  "tower",
  "tracing",
  "ts-rs",
+ "url",
  "uuid",
  "wiremock",
 ]

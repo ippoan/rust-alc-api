@@ -64,6 +64,34 @@ async fn test_upsert_webhook_success() {
 }
 
 #[tokio::test]
+async fn test_upsert_webhook_rejects_ssrf_url() {
+    // SSRF 対策: 内部 IP / メタデータ / http / loopback は 400 で拒否 (Refs #390)。
+    let bad_urls = [
+        "http://example.com/hook",                  // http 不可
+        "https://169.254.169.254/latest/meta-data", // クラウドメタデータ
+        "https://127.0.0.1/hook",                   // loopback
+        "https://10.0.0.5/hook",                    // private
+        "https://localhost/hook",                   // localhost
+        "https://svc.internal/hook",                // 内部 FQDN
+    ];
+    for url in bad_urls {
+        let (base_url, auth) = setup().await;
+        let client = reqwest::Client::new();
+        let res = client
+            .post(format!("{base_url}/api/tenko/webhooks"))
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({
+                "event_type": "tenko_completed",
+                "url": url,
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 400, "url should be rejected: {url}");
+    }
+}
+
+#[tokio::test]
 async fn test_upsert_webhook_all_valid_event_types() {
     let valid_events = [
         "alcohol_detected",

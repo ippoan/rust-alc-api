@@ -43,6 +43,10 @@ impl WebhookHttpClient for ReqwestWebhookClient {
     ) -> Result<(Option<i32>, Option<String>, bool), anyhow::Error> {
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(10))
+            // redirect 無効化 (302 → 内部リソースへの SSRF バイパス防止)。Refs #390。
+            // URL の allowlist 検証は書き込み時 (config 作成/更新) に validate_webhook_url
+            // で実施する。
+            .redirect(reqwest::redirect::Policy::none())
             .build()?;
 
         let body = serde_json::to_string(payload)?;
@@ -202,10 +206,128 @@ pub async fn check_overdue_schedules(
     Ok(())
 }
 
+/// Webhook 配信先 URL が SSRF 的に危険でないか検証する。Refs #390。
+///
+/// テナント管理者が任意 URL を登録でき、サーバがそこへ POST してレスポンスを
+/// 保存するため、内部サービス / クラウドメタデータ (169.254.169.254 等) への
+/// 到達を防ぐ。書き込み時と配信時の両方で呼ぶ。
+///
+/// ルール:
+/// - `https` のみ許可 (内部 http サービス / メタデータ叩きを排除)
+/// - userinfo 付き URL は拒否
+/// - host が IP リテラルなら loopback / private / link-local / unspecified を拒否
+/// - host 名が localhost / `*.internal` / `*.local` / メタデータ FQDN なら拒否
+///
+/// NOTE: ホスト名→IP の DNS 解決時チェック (DNS rebinding 完全対策) は未実装。
+/// 完全な保護には配信時に解決済み IP を検証する custom resolver が要る (follow-up)。
+pub fn validate_webhook_url(raw: &str) -> bool {
+    let url = match url::Url::parse(raw) {
+        Ok(u) => u,
+        Err(_) => return false,
+    };
+    // host を scheme 判定より先に取る (host を持たない scheme = data:/javascript:
+    // 等を None 経路で拒否しつつ、その経路を到達可能に保つ)。
+    let host = match url.host_str() {
+        Some(h) => h.trim_end_matches('.').to_ascii_lowercase(),
+        None => return false,
+    };
+    if url.scheme() != "https" {
+        return false;
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return false;
+    }
+    // IPv6 は host_str がブラケット付き ("[::1]") で返るため外してから IP 判定。
+    let ip_candidate = host.trim_start_matches('[').trim_end_matches(']');
+    if let Ok(ip) = ip_candidate.parse::<std::net::IpAddr>() {
+        return is_global_ip(ip);
+    }
+    // ホスト名ベースの明示ブロック
+    !(host == "localhost"
+        || host.ends_with(".localhost")
+        || host.ends_with(".internal")
+        || host.ends_with(".local")
+        || host == "metadata.google.internal")
+}
+
+/// IP が外部到達可能 (loopback/private/link-local/unspecified でない) か。
+fn is_global_ip(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => {
+            !(v4.is_private()
+                || v4.is_loopback()
+                || v4.is_link_local()
+                || v4.is_unspecified()
+                || v4.is_broadcast()
+                || v4.is_documentation()
+                // CGNAT 100.64.0.0/10
+                || (v4.octets()[0] == 100 && (v4.octets()[1] & 0xc0) == 0x40))
+        }
+        std::net::IpAddr::V6(v6) => {
+            !(v6.is_loopback()
+                || v6.is_unspecified()
+                // unique local fc00::/7
+                || (v6.segments()[0] & 0xfe00) == 0xfc00
+                // link-local fe80::/10
+                || (v6.segments()[0] & 0xffc0) == 0xfe80)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::models::TenkoSchedule;
+
+    #[test]
+    fn webhook_url_allows_public_https() {
+        assert!(validate_webhook_url("https://hooks.example.com/path"));
+        assert!(validate_webhook_url("https://example.co.jp/")); // 末尾ドット無し
+        assert!(validate_webhook_url("https://example.com./")); // 末尾ドットは除去
+        assert!(validate_webhook_url("https://8.8.8.8/cb")); // public IP literal
+        assert!(validate_webhook_url("https://[2001:4860:4860::8888]/")); // public v6
+    }
+
+    #[test]
+    fn webhook_url_rejects_non_https_and_userinfo() {
+        assert!(!validate_webhook_url("http://example.com/")); // http 不可
+        assert!(!validate_webhook_url("ftp://example.com/"));
+        assert!(!validate_webhook_url("https://user@example.com/")); // userinfo
+        assert!(!validate_webhook_url("https://u:p@example.com/"));
+        assert!(!validate_webhook_url("not-a-url"));
+        // host を持たない (host_str()==None) scheme は弾く: parse は成功するが
+        // authority が無いので reject されること (line 232 の None 経路)。
+        assert!(!validate_webhook_url("data:text/html,evil"));
+        assert!(!validate_webhook_url("mailto:admin@ippoan.org"));
+    }
+
+    #[test]
+    fn webhook_url_rejects_internal_hosts_and_ranges() {
+        // クラウドメタデータ
+        assert!(!validate_webhook_url(
+            "https://169.254.169.254/latest/meta-data/"
+        ));
+        assert!(!validate_webhook_url("https://metadata.google.internal/"));
+        // loopback / private / link-local / unspecified
+        assert!(!validate_webhook_url("https://127.0.0.1/"));
+        assert!(!validate_webhook_url("https://10.0.0.5/"));
+        assert!(!validate_webhook_url("https://192.168.1.1/"));
+        assert!(!validate_webhook_url("https://172.16.0.1/"));
+        assert!(!validate_webhook_url("https://0.0.0.0/"));
+        assert!(!validate_webhook_url("https://100.64.0.1/")); // CGNAT
+        assert!(!validate_webhook_url("https://255.255.255.255/")); // broadcast
+        assert!(!validate_webhook_url("https://192.0.2.1/")); // documentation
+                                                              // v6 内部
+        assert!(!validate_webhook_url("https://[::1]/")); // loopback
+        assert!(!validate_webhook_url("https://[::]/")); // unspecified
+        assert!(!validate_webhook_url("https://[fc00::1]/")); // unique local
+        assert!(!validate_webhook_url("https://[fe80::1]/")); // link-local
+                                                              // 名前ベース
+        assert!(!validate_webhook_url("https://localhost/"));
+        assert!(!validate_webhook_url("https://foo.localhost/"));
+        assert!(!validate_webhook_url("https://api.internal/"));
+        assert!(!validate_webhook_url("https://db.local/"));
+    }
     use std::sync::Mutex;
 
     // --- Mock Repository ---
