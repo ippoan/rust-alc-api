@@ -1160,16 +1160,24 @@ async fn upsert_lineworks_user(
 /// (カンマ区切り) で上書きでき、未設定時は ippoan / mtamaramu 系の既定ドメインへ
 /// suffix 一致させる。`localhost` / `127.0.0.1` は開発用に許可。
 fn is_allowed_redirect_uri(redirect_uri: &str) -> bool {
-    let host = redirect_uri
-        .split("://")
-        .nth(1)
-        .unwrap_or("")
-        .split('/')
-        .next()
-        .unwrap_or("")
-        .split(':')
-        .next()
-        .unwrap_or("");
+    // ad-hoc な文字列分割はブラウザ/IdP と解釈が食い違い、`\` の `/` 化や
+    // `user@` userinfo を使った allowlist バイパスを許す。必ず実 URL パーサで
+    // 解釈してから host を比較する。
+    let url = match url::Url::parse(redirect_uri) {
+        Ok(u) => u,
+        Err(_) => return false,
+    };
+    // http(s) 以外 (javascript:, data: 等) と userinfo 付き URL は拒否。
+    if !matches!(url.scheme(), "https" | "http") {
+        return false;
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return false;
+    }
+    let host = match url.host_str() {
+        Some(h) => h.trim_end_matches('.').to_ascii_lowercase(),
+        None => return false,
+    };
     if host.is_empty() {
         return false;
     }
@@ -1180,6 +1188,7 @@ fn is_allowed_redirect_uri(redirect_uri: &str) -> bool {
         .split(',')
         .map(str::trim)
         .filter(|s| !s.is_empty())
+        .map(str::to_ascii_lowercase)
         .any(|suffix| host == suffix || host.ends_with(&format!(".{suffix}")))
 }
 
@@ -1354,5 +1363,21 @@ mod tests {
         // scheme なし / host 抽出不可
         assert!(!is_allowed_redirect_uri("not-a-url"));
         assert!(!is_allowed_redirect_uri(""));
+    }
+
+    /// URL パーサで解釈が食い違うバイパス手口を弾けること (Refs #385 security review)。
+    #[test]
+    fn rejects_parser_confusion_bypasses() {
+        // backslash を `/` 扱いして実ホストが evil.com になるケース
+        assert!(!is_allowed_redirect_uri("https://evil.com\\.ippoan.org/"));
+        // userinfo (user@) で実ホストが evil.com になるケース
+        assert!(!is_allowed_redirect_uri(
+            "https://ippoan.org@evil.com/catch"
+        ));
+        // http(s) 以外の scheme
+        assert!(!is_allowed_redirect_uri("javascript:alert(1)//ippoan.org"));
+        assert!(!is_allowed_redirect_uri("data:text/html,evil"));
+        // host に userinfo を付けた正規ドメインも (userinfo 付きは一律拒否)
+        assert!(!is_allowed_redirect_uri("https://x@ippoan.org/"));
     }
 }
