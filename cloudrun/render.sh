@@ -3,7 +3,7 @@
 # Generates a Cloud Run service YAML for any service × environment combination.
 #
 # Usage: bash cloudrun/render.sh <service> <environment> <image_sha> [options]
-#   service:     backend | gateway | tenko | carins | dtako
+#   service:     backend | gateway | tenko | carins | dtako | trouble | camera
 #   environment: staging | production
 #   image_sha:   Docker image SHA tag
 #
@@ -59,6 +59,7 @@ case "$SERVICE" in
   carins)   SUFFIX="-carins";  BIN="carins-api" ;;
   dtako)    SUFFIX="-dtako";   BIN="dtako-api" ;;
   trouble)  SUFFIX="-trouble"; BIN="trouble-api" ;;
+  camera)   SUFFIX="-camera";  BIN="alc-camera-api" ;;
   *) echo "Unknown service: $SERVICE" >&2; exit 1 ;;
 esac
 
@@ -287,6 +288,8 @@ emit_env_gateway() {
               value: "PLACEHOLDER_DTAKO_URL"
             - name: TROUBLE_API_URL
               value: "PLACEHOLDER_TROUBLE_URL"
+            - name: CAMERA_API_URL
+              value: "PLACEHOLDER_CAMERA_URL"
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:
@@ -377,6 +380,14 @@ YAML
   emit_database_url
 }
 
+emit_env_camera() {
+  cat <<YAML
+            - name: RUST_LOG
+              value: "alc_camera_api=info,alc_camera=info"
+YAML
+  emit_database_url
+}
+
 # Shared helper: emit DATABASE_URL (staging=localhost, production=Secret Manager)
 emit_database_url() {
   if [[ "$ENV" == "staging" ]]; then
@@ -428,6 +439,7 @@ case "$SERVICE" in
   carins)  MEMORY="256Mi"; CPU="1"   ;;
   dtako)   MEMORY="512Mi"; CPU="1"   ;;
   trouble) MEMORY="256Mi"; CPU="1"   ;;
+  camera)  MEMORY="256Mi"; CPU="1"   ;;
 esac
 
 # Port

@@ -78,6 +78,7 @@ jobs:
           - { name: carins, targets: "//crates/carins-api" }
           - { name: dtako, targets: "//crates/dtako-api" }
           - { name: trouble, targets: "//crates/trouble-api" }
+          - { name: camera, targets: "//crates/alc-camera-api" }
     steps:
       - uses: actions/checkout@v4
       - uses: ippoan/setup-bazel@main
@@ -333,6 +334,13 @@ jobs:
             bin-paths: "bazel-bin/crates/trouble-api/trouble-api"
             dockerfile: Dockerfile.trouble
             tag-suffix: "-trouble"
+            extra-copy: ""
+          - name: camera
+            targets: "//crates/alc-camera-api"
+            binaries: "alc-camera-api"
+            bin-paths: "bazel-bin/crates/alc-camera-api/alc-camera-api"
+            dockerfile: Dockerfile.camera
+            tag-suffix: "-camera"
             extra-copy: ""
     steps:
       - uses: actions/checkout@v4

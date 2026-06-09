@@ -1,6 +1,7 @@
 pub mod api_tokens;
 pub mod auth;
 pub mod bot_admin;
+pub mod cameras;
 pub mod car_inspections;
 pub mod carins_files;
 pub mod carrying_items;
@@ -59,6 +60,10 @@ pub mod webhook;
 pub use api_tokens::{ApiTokenRow, ApiTokensRepository};
 pub use auth::AuthRepository;
 pub use bot_admin::BotAdminRepository;
+pub use cameras::{
+    Camera, CameraHealthLog, CameraStatusRow, CamerasRepository, CreateCamera,
+    CreateCameraHealthLog, UpdateCamera,
+};
 pub use car_inspections::CarInspectionRepository;
 pub use carins_files::CarinsFilesRepository;
 pub use carrying_items::CarryingItemsRepository;

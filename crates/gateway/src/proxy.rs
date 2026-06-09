@@ -18,6 +18,7 @@ pub struct ProxyState {
     pub carins_url: Option<String>,
     pub dtako_url: Option<String>,
     pub trouble_url: Option<String>,
+    pub camera_url: Option<String>,
 }
 
 /// パスに応じてバックエンド URL を選択する
@@ -48,6 +49,8 @@ fn resolve_backend<'a>(path: &str, state: &'a ProxyState) -> &'a str {
         state.dtako_url.as_deref().unwrap_or(&state.backend_url)
     } else if api_path.starts_with("/trouble") {
         state.trouble_url.as_deref().unwrap_or(&state.backend_url)
+    } else if api_path.starts_with("/cameras") {
+        state.camera_url.as_deref().unwrap_or(&state.backend_url)
     } else {
         &state.backend_url
     }

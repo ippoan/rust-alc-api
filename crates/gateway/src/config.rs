@@ -12,6 +12,8 @@ pub struct Config {
     pub dtako_url: Option<String>,
     /// trouble-api の URL。未設定時は backend_url にフォールバック。
     pub trouble_url: Option<String>,
+    /// alc-camera-api の URL。未設定時は backend_url にフォールバック。
+    pub camera_url: Option<String>,
 }
 
 impl Config {
@@ -27,6 +29,7 @@ impl Config {
             carins_url: env::var("CARINS_API_URL").ok(),
             dtako_url: env::var("DTAKO_API_URL").ok(),
             trouble_url: env::var("TROUBLE_API_URL").ok(),
+            camera_url: env::var("CAMERA_API_URL").ok(),
         }
     }
 }
