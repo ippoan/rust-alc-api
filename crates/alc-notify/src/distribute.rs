@@ -677,6 +677,11 @@ mod tests {
             redactions_applied: None,
             redaction_status: "completed".into(),
             redaction_error: None,
+            redact_dl_ms: None,
+            redact_llm_ms: None,
+            redact_render_ms: None,
+            redact_upload_ms: None,
+            redact_total_ms: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         }

@@ -203,6 +203,7 @@ impl NotifyDocumentRepository for PgNotifyDocumentRepository {
         id: Uuid,
         redacted_r2_key: &str,
         redactions_applied: i32,
+        timing: &RedactTiming,
     ) -> Result<(), sqlx::Error> {
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
         sqlx::query(
@@ -213,12 +214,22 @@ impl NotifyDocumentRepository for PgNotifyDocumentRepository {
                 redactions_applied = $2,
                 redaction_status = 'completed',
                 redaction_error = NULL,
+                redact_dl_ms = $3,
+                redact_llm_ms = $4,
+                redact_render_ms = $5,
+                redact_upload_ms = $6,
+                redact_total_ms = $7,
                 updated_at = NOW()
-            WHERE id = $3
+            WHERE id = $8
             "#,
         )
         .bind(redacted_r2_key)
         .bind(redactions_applied)
+        .bind(timing.dl_ms)
+        .bind(timing.llm_ms)
+        .bind(timing.render_ms)
+        .bind(timing.upload_ms)
+        .bind(timing.total_ms)
         .bind(id)
         .execute(&mut *tc.conn)
         .await?;
@@ -235,6 +246,11 @@ impl NotifyDocumentRepository for PgNotifyDocumentRepository {
                 redactions_applied = NULL,
                 redaction_status = 'pending',
                 redaction_error = NULL,
+                redact_dl_ms = NULL,
+                redact_llm_ms = NULL,
+                redact_render_ms = NULL,
+                redact_upload_ms = NULL,
+                redact_total_ms = NULL,
                 updated_at = NOW()
             WHERE id = $1
             "#,

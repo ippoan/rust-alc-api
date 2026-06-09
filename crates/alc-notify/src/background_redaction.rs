@@ -26,7 +26,7 @@ use std::time::Instant;
 use uuid::Uuid;
 
 use alc_core::redact_broadcast::{RedactBroadcaster, RedactEvent};
-use alc_core::repository::notify_documents::NotifyDocumentRepository;
+use alc_core::repository::notify_documents::{NotifyDocumentRepository, RedactTiming};
 use alc_core::storage::StorageBackend;
 use alc_core::AppState;
 
@@ -289,9 +289,17 @@ pub async fn redact_document_with_deps(
     let up_ms = t_up.elapsed().as_millis();
 
     // 10. 成功確定: redacted_r2_key + redacted_at + redactions_applied + status='completed'
+    //     + stage 別レイテンシ (UI デバッグ表示用、Refs #334)
     let applied = redactions.len() as i32;
+    let timing = RedactTiming {
+        dl_ms: dl_ms as i32,
+        llm_ms: llm_ms as i32,
+        render_ms: render_ms as i32,
+        upload_ms: up_ms as i32,
+        total_ms: t_total.elapsed().as_millis() as i32,
+    };
     if let Err(e) = docs
-        .complete_redaction(tenant_id, document_id, &key, applied)
+        .complete_redaction(tenant_id, document_id, &key, applied, &timing)
         .await
     {
         tracing::error!("redact: complete update failed: {e}");
@@ -360,7 +368,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use alc_core::repository::notify_documents::{
-        CreateNotifyDocument, ExtractionResult, NotifyDocument,
+        CreateNotifyDocument, ExtractionResult, NotifyDocument, RedactTiming,
     };
     use alc_core::storage::StorageError;
     use async_trait::async_trait;
@@ -453,6 +461,7 @@ mod tests {
             _id: Uuid,
             redacted_r2_key: &str,
             applied: i32,
+            _timing: &RedactTiming,
         ) -> Result<(), sqlx::Error> {
             *self.completed.lock().unwrap() = Some((redacted_r2_key.to_string(), applied));
             self.statuses
@@ -568,6 +577,11 @@ mod tests {
             redactions_applied: None,
             redaction_status: "pending".into(),
             redaction_error: None,
+            redact_dl_ms: None,
+            redact_llm_ms: None,
+            redact_render_ms: None,
+            redact_upload_ms: None,
+            redact_total_ms: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         }
