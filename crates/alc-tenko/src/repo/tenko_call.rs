@@ -145,14 +145,24 @@ impl TenkoCallRepository for PgTenkoCallRepository {
         tenant_id: &str,
         label: Option<&str>,
     ) -> Result<i32, sqlx::Error> {
+        // RLS の WITH CHECK (tenant_id = current_setting('app.current_tenant_id'))
+        // を満たすため、INSERT と同一トランザクションで GUC をセットする。
+        // (pool 直 INSERT だと #386 の after_release RESET 後は GUC 未設定で
+        // WITH CHECK に弾かれる。) Refs #386 / #387。
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("SELECT set_current_tenant($1)")
+            .bind(tenant_id)
+            .execute(&mut *tx)
+            .await?;
         let row = sqlx::query_as::<_, (i32,)>(
             "INSERT INTO tenko_call_numbers (call_number, tenant_id, label) VALUES ($1, $2, $3) RETURNING id",
         )
         .bind(call_number)
         .bind(tenant_id)
         .bind(label)
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *tx)
         .await?;
+        tx.commit().await?;
 
         Ok(row.0)
     }
