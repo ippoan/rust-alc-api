@@ -405,7 +405,7 @@ jobs:
         run: |
           REPO="ghcr.io/${{ github.repository }}"
           SHA="${{ github.sha }}"
-          for suffix in "" "-gateway" "-tenko" "-carins" "-dtako" "-trouble"; do
+          for suffix in "" "-gateway" "-tenko" "-carins" "-dtako" "-trouble" "-camera"; do
             docker pull "${REPO}${suffix}:${SHA}"
             docker tag "${REPO}${suffix}:${SHA}" "${REPO}${suffix}:dev"
             docker push "${REPO}${suffix}:dev"
@@ -430,7 +430,7 @@ jobs:
         run: |
           REPO="ghcr.io/${{ github.repository }}"
           SHA="${{ github.sha }}"
-          for suffix in "" "-gateway" "-tenko" "-carins" "-dtako" "-trouble"; do
+          for suffix in "" "-gateway" "-tenko" "-carins" "-dtako" "-trouble" "-camera"; do
             docker pull "${REPO}${suffix}:dev"
             docker tag "${REPO}${suffix}:dev" "${REPO}${suffix}:${SHA}"
             docker tag "${REPO}${suffix}:dev" "${REPO}${suffix}:latest"
