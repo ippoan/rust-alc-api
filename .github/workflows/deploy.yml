@@ -182,7 +182,9 @@ jobs:
       )
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: true
+      # 部分失敗時に他 service の deploy は止めず、失敗した service だけを
+      # 独立してロールバックする (Refs #375)。
+      fail-fast: false
       matrix:
         service: [backend, tenko, carins, dtako, trouble]
     steps:
@@ -196,7 +198,32 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
+      - name: Capture current serving revision (for rollback)
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            case "${{ matrix.service }}" in
+              backend) SVC="rust-alc-api-staging" ;;
+              *)       SVC="rust-alc-api-staging-${{ matrix.service }}" ;;
+            esac
+          else
+            case "${{ matrix.service }}" in
+              backend) SVC="rust-alc-api" ;;
+              *)       SVC="rust-alc-api-${{ matrix.service }}" ;;
+            esac
+          fi
+          PREV=""
+          if JSON=$(gcloud run services describe "$SVC" \
+               --region ${{ env.REGION }} --project ${{ env.PROJECT }} --format=json 2>/dev/null); then
+            PREV=$(printf '%s' "$JSON" | jq -r \
+              '(([.status.traffic[]? | select((.percent // 0) > 0) | .revisionName] | map(select(. != null)))[0]) // ""')
+          fi
+          echo "ROLLBACK_SVC=$SVC" >> "$GITHUB_ENV"
+          echo "PREV_REVISION=$PREV" >> "$GITHUB_ENV"
+          echo "captured serving revision for rollback: ${PREV:-<none>} (svc=$SVC)"
+
       - name: Render and deploy
+        id: deploy
         env:
           ENV_SCRAPER_URL: ${{ vars.SCRAPER_URL }}
           REF_NAME: ${{ inputs.ref_name }}
@@ -250,6 +277,20 @@ jobs:
           cat /tmp/service.yaml
 
           gcloud run services replace /tmp/service.yaml \
+            --region ${{ env.REGION }} \
+            --project ${{ env.PROJECT }}
+
+      - name: Rollback traffic on deploy failure
+        # deploy (render + replace) が失敗した時だけ、直前に 100% を受けていた
+        # revision に traffic を戻す (Refs #375)。staging は replace が latest 100%
+        # にフリップするので壊れた revision が serving し続けるのを防ぐ。production は
+        # no-traffic deploy で traffic を旧 revision に固定済みなので、この update-traffic
+        # は冪等 (同じ revision を 100% に再指定するだけ) で invariant を壊さない。
+        if: always() && steps.deploy.outcome == 'failure' && env.PREV_REVISION != ''
+        run: |
+          echo "::warning::deploy failed for ${{ matrix.service }} — restoring 100% traffic to ${PREV_REVISION} on ${ROLLBACK_SVC}"
+          gcloud run services update-traffic "${ROLLBACK_SVC}" \
+            --to-revisions="${PREV_REVISION}=100" \
             --region ${{ env.REGION }} \
             --project ${{ env.PROJECT }}
 
@@ -319,7 +360,26 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
+      - name: Capture current serving revision (for rollback)
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            SVC="rust-alc-api-staging-gateway"
+          else
+            SVC="rust-alc-api-gateway"
+          fi
+          PREV=""
+          if JSON=$(gcloud run services describe "$SVC" \
+               --region ${{ env.REGION }} --project ${{ env.PROJECT }} --format=json 2>/dev/null); then
+            PREV=$(printf '%s' "$JSON" | jq -r \
+              '(([.status.traffic[]? | select((.percent // 0) > 0) | .revisionName] | map(select(. != null)))[0]) // ""')
+          fi
+          echo "ROLLBACK_SVC=$SVC" >> "$GITHUB_ENV"
+          echo "PREV_REVISION=$PREV" >> "$GITHUB_ENV"
+          echo "captured serving revision for rollback: ${PREV:-<none>} (svc=$SVC)"
+
       - name: Render gateway YAML with service URLs
+        id: deploy
         env:
           REF_NAME: ${{ inputs.ref_name }}
         run: |
@@ -398,6 +458,17 @@ jobs:
           cat /tmp/gateway.yaml
 
           gcloud run services replace /tmp/gateway.yaml \
+            --region ${{ env.REGION }} \
+            --project ${{ env.PROJECT }}
+
+      - name: Rollback traffic on deploy failure
+        # gateway deploy が失敗した時だけ直前 serving revision に traffic を戻す
+        # (Refs #375)。staging の 100% フリップ救済 / production では冪等。
+        if: always() && steps.deploy.outcome == 'failure' && env.PREV_REVISION != ''
+        run: |
+          echo "::warning::gateway deploy failed — restoring 100% traffic to ${PREV_REVISION} on ${ROLLBACK_SVC}"
+          gcloud run services update-traffic "${ROLLBACK_SVC}" \
+            --to-revisions="${PREV_REVISION}=100" \
             --region ${{ env.REGION }} \
             --project ${{ env.PROJECT }}
 
