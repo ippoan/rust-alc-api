@@ -421,6 +421,10 @@ impl NotifyDocumentRepository for MockNotifyDocumentRepository {
         check_fail!(self);
         Ok(())
     }
+    async fn reset_extraction(&self, _tenant_id: Uuid, _id: Uuid) -> Result<(), sqlx::Error> {
+        check_fail!(self);
+        Ok(())
+    }
 }
 
 // ============================================================

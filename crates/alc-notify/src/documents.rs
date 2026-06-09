@@ -359,9 +359,16 @@ async fn extract_recompute(
         })?
         .ok_or(StatusCode::NOT_FOUND)?;
 
-    // 既存 extraction_status / extraction_error は保持して上書きする (background が
-    // 完走時に completed/failed を再設定する)。明示的なリセット関数がないので
-    // background 内で update_extraction が走った時点で最新化される。
+    // extraction_status を 'pending' に戻し、extraction_error を NULL、updated_at
+    // を NOW() に倒してから再 spawn (Refs ippoan/nuxt-notify#66)。これにより:
+    //   - 前回 stuck (pending のまま固まった) / failed の状態が truthful にリセット
+    //   - frontend の stuck 検知 (updated_at 起点の経過時間) も 0 に戻る
+    // reset 失敗は致命ではない (background が完走時に上書きする) ので、エラーでも
+    // spawn は続行し、ログだけ残す。
+    if let Err(e) = state.notify_documents.reset_extraction(tenant.0, id).await {
+        tracing::warn!("extract_recompute: reset_extraction failed (continuing): {e}");
+    }
+
     crate::background_extract::spawn_extract_document(state.clone(), tenant.0, id);
     Ok(StatusCode::ACCEPTED)
 }
