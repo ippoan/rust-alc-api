@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
+use axum::http::Method;
 use axum::{Extension, Router};
 use sqlx::postgres::PgPoolOptions;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
@@ -384,9 +385,49 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
+    // CORS: 任意オリジン全開放 (allow_origin(Any)) をやめ、ippoan 系フロントの
+    // オリジンだけ許可する。Origin は `scheme://host[:port]` 形式 (path/userinfo
+    // なし) なので host 抽出は単純分割で安全。許可 suffix は env
+    // `CORS_ALLOWED_ORIGIN_SUFFIXES` (カンマ区切り) で上書き可。method は標準 verb に
+    // 限定。header はカスタムヘッダ (X-Tenant-ID 等) が多いため Any を維持 (credentials
+    // 不使用なので origin 制限が実質の境界)。Refs #389。
+    let cors_suffixes: Vec<String> = std::env::var("CORS_ALLOWED_ORIGIN_SUFFIXES")
+        .unwrap_or_else(|_| {
+            "ippoan.org,mtamaramu.com,m-tama-ramu.workers.dev,localhost,127.0.0.1".to_string()
+        })
+        .split(',')
+        .map(|s| s.trim().to_ascii_lowercase())
+        .filter(|s| !s.is_empty())
+        .collect();
     let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
+        .allow_origin(AllowOrigin::predicate(move |origin, _req| {
+            origin
+                .to_str()
+                .ok()
+                .and_then(|o| o.split("://").nth(1))
+                .map(|hostport| {
+                    let host = hostport
+                        .split('/')
+                        .next()
+                        .unwrap_or("")
+                        .split(':')
+                        .next()
+                        .unwrap_or("")
+                        .to_ascii_lowercase();
+                    cors_suffixes
+                        .iter()
+                        .any(|s| host == *s || host.ends_with(&format!(".{s}")))
+                })
+                .unwrap_or(false)
+        }))
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::DELETE,
+            Method::PATCH,
+            Method::OPTIONS,
+        ])
         .allow_headers(Any);
 
     // Scraper URL (optional — dtako-scraper Cloud Run)
