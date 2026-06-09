@@ -417,6 +417,10 @@ async fn google_redirect(
     Query(params): Query<GoogleRedirectParams>,
     Extension(verifier): Extension<GoogleTokenVerifier>,
 ) -> Result<impl IntoResponse, StatusCode> {
+    if !is_allowed_redirect_uri(&params.redirect_uri) {
+        tracing::warn!("rejected google redirect_uri: disallowed host");
+        return Err(StatusCode::BAD_REQUEST);
+    }
     let oauth_state_secret =
         std::env::var("OAUTH_STATE_SECRET").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -523,6 +527,10 @@ async fn lineworks_redirect(
     State(state): State<AppState>,
     Query(params): Query<LineworksRedirectParams>,
 ) -> Result<impl IntoResponse, StatusCode> {
+    if !is_allowed_redirect_uri(&params.redirect_uri) {
+        tracing::warn!("rejected lineworks redirect_uri: disallowed host");
+        return Err(StatusCode::BAD_REQUEST);
+    }
     let oauth_state_secret = std::env::var("OAUTH_STATE_SECRET").map_err(|_| {
         tracing::error!("OAUTH_STATE_SECRET not set");
         StatusCode::INTERNAL_SERVER_ERROR
@@ -709,6 +717,10 @@ struct LineRedirectParams {
 async fn line_redirect(
     Query(params): Query<LineRedirectParams>,
 ) -> Result<impl IntoResponse, StatusCode> {
+    if !is_allowed_redirect_uri(&params.redirect_uri) {
+        tracing::warn!("rejected line redirect_uri: disallowed host");
+        return Err(StatusCode::BAD_REQUEST);
+    }
     let oauth_state_secret = std::env::var("OAUTH_STATE_SECRET").map_err(|_| {
         tracing::error!("OAUTH_STATE_SECRET not set");
         StatusCode::INTERNAL_SERVER_ERROR
@@ -1140,6 +1152,37 @@ async fn upsert_lineworks_user(
     }
 }
 
+/// `redirect_uri` のホストがサーバ側 allowlist に含まれるか検証する。Refs #385。
+///
+/// OAuth フローは発行した access/refresh token を `redirect_uri` の fragment に
+/// 載せて転送するため、許可ドメインを縛らないと攻撃者が指定した任意ホストへ
+/// トークンが漏れる (token theft)。許可ホストは env `ALLOWED_REDIRECT_HOSTS`
+/// (カンマ区切り) で上書きでき、未設定時は ippoan / mtamaramu 系の既定ドメインへ
+/// suffix 一致させる。`localhost` / `127.0.0.1` は開発用に許可。
+fn is_allowed_redirect_uri(redirect_uri: &str) -> bool {
+    let host = redirect_uri
+        .split("://")
+        .nth(1)
+        .unwrap_or("")
+        .split('/')
+        .next()
+        .unwrap_or("")
+        .split(':')
+        .next()
+        .unwrap_or("");
+    if host.is_empty() {
+        return false;
+    }
+    let allowed = std::env::var("ALLOWED_REDIRECT_HOSTS").unwrap_or_else(|_| {
+        "ippoan.org,mtamaramu.com,m-tama-ramu.workers.dev,localhost,127.0.0.1".to_string()
+    });
+    allowed
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .any(|suffix| host == suffix || host.ends_with(&format!(".{suffix}")))
+}
+
 /// redirect_uri からパレントドメインを抽出
 /// 例: "https://items.mtamaramu.com/foo" → "mtamaramu.com"
 fn extract_parent_domain(url_str: &str) -> String {
@@ -1275,4 +1318,41 @@ async fn password_login(
             role: user.role,
         },
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_allowed_redirect_uri;
+
+    /// env を汚さないよう、既定 allowlist (env 未設定時) の挙動だけを検証する。
+    #[test]
+    fn allows_default_trusted_hosts() {
+        assert!(is_allowed_redirect_uri(
+            "https://alc.ippoan.org/auth/callback"
+        ));
+        assert!(is_allowed_redirect_uri("https://items.mtamaramu.com/foo"));
+        assert!(is_allowed_redirect_uri(
+            "https://alc-app.m-tama-ramu.workers.dev/cb"
+        ));
+        // apex ドメイン自体も許可
+        assert!(is_allowed_redirect_uri("https://ippoan.org/"));
+        // 開発用
+        assert!(is_allowed_redirect_uri("http://localhost:3000/cb"));
+        assert!(is_allowed_redirect_uri("http://127.0.0.1:8080/cb"));
+    }
+
+    #[test]
+    fn rejects_untrusted_and_lookalike_hosts() {
+        // 攻撃者ドメイン
+        assert!(!is_allowed_redirect_uri("https://evil.com/catch"));
+        // suffix 一致を悪用した lookalike (ippoan.org.evil.com)
+        assert!(!is_allowed_redirect_uri(
+            "https://ippoan.org.evil.com/catch"
+        ));
+        // 部分文字列だけ一致する別ドメイン
+        assert!(!is_allowed_redirect_uri("https://notmtamaramu.com/x"));
+        // scheme なし / host 抽出不可
+        assert!(!is_allowed_redirect_uri("not-a-url"));
+        assert!(!is_allowed_redirect_uri(""));
+    }
 }
