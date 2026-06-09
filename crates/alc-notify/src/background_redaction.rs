@@ -21,6 +21,7 @@
 //! を引数で受け取る。`AppState` を扱う公開ラッパは薄い。
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use uuid::Uuid;
 
@@ -139,7 +140,13 @@ pub async fn redact_document_with_deps(
         return;
     }
 
+    // stage 別レイテンシ計測 (Refs ippoan/nuxt-notify#71)。Cloud Run 上で動く
+    // 本パイプラインは Cloudflare ログには出ないので、ここで構造化 log を残して
+    // download / gemini / render(JPEG) / upload のどこが律速かを切り分けられるようにする。
+    let t_total = Instant::now();
+
     // 6. R2 から原本 PDF を取得
+    let t_dl = Instant::now();
     let pdf_bytes = match storage.download(&doc.r2_key).await {
         Ok(b) => b,
         Err(e) => {
@@ -159,8 +166,10 @@ pub async fn redact_document_with_deps(
             return;
         }
     };
+    let dl_ms = t_dl.elapsed().as_millis();
 
     // 7. Gemini で redaction box を検出
+    let t_llm = Instant::now();
     let redactions = {
         let result = if use_2stage {
             detect_amount_boxes_v2(&pdf_bytes, api_key, None, endpoint).await
@@ -188,8 +197,10 @@ pub async fn redact_document_with_deps(
             }
         }
     };
+    let llm_ms = t_llm.elapsed().as_millis();
 
     // 8. rasterize → 黒矩形マスク → JPEG (PDF 再構築は廃止、画像 1 枚で配信する)
+    let t_render = Instant::now();
     let redacted_bytes = match apply_redactions(&pdf_bytes, &redactions) {
         Ok(b) => b,
         Err(e) => {
@@ -210,8 +221,10 @@ pub async fn redact_document_with_deps(
             return;
         }
     };
+    let render_ms = t_render.elapsed().as_millis();
 
     // 9. R2 に redacted JPEG をアップロード (document スコープ固定キー、上書き対応)
+    let t_up = Instant::now();
     let key = format!("{}/redacted/{}.jpg", tenant_id, document_id);
     if let Err(e) = storage.upload(&key, &redacted_bytes, "image/jpeg").await {
         tracing::error!("redact: r2 upload: {e}");
@@ -230,6 +243,7 @@ pub async fn redact_document_with_deps(
         .await;
         return;
     }
+    let up_ms = t_up.elapsed().as_millis();
 
     // 10. 成功確定: redacted_r2_key + redacted_at + redactions_applied + status='completed'
     let applied = redactions.len() as i32;
@@ -251,8 +265,22 @@ pub async fn redact_document_with_deps(
     )
     .await;
 
+    // stage 別 + total を構造化 field で残す (Refs ippoan/nuxt-notify#71)。
+    // Cloud Run Logging の jsonPayload で dl_ms/llm_ms/render_ms/up_ms を
+    // クエリでき、同 document_id を Cloudflare 側ログと突き合わせて p95 を取れる。
+    // 体感の律速はほぼ llm_ms (Gemini) の想定だが、ここで数値として確定させる。
     tracing::info!(
-        "redact: tenant={tenant_id} doc={document_id} applied={applied} (2stage={use_2stage})"
+        document_id = %document_id,
+        tenant_id = %tenant_id,
+        applied,
+        use_2stage,
+        pdf_bytes = pdf_bytes.len(),
+        dl_ms = dl_ms as u64,
+        llm_ms = llm_ms as u64,
+        render_ms = render_ms as u64,
+        up_ms = up_ms as u64,
+        total_ms = t_total.elapsed().as_millis() as u64,
+        "redact_pipeline_done"
     );
 }
 
