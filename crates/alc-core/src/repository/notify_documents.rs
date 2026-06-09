@@ -136,4 +136,11 @@ pub trait NotifyDocumentRepository: Send + Sync {
     /// force re-redact 用: redaction_status='pending' に戻し、redacted_* を NULL に。
     /// R2 オブジェクトは消さない (固定キーで上書きされる)。
     async fn reset_redaction(&self, tenant_id: Uuid, id: Uuid) -> Result<(), sqlx::Error>;
+
+    /// force re-extract 用: extraction_status='pending' に戻し、extraction_error
+    /// を NULL に、updated_at を NOW() に倒す (Refs ippoan/nuxt-notify#66)。
+    /// background が完走するまで「処理中」を truthful に保ち、stuck 検知の
+    /// 経過時間タイマー (updated_at 起点) もリセットする。extracted_data は
+    /// 触らない (background が completed 時に上書きするまで旧値を保持)。
+    async fn reset_extraction(&self, tenant_id: Uuid, id: Uuid) -> Result<(), sqlx::Error>;
 }

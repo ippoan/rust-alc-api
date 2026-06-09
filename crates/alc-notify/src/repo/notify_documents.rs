@@ -260,4 +260,21 @@ impl NotifyDocumentRepository for PgNotifyDocumentRepository {
         .await?;
         Ok(())
     }
+
+    async fn reset_extraction(&self, tenant_id: Uuid, id: Uuid) -> Result<(), sqlx::Error> {
+        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
+        sqlx::query(
+            r#"
+            UPDATE notify_documents SET
+                extraction_status = 'pending',
+                extraction_error = NULL,
+                updated_at = NOW()
+            WHERE id = $1
+            "#,
+        )
+        .bind(id)
+        .execute(&mut *tc.conn)
+        .await?;
+        Ok(())
+    }
 }

@@ -473,6 +473,9 @@ mod tests {
         async fn reset_redaction(&self, _t: Uuid, _id: Uuid) -> Result<(), sqlx::Error> {
             Ok(())
         }
+        async fn reset_extraction(&self, _t: Uuid, _id: Uuid) -> Result<(), sqlx::Error> {
+            Ok(())
+        }
     }
 
     struct StubStorage {
