@@ -18,28 +18,17 @@
 - 顔写真アップロード (Cloud Storage)
 - RLS によるマルチテナントデータ分離
 
-## Snapshot hook (plan 整合性チェック)
+## pre-commit hook (fmt / clippy)
 
-`ippoan/ippoan-dev-plans` で管理している plan / feature flag の状態と本 repo の `manifests/production.snapshot.json` の整合性を pre-commit hook + CI で機械的に保証する。
+`.githooks/pre-commit` が commit 前に `cargo fmt --check` と `cargo clippy --workspace --all-targets -- -D warnings` を走らせる。
 
 ### 初回 setup (clone 直後 1 度だけ)
 
 ```bash
-NODE_AUTH_TOKEN=$(gh auth token) npm install
 git config core.hooksPath .githooks
 ```
 
-`.npmrc` は `@ippoan` scope を GHCR registry に向ける設定済み。`NODE_AUTH_TOKEN` には `read:packages` scope の PAT (Personal Access Token) が必要 — `gh auth token` が動けば一旦 OK、CI 用に長期運用する場合は専用 PAT を `~/.npmrc` に置く。
+clippy が遅い (~30s+) ときは `SKIP_CLIPPY=1 git commit ...` で一時 skip 可 (CI では必ず走る)。
 
-### 日常運用
-
-| 状況 | 対処 |
-|---|---|
-| `if_flag!("name#sha")` を新規追加 | 先に `ippoan/ippoan-dev-plans` で `scope:rust-alc-api` ラベル付きの plan Issue を作る → `npm run snapshot` で snapshot 更新 → commit |
-| pre-commit が drift で落ちた | `npm run snapshot && git add manifests/production.snapshot.json` |
-| pre-commit が "stale sha" で落ちた | snapshot を再生成して新 sha に追従 (`npm run snapshot`)、もしくは code 側を新 sha に書き換え |
-| clippy が遅い (~30s+) | `SKIP_CLIPPY=1 git commit ...` で一時 skip、CI で必ず走る |
-
-### CI 防衛線
-
-`.github/workflows/ci.yml` の `snapshot-check` job が `ippoan/ci-workflows/.github/workflows/snapshot-check.yml@main` を呼んで同じチェックを CI 上で再実行。`auto-merge` job の `needs` に含まれているので必須チェック扱い。
+> 旧 plan/snapshot 整合性チェック (`ippoan/ippoan-dev-plans` ↔ `manifests/production.snapshot.json`) は
+> dev-plans repo の archive に伴い撤去した。`if_flag!()` の消費者は無かったため code への影響は無い。
