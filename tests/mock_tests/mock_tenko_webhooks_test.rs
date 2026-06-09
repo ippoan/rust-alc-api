@@ -67,12 +67,12 @@ async fn test_upsert_webhook_success() {
 async fn test_upsert_webhook_rejects_ssrf_url() {
     // SSRF 対策: 内部 IP / メタデータ / http / loopback は 400 で拒否 (Refs #390)。
     let bad_urls = [
-        "http://example.com/hook",                 // http 不可
+        "http://example.com/hook",                  // http 不可
         "https://169.254.169.254/latest/meta-data", // クラウドメタデータ
-        "https://127.0.0.1/hook",                  // loopback
-        "https://10.0.0.5/hook",                   // private
-        "https://localhost/hook",                  // localhost
-        "https://svc.internal/hook",               // 内部 FQDN
+        "https://127.0.0.1/hook",                   // loopback
+        "https://10.0.0.5/hook",                    // private
+        "https://localhost/hook",                   // localhost
+        "https://svc.internal/hook",                // 内部 FQDN
     ];
     for url in bad_urls {
         let (base_url, auth) = setup().await;
