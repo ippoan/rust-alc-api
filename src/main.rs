@@ -80,6 +80,20 @@ async fn main() -> anyhow::Result<()> {
 
     let pool = PgPoolOptions::new()
         .max_connections(10)
+        // RLS テナント GUC (`app.current_tenant_id`) は `set_current_tenant` が
+        // session-scope (`set_config(..., false)`) で立てるため、コネクションを
+        // プールへ返してもクリアされない。次に同じコネクションを borrow した
+        // 別リクエスト (特に `self.pool` 直クエリ) へ tenant コンテキストが
+        // リークするのを防ぐため、返却時に必ず RESET して未設定 (= RLS で
+        // 行ゼロの fail-closed) に戻す。Refs #386。
+        .after_release(|conn, _meta| {
+            Box::pin(async move {
+                sqlx::query("RESET app.current_tenant_id")
+                    .execute(conn)
+                    .await?;
+                Ok(true)
+            })
+        })
         .connect(&database_url)
         .await?;
 
