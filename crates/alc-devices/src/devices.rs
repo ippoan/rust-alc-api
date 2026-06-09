@@ -70,10 +70,15 @@ fn db_err(context: &str, e: sqlx::Error) -> StatusCode {
     StatusCode::INTERNAL_SERVER_ERROR
 }
 
-/// FCM_INTERNAL_SECRET ヘッダー認証 (設定されていなければスキップ)
+/// FCM_INTERNAL_SECRET ヘッダー認証。
+///
+/// secret 未設定時は **fail-closed** で 503 を返す (旧実装は Ok を返す fail-open
+/// で、env 設定漏れ時にエンドポイントが無認証開放されていた。ingest.rs の
+/// fail-closed に揃える)。Refs #392。
 fn check_internal_secret(headers: &HeaderMap) -> Result<(), StatusCode> {
     let Ok(expected) = std::env::var("FCM_INTERNAL_SECRET") else {
-        return Ok(()); // 未設定 → チェックスキップ
+        tracing::error!("FCM_INTERNAL_SECRET not set; refusing request (fail-closed)");
+        return Err(StatusCode::SERVICE_UNAVAILABLE);
     };
     let provided = headers
         .get("X-Internal-Secret")
