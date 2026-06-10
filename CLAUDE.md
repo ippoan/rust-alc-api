@@ -884,6 +884,13 @@ npx playwright test
 
 - **`cloudrun/render.sh` や `.github/workflows/*.yml` に値ハードコード禁止** — email/設定値は Secret Manager に格納し `valueFrom: secretKeyRef: {key: latest, name: <name>}` で参照。既存の `JWT_SECRET` / `GOOGLE_CLIENT_ID` / `OAUTH_STATE_SECRET` パターンに揃える。SA `747065218280-compute@developer.gserviceaccount.com` は `secretmanager.secretAccessor` 付与済 (`feedback_no_hardcode_in_render`)
   - 例外: 完全 static な routing 設定 (`STORAGE_BACKEND=r2`) や boolean (`STAGING_MODE=true`) は `value:` 直書き可
+- **新規 secret を `secretKeyRef` で参照する前に runtime SA へ per-secret grant が必要** — `747065218280-compute@` への `secretmanager.secretAccessor` は **project レベルではなく per-secret grant** なので、`secret-inject` skill 等で新 secret を投入しただけでは Cloud Run が解決できず、`gcloud run services replace` の cutover が `Permission denied on secret: <NAME> ... must be granted roles/secretmanager.secretAccessor` で fail する。新 secret ごとに 1 回:
+  ```bash
+  gcloud secrets add-iam-policy-binding <NAME> --project=cloudsql-sv \
+    --member="serviceAccount:747065218280-compute@developer.gserviceaccount.com" \
+    --role="roles/secretmanager.secretAccessor"
+  ```
+  (事例: #391 `ALC_STAGING_API_KEY` — grant 漏れで staging cutover が permission denied → enforce が無音で未適用だった。`feedback_cloudrun_new_secret_grant`)
 - **Secret Manager 更新後は `gcloud run deploy` で新 revision 強制作成** — 既存インスタンスは起動時にキャッシュした値を使い続けるため、`gcloud run services update` だけでは反映されない (`feedback_cloudrun_secret_cache`)
 - **alc-app の `wrangler.jsonc` はトップレベル `vars` が必須** — `env.staging.vars` だけでは本番反映されない。未設定だと `NUXT_PUBLIC_API_BASE` が localhost:3001 にフォールバックして本番 Failed to fetch / OAuth 不能 (`feedback_alc_app_vars`)
 
