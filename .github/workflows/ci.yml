@@ -585,13 +585,17 @@ jobs:
 
   auto-merge:
     name: Auto Merge
-    needs: [check, coverage-check, build-image]
+    # deploy (staging cutover) を needs に含める: merge → branch 削除で走行中の
+    # cutover が cancel され deploy 失敗が無音化するのを防ぐ (Refs #405、#391 で
+    # 2 回実害)。トレードオフとして staging 障害時は全 PR が merge 不能になる。
+    needs: [check, coverage-check, build-image, deploy]
     if: >-
       always() &&
       github.event_name == 'pull_request' &&
       needs.check.result == 'success' &&
       needs.coverage-check.result == 'success' &&
-      needs.build-image.result == 'success'
+      needs.build-image.result == 'success' &&
+      needs.deploy.result == 'success'
     uses: ippoan/ci-workflows/.github/workflows/auto-merge.yml@main
     permissions:
       contents: write
