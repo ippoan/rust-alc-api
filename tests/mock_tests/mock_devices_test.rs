@@ -300,6 +300,146 @@ async fn test_device_settings_not_found() {
 }
 
 // ============================================================
+// GET /devices/settings/{id} — X-Device-Token 検証 (Refs #388)
+// ============================================================
+
+/// token 一致 → 200。response に settings_token は echo されない
+#[tokio::test]
+async fn test_device_settings_token_match() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+
+    let mock = Arc::new(MockDeviceRepository::default());
+    mock.return_data.store(true, Ordering::SeqCst);
+    mock.return_settings_token.store(true, Ordering::SeqCst);
+    let mut state = setup_mock_app_state();
+    state.devices = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let device_id = Uuid::new_v4();
+    let client = reqwest::Client::new();
+    let res = client
+        .get(format!("{base_url}/api/devices/settings/{device_id}"))
+        .header("X-Device-Token", Uuid::nil().to_string())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(body["call_enabled"], true);
+    assert!(body.get("settings_token").is_none());
+}
+
+/// token 不一致 → 401
+#[tokio::test]
+async fn test_device_settings_token_mismatch() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+
+    let mock = Arc::new(MockDeviceRepository::default());
+    mock.return_data.store(true, Ordering::SeqCst);
+    mock.return_settings_token.store(true, Ordering::SeqCst);
+    let mut state = setup_mock_app_state();
+    state.devices = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let device_id = Uuid::new_v4();
+    let client = reqwest::Client::new();
+    let res = client
+        .get(format!("{base_url}/api/devices/settings/{device_id}"))
+        .header("X-Device-Token", Uuid::new_v4().to_string())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 401);
+}
+
+/// token 未発行の旧 device にヘッダを送った場合も 401 (token を持たないはずの caller)
+#[tokio::test]
+async fn test_device_settings_token_sent_but_not_issued() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+
+    let mock = Arc::new(MockDeviceRepository::default());
+    mock.return_data.store(true, Ordering::SeqCst);
+    // return_settings_token は立てない = row.settings_token は None
+    let mut state = setup_mock_app_state();
+    state.devices = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let device_id = Uuid::new_v4();
+    let client = reqwest::Client::new();
+    let res = client
+        .get(format!("{base_url}/api/devices/settings/{device_id}"))
+        .header("X-Device-Token", Uuid::nil().to_string())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 401);
+}
+
+/// token 発行済みだがヘッダ未送信 → 移行期は warn のみで 200 (Phase C で 401 化)
+#[tokio::test]
+async fn test_device_settings_token_issued_header_missing() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+
+    let mock = Arc::new(MockDeviceRepository::default());
+    mock.return_data.store(true, Ordering::SeqCst);
+    mock.return_settings_token.store(true, Ordering::SeqCst);
+    let mut state = setup_mock_app_state();
+    state.devices = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let device_id = Uuid::new_v4();
+    let client = reqwest::Client::new();
+    let res = client
+        .get(format!("{base_url}/api/devices/settings/{device_id}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+}
+
+/// status approved 時のみ settings_token が返る (pending では absent)
+#[tokio::test]
+async fn test_registration_status_settings_token_only_when_approved() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+
+    let mock = Arc::new(MockDeviceRepository::default());
+    mock.return_data.store(true, Ordering::SeqCst);
+    mock.return_settings_token.store(true, Ordering::SeqCst);
+    let mut state = setup_mock_app_state();
+    state.devices = mock.clone();
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::new();
+    // pending: settings_token は出ない
+    let res = client
+        .get(format!("{base_url}/api/devices/register/status/some-code"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(body["status"], "pending");
+    assert!(body.get("settings_token").is_none());
+
+    // approved: settings_token が出る
+    mock.return_approved_status.store(true, Ordering::SeqCst);
+    let res = client
+        .get(format!("{base_url}/api/devices/register/status/some-code"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(body["status"], "approved");
+    assert_eq!(body["settings_token"], Uuid::nil().to_string());
+}
+
+// ============================================================
 // PUT /devices/register-fcm-token — public (no auth)
 // ============================================================
 

@@ -75,13 +75,16 @@ impl DeviceRepository for PgDeviceRepository {
                 Option<Uuid>,
                 Option<String>,
                 Option<String>,
+                Option<Uuid>,
             ),
         >(
             r#"
-            SELECT status, device_id, tenant_id, expires_at::text,
-                   NULLIF(device_name, '') AS device_name
-            FROM device_registration_requests
-            WHERE registration_code = $1
+            SELECT r.status, r.device_id, r.tenant_id, r.expires_at::text,
+                   NULLIF(r.device_name, '') AS device_name,
+                   d.settings_token
+            FROM device_registration_requests r
+            LEFT JOIN devices d ON d.id = r.device_id
+            WHERE r.registration_code = $1
             "#,
         )
         .bind(code)
@@ -93,6 +96,7 @@ impl DeviceRepository for PgDeviceRepository {
             tenant_id: r.2,
             expires_at: r.3,
             device_name: r.4,
+            settings_token: r.5,
         }))
     }
 
@@ -135,14 +139,15 @@ impl DeviceRepository for PgDeviceRepository {
         is_device_owner: bool,
         is_dev_device: bool,
         req_id: Uuid,
+        settings_token: Uuid,
     ) -> Result<Uuid, sqlx::Error> {
         let mut tx = self.pool.begin().await?;
         alc_core::tenant::set_current_tenant(&mut tx, &tenant_id.to_string()).await?;
 
         let device_id = sqlx::query_as::<_, (Uuid,)>(
             r#"
-            INSERT INTO devices (tenant_id, device_name, device_type, phone_number, status, approved_at, is_device_owner, is_dev_device)
-            VALUES ($1, $2, 'android', $3, 'active', NOW(), $4, $5)
+            INSERT INTO devices (tenant_id, device_name, device_type, phone_number, status, approved_at, is_device_owner, is_dev_device, settings_token)
+            VALUES ($1, $2, 'android', $3, 'active', NOW(), $4, $5, $6)
             RETURNING id
             "#,
         )
@@ -151,6 +156,7 @@ impl DeviceRepository for PgDeviceRepository {
         .bind(phone_number)
         .bind(is_device_owner)
         .bind(is_dev_device)
+        .bind(settings_token)
         .fetch_one(&mut *tx)
         .await?
         .0;
@@ -505,14 +511,15 @@ impl DeviceRepository for PgDeviceRepository {
         approved_by: Option<Uuid>,
         is_device_owner: bool,
         is_dev_device: bool,
+        settings_token: Uuid,
     ) -> Result<Uuid, sqlx::Error> {
         let mut tx = self.pool.begin().await?;
         alc_core::tenant::set_current_tenant(&mut tx, &tenant_id.to_string()).await?;
 
         let device_id = sqlx::query_as::<_, (Uuid,)>(
             r#"
-            INSERT INTO devices (tenant_id, device_name, device_type, phone_number, status, approved_by, approved_at, is_device_owner, is_dev_device)
-            VALUES ($1, $2, $3, $4, 'active', $5, NOW(), $6, $7)
+            INSERT INTO devices (tenant_id, device_name, device_type, phone_number, status, approved_by, approved_at, is_device_owner, is_dev_device, settings_token)
+            VALUES ($1, $2, $3, $4, 'active', $5, NOW(), $6, $7, $8)
             RETURNING id
             "#,
         )
@@ -523,6 +530,7 @@ impl DeviceRepository for PgDeviceRepository {
         .bind(approved_by)
         .bind(is_device_owner)
         .bind(is_dev_device)
+        .bind(settings_token)
         .fetch_one(&mut *tx)
         .await?
         .0;
@@ -593,6 +601,7 @@ impl DeviceRepository for PgDeviceRepository {
         approved_by: Option<Uuid>,
         is_device_owner: bool,
         is_dev_device: bool,
+        settings_token: Uuid,
     ) -> Result<Uuid, sqlx::Error> {
         // Same logic as approve_device — create device + update request in tx
         let mut tx = self.pool.begin().await?;
@@ -600,8 +609,8 @@ impl DeviceRepository for PgDeviceRepository {
 
         let device_id = sqlx::query_as::<_, (Uuid,)>(
             r#"
-            INSERT INTO devices (tenant_id, device_name, device_type, phone_number, status, approved_by, approved_at, is_device_owner, is_dev_device)
-            VALUES ($1, $2, $3, $4, 'active', $5, NOW(), $6, $7)
+            INSERT INTO devices (tenant_id, device_name, device_type, phone_number, status, approved_by, approved_at, is_device_owner, is_dev_device, settings_token)
+            VALUES ($1, $2, $3, $4, 'active', $5, NOW(), $6, $7, $8)
             RETURNING id
             "#,
         )
@@ -612,6 +621,7 @@ impl DeviceRepository for PgDeviceRepository {
         .bind(approved_by)
         .bind(is_device_owner)
         .bind(is_dev_device)
+        .bind(settings_token)
         .fetch_one(&mut *tx)
         .await?
         .0;

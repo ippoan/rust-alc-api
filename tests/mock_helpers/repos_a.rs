@@ -1037,6 +1037,8 @@ pub struct MockDeviceRepository {
     pub return_schedule_overnight: AtomicBool,
     /// code_exists で初回だけ true を返す (コード衝突リトライテスト用)
     pub return_code_exists_once: AtomicBool,
+    /// get_device_settings / get_registration_status で settings_token (nil UUID) を返す
+    pub return_settings_token: AtomicBool,
 }
 
 impl Default for MockDeviceRepository {
@@ -1066,6 +1068,7 @@ impl Default for MockDeviceRepository {
             return_schedule_days_mismatch: AtomicBool::new(false),
             return_schedule_overnight: AtomicBool::new(false),
             return_code_exists_once: AtomicBool::new(false),
+            return_settings_token: AtomicBool::new(false),
         }
     }
 }
@@ -1110,12 +1113,18 @@ impl DeviceRepository for MockDeviceRepository {
             } else {
                 Some("2099-12-31T23:59:59Z".to_string())
             };
+            let settings_token = if self.return_settings_token.load(Ordering::SeqCst) {
+                Some(Uuid::nil())
+            } else {
+                None
+            };
             Ok(Some(RegistrationStatusRow {
                 status,
                 device_id: None,
                 tenant_id: Some(Uuid::nil()),
                 expires_at,
                 device_name: Some("Test Device".to_string()),
+                settings_token,
             }))
         } else {
             Ok(None)
@@ -1165,6 +1174,7 @@ impl DeviceRepository for MockDeviceRepository {
         _is_device_owner: bool,
         _is_dev_device: bool,
         _req_id: Uuid,
+        _settings_token: Uuid,
     ) -> Result<Uuid, sqlx::Error> {
         check_fail!(self);
         Ok(Uuid::nil())
@@ -1186,6 +1196,11 @@ impl DeviceRepository for MockDeviceRepository {
     ) -> Result<Option<DeviceSettingsRow>, sqlx::Error> {
         check_fail!(self);
         if self.return_data.load(Ordering::SeqCst) {
+            let settings_token = if self.return_settings_token.load(Ordering::SeqCst) {
+                Some(Uuid::nil())
+            } else {
+                None
+            };
             Ok(Some(DeviceSettingsRow {
                 call_enabled: true,
                 call_schedule: None,
@@ -1194,6 +1209,7 @@ impl DeviceRepository for MockDeviceRepository {
                 last_login_employee_name: None,
                 last_login_employee_role: None,
                 always_on: false,
+                settings_token,
             }))
         } else {
             Ok(None)
@@ -1514,6 +1530,7 @@ impl DeviceRepository for MockDeviceRepository {
         _approved_by: Option<Uuid>,
         _is_device_owner: bool,
         _is_dev_device: bool,
+        _settings_token: Uuid,
     ) -> Result<Uuid, sqlx::Error> {
         check_fail!(self);
         if self.fail_on_approve.swap(false, Ordering::SeqCst) {
@@ -1553,6 +1570,7 @@ impl DeviceRepository for MockDeviceRepository {
         _approved_by: Option<Uuid>,
         _is_device_owner: bool,
         _is_dev_device: bool,
+        _settings_token: Uuid,
     ) -> Result<Uuid, sqlx::Error> {
         check_fail!(self);
         if self.fail_on_approve.swap(false, Ordering::SeqCst) {

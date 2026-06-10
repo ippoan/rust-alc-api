@@ -65,6 +65,9 @@ pub struct RegistrationStatusRow {
     pub tenant_id: Option<Uuid>,
     pub expires_at: Option<String>,
     pub device_name: Option<String>,
+    /// 承認時に発行される device 保有 token (Refs #388)。approved 後の
+    /// ポーリングで端末に渡す。
+    pub settings_token: Option<Uuid>,
 }
 
 /// claim 検索結果
@@ -102,6 +105,8 @@ pub struct DeviceSettingsRow {
     pub last_login_employee_name: Option<String>,
     pub last_login_employee_role: Option<Vec<String>>,
     pub always_on: bool,
+    /// X-Device-Token 検証用 (Refs #388)。response には echo しない。
+    pub settings_token: Option<Uuid>,
 }
 
 /// FCM デバイス情報
@@ -176,6 +181,7 @@ pub trait DeviceRepository: Send + Sync {
         is_device_owner: bool,
         is_dev_device: bool,
         req_id: Uuid,
+        settings_token: Uuid,
     ) -> Result<Uuid, sqlx::Error>;
 
     /// claim: QR永久 - phone_number/device_name 更新
@@ -312,6 +318,7 @@ pub trait DeviceRepository: Send + Sync {
         approved_by: Option<Uuid>,
         is_device_owner: bool,
         is_dev_device: bool,
+        settings_token: Uuid,
     ) -> Result<Uuid, sqlx::Error>;
 
     /// コードで承認: リクエスト検索
@@ -332,6 +339,7 @@ pub trait DeviceRepository: Send + Sync {
         approved_by: Option<Uuid>,
         is_device_owner: bool,
         is_dev_device: bool,
+        settings_token: Uuid,
     ) -> Result<Uuid, sqlx::Error>;
 
     /// 拒否

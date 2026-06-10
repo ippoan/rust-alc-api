@@ -238,6 +238,10 @@ struct RegistrationStatusResponse {
     tenant_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     device_name: Option<String>,
+    /// 承認時に発行された device 保有 token (Refs #388)。端末はこれを保存し
+    /// settings 取得時に X-Device-Token ヘッダで送る。approved 時のみ返る。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    settings_token: Option<Uuid>,
 }
 
 async fn check_registration_status(
@@ -280,6 +284,7 @@ async fn check_registration_status(
         device_id: if approved { row.device_id } else { None },
         tenant_id: if approved { row.tenant_id } else { None },
         device_name: if approved { row.device_name } else { None },
+        settings_token: if approved { row.settings_token } else { None },
     }))
 }
 
@@ -302,6 +307,9 @@ struct ClaimRegistrationResponse {
     tenant_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     message: Option<String>,
+    /// 即時登録 (url / device_owner) 時に発行される device 保有 token (Refs #388)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    settings_token: Option<Uuid>,
 }
 
 async fn claim_registration(
@@ -317,6 +325,7 @@ async fn claim_registration(
                 device_id: None,
                 tenant_id: None,
                 message: Some(msg.into()),
+                settings_token: None,
             }),
         )
     };
@@ -354,6 +363,8 @@ async fn claim_registration(
                 .ok_or_else(|| claim_err("無効なトークンです"))?;
             let is_do = req.flow_type == "device_owner";
 
+            // settings 取得用の device 保有 token を発行 (Refs #388)
+            let settings_token = Uuid::new_v4();
             let device_id = state
                 .devices
                 .claim_url_flow(
@@ -363,6 +374,7 @@ async fn claim_registration(
                     is_do || req.is_device_owner,
                     req.is_dev_device,
                     req.id,
+                    settings_token,
                 )
                 .await
                 .map_err(|e| claim_db("claim url flow", e))?;
@@ -373,6 +385,7 @@ async fn claim_registration(
                 device_id: Some(device_id),
                 tenant_id: Some(tenant_id),
                 message: None,
+                settings_token: Some(settings_token),
             }))
         }
         "qr_permanent" => {
@@ -389,6 +402,7 @@ async fn claim_registration(
                 device_id: None,
                 tenant_id: None,
                 message: Some("管理者の承認待ちです".into()),
+                settings_token: None,
             }))
         }
         _ => Err(claim_err("無効なフロータイプです")),
@@ -601,6 +615,9 @@ async fn approve_device(
         .unwrap_or("kiosk");
     let approved_by = auth.as_ref().map(|a| a.user_id);
 
+    // settings 取得用の device 保有 token を発行 (Refs #388)。端末には status
+    // ポーリング (approved 時) 経由で渡る。管理者向け response には載せない。
+    let settings_token = Uuid::new_v4();
     let device_id = state
         .devices
         .approve_device(
@@ -612,6 +629,7 @@ async fn approve_device(
             approved_by,
             req.is_device_owner,
             req.is_dev_device,
+            settings_token,
         )
         .await
         .map_err(|e| {
@@ -661,6 +679,9 @@ async fn approve_by_code(
         .unwrap_or("kiosk");
     let approved_by = auth.as_ref().map(|a| a.user_id);
 
+    // settings 取得用の device 保有 token を発行 (Refs #388)。端末には status
+    // ポーリング (approved 時) 経由で渡る。承認者向け response には載せない。
+    let settings_token = Uuid::new_v4();
     let device_id = state
         .devices
         .approve_by_code(
@@ -672,6 +693,7 @@ async fn approve_by_code(
             approved_by,
             req.is_device_owner,
             req.is_dev_device,
+            settings_token,
         )
         .await
         .map_err(|e| {
@@ -808,6 +830,7 @@ impl From<DeviceSettingsRow> for DeviceSettingsResponse {
 
 async fn get_device_settings(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(device_id): Path<Uuid>,
 ) -> Result<Json<DeviceSettingsResponse>, StatusCode> {
     let row = state
@@ -819,6 +842,21 @@ async fn get_device_settings(
             StatusCode::INTERNAL_SERVER_ERROR
         })?
         .ok_or(StatusCode::NOT_FOUND)?;
+
+    // device 保有 token (X-Device-Token) の検証 (Refs #388)。移行期互換:
+    // ヘッダが来たら厳格に検証、token 発行済みなのに未送信なら warn のみ
+    // (Phase C で 401 化)、旧端末 (token 未発行 + 未送信) は従来動作。
+    let provided = headers.get("X-Device-Token").and_then(|v| v.to_str().ok());
+    match (provided, row.settings_token) {
+        (Some(p), Some(t)) if constant_time_eq(p.as_bytes(), t.to_string().as_bytes()) => {}
+        (Some(_), _) => return Err(StatusCode::UNAUTHORIZED),
+        (None, Some(_)) => {
+            tracing::warn!(
+                "get_device_settings: token issued but header missing (device={device_id})"
+            );
+        }
+        (None, None) => {}
+    }
 
     Ok(Json(DeviceSettingsResponse::from(row)))
 }
