@@ -1,4 +1,5 @@
 use axum::{
+    body::Bytes,
     extract::{Query, State},
     http::{HeaderMap, StatusCode},
     routing::{get, post},
@@ -755,12 +756,20 @@ staging_import!(import_notify_recipients, StagingNotifyRecipient, "notify_recipi
 async fn import_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(payload): Json<StagingExportData>,
+    body: Bytes,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     if !is_staging_mode() {
         return Err(StatusCode::NOT_FOUND);
     }
+    // key 検証を本文 parse より前に行うため Json extractor ではなく Bytes で受ける。
+    // Json だと不正本文が parse 段階 (422) で弾かれ key チェックに到達しないため、
+    // export (Query) と挙動を揃えて「誤 key は本文の正否によらず 401」にする。Refs #391
     check_staging_key(&headers)?;
+
+    let payload: StagingExportData = serde_json::from_slice(&body).map_err(|e| {
+        tracing::warn!("staging import parse error: {e}");
+        StatusCode::BAD_REQUEST
+    })?;
 
     let pool = state.pool();
     let data = &payload.data;
