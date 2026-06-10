@@ -55,11 +55,12 @@ async fn update_classification(
 
     let tenant_id = tenant.0 .0;
 
+    // 生の sqlx エラー (SQL 片 / テーブル名等) を 500 body に echo しない (Refs #393 M-1)
     let row = state
         .dtako_event_classifications
         .update(tenant_id, id, &body.classification)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(crate::dtako_upload::internal_err)?;
 
     match row {
         Some(r) => Ok(Json(r)),

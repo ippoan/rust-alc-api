@@ -192,27 +192,25 @@ impl AuthRepository for PgAuthRepository {
     async fn find_user_in_tenant(
         &self,
         target_tenant_id: Uuid,
-        google_sub: Option<&str>,
-        lineworks_id: Option<&str>,
-        line_user_id: Option<&str>,
-        email: &str,
+        current_user_id: Uuid,
     ) -> Result<Option<User>, sqlx::Error> {
-        // google_sub, lineworks_id, line_user_id のいずれかでマッチ、またはメールでフォールバック
+        // email 一致のみで別テナントの user row にマッチさせない。同一 email が
+        // 複数テナントに存在すると意図しない role での JWT 発行につながるため、
+        // verified identity (google_sub / lineworks_id / line_user_id) の一致を
+        // 要求する (Refs #393 M-4)。verified ID を持たないユーザーは switch 不可。
         sqlx::query_as::<_, User>(
-            r#"SELECT * FROM users WHERE tenant_id = $1
+            r#"SELECT t.* FROM users t
+               JOIN users c ON c.id = $2
+               WHERE t.tenant_id = $1
                AND (
-                 (google_sub IS NOT NULL AND google_sub = $2)
-                 OR (lineworks_id IS NOT NULL AND lineworks_id = $3)
-                 OR (line_user_id IS NOT NULL AND line_user_id = $4)
-                 OR email = $5
+                 (t.google_sub IS NOT NULL AND t.google_sub = c.google_sub)
+                 OR (t.lineworks_id IS NOT NULL AND t.lineworks_id = c.lineworks_id)
+                 OR (t.line_user_id IS NOT NULL AND t.line_user_id = c.line_user_id)
                )
                LIMIT 1"#,
         )
         .bind(target_tenant_id)
-        .bind(google_sub.unwrap_or(""))
-        .bind(lineworks_id.unwrap_or(""))
-        .bind(line_user_id.unwrap_or(""))
-        .bind(email)
+        .bind(current_user_id)
         .fetch_optional(&self.pool)
         .await
     }

@@ -280,10 +280,7 @@ impl AuthRepository for MockAuthRepository {
     async fn find_user_in_tenant(
         &self,
         _target_tenant_id: Uuid,
-        _google_sub: Option<&str>,
-        _lineworks_id: Option<&str>,
-        _line_user_id: Option<&str>,
-        _email: &str,
+        _current_user_id: Uuid,
     ) -> Result<Option<User>, sqlx::Error> {
         check_fail!(self);
         Ok(self.return_switch_user.lock().unwrap().clone())

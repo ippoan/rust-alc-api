@@ -1,9 +1,14 @@
 use std::sync::Arc;
 
+use axum::http::header::{
+    HeaderValue, REFERRER_POLICY, STRICT_TRANSPORT_SECURITY, X_CONTENT_TYPE_OPTIONS,
+    X_FRAME_OPTIONS,
+};
 use axum::http::Method;
 use axum::{Extension, Router};
 use sqlx::postgres::PgPoolOptions;
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
+use tower_http::set_header::SetResponseHeaderLayer;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
@@ -449,6 +454,25 @@ async fn main() -> anyhow::Result<()> {
         .layer(Extension(lw_client))
         .layer(axum::extract::DefaultBodyLimit::max(20 * 1024 * 1024)) // 20MB
         .layer(cors)
+        // セキュリティレスポンスヘッダ (Refs #394 L-2)。JSON API のため XSS 面は
+        // 小さいが、HSTS / nosniff / clickjacking 抑止は安価に効く。ハンドラが
+        // 個別に設定した値は尊重する (if_not_present)。
+        .layer(SetResponseHeaderLayer::if_not_present(
+            STRICT_TRANSPORT_SECURITY,
+            HeaderValue::from_static("max-age=31536000; includeSubDomains"),
+        ))
+        .layer(SetResponseHeaderLayer::if_not_present(
+            X_CONTENT_TYPE_OPTIONS,
+            HeaderValue::from_static("nosniff"),
+        ))
+        .layer(SetResponseHeaderLayer::if_not_present(
+            X_FRAME_OPTIONS,
+            HeaderValue::from_static("DENY"),
+        ))
+        .layer(SetResponseHeaderLayer::if_not_present(
+            REFERRER_POLICY,
+            HeaderValue::from_static("no-referrer"),
+        ))
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 

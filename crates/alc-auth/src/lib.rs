@@ -336,11 +336,12 @@ async fn switch_org(
     let target_tenant_id =
         Uuid::parse_str(&body.organization_id).map_err(|_| StatusCode::BAD_REQUEST)?;
 
-    // ターゲットテナントで同一ユーザーを検索 (email でフォールバック)
-    // 現在の JWT から email を取得し、ターゲットテナントのユーザーを探す
+    // ターゲットテナントで同一ユーザーを検索。email 一致のみでは切り替えを許可
+    // せず、current user と同じ verified identity (google_sub / lineworks_id /
+    // line_user_id) を持つ row を要求する (Refs #393 M-4)。
     let target_user = state
         .auth
-        .find_user_in_tenant(target_tenant_id, None, None, None, &auth_user.email)
+        .find_user_in_tenant(target_tenant_id, auth_user.user_id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::FORBIDDEN)?;

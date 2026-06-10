@@ -977,6 +977,7 @@ async fn internal_download(
     let r2_zip_key = record.r2_zip_key;
     let filename = record.filename;
 
+    // storage エラー詳細 (bucket / key / 認証情報) は log のみ、body には出さない (Refs #393 M-1)
     let zip_bytes = state
         .dtako_storage
         .as_ref()
@@ -984,9 +985,10 @@ async fn internal_download(
         .download(&r2_zip_key)
         .await
         .map_err(|e| {
+            tracing::error!("R2 download failed: {e}");
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("R2 download failed: {e}"),
+                "R2 download failed".to_string(),
             )
         })?;
 
@@ -1034,6 +1036,7 @@ async fn internal_rerun(
     let filename = record.filename;
 
     // R2 から ZIP をダウンロード
+    // storage エラー詳細 (bucket / key / 認証情報) は log のみ、body には出さない (Refs #393 M-1)
     let zip_bytes = state
         .dtako_storage
         .as_ref()
@@ -1041,9 +1044,10 @@ async fn internal_rerun(
         .download(&r2_zip_key)
         .await
         .map_err(|e| {
+            tracing::error!("R2 download failed: {e}");
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("R2 download failed: {e}"),
+                "R2 download failed".to_string(),
             )
         })?;
 
@@ -1576,9 +1580,10 @@ async fn split_csv_handler(
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     tracing::info!("split-csv (auth) called: upload_id={}", upload_id);
 
+    // 生の anyhow エラー (内部パス / SQL 片等) を 500 body に echo しない (Refs #393 M-1)
     split_csv_from_r2(&state, upload_id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(internal_err)?;
 
     Ok(Json(
         serde_json::json!({ "status": "ok", "upload_id": upload_id }),
