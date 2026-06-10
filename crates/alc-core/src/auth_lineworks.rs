@@ -387,6 +387,7 @@ mod tests {
                 nonce: "nonce123".into(),
                 provider: "lineworks".into(),
                 external_org_id: "org1".into(),
+                iat: state::now_unix(),
             };
             let secret = "test-secret-key";
             let signed = state::sign(&payload, secret);
@@ -405,10 +406,60 @@ mod tests {
                 nonce: "n".into(),
                 provider: "lw".into(),
                 external_org_id: "o".into(),
+                iat: state::now_unix(),
             };
             let signed = state::sign(&payload, "secret1");
             assert!(state::verify(&signed, "wrong-secret").is_err());
         });
+    }
+
+    #[test]
+    fn test_state_verify_expired() {
+        test_group!("LINE WORKS OAuth");
+        test_case!(
+            "TTL超過 state は署名が有効でも検証失敗 (Refs #393 M-3)",
+            {
+                let iat = 1_700_000_000_u64;
+                let payload = state::StatePayload {
+                    redirect_uri: "https://example.com".into(),
+                    nonce: "n".into(),
+                    provider: "lw".into(),
+                    external_org_id: "o".into(),
+                    iat,
+                };
+                let secret = "secret1";
+                let signed = state::sign(&payload, secret);
+                // TTL 内は通る (境界値ちょうども OK)
+                assert!(state::verify_at(&signed, secret, iat + state::STATE_TTL_SECS).is_ok());
+                // TTL を 1 秒でも超えたら expired
+                let err =
+                    state::verify_at(&signed, secret, iat + state::STATE_TTL_SECS + 1).unwrap_err();
+                assert!(err.contains("expired"));
+            }
+        );
+    }
+
+    #[test]
+    fn test_state_verify_legacy_payload_without_iat_rejected() {
+        test_group!("LINE WORKS OAuth");
+        test_case!(
+            "iat 無し旧フォーマットは serde default 0 → 期限切れ扱い",
+            {
+                use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+                use hmac::{Hmac, Mac};
+                // 旧フォーマット (iat フィールド無し) の state を手組みする
+                let json = r#"{"redirect_uri":"https://example.com","nonce":"n","provider":"lw","external_org_id":"o"}"#;
+                let payload_b64 = URL_SAFE_NO_PAD.encode(json.as_bytes());
+                let secret = "secret1";
+                let mut mac = Hmac::<sha2::Sha256>::new_from_slice(secret.as_bytes()).unwrap();
+                mac.update(payload_b64.as_bytes());
+                let sig = URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
+                let signed = format!("{payload_b64}.{sig}");
+
+                let err = state::verify(&signed, secret).unwrap_err();
+                assert!(err.contains("expired"));
+            }
+        );
     }
 
     #[test]
@@ -552,12 +603,27 @@ pub mod state {
 
     type HmacSha256 = Hmac<Sha256>;
 
+    /// state の有効期限 (秒)。HMAC が有効でも発行から これ を超えた state は
+    /// reject し、無期限 replay を防ぐ (Refs #393 M-3)。
+    pub const STATE_TTL_SECS: u64 = 600;
+
     #[derive(Debug, Serialize, Deserialize)]
     pub struct StatePayload {
         pub redirect_uri: String,
         pub nonce: String,
         pub provider: String,
         pub external_org_id: String,
+        /// 発行時刻 (UNIX 秒)。`sign` する側が `now_unix()` で設定する。
+        /// 旧フォーマット (フィールド無し) は 0 に default され期限切れ扱い。
+        #[serde(default)]
+        pub iat: u64,
+    }
+
+    pub fn now_unix() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock before UNIX epoch")
+            .as_secs()
     }
 
     pub fn sign(payload: &StatePayload, secret: &str) -> String {
@@ -572,6 +638,12 @@ pub mod state {
     }
 
     pub fn verify(state: &str, secret: &str) -> Result<StatePayload, String> {
+        verify_at(state, secret, now_unix())
+    }
+
+    /// 時刻注入版 (テスト用に `now` を引数で受ける)。署名検証に加えて
+    /// `iat` から `STATE_TTL_SECS` を超えた state を reject する (Refs #393 M-3)。
+    pub fn verify_at(state: &str, secret: &str, now: u64) -> Result<StatePayload, String> {
         let parts: Vec<&str> = state.splitn(2, '.').collect();
         if parts.len() != 2 {
             return Err("Invalid state format".into());
@@ -589,6 +661,12 @@ pub mod state {
         let json = URL_SAFE_NO_PAD
             .decode(payload_b64)
             .map_err(|_| "Invalid payload encoding")?;
-        serde_json::from_slice(&json).map_err(|e| format!("State payload parse error: {e}"))
+        let payload: StatePayload =
+            serde_json::from_slice(&json).map_err(|e| format!("State payload parse error: {e}"))?;
+
+        if now.saturating_sub(payload.iat) > STATE_TTL_SECS {
+            return Err("State expired".into());
+        }
+        Ok(payload)
     }
 }

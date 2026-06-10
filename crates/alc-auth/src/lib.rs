@@ -430,6 +430,7 @@ async fn google_redirect(
         nonce: Uuid::new_v4().to_string(),
         provider: "google".to_string(),
         external_org_id: String::new(),
+        iat: auth_lineworks::state::now_unix(),
     };
     let signed_state = auth_lineworks::state::sign(&state_payload, &oauth_state_secret);
 
@@ -571,6 +572,7 @@ async fn lineworks_redirect(
         nonce: Uuid::new_v4().to_string(),
         provider: "lineworks".to_string(),
         external_org_id: config.external_org_id.clone(),
+        iat: auth_lineworks::state::now_unix(),
     };
     let signed_state = auth_lineworks::state::sign(&state_payload, &oauth_state_secret);
 
@@ -736,6 +738,7 @@ async fn line_redirect(
         nonce: Uuid::new_v4().to_string(),
         provider: "line".to_string(),
         external_org_id: params.tenant_id.unwrap_or_default(),
+        iat: auth_lineworks::state::now_unix(),
     };
     let signed_state = auth_lineworks::state::sign(&state_payload, &oauth_state_secret);
 

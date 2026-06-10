@@ -1146,6 +1146,7 @@ async fn test_google_callback_success() {
         nonce: Uuid::new_v4().to_string(),
         provider: "google".to_string(),
         external_org_id: String::new(),
+        iat: lineworks::state::now_unix(),
     };
     let signed_state = lineworks::state::sign(&state_payload, "test-state-secret");
 
@@ -1254,6 +1255,7 @@ async fn test_google_callback_invalid_code() {
         nonce: Uuid::new_v4().to_string(),
         provider: "google".to_string(),
         external_org_id: String::new(),
+        iat: lineworks::state::now_unix(),
     };
     let signed_state = lineworks::state::sign(&state_payload, "test-state-secret");
 
@@ -1303,6 +1305,7 @@ async fn test_google_callback_new_user() {
         nonce: Uuid::new_v4().to_string(),
         provider: "google".to_string(),
         external_org_id: String::new(),
+        iat: lineworks::state::now_unix(),
     };
     let signed_state = lineworks::state::sign(&state_payload, "test-state-secret");
 
@@ -1437,6 +1440,7 @@ async fn test_lineworks_callback_success() {
         nonce: Uuid::new_v4().to_string(),
         provider: "lineworks".to_string(),
         external_org_id: "lw-org".to_string(),
+        iat: lineworks::state::now_unix(),
     };
     let signed_state = lineworks::state::sign(&state_payload, oauth_secret);
 
@@ -1551,6 +1555,7 @@ async fn test_lineworks_callback_existing_user() {
         nonce: Uuid::new_v4().to_string(),
         provider: "lineworks".to_string(),
         external_org_id: "lw-org".to_string(),
+        iat: lineworks::state::now_unix(),
     };
     let signed_state = lineworks::state::sign(&state_payload, oauth_secret);
 
@@ -1655,6 +1660,7 @@ async fn test_lineworks_callback_sso_not_found() {
         nonce: Uuid::new_v4().to_string(),
         provider: "lineworks".to_string(),
         external_org_id: "lw-org".to_string(),
+        iat: lineworks::state::now_unix(),
     };
     let signed_state = lineworks::state::sign(&state_payload, oauth_secret);
 
@@ -1704,6 +1710,7 @@ async fn test_lineworks_callback_decrypt_fails() {
         nonce: Uuid::new_v4().to_string(),
         provider: "lineworks".to_string(),
         external_org_id: "lw-org".to_string(),
+        iat: lineworks::state::now_unix(),
     };
     let signed_state = lineworks::state::sign(&state_payload, oauth_secret);
 
@@ -1773,6 +1780,7 @@ async fn test_lineworks_callback_token_exchange_fails() {
         nonce: Uuid::new_v4().to_string(),
         provider: "lineworks".to_string(),
         external_org_id: "lw-org".to_string(),
+        iat: lineworks::state::now_unix(),
     };
     let signed_state = lineworks::state::sign(&state_payload, oauth_secret);
 
@@ -1861,6 +1869,7 @@ async fn test_lineworks_callback_profile_fetch_fails() {
         nonce: Uuid::new_v4().to_string(),
         provider: "lineworks".to_string(),
         external_org_id: "lw-org".to_string(),
+        iat: lineworks::state::now_unix(),
     };
     let signed_state = lineworks::state::sign(&state_payload, oauth_secret);
 
@@ -1959,6 +1968,7 @@ async fn test_lineworks_callback_create_user_fails() {
         nonce: Uuid::new_v4().to_string(),
         provider: "lineworks".to_string(),
         external_org_id: "lw-org".to_string(),
+        iat: lineworks::state::now_unix(),
     };
     let signed_state = lineworks::state::sign(&state_payload, oauth_secret);
 
@@ -2260,6 +2270,7 @@ async fn test_google_callback_two_part_domain() {
         nonce: Uuid::new_v4().to_string(),
         provider: "google".to_string(),
         external_org_id: String::new(),
+        iat: lineworks::state::now_unix(),
     };
     let signed_state = lineworks::state::sign(&state_payload, "test-state-secret");
 
@@ -2312,6 +2323,7 @@ async fn test_google_callback_http_redirect_uri() {
         nonce: Uuid::new_v4().to_string(),
         provider: "google".to_string(),
         external_org_id: String::new(),
+        iat: lineworks::state::now_unix(),
     };
     let signed_state = lineworks::state::sign(&state_payload, "test-state-secret");
 
@@ -3131,6 +3143,7 @@ async fn test_line_callback_existing_user() {
         nonce: "n".into(),
         provider: "line".into(),
         external_org_id: String::new(),
+        iat: lineworks::state::now_unix(),
     };
     let signed = lineworks::state::sign(&p, ss);
     let client = reqwest::Client::builder()
@@ -3195,6 +3208,7 @@ async fn test_line_callback_zero_tenants() {
         nonce: "n".into(),
         provider: "line".into(),
         external_org_id: String::new(),
+        iat: lineworks::state::now_unix(),
     };
     let signed = lineworks::state::sign(&p, ss);
     let client = reqwest::Client::builder()
@@ -3265,6 +3279,7 @@ async fn test_line_callback_one_tenant() {
         nonce: "n".into(),
         provider: "line".into(),
         external_org_id: String::new(),
+        iat: lineworks::state::now_unix(),
     };
     let signed = lineworks::state::sign(&p, ss);
     let client = reqwest::Client::builder()
@@ -3334,6 +3349,7 @@ async fn test_line_callback_multiple_tenants() {
         nonce: "n".into(),
         provider: "line".into(),
         external_org_id: String::new(),
+        iat: lineworks::state::now_unix(),
     };
     let signed = lineworks::state::sign(&p, ss);
     let client = reqwest::Client::builder()
@@ -3412,6 +3428,7 @@ async fn test_line_callback_token_exchange_fails() {
         nonce: "n".into(),
         provider: "line".into(),
         external_org_id: String::new(),
+        iat: lineworks::state::now_unix(),
     };
     let signed = lineworks::state::sign(&p, ss);
     let client = reqwest::Client::builder()
@@ -3466,6 +3483,7 @@ async fn test_line_callback_profile_fetch_fails() {
         nonce: "n".into(),
         provider: "line".into(),
         external_org_id: String::new(),
+        iat: lineworks::state::now_unix(),
     };
     let signed = lineworks::state::sign(&p, ss);
     let client = reqwest::Client::builder()
@@ -3504,6 +3522,7 @@ async fn test_line_callback_missing_channel_id() {
         nonce: "n".into(),
         provider: "line".into(),
         external_org_id: String::new(),
+        iat: lineworks::state::now_unix(),
     };
     let signed = lineworks::state::sign(&p, ss);
     let client = reqwest::Client::builder()
@@ -3565,6 +3584,7 @@ async fn test_line_callback_qr_invite() {
         nonce: "n".into(),
         provider: "line".into(),
         external_org_id: tid.to_string(),
+        iat: lineworks::state::now_unix(),
     };
     let signed = lineworks::state::sign(&p, ss);
     let client = reqwest::Client::builder()
