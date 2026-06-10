@@ -25,6 +25,12 @@ type = "unit"
 path = "crates/alc-csv-parser/src/work_segments.rs"
 type = "unit"
 
+# --- alc-auth-jwt (leaf crate, Refs #410) ---
+
+[[files]]
+path = "crates/alc-auth-jwt/src/lib.rs"
+type = "mock"
+
 # --- alc-core ---
 
 [[files]]
