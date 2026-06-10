@@ -112,6 +112,18 @@ async fn get_file(
     Ok(Json(row))
 }
 
+/// Content-Disposition 用に user 由来 filename をサニタイズする。`"` は disposition
+/// の構造を操作できるため `_` に落とし、非 ASCII は RFC 5987 `filename*=UTF-8''`
+/// で渡す (Refs #394 L-3。参考: alc-notify viewer の `build_inline_disposition`)。
+fn build_attachment_disposition(filename: &str) -> String {
+    let encoded = urlencoding::encode(filename);
+    format!(
+        "attachment; filename=\"{}\"; filename*=UTF-8''{}",
+        filename.replace('"', "_"),
+        encoded
+    )
+}
+
 async fn download_file(
     State(state): State<CarinsState>,
     Extension(tenant_id): Extension<TenantId>,
@@ -140,7 +152,7 @@ async fn download_file(
                 (header::CONTENT_TYPE, content_type),
                 (
                     header::CONTENT_DISPOSITION,
-                    format!("attachment; filename=\"{}\"", filename),
+                    build_attachment_disposition(&filename),
                 ),
             ],
             data,
@@ -159,7 +171,7 @@ async fn download_file(
                 (header::CONTENT_TYPE, content_type),
                 (
                     header::CONTENT_DISPOSITION,
-                    format!("attachment; filename=\"{}\"", filename),
+                    build_attachment_disposition(&filename),
                 ),
             ],
             data,
@@ -596,6 +608,30 @@ fn spawn_verify_unverified(state: &CarinsState, tenant_id: Uuid, rows: &[FileRow
 mod tests {
     use super::*;
     use std::sync::Mutex;
+
+    #[test]
+    fn attachment_disposition_basic() {
+        let cd = build_attachment_disposition("hello.pdf");
+        assert!(cd.starts_with("attachment; "));
+        assert!(cd.contains("filename=\"hello.pdf\""));
+        assert!(cd.contains("filename*=UTF-8''hello.pdf"));
+    }
+
+    #[test]
+    fn attachment_disposition_sanitizes_quote() {
+        // `"` で disposition 構造を操作できないこと (Refs #394 L-3)
+        let cd = build_attachment_disposition("evil\"; foo=\"bar.pdf");
+        assert!(!cd.contains("evil\";"));
+        assert!(cd.contains("filename=\"evil_; foo=_bar.pdf\""));
+    }
+
+    #[test]
+    fn attachment_disposition_utf8() {
+        let cd = build_attachment_disposition("車検証.pdf");
+        // ASCII fallback はそのまま、RFC 5987 側は URL エンコード
+        assert!(cd.contains("filename*=UTF-8''"));
+        assert!(cd.contains("%E8%BB%8A"));
+    }
 
     struct MockRepo {
         pending_pdf_uuid: Mutex<Option<String>>,

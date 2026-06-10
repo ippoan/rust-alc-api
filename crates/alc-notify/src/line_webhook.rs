@@ -77,14 +77,18 @@ async fn handle_webhook(
                         resolved.tenant_id
                     );
 
+                    // フォールバック表示名用の短縮 ID。`&user_id[..8]` は user_id が
+                    // 8 バイト未満 / UTF-8 境界を割ると panic するため、char ベースで
+                    // 安全に先頭 8 文字を取る (Refs #394 L-4)。
+                    let short_id: String = user_id.chars().take(8).collect();
                     // JWT でアクセストークン取得 → プロフィール取得
                     let name = match line_client.get_access_token(&line_config).await {
                         Ok(token) => get_user_display_name(&token, user_id)
                             .await
-                            .unwrap_or_else(|_| format!("LINE User {}", &user_id[..8])),
+                            .unwrap_or_else(|_| format!("LINE User {short_id}")),
                         Err(e) => {
                             tracing::warn!("LINE token error, using default name: {e}");
-                            format!("LINE User {}", &user_id[..8])
+                            format!("LINE User {short_id}")
                         }
                     };
 
@@ -190,8 +194,13 @@ fn verify_signature(body: &[u8], channel_secret: &str, signature: &str) -> bool 
         return false;
     };
     mac.update(body);
-    let expected = base64::engine::general_purpose::STANDARD.encode(mac.finalize().into_bytes());
-    expected == signature
+    // LINE の x-line-signature は base64(HMAC-SHA256(body))。文字列 `==` 比較は
+    // 非 constant-time でタイミング側チャネルの余地があるため、署名を decode して
+    // `mac.verify_slice` (内部で constant-time 比較) で検証する (Refs #393 M-2)。
+    let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(signature) else {
+        return false;
+    };
+    mac.verify_slice(&decoded).is_ok()
 }
 
 use base64::Engine;

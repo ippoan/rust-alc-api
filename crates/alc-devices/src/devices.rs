@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use alc_core::auth_middleware::{AuthUser, TenantId};
+use alc_core::constant_time::constant_time_eq;
 use alc_core::repository::devices::{
     DeviceRow, DeviceSettingsRow, FcmDeviceRow, RegistrationRequestRow,
 };
@@ -84,7 +85,8 @@ fn check_internal_secret(headers: &HeaderMap) -> Result<(), StatusCode> {
         .get("X-Internal-Secret")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    if provided == expected {
+    // 文字列 `==` は非 constant-time でタイミング側チャネルの余地がある (Refs #393 M-2)
+    if constant_time_eq(provided.as_bytes(), expected.as_bytes()) {
         Ok(())
     } else {
         Err(StatusCode::UNAUTHORIZED)
@@ -1638,7 +1640,8 @@ async fn trigger_update_dev(
         .get("X-Internal-Secret")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    if provided != expected_secret {
+    // 文字列 `!=` は非 constant-time でタイミング側チャネルの余地がある (Refs #393 M-2)
+    if !constant_time_eq(provided.as_bytes(), expected_secret.as_bytes()) {
         return Err(StatusCode::UNAUTHORIZED);
     }
 

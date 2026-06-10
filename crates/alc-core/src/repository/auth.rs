@@ -118,13 +118,13 @@ pub trait AuthRepository: Send + Sync {
 
     // --- Switch org ---
 
+    /// switch-org 用: current user (`current_user_id`) と同じ verified identity
+    /// (google_sub / lineworks_id / line_user_id) を持つ user を target tenant から
+    /// 探す。email のみの一致では別テナントの JWT を発行しない (Refs #393 M-4)。
     async fn find_user_in_tenant(
         &self,
         target_tenant_id: Uuid,
-        google_sub: Option<&str>,
-        lineworks_id: Option<&str>,
-        line_user_id: Option<&str>,
-        email: &str,
+        current_user_id: Uuid,
     ) -> Result<Option<User>, sqlx::Error>;
 
     // --- Password login ---
