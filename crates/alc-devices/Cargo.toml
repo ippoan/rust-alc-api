@@ -7,7 +7,6 @@ edition = "2021"
 alc-core = { path = "../alc-core" }
 async-trait = "0.1"
 axum = "0.8"
-rand = "0.10"
 sqlx = { version = "0.8", features = ["postgres"] }
 chrono = { version = "0.4", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }

@@ -1,6 +1,6 @@
 use axum::{
     extract::{Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     routing::{get, post},
     Json, Router,
 };
@@ -10,6 +10,7 @@ use serde_json::json;
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use alc_core::constant_time::constant_time_eq;
 use alc_core::AppState;
 
 // ---------------------------------------------------------------------------
@@ -17,6 +18,7 @@ use alc_core::AppState;
 // ---------------------------------------------------------------------------
 
 pub fn router() -> Router<AppState> {
+    assert_not_prod_with_staging_mode();
     Router::new()
         .route("/staging/export", get(export_handler))
         .route("/staging/import", post(import_handler))
@@ -30,6 +32,40 @@ fn is_staging_mode() -> bool {
     std::env::var("STAGING_MODE")
         .map(|v| v == "true")
         .unwrap_or(false)
+}
+
+/// 本番 fail-safe (Refs #391)。Cloud Run の `K_SERVICE` (service 名) が
+/// "staging" を含まない service で `STAGING_MODE=true` が立っていたら、無認証
+/// export/import が本番データに開くため router 構築時点で起動を拒否する。
+/// ローカル dev / テストは `K_SERVICE` 自体が無いので影響しない。
+fn assert_not_prod_with_staging_mode() {
+    if let Ok(service) = std::env::var("K_SERVICE") {
+        if !service.contains("staging") && is_staging_mode() {
+            panic!(
+                "STAGING_MODE=true must not be set on non-staging service '{service}' — refusing to boot (Refs #391)"
+            );
+        }
+    }
+}
+
+/// shared-secret ヘッダ検証 (Refs #391)。`STAGING_API_KEY` が設定されていれば
+/// `X-Staging-Key` ヘッダとの constant-time 一致を要求し、同一 staging 内の
+/// 任意 tenant_id dump / 改竄を「key を知る caller」に限定する。
+/// 未設定なら従来どおり無認証 (揮発 DB 前提の staging-open 運用を壊さない
+/// opt-in 強化。env + フロント側ヘッダ送信が揃った時点で有効化する)。
+fn check_staging_key(headers: &HeaderMap) -> Result<(), StatusCode> {
+    let Ok(expected) = std::env::var("STAGING_API_KEY") else {
+        return Ok(());
+    };
+    let provided = headers
+        .get("X-Staging-Key")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if constant_time_eq(provided.as_bytes(), expected.as_bytes()) {
+        Ok(())
+    } else {
+        Err(StatusCode::UNAUTHORIZED)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -566,11 +602,13 @@ staging_export!(
 
 async fn export_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Query(params): Query<ExportParams>,
 ) -> Result<Json<StagingExportData>, StatusCode> {
     if !is_staging_mode() {
         return Err(StatusCode::NOT_FOUND);
     }
+    check_staging_key(&headers)?;
 
     let pool = state.pool();
     let tid = params.tenant_id;
@@ -589,7 +627,12 @@ async fn export_handler(
     let employees = export_employees(pool, tid).await?;
     let devices = export_devices(pool, tid).await?;
     let tenko_schedules = export_tenko_schedules(pool, tid).await?;
-    let webhook_configs = export_webhook_configs(pool, tid).await?;
+    // webhook の平文 secret は export に載せない (Refs #391)。import 側も secret
+    // カラムを触らないため、復元時は既存値保持 / 新規行は NULL になる
+    let mut webhook_configs = export_webhook_configs(pool, tid).await?;
+    for c in &mut webhook_configs {
+        c.secret = None;
+    }
     let tenant_allowed_emails = export_allowed_emails(pool, tid).await?;
     let sso_provider_configs = export_sso_configs(pool, tid).await?;
     let tenko_call_numbers = export_tenko_call_numbers(pool, &tid_str).await?;
@@ -661,9 +704,11 @@ staging_import!(import_tenko_schedules, StagingTenkoSchedule, "tenko_schedules",
     update: [tenko_type, responsible_manager_name, scheduled_at, instruction,
              consumed, consumed_by_session_id, updated_at]);
 
+// secret は insert/update とも対象外 (Refs #391): export が secret を含まなくなった
+// ため、import で既存 secret を NULL 上書きしない。新規行は NULL (要再設定)。
 staging_import!(import_webhook_configs, StagingWebhookConfig, "webhook_configs",
-    insert: [id, tenant_id, event_type, url, secret, enabled, created_at, updated_at],
-    update: [event_type, url, secret, enabled, updated_at]);
+    insert: [id, tenant_id, event_type, url, enabled, created_at, updated_at],
+    update: [event_type, url, enabled, updated_at]);
 
 staging_import!(import_allowed_emails, StagingTenantAllowedEmail, "tenant_allowed_emails",
     insert: [id, tenant_id, email, role, created_at],
@@ -709,11 +754,13 @@ staging_import!(import_notify_recipients, StagingNotifyRecipient, "notify_recipi
 
 async fn import_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(payload): Json<StagingExportData>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     if !is_staging_mode() {
         return Err(StatusCode::NOT_FOUND);
     }
+    check_staging_key(&headers)?;
 
     let pool = state.pool();
     let data = &payload.data;
@@ -772,4 +819,84 @@ async fn import_handler(
 fn db_err(e: sqlx::Error) -> StatusCode {
     tracing::error!("staging db error: {e}");
     StatusCode::INTERNAL_SERVER_ERROR
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    /// env (K_SERVICE / STAGING_MODE / STAGING_API_KEY) を触るテストの直列化
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn clear_env() {
+        std::env::remove_var("K_SERVICE");
+        std::env::remove_var("STAGING_MODE");
+        std::env::remove_var("STAGING_API_KEY");
+    }
+
+    #[test]
+    fn prod_guard_panics_when_staging_mode_on_prod_service() {
+        let guard = ENV_LOCK.lock().unwrap();
+        clear_env();
+        std::env::set_var("K_SERVICE", "rust-alc-api");
+        std::env::set_var("STAGING_MODE", "true");
+        let result = std::panic::catch_unwind(assert_not_prod_with_staging_mode);
+        clear_env();
+        drop(guard);
+        assert!(
+            result.is_err(),
+            "expected panic on prod + STAGING_MODE=true"
+        );
+    }
+
+    #[test]
+    fn prod_guard_allows_staging_service_and_prod_without_flag() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_env();
+        // staging service なら STAGING_MODE=true でも boot できる
+        std::env::set_var("K_SERVICE", "rust-alc-api-staging");
+        std::env::set_var("STAGING_MODE", "true");
+        assert_not_prod_with_staging_mode();
+        // 本番 service でも STAGING_MODE が無ければ boot できる
+        std::env::set_var("K_SERVICE", "rust-alc-api");
+        std::env::remove_var("STAGING_MODE");
+        assert_not_prod_with_staging_mode();
+        // ローカル (K_SERVICE 無し) は STAGING_MODE=true でも boot できる
+        clear_env();
+        std::env::set_var("STAGING_MODE", "true");
+        assert_not_prod_with_staging_mode();
+        clear_env();
+    }
+
+    #[test]
+    fn staging_key_optional_when_env_unset() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_env();
+        let headers = HeaderMap::new();
+        assert!(check_staging_key(&headers).is_ok());
+    }
+
+    #[test]
+    fn staging_key_enforced_when_env_set() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_env();
+        std::env::set_var("STAGING_API_KEY", "test-staging-key");
+
+        // ヘッダ無し → 401
+        let headers = HeaderMap::new();
+        assert_eq!(check_staging_key(&headers), Err(StatusCode::UNAUTHORIZED));
+
+        // 不一致 → 401
+        let mut headers = HeaderMap::new();
+        headers.insert("X-Staging-Key", "wrong".parse().unwrap());
+        assert_eq!(check_staging_key(&headers), Err(StatusCode::UNAUTHORIZED));
+
+        // 一致 → Ok
+        let mut headers = HeaderMap::new();
+        headers.insert("X-Staging-Key", "test-staging-key".parse().unwrap());
+        assert!(check_staging_key(&headers).is_ok());
+
+        clear_env();
+    }
 }

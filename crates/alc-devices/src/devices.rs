@@ -5,7 +5,6 @@ use axum::{
     Extension, Json, Router,
 };
 use chrono::{Datelike, Timelike};
-use rand::RngExt;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -271,11 +270,16 @@ async fn check_registration_status(
         row.status.clone()
     };
 
+    // approved になるまで device_id / tenant_id / device_name は返さない (Refs #388)。
+    // コードを推測した第三者が pending リクエストから他テナントの tenant_id や
+    // デバイス名を収集できる暴露経路を塞ぐ。フロント (DeviceRegistration.vue) は
+    // approved 後にしかこれらを使わないため互換。
+    let approved = status == "approved";
     Ok(Json(RegistrationStatusResponse {
         status,
-        device_id: row.device_id,
-        tenant_id: row.tenant_id,
-        device_name: row.device_name,
+        device_id: if approved { row.device_id } else { None },
+        tenant_id: if approved { row.tenant_id } else { None },
+        device_name: if approved { row.device_name } else { None },
     }))
 }
 
@@ -639,7 +643,15 @@ async fn approve_by_code(
             tracing::error!("approve_by_code lookup error: {e}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?
-        .ok_or(StatusCode::NOT_FOUND)?;
+        .ok_or_else(|| {
+            // code enumeration の検知用に「誰がどのテナントから外したか」を残す (Refs #388)。
+            // tracing マクロを複数行に割るとフォーマット文字列行が行カバレッジに乗らない
+            // (coverage gate に引っかかる) ため 1 行に収める。
+            let approver = auth.as_ref().map(|a| a.user_id);
+            let t = tenant.0;
+            tracing::warn!("approve_by_code miss: tenant={t} approver={approver:?}");
+            StatusCode::NOT_FOUND
+        })?;
 
     let device_name = req.device_name.clone().unwrap_or_default();
     let device_type = req
@@ -1681,14 +1693,15 @@ async fn trigger_update_dev(
 // ヘルパー
 // ============================================================
 
-/// 6桁のユニークな登録コードを生成
+/// ユニークな登録コードを生成 (衝突チェック付き)。
+///
+/// 旧実装の 6 桁数字 (900k 空間) は総当たりで他テナントの承認待ちコードに当てられ、
+/// approve-by-code の越境奪取 / tenant_id 収集に使えた (Refs #388)。コードは QR /
+/// URL 経由で受け渡され人間の手入力性は不要なため、UUID v4 (122bit) に引き上げて
+/// enumeration を計算量的に不可能にする。
 async fn generate_unique_code(state: &AppState) -> Result<String, StatusCode> {
     loop {
-        let code_str = {
-            let mut rng = rand::rng();
-            let code: u32 = rng.random_range(100_000..1_000_000);
-            code.to_string()
-        };
+        let code_str = Uuid::new_v4().to_string();
         let exists = state
             .devices
             .code_exists(&code_str)
