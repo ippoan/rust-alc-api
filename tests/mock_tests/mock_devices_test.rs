@@ -3313,6 +3313,82 @@ async fn test_trigger_update_dev_with_tenants() {
 }
 
 // ============================================================
+// trigger_update_dev: download_url passthrough (Refs #406)
+// ============================================================
+
+#[tokio::test]
+async fn test_trigger_update_dev_download_url_passthrough() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("FCM_INTERNAL_SECRET", "dev-secret-3");
+
+    let mock = Arc::new(MockDeviceRepository::default());
+    mock.return_dev_tenants.store(true, Ordering::SeqCst);
+    mock.return_data.store(true, Ordering::SeqCst);
+    let mut state = setup_mock_app_state();
+    state.devices = mock;
+    let fcm_mock = Arc::new(crate::common::MockFcmSender::new());
+    state.fcm = Some(fcm_mock.clone());
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let url =
+        "https://github.com/ippoan/AlcoholChecker/releases/download/dev-pr2-10/app-release.apk";
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/devices/trigger-update-dev"))
+        .header("X-Internal-Secret", "dev-secret-3")
+        .json(&serde_json::json!({ "version_code": 100, "download_url": url }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(body["sent"], 1);
+
+    // FCM data に download_url がそのまま forward される
+    let sent = fcm_mock.sent.lock().unwrap();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].1.get("download_url"), Some(&url.to_string()));
+    assert_eq!(sent[0].1.get("type"), Some(&"app_update".to_string()));
+    drop(sent);
+    std::env::remove_var("FCM_INTERNAL_SECRET");
+}
+
+// ============================================================
+// trigger_update: download_url 省略時は FCM data に乗らない (Refs #406)
+// ============================================================
+
+#[tokio::test]
+async fn test_trigger_update_without_download_url() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+
+    let mock = Arc::new(MockDeviceRepository::default());
+    mock.return_data.store(true, Ordering::SeqCst);
+    let mut state = setup_mock_app_state();
+    state.devices = mock;
+    let fcm_mock = Arc::new(crate::common::MockFcmSender::new());
+    state.fcm = Some(fcm_mock.clone());
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let tenant_id = Uuid::new_v4();
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/devices/trigger-update"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .json(&serde_json::json!({ "version_code": 100 }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+
+    let sent = fcm_mock.sent.lock().unwrap();
+    assert_eq!(sent.len(), 1);
+    assert!(sent[0].1.get("download_url").is_none());
+}
+
+// ============================================================
 // trigger_update_dev: DB error on list_dev_device_tenant_ids
 // ============================================================
 

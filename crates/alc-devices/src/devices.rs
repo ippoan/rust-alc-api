@@ -1550,6 +1550,10 @@ struct TriggerUpdateBody {
     /// true: dev端末のみ, false/省略: 全端末
     #[serde(default)]
     dev_only: Option<bool>,
+    /// 指定時はアプリがこの URL から APK を DL する (PR dev build の prerelease asset 等)。
+    /// 省略時はアプリ側が releases/latest に fallback。
+    #[serde(default)]
+    download_url: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1627,6 +1631,9 @@ async fn send_update_fcm(
         }
         if let Some(ref vn) = body.version_name {
             data.insert("version_name".to_string(), vn.clone());
+        }
+        if let Some(ref url) = body.download_url {
+            data.insert("download_url".to_string(), url.clone());
         }
 
         match fcm.send_data_message(&device.fcm_token, data).await {
