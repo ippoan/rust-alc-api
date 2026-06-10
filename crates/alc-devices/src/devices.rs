@@ -851,9 +851,8 @@ async fn get_device_settings(
         (Some(p), Some(t)) if constant_time_eq(p.as_bytes(), t.to_string().as_bytes()) => {}
         (Some(_), _) => return Err(StatusCode::UNAUTHORIZED),
         (None, Some(_)) => {
-            tracing::warn!(
-                "get_device_settings: token issued but header missing (device={device_id})"
-            );
+            // rustfmt の折り返しでフォーマット文字列行が coverage に乗らないため短く 1 行
+            tracing::warn!("device_settings token not sent: {device_id}");
         }
         (None, None) => {}
     }
