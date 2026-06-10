@@ -1,0 +1,16 @@
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
+load("@crates//:defs.bzl", "all_crate_deps")
+
+rust_library(
+    name = "alc-auth-jwt",
+    srcs = glob(["src/**/*.rs"]),
+    crate_name = "alc_auth_jwt",
+    deps = all_crate_deps(normal = True),
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    visibility = ["//visibility:public"],
+)
+
+rust_test(
+    name = "alc-auth-jwt_test",
+    crate = ":alc-auth-jwt",
+)

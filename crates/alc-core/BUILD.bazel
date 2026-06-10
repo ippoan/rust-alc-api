@@ -6,7 +6,9 @@ rust_library(
     srcs = glob(["src/**/*.rs"]),
     crate_name = "alc_core",
     crate_features = ["test-helpers"],
-    deps = all_crate_deps(normal = True),
+    deps = all_crate_deps(normal = True) + [
+        "//crates/alc-auth-jwt",
+    ],
     proc_macro_deps = all_crate_deps(proc_macro = True),
     visibility = ["//visibility:public"],
 )
