@@ -576,60 +576,6 @@ async fn test_my_orgs_unauthorized() {
 }
 
 // ============================================================
-// POST /api/auth/tenants — create tenant success
-// ============================================================
-
-#[tokio::test]
-async fn test_create_tenant_success() {
-    let _guard = crate::common::ENV_LOCK.lock().unwrap();
-    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
-
-    let mock = Arc::new(MockAuthRepository::default());
-    let mut state = setup_mock_app_state();
-    state.auth = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
-
-    let client = reqwest::Client::new();
-    let res = client
-        .post(format!("{base_url}/api/auth/tenants"))
-        .json(&serde_json::json!({ "name": "New Tenant" }))
-        .send()
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), 201);
-    let body: Value = res.json().await.unwrap();
-    assert_eq!(body["name"], "New Tenant");
-    assert!(body["id"].is_string());
-}
-
-// ============================================================
-// POST /api/auth/tenants — DB error
-// ============================================================
-
-#[tokio::test]
-async fn test_create_tenant_db_error() {
-    let _guard = crate::common::ENV_LOCK.lock().unwrap();
-    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
-
-    let mock = Arc::new(MockAuthRepository::default());
-    mock.fail_next.store(true, Ordering::SeqCst);
-    let mut state = setup_mock_app_state();
-    state.auth = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
-
-    let client = reqwest::Client::new();
-    let res = client
-        .post(format!("{base_url}/api/auth/tenants"))
-        .json(&serde_json::json!({ "name": "New Tenant" }))
-        .send()
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), 500);
-}
-
-// ============================================================
 // GET /api/auth/woff-config — success
 // ============================================================
 

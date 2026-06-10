@@ -189,23 +189,6 @@ impl AuthRepository for MockAuthRepository {
         })
     }
 
-    async fn create_tenant_by_name(&self, name: &str) -> Result<Tenant, sqlx::Error> {
-        check_fail!(self);
-        let tid = self
-            .auto_tenant_id
-            .lock()
-            .unwrap()
-            .unwrap_or_else(Uuid::new_v4);
-        Ok(Tenant {
-            id: tid,
-            name: name.to_string(),
-            slug: None,
-            email_domain: None,
-            short_id: format!("{:.8}", tid.simple()),
-            created_at: Utc::now(),
-        })
-    }
-
     async fn get_tenant_by_id(&self, _id: Uuid) -> Result<Option<Tenant>, sqlx::Error> {
         check_fail!(self);
         Ok(self.return_tenant.lock().unwrap().clone())
