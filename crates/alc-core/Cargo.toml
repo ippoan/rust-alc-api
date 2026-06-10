@@ -7,6 +7,7 @@ edition = "2021"
 unexpected_cfgs = { level = "allow", check-cfg = ['cfg(coverage)'] }
 
 [dependencies]
+alc-auth-jwt = { path = "../alc-auth-jwt" }
 anyhow = "1"
 async-trait = "0.1"
 axum = "0.8"

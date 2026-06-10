@@ -57,6 +57,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "alc-auth-jwt"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "jsonwebtoken",
+ "serde",
+ "sha2",
+ "uuid",
+]
+
+[[package]]
 name = "alc-camera"
 version = "0.1.0"
 dependencies = [
@@ -123,6 +134,7 @@ dependencies = [
 name = "alc-core"
 version = "0.1.0"
 dependencies = [
+ "alc-auth-jwt",
  "anyhow",
  "async-trait",
  "axum",
