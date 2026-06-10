@@ -590,6 +590,7 @@ fetch のみに戻す)。
 - テストは並列実行可能 (`RUST_TEST_THREADS=1` 不要)
 - env var 競合は `ENV_LOCK`、email_domain 競合は `GOOGLE_LOGIN_LOCK` (tests/common/mod.rs) で直列化
 - DB エラー注入: 認証なしエンドポイントは `pool.close()`、認証ありは trigger (INSERT/UPDATE/DELETE) or RENAME (SELECT) + `DB_RENAME_LOCK` + `db_rename_flock()`
+- **coverage gate 対象ファイルで `tracing` マクロを複数行にしない** — フォーマット文字列が独立行になる (手書きでも rustfmt の 100 桁折り返しでも) と、その行は llvm-cov の行カバレッジに乗らず 100% gate が fail する (PR #399/#400 で 2 回発生)。メッセージを短くして必ず 1 行に収める
 - カバレッジ計画: `plans/coverage_100.md`
 
 ### 100% 未達成ファイル一覧 (2026-03-27 実測)
