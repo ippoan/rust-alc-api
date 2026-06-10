@@ -48,8 +48,6 @@ pub trait AuthRepository: Send + Sync {
 
     async fn create_tenant_with_domain(&self, email_domain: &str) -> Result<Tenant, sqlx::Error>;
 
-    async fn create_tenant_by_name(&self, name: &str) -> Result<Tenant, sqlx::Error>;
-
     async fn get_tenant_by_id(&self, id: Uuid) -> Result<Option<Tenant>, sqlx::Error>;
 
     async fn get_tenant_slug(&self, tenant_id: Uuid) -> Result<Option<String>, sqlx::Error>;

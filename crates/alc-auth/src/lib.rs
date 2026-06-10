@@ -25,7 +25,6 @@ pub fn public_router() -> Router<AppState> {
         .route("/auth/google", post(google_login))
         .route("/auth/google/code", post(google_code_login))
         .route("/auth/refresh", post(refresh_token))
-        .route("/auth/tenants", post(create_tenant))
         .route("/auth/lineworks/redirect", get(lineworks_redirect))
         .route("/auth/lineworks/callback", get(lineworks_callback))
         .route("/auth/google/redirect", get(google_redirect))
@@ -1217,38 +1216,6 @@ fn extract_parent_domain(url_str: &str) -> String {
     } else {
         host.to_string()
     }
-}
-
-// --- テナント作成 (後方互換) ---
-
-#[derive(Debug, Deserialize)]
-pub struct CreateTenant {
-    pub name: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct TenantResponse {
-    pub id: Uuid,
-    pub name: String,
-}
-
-async fn create_tenant(
-    State(state): State<AppState>,
-    Json(body): Json<CreateTenant>,
-) -> Result<(StatusCode, Json<TenantResponse>), StatusCode> {
-    let tenant = state
-        .auth
-        .create_tenant_by_name(&body.name)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    Ok((
-        StatusCode::CREATED,
-        Json(TenantResponse {
-            id: tenant.id,
-            name: tenant.name,
-        }),
-    ))
 }
 
 // --- Password login ---

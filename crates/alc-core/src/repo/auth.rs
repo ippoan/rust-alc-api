@@ -104,24 +104,6 @@ impl AuthRepository for PgAuthRepository {
         ))
     }
 
-    async fn create_tenant_by_name(&self, name: &str) -> Result<Tenant, sqlx::Error> {
-        for _ in 0..16 {
-            let result =
-                sqlx::query_as::<_, Tenant>("INSERT INTO tenants (name) VALUES ($1) RETURNING *")
-                    .bind(name)
-                    .fetch_one(&self.pool)
-                    .await;
-            match result {
-                Ok(t) => return Ok(t),
-                Err(sqlx::Error::Database(e)) if e.is_unique_violation() => continue,
-                Err(e) => return Err(e),
-            }
-        }
-        Err(sqlx::Error::Configuration(
-            "could not insert tenant: 16 short_id collisions in a row".into(),
-        ))
-    }
-
     async fn get_tenant_by_id(&self, id: Uuid) -> Result<Option<Tenant>, sqlx::Error> {
         sqlx::query_as::<_, Tenant>("SELECT * FROM tenants WHERE id = $1")
             .bind(id)

@@ -37,7 +37,6 @@ mod tests {
         assert!(is_public_route("/api/auth/lineworks/redirect"));
         assert!(is_public_route("/api/auth/lineworks/callback"));
         assert!(is_public_route("/api/auth/line/redirect"));
-        assert!(is_public_route("/api/auth/tenants"));
 
         // tenko-call public
         assert!(is_public_route("/api/tenko-call/register"));
