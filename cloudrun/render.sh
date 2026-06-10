@@ -149,6 +149,11 @@ YAML
     cat <<YAML
             - name: DATABASE_URL
               value: "${db_url}"
+            - name: STAGING_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: ALC_STAGING_API_KEY
 YAML
   else
     cat <<YAML
