@@ -145,6 +145,9 @@ emit_env_backend() {
             - name: RUST_LOG
               value: "info"
 YAML
+  # staging のみ: export/import の opt-in 認証 key を注入 (Refs #391)。runtime SA
+  # 747065218280-compute@ は project-level secretAccessor で ALC_STAGING_API_KEY も
+  # 解決できる前提 (既存 JWT_SECRET 等と同経路)。新 revision 起動で X-Staging-Key 必須化。
   if [[ "$ENV" == "staging" ]]; then
     cat <<YAML
             - name: DATABASE_URL
