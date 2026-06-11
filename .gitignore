@@ -17,7 +17,8 @@ types/
 workers/
 node_modules/
 .wrangler/
-.claude/
+.claude/*
+!.claude/skills/
 /bazel-*
 MODULE.bazel.lock
 backup/
