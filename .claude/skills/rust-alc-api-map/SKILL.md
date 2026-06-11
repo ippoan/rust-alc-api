@@ -1,0 +1,95 @@
+---
+name: rust-alc-api-map
+generated-from: rust-alc-api:d32207dadf1a22a5370408091b77725b10048165
+paths: [crates/, src/, migrations/]
+description: rust-alc-api (アルコールチェッカー基盤の Rust/Axum Cargo workspace — 13 domain crate + gateway/tenko/carins/dtako/trouble の複数バイナリ、PostgreSQL+RLS、Cloud Run) の構造ナビゲーション。どの crate に何のルートがあるか / monolith(rust-alc-api) と per-domain API + gateway の二系統 / RLS・migration・deploy/release 分離の gotcha を 1 枚にまとめる。トリガー:「rust-alc-api」「alc-api」「alc-notify」「alc-tenko」「alc-trouble」「alc-carins」「alc-dtako」「gateway」「tenko-api」「carins-api」「dtako-api」「trouble-api」「RLS テナント」「sqlx migration」「ts-rs」「Release Wave」「Bazel」等。
+---
+
+# rust-alc-api-map — rust-alc-api 構造ナビゲーション
+
+アルコールチェッカーシステムの backend。Cargo workspace で **13 の domain crate** (`alc-*`)
++ **複数バイナリ** を持つ。PostgreSQL (`alc_api` スキーマ + RLS) / Cloudflare R2 (or GCS) /
+Google OAuth + LINE WORKS。Cloud Run にデプロイ。
+
+> ここは索引。網羅ではない。実ルートの完全列挙や関数シグネチャは repo 側が正。
+> frontmatter の `generated-from` が現 tree-sha とズレたら hook が再生成を促す。
+
+## 二系統のバイナリ構成 (重要)
+
+| 系統 | バイナリ | 役割 |
+|---|---|---|
+| **monolith** | `rust-alc-api` (`src/main.rs`) | 全 domain crate の router を `/api` 下に一括 nest。全 repo を 1 プロセスで提供 |
+| **gateway** | `gateway` (`crates/gateway`) | JWT 検証 + reverse proxy。public route 判定 (`routes.rs::is_public_route`) して各 per-domain API へ転送 |
+| **per-domain API** | `tenko-api` / `carins-api` / `dtako-api` / `trouble-api` | 各 domain crate の router だけを単独で立てる薄い main。`X-Tenant-ID` header 認証 (`require_tenant_header`) |
+| **CLI** | `migrate` (`src/bin/migrate.rs`) / `archive` (`src/bin/archive.rs`) | sqlx migration 実行 / アーカイブ Job |
+
+monolith と per-domain API は同じ domain crate (`alc-tenko` 等) を共有 → ルート実装は 1 箇所。
+
+## 区画 (workspace crate)
+
+| crate | 役割 / 主要ルート群 |
+|---|---|
+| `alc-core` | 共通基盤: models / repository trait / `auth_middleware` / `realtime_bus` / `redact_broadcast`。ts-rs 型 export 元 |
+| `alc-auth` | Google / LINE WORKS OAuth、JWT。`routes/mod.rs` で `auth` として re-export |
+| `alc-misc` | health / health_canary / measurements / employees / items / api_tokens / sso_admin / tenant_users / timecard / access_requests / staging / upload / bot_admin / driver_info / members / communication_items / carrying_items / guidance_records |
+| `alc-tenko` | 点呼: tenko_call / tenko_records / tenko_schedules / tenko_sessions / tenko_webhooks / daily_health / equipment_failures / health_baselines |
+| `alc-carins` | 車検証(carins): car_inspections / car_inspection_files / carins_files / nfc_tags |
+| `alc-dtako` | デジタコ: dtako_* (csv_proxy / daily_hours / drivers / logs / operations / restraint_report(_pdf) / scraper / upload / vehicles / work_times / y_time_export / event_classifications) / vehicle_settings_dumps |
+| `alc-trouble` | トラブル管理: tickets / files / workflow / categories / offices / progress_statuses / schedules / tasks / task_types / task_statuses / notifications / notifier / cloud_tasks / lineworks_members |
+| `alc-notify` | LINE/LINE WORKS 配信: recipients / groups / documents / distribute / ingest / line_config / line_webhook / lineworks_* / read_tracker / viewer / email_documents / extract / redact / background_extract / background_redaction |
+| `alc-devices` | デバイス登録 (`devices`) |
+| `alc-storage` | StorageBackend trait + R2 / GCS / HttpProxy 実装 |
+| `alc-csv-parser` / `alc-compare` | CSV パース / 比較ロジック |
+| `alc-pdf` | PDF 生成 (assets/fonts 同梱) |
+
+## entrypoint / router
+
+- **monolith**: `src/main.rs` — DATABASE_URL で `PgPool`、Storage backend (`STORAGE_BACKEND` = r2/gcs、
+  carins/dtako/notify/trouble は別バケット+別 R2 キー)、巨大な `AppState` に全 Pg*Repository を組み立て、
+  `.nest("/api", rust_alc_api::routes::router())`。背景 task: 60s ごと `check_overdue_schedules`。
+- **router 本体**: `src/routes/mod.rs` — 各 domain crate のルートを re-export し `router()` で結線。
+  middleware: `require_jwt` (管理) / `require_tenant` (JWT→`X-Tenant-ID` フォールバック) / `require_internal_jwt`。
+- **gateway**: `crates/gateway/src/{main,routes,proxy,auth,config}.rs`。`is_public_route` に
+  列挙された path (health / auth/* / tenko-call register / devices register / staging / notify line-webhook
+  等) は JWT skip でそのまま proxy。
+
+## gotcha (CLAUDE.md / README 由来)
+
+- **DB 接続**: `alc_api_app` ロール (NOBYPASSRLS → RLS 有効) で、**直接接続 port 5432** を使う
+  (Supavisor 6543 は `set_config` がリセットされ RLS テナント分離が壊れる)。
+  `DATABASE_URL` に `?options=-c search_path=alc_api` 必須。
+- **migration 不変条件**: 適用済み `migrations/*.sql` を絶対に変更しない (sqlx が SHA-384 検証、不一致で起動不能)。
+  修正は新ファイル追加。migration は **Cloud Run Jobs** (`rust-alc-api-migrate`) で deploy 前に実行
+  (`main.rs` から `sqlx::migrate!()` は削除済み = 起動時自動適用なし)。
+- **snapshot hook (plan 整合性)**: `if_flag!(...)` 追加時は先に `ippoan/ippoan-dev-plans` の
+  `scope:rust-alc-api` plan Issue を作り `npm run snapshot` で `manifests/production.snapshot.json` 更新。
+  pre-commit (`.githooks`) + CI `snapshot-check` job が drift/stale-sha を検出。`SKIP_CLIPPY=1` で commit 時 clippy skip 可。
+- **ts-rs**: 各 crate が `#[ts(export)]` で TS 型を生成 (`cargo test export_bindings`)。フロント
+  (nuxt-*) が型同期する。型変更時は export_bindings を回す。
+- **長時間 compute と Cloud Run**: `tokio::spawn` で background compute → fire-and-forget broadcast は
+  やらない (Cloud Run は応答後に CPU を絞る)。`RealtimeBus` / `RedactBroadcaster` で対処。CLAUDE.md 該当節参照。
+
+## CI / deploy から見た立ち位置
+
+- **Bazel + Cargo の二重ビルド**: `BUILD.bazel` (rust_library `rust_alc_api_lib` + rust_binary 群 + rust_test)
+  と Cargo workspace の両方が存在 (`MODULE.bazel` / `.bazelrc`)。CI は主に Cargo (`cargo llvm-cov nextest`)。
+- **deploy.yml は deploy/release 分離 (Refs #137)**: PR → staging 自動 deploy、tag(v*) push → production。
+  **production の tag release は新 revision を 0% (no-traffic) で deploy するだけ**で traffic は旧 revision に残す。
+  実際の切替は **Release Wave flip** が行う。`verify-no-traffic` job がこの不変条件を検証 (latest revision が
+  0% traffic でなければ FAIL)。
+- **複数 Dockerfile**: `Dockerfile` (monolith + migrate + archive + PDFium 同梱) / `Dockerfile.gateway` /
+  `.tenko` / `.carins` / `.dtako` / `.trouble`。各 service が個別 Cloud Run service (`rust-alc-api`,
+  `rust-alc-api-gateway`, `rust-alc-api-tenko` ...) として deploy される。`cloudrun/render.sh` が YAML 生成。
+- **手動 `deploy.sh`** もあり (monolith のみ、AR `cloudsql-sv/alc-app` へ)。通常は CI 経由。
+- **coverage 100% ガード**: `coverage_100.toml` 登録ファイルは CI でリグレッション検出。mock テストは
+  domain 別 (`tests/mock_tenko` `mock_dtako` `mock_carins` `mock_trouble` `mock_devices` `mock_misc`)。
+- **その他 workflow**: `migration-safety-check.yml` (適用済み migration の破壊的変更検査) /
+  `release-wave.yml` (Release Wave caller、`repository_dispatch` で cloudrun flip を受ける)。
+
+## 関連 skill
+
+- `coverage-test-patterns` — sqlx 向け DB エラー注入 / SSE テスト / 100% 達成パターン
+- `coverage-check` — 未カバー行抽出
+- `type-safe-pipeline` — フロント (nuxt-*) が rust-alc-api の ts-rs 型を CI 同期する仕組み
+- `migrate-test` — Supabase + sqlx migration の splinter/RLS 検証
+- `cross-repo-symbol-index` — この per-repo map の鮮度 hook 運用方針
