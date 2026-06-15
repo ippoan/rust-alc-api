@@ -34,14 +34,14 @@ use rust_alc_api::db::repository::{
     PgDailyHealthRepository, PgDeviceRepository, PgDriverInfoRepository, PgDtakoCsvProxyRepository,
     PgDtakoDailyHoursRepository, PgDtakoDriversRepository, PgDtakoEventClassificationsRepository,
     PgDtakoLogsRepository, PgDtakoOperationsRepository, PgDtakoRestraintReportPdfRepository,
-    PgDtakoRestraintReportRepository, PgDtakoScraperRepository, PgDtakoUploadRepository,
-    PgDtakoVehiclesRepository, PgDtakoWorkTimesRepository, PgDtakoYTimeExportRepository,
-    PgEmployeeRepository, PgEquipmentFailuresRepository, PgGuidanceRecordsRepository,
-    PgHealthBaselinesRepository, PgItemFilesRepository, PgItemsRepository,
-    PgMeasurementsRepository, PgNfcTagRepository, PgSsoAdminRepository, PgTenantUsersRepository,
-    PgTenkoCallRepository, PgTenkoRecordsRepository, PgTenkoSchedulesRepository,
-    PgTenkoSessionRepository, PgTenkoWebhooksRepository, PgTimecardRepository,
-    PgVehicleSettingsDumpsRepository,
+    PgDtakoRestraintReportRepository, PgDtakoScraperRepository, PgDtakoTicketsRepository,
+    PgDtakoUploadRepository, PgDtakoVehiclesRepository, PgDtakoWorkTimesRepository,
+    PgDtakoYTimeExportRepository, PgEmployeeRepository, PgEquipmentFailuresRepository,
+    PgGuidanceRecordsRepository, PgHealthBaselinesRepository, PgItemFilesRepository,
+    PgItemsRepository, PgMeasurementsRepository, PgNfcTagRepository, PgSsoAdminRepository,
+    PgTenantUsersRepository, PgTenkoCallRepository, PgTenkoRecordsRepository,
+    PgTenkoSchedulesRepository, PgTenkoSessionRepository, PgTenkoWebhooksRepository,
+    PgTimecardRepository, PgVehicleSettingsDumpsRepository,
 };
 use rust_alc_api::storage::StorageBackend;
 use rust_alc_api::AppState;
@@ -216,6 +216,7 @@ async fn main() -> anyhow::Result<()> {
     let dtako_restraint_report_pdf =
         Arc::new(PgDtakoRestraintReportPdfRepository::new(pool.clone()));
     let dtako_scraper = Arc::new(PgDtakoScraperRepository::new(pool.clone()));
+    let dtako_tickets = Arc::new(PgDtakoTicketsRepository::new(pool.clone()));
     let dtako_upload = Arc::new(PgDtakoUploadRepository::new(pool.clone()));
     let dtako_vehicles = Arc::new(PgDtakoVehiclesRepository::new(pool.clone()));
     let vehicle_settings_dumps = Arc::new(PgVehicleSettingsDumpsRepository::new(pool.clone()));
@@ -314,6 +315,7 @@ async fn main() -> anyhow::Result<()> {
         dtako_restraint_report,
         dtako_restraint_report_pdf,
         dtako_scraper,
+        dtako_tickets,
         dtako_upload,
         dtako_vehicles,
         dtako_work_times,

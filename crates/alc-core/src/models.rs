@@ -1968,3 +1968,138 @@ pub struct UpdateTroubleTask {
     )]
     pub occurred_at: Option<Option<DateTime<Utc>>>,
 }
+
+// ============================================================
+// dtako_tickets — dtako (デジタコ) エラー通知メールの起票テーブル
+// Refs: ippoan/email-receiver#1 / ippoan/rust-alc-api#414
+// ============================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, TS)]
+#[ts(export)]
+pub struct DtakoTicket {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub source: String,
+    pub source_email_subject: Option<String>,
+    pub source_email_from: Option<String>,
+    pub source_email_message_id: Option<String>,
+    pub source_email_received_at: DateTime<Utc>,
+    pub vehicle_name: String,
+    pub vehicle_code: Option<String>,
+    pub error_kind: String,
+    pub status: String,
+    pub comp_id: Option<String>,
+    pub unko_no: Option<String>,
+    pub operation_started_at: Option<DateTime<Utc>>,
+    pub operation_ended_at: Option<DateTime<Utc>>,
+    pub scraped_payload: Option<serde_json::Value>,
+    pub settings_zip_r2_key: Option<String>,
+    pub close_token: String,
+    pub closed_at: Option<DateTime<Utc>>,
+    pub closed_by: Option<String>,
+    pub raw_email_text: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// email-receiver Worker → POST /api/dtako/tickets で起票するときの body。
+/// 内部 shared-secret (X-Internal-Shared-Secret) + X-Tenant-ID で認証。
+#[derive(Debug, Clone, Deserialize, TS)]
+#[ts(export)]
+pub struct DtakoTicketCreate {
+    #[serde(default = "default_source_email")]
+    pub source: String,
+    pub source_email_subject: Option<String>,
+    pub source_email_from: Option<String>,
+    pub source_email_message_id: Option<String>,
+    pub source_email_received_at: DateTime<Utc>,
+    pub vehicle_name: String,
+    pub vehicle_code: Option<String>,
+    pub error_kind: String,
+    pub raw_email_text: Option<String>,
+}
+
+fn default_source_email() -> String {
+    "email".to_string()
+}
+
+/// email-receiver Worker → PATCH /api/dtako/tickets/{id}/scraped で
+/// F-VOS3020 scrape 結果を反映するときの body。null は変更なしを意味する。
+#[derive(Debug, Clone, Deserialize, TS)]
+#[ts(export)]
+pub struct DtakoTicketScrapedPatch {
+    pub comp_id: Option<String>,
+    pub unko_no: Option<String>,
+    pub operation_started_at: Option<DateTime<Utc>>,
+    pub operation_ended_at: Option<DateTime<Utc>>,
+    pub settings_zip_r2_key: Option<String>,
+    pub scraped_payload: Option<serde_json::Value>,
+}
+
+/// 一覧取得フィルタ (nuxt_dtako_logs から GET /api/dtako/tickets)。
+#[derive(Debug, Clone, Deserialize, TS)]
+#[ts(export)]
+pub struct DtakoTicketFilter {
+    pub status: Option<String>,
+    pub vehicle_name: Option<String>,
+    pub page: Option<i64>,
+    pub per_page: Option<i64>,
+}
+
+#[derive(Debug, Serialize, TS)]
+#[ts(export)]
+pub struct DtakoTicketsResponse {
+    pub tickets: Vec<DtakoTicket>,
+    pub total: i64,
+    pub page: i64,
+    pub per_page: i64,
+}
+
+/// browser (QR scan) → POST /api/dtako/tickets/close で close するときの body。
+/// 認証は close_token のみ (URL-safe 32 byte hex)。
+#[derive(Debug, Clone, Deserialize, TS)]
+#[ts(export)]
+pub struct DtakoTicketCloseRequest {
+    pub close_token: String,
+    pub closed_by: Option<String>,
+}
+
+#[derive(Debug, Serialize, TS)]
+#[ts(export)]
+pub struct DtakoTicketCloseResponse {
+    pub ticket_id: Uuid,
+}
+
+#[cfg(test)]
+mod dtako_ticket_tests {
+    use super::*;
+
+    #[test]
+    fn create_default_source_is_email() {
+        // serde の `#[serde(default = "default_source_email")]` 経由で
+        // body から `source` を省略した時のデフォルト値を検証する。
+        let json = r#"{
+            "source_email_received_at": "2026-06-15T08:00:00Z",
+            "vehicle_name": "(16) 十勝800か16",
+            "error_kind": "sd_card_error"
+        }"#;
+        let create: DtakoTicketCreate = serde_json::from_str(json).expect("parse");
+        assert_eq!(create.source, "email");
+        assert_eq!(create.vehicle_name, "(16) 十勝800か16");
+        assert_eq!(create.error_kind, "sd_card_error");
+        // 関数本体 (default_source_email) も直接 1 度呼ぶ。
+        assert_eq!(default_source_email(), "email");
+    }
+
+    #[test]
+    fn create_explicit_source_manual_overrides_default() {
+        let json = r#"{
+            "source": "manual",
+            "source_email_received_at": "2026-06-15T08:00:00Z",
+            "vehicle_name": "x",
+            "error_kind": "sd_card_error"
+        }"#;
+        let create: DtakoTicketCreate = serde_json::from_str(json).expect("parse");
+        assert_eq!(create.source, "manual");
+    }
+}

@@ -13,6 +13,7 @@ use rust_alc_api::db::repository::dtako_restraint_report_pdf::{
     DtakoRestraintReportPdfRepository, PdfDriver,
 };
 use rust_alc_api::db::repository::dtako_scraper::DtakoScraperRepository;
+use rust_alc_api::db::repository::dtako_tickets::DtakoTicketsRepository;
 use rust_alc_api::db::repository::dtako_upload::{
     DtakoDriverOpRow, DtakoOpRow, DtakoUploadRepository, InsertDailyWorkHoursParams,
     InsertOperationParams, InsertSegmentParams, UploadHistoryRecord, UploadTenantAndKey,
@@ -373,6 +374,72 @@ impl DtakoScraperRepository for MockDtakoScraperRepository {
     ) -> Result<Vec<ScrapeHistoryItem>, sqlx::Error> {
         check_fail!(self);
         Ok(self.history_data.lock().unwrap().clone())
+    }
+}
+
+// =============================================================================
+// MockDtakoTicketsRepository
+// =============================================================================
+
+pub struct MockDtakoTicketsRepository {
+    pub fail_next: AtomicBool,
+}
+
+impl Default for MockDtakoTicketsRepository {
+    fn default() -> Self {
+        Self {
+            fail_next: AtomicBool::new(false),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl DtakoTicketsRepository for MockDtakoTicketsRepository {
+    async fn create(
+        &self,
+        _tenant_id: Uuid,
+        _input: &DtakoTicketCreate,
+    ) -> Result<DtakoTicket, sqlx::Error> {
+        check_fail!(self);
+        Err(sqlx::Error::RowNotFound)
+    }
+
+    async fn patch_scraped(
+        &self,
+        _tenant_id: Uuid,
+        _id: Uuid,
+        _input: &DtakoTicketScrapedPatch,
+    ) -> Result<Option<DtakoTicket>, sqlx::Error> {
+        check_fail!(self);
+        Ok(None)
+    }
+
+    async fn list(
+        &self,
+        _tenant_id: Uuid,
+        filter: &DtakoTicketFilter,
+    ) -> Result<DtakoTicketsResponse, sqlx::Error> {
+        check_fail!(self);
+        Ok(DtakoTicketsResponse {
+            tickets: vec![],
+            total: 0,
+            page: filter.page.unwrap_or(1),
+            per_page: filter.per_page.unwrap_or(50),
+        })
+    }
+
+    async fn get(&self, _tenant_id: Uuid, _id: Uuid) -> Result<Option<DtakoTicket>, sqlx::Error> {
+        check_fail!(self);
+        Ok(None)
+    }
+
+    async fn close_by_token(
+        &self,
+        _close_token: &str,
+        _closed_by: Option<&str>,
+    ) -> Result<Option<Uuid>, sqlx::Error> {
+        check_fail!(self);
+        Ok(None)
     }
 }
 
