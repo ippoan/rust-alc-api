@@ -2069,3 +2069,37 @@ pub struct DtakoTicketCloseRequest {
 pub struct DtakoTicketCloseResponse {
     pub ticket_id: Uuid,
 }
+
+#[cfg(test)]
+mod dtako_ticket_tests {
+    use super::*;
+
+    #[test]
+    fn create_default_source_is_email() {
+        // serde の `#[serde(default = "default_source_email")]` 経由で
+        // body から `source` を省略した時のデフォルト値を検証する。
+        let json = r#"{
+            "source_email_received_at": "2026-06-15T08:00:00Z",
+            "vehicle_name": "(16) 十勝800か16",
+            "error_kind": "sd_card_error"
+        }"#;
+        let create: DtakoTicketCreate = serde_json::from_str(json).expect("parse");
+        assert_eq!(create.source, "email");
+        assert_eq!(create.vehicle_name, "(16) 十勝800か16");
+        assert_eq!(create.error_kind, "sd_card_error");
+        // 関数本体 (default_source_email) も直接 1 度呼ぶ。
+        assert_eq!(default_source_email(), "email");
+    }
+
+    #[test]
+    fn create_explicit_source_manual_overrides_default() {
+        let json = r#"{
+            "source": "manual",
+            "source_email_received_at": "2026-06-15T08:00:00Z",
+            "vehicle_name": "x",
+            "error_kind": "sd_card_error"
+        }"#;
+        let create: DtakoTicketCreate = serde_json::from_str(json).expect("parse");
+        assert_eq!(create.source, "manual");
+    }
+}

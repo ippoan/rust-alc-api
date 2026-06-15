@@ -442,4 +442,104 @@ mod tests {
         .await;
         assert_eq!(resp.status(), StatusCode::OK);
     }
+
+    // -----------------------------------------------------------------
+    // require_internal_shared_secret + constant_time_eq
+    // -----------------------------------------------------------------
+
+    fn app_internal_secret(secret: &str) -> Router {
+        Router::new()
+            .route("/i", get(echo_tenant))
+            .layer(axum_middleware::from_fn(require_internal_shared_secret))
+            .layer(Extension(InternalSharedSecret(secret.to_string())))
+    }
+
+    #[tokio::test]
+    async fn internal_secret_ok_inserts_tenant_id() {
+        let tid = Uuid::new_v4();
+        let resp = send(
+            app_internal_secret("secret-value"),
+            req_with_headers(
+                "/i",
+                &[
+                    ("X-Internal-Shared-Secret", "secret-value"),
+                    ("X-Tenant-ID", &tid.to_string()),
+                ],
+            ),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), 1024).await.unwrap();
+        assert_eq!(String::from_utf8_lossy(&body), tid.to_string());
+    }
+
+    #[tokio::test]
+    async fn internal_secret_missing_header_unauthorized() {
+        // 「ヘッダー無し」と「secret 値が空文字列」の両方で 401。
+        let resp = send(
+            app_internal_secret("secret-value"),
+            req_with_headers("/i", &[("X-Tenant-ID", &Uuid::new_v4().to_string())]),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn internal_secret_mismatch_unauthorized() {
+        let resp = send(
+            app_internal_secret("secret-value"),
+            req_with_headers(
+                "/i",
+                &[
+                    ("X-Internal-Shared-Secret", "wrong-secret"),
+                    ("X-Tenant-ID", &Uuid::new_v4().to_string()),
+                ],
+            ),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn internal_secret_ok_but_tenant_missing_unauthorized() {
+        let resp = send(
+            app_internal_secret("secret-value"),
+            req_with_headers("/i", &[("X-Internal-Shared-Secret", "secret-value")]),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn internal_secret_ok_but_tenant_invalid_uuid_unauthorized() {
+        let resp = send(
+            app_internal_secret("secret-value"),
+            req_with_headers(
+                "/i",
+                &[
+                    ("X-Internal-Shared-Secret", "secret-value"),
+                    ("X-Tenant-ID", "not-a-uuid"),
+                ],
+            ),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[test]
+    fn constant_time_eq_matches_equal_strings() {
+        assert!(constant_time_eq(b"abc", b"abc"));
+        assert!(constant_time_eq(b"", b""));
+    }
+
+    #[test]
+    fn constant_time_eq_rejects_different_strings() {
+        assert!(!constant_time_eq(b"abc", b"abd"));
+        // 長さ違い (両方向)。
+        assert!(!constant_time_eq(b"abc", b"abcd"));
+        assert!(!constant_time_eq(b"abcd", b"abc"));
+        // 長さ違い + 空。
+        assert!(!constant_time_eq(b"", b"x"));
+        assert!(!constant_time_eq(b"x", b""));
+    }
 }
