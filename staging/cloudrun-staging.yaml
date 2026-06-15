@@ -244,6 +244,13 @@ spec:
                 secretKeyRef:
                   key: latest
                   name: dtako-r2-secret-key
+            # email-receiver Worker からの internal ingest (POST /api/dtako/tickets)
+            # 用。empty なら dtako-api 側で internal route を disable する safe fallback。
+            - name: INTERNAL_SHARED_SECRET
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: INTERNAL_SHARED_SECRET
             - name: RUST_LOG
               value: "dtako_api=info"
           resources:
