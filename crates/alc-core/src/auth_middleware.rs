@@ -201,6 +201,60 @@ pub async fn require_tenant_header(mut req: Request, next: Next) -> Result<Respo
     Ok(next.run(req).await)
 }
 
+/// `INTERNAL_SHARED_SECRET` env で配布される shared secret を `X-Internal-Shared-Secret`
+/// ヘッダーで検証する middleware。timing-safe 比較。
+///
+/// 認証ヘッダーが揃えば追加で `X-Tenant-ID` から `TenantId` extension を挿入する
+/// (`require_tenant` のフォールバックパターンと同じ規約)。X-Tenant-ID 欠落時は 401。
+///
+/// 使用箇所: email-receiver Worker → `POST /api/dtako/tickets` 等の internal ingest
+/// 経路。本 middleware を `from_fn_with_state` ではなく `Extension(InternalSharedSecret)`
+/// 経由で読むことで、binding ごとに secret を差し替え可能 (テスト時 mock しやすい)。
+///
+/// 注意: TLS 終端を越えてくる shared secret なので、constant-time 比較で timing
+/// attack を防ぐ。長さ違いも constant-time で扱う。
+#[derive(Clone)]
+pub struct InternalSharedSecret(pub String);
+
+pub async fn require_internal_shared_secret(
+    Extension(InternalSharedSecret(expected)): Extension<InternalSharedSecret>,
+    mut req: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    let provided = req
+        .headers()
+        .get("X-Internal-Shared-Secret")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    if !constant_time_eq(expected.as_bytes(), provided.as_bytes()) {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    let tenant_id = req
+        .headers()
+        .get("X-Tenant-ID")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| Uuid::parse_str(v).ok())
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    req.extensions_mut().insert(TenantId(tenant_id));
+    Ok(next.run(req).await)
+}
+
+/// timing-safe な byte 列等値比較。長さが異なれば短い方を 0 と比較し続けて
+/// 早期 return しない (= short-circuit を避ける)。
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    let max = a.len().max(b.len());
+    let mut diff: u8 = (a.len() ^ b.len()) as u8;
+    for i in 0..max {
+        let ai = *a.get(i).unwrap_or(&0);
+        let bi = *b.get(i).unwrap_or(&0);
+        diff |= ai ^ bi;
+    }
+    diff == 0
+}
+
 /// Authorization ヘッダーから Bearer トークンを抽出
 fn extract_bearer_token(req: &Request) -> Option<&str> {
     req.headers()

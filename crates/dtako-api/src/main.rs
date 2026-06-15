@@ -9,13 +9,16 @@ use tower_http::{
 };
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use alc_core::auth_middleware::require_tenant_header;
+use alc_core::auth_middleware::{
+    require_internal_shared_secret, require_tenant_header, InternalSharedSecret,
+};
 use alc_dtako::repo::{
     PgDtakoCsvProxyRepository, PgDtakoDailyHoursRepository, PgDtakoDriversRepository,
     PgDtakoEventClassificationsRepository, PgDtakoLogsRepository, PgDtakoOperationsRepository,
     PgDtakoRestraintReportPdfRepository, PgDtakoRestraintReportRepository,
-    PgDtakoScraperRepository, PgDtakoUploadRepository, PgDtakoVehiclesRepository,
-    PgDtakoWorkTimesRepository, PgDtakoYTimeExportRepository, PgVehicleSettingsDumpsRepository,
+    PgDtakoScraperRepository, PgDtakoTicketsRepository, PgDtakoUploadRepository,
+    PgDtakoVehiclesRepository, PgDtakoWorkTimesRepository, PgDtakoYTimeExportRepository,
+    PgVehicleSettingsDumpsRepository,
 };
 use alc_dtako::DtakoState;
 
@@ -80,6 +83,7 @@ async fn main() {
             pool.clone(),
         )),
         dtako_scraper: Arc::new(PgDtakoScraperRepository::new(pool.clone())),
+        dtako_tickets: Arc::new(PgDtakoTicketsRepository::new(pool.clone())),
         dtako_upload: Arc::new(PgDtakoUploadRepository::new(pool.clone())),
         dtako_vehicles: Arc::new(PgDtakoVehiclesRepository::new(pool.clone())),
         vehicle_settings_dumps: Arc::new(PgVehicleSettingsDumpsRepository::new(pool.clone())),
@@ -97,12 +101,31 @@ async fn main() {
         .merge(alc_dtako::dtako_restraint_report::tenant_router())
         .merge(alc_dtako::dtako_restraint_report_pdf::tenant_router())
         .merge(alc_dtako::dtako_scraper::tenant_router())
+        .merge(alc_dtako::dtako_tickets::tenant_router())
         .merge(alc_dtako::dtako_upload::tenant_router())
         .merge(alc_dtako::dtako_vehicles::tenant_router())
         .merge(alc_dtako::vehicle_settings_dumps::tenant_router())
         .merge(alc_dtako::dtako_work_times::tenant_router())
         .nest("/dtako-logs", alc_dtako::dtako_logs::tenant_router())
         .layer(axum_middleware::from_fn(require_tenant_header));
+
+    // email-receiver Worker からの internal ingest 経路。
+    // INTERNAL_SHARED_SECRET env が空 (= 未配布) なら disable する。
+    let internal_secret = std::env::var("INTERNAL_SHARED_SECRET").unwrap_or_default();
+    let internal_ingest = if internal_secret.is_empty() {
+        tracing::warn!(
+            "INTERNAL_SHARED_SECRET not set; /api/dtako/tickets internal routes are disabled"
+        );
+        Router::<DtakoState>::new()
+    } else {
+        Router::<DtakoState>::new()
+            .merge(alc_dtako::dtako_tickets::internal_router())
+            .layer(axum_middleware::from_fn(require_internal_shared_secret))
+            .layer(axum::Extension(InternalSharedSecret(internal_secret)))
+    };
+
+    // browser からの close 経路は認証なし (close_token のみで保護)。
+    let public_close = alc_dtako::dtako_tickets::public_close_router::<DtakoState>();
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -112,6 +135,8 @@ async fn main() {
     let app = Router::new()
         .route("/health", axum::routing::get(|| async { "ok" }))
         .merge(tenant_protected)
+        .merge(internal_ingest)
+        .merge(public_close)
         .with_state(state)
         .layer(cors)
         .layer(TraceLayer::new_for_http());

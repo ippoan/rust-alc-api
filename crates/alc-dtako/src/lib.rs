@@ -14,6 +14,7 @@ pub mod dtako_operations;
 pub mod dtako_restraint_report;
 pub mod dtako_restraint_report_pdf;
 pub mod dtako_scraper;
+pub mod dtako_tickets;
 pub mod dtako_upload;
 pub mod dtako_vehicles;
 pub mod dtako_work_times;
@@ -26,8 +27,8 @@ use alc_core::repository::{
     DtakoCsvProxyRepository, DtakoDailyHoursRepository, DtakoDriversRepository,
     DtakoEventClassificationsRepository, DtakoLogsRepository, DtakoOperationsRepository,
     DtakoRestraintReportPdfRepository, DtakoRestraintReportRepository, DtakoScraperRepository,
-    DtakoUploadRepository, DtakoVehiclesRepository, DtakoWorkTimesRepository,
-    DtakoYTimeExportRepository, VehicleSettingsDumpsRepository,
+    DtakoTicketsRepository, DtakoUploadRepository, DtakoVehiclesRepository,
+    DtakoWorkTimesRepository, DtakoYTimeExportRepository, VehicleSettingsDumpsRepository,
 };
 use alc_core::storage::StorageBackend;
 
@@ -44,6 +45,7 @@ pub struct DtakoState {
     pub dtako_restraint_report: Arc<dyn DtakoRestraintReportRepository>,
     pub dtako_restraint_report_pdf: Arc<dyn DtakoRestraintReportPdfRepository>,
     pub dtako_scraper: Arc<dyn DtakoScraperRepository>,
+    pub dtako_tickets: Arc<dyn DtakoTicketsRepository>,
     pub dtako_upload: Arc<dyn DtakoUploadRepository>,
     pub dtako_vehicles: Arc<dyn DtakoVehiclesRepository>,
     pub dtako_work_times: Arc<dyn DtakoWorkTimesRepository>,
@@ -64,6 +66,7 @@ impl axum::extract::FromRef<alc_core::AppState> for DtakoState {
             dtako_restraint_report: state.dtako_restraint_report.clone(),
             dtako_restraint_report_pdf: state.dtako_restraint_report_pdf.clone(),
             dtako_scraper: state.dtako_scraper.clone(),
+            dtako_tickets: state.dtako_tickets.clone(),
             dtako_upload: state.dtako_upload.clone(),
             dtako_vehicles: state.dtako_vehicles.clone(),
             dtako_work_times: state.dtako_work_times.clone(),
