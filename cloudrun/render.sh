@@ -360,6 +360,15 @@ emit_env_dtako() {
                   name: dtako-r2-secret-key
             - name: SCRAPER_URL
               value: "${ENV_SCRAPER_URL:?ENV_SCRAPER_URL not set (GitHub vars.SCRAPER_URL)}"
+            # email-receiver Worker からの internal ingest (POST /api/dtako/tickets)
+            # 検証用。empty なら dtako-api/src/main.rs:114 で internal route を disable
+            # するので、未投入の prod でも safe fallback。値は ippoan 4 worker と共有
+            # (Refs auth-worker CLAUDE.md "2026-05-24: prod/staging 統合")。
+            - name: INTERNAL_SHARED_SECRET
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: INTERNAL_SHARED_SECRET
             - name: RUST_LOG
               value: "dtako_api=info"
 YAML
