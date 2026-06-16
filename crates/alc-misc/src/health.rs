@@ -71,10 +71,14 @@ fn sha256_prefix(input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
+    use tokio::sync::Mutex;
 
     // env vars はプロセス共有なので、本ファイルの env 操作は逐次化する。
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
+    // tokio::sync::Mutex を使うのは、std::sync::Mutex の guard を `.await` 越しに
+    // 保持すると clippy::await_holding_lock (= CI で `-D warnings` により error)
+    // を踏むため。本テストは env 設定 → async handler 呼び出し → assert を
+    // 1 つのロック内で完結させたいので、async-aware mutex が必須。
+    static ENV_LOCK: Mutex<()> = Mutex::const_new(());
 
     #[test]
     fn sha256_prefix_returns_hex_8_chars_and_is_deterministic() {
@@ -99,7 +103,7 @@ mod tests {
     #[tokio::test]
     async fn fingerprints_endpoint_lists_internal_shared_secret_bindings_and_skips_empty_and_unrelated(
     ) {
-        let _g = ENV_LOCK.lock().unwrap();
+        let _g = ENV_LOCK.lock().await;
         std::env::set_var("INTERNAL_SHARED_SECRET_TEST_FP_A", "abc");
         std::env::set_var("INTERNAL_SHARED_SECRET_TEST_FP_B", "xyz");
         std::env::set_var("INTERNAL_SHARED_SECRET_TEST_FP_EMPTY", "");
