@@ -37,14 +37,22 @@ jobs:
       fail-fast: false
       matrix:
         target:
+          # check job 用 (test と build profile が違うため別 cache に分離)。
           - { name: "check", key: "check", cmd: "cargo clippy --workspace -- -D warnings && cargo test export_bindings --workspace" }
-          - { name: "test", key: "test-lib", cmd: "cargo llvm-cov nextest --no-report --ignore-run-fail --lib --workspace" }
-          - { name: "mock-tenko", key: "test-mock-tenko", cmd: "cargo llvm-cov nextest --no-report --ignore-run-fail --test mock_tenko" }
-          - { name: "mock-dtako", key: "test-mock-dtako", cmd: "cargo llvm-cov nextest --no-report --ignore-run-fail --test mock_dtako" }
-          - { name: "mock-devices", key: "test-mock-devices", cmd: "cargo llvm-cov nextest --no-report --ignore-run-fail --test mock_devices" }
-          - { name: "mock-carins", key: "test-mock-carins", cmd: "cargo llvm-cov nextest --no-report --ignore-run-fail --test mock_carins" }
-          - { name: "mock-trouble", key: "test-mock-trouble", cmd: "cargo llvm-cov nextest --no-report --ignore-run-fail --test mock_trouble --test trouble_test" }
-          - { name: "mock-misc", key: "test-mock-misc", cmd: "cargo llvm-cov nextest --no-report --ignore-run-fail --test mock_misc --test archive_repo_test" }
+          # test-matrix 7 並列 (lib + mock-*) が共有する 1 つの cache。
+          # rust-flickr#28-#32 の実験で確定した「shared-key 統合 + main warm 1 job
+          # だけ save」設計 (Refs #426)。ここで全 test 系の dep を 1 つの target/ に
+          # 揃えてから save するため、後段の test-matrix 7 並列が exact match で restore できる。
+          - name: "test-shared"
+            key: "test-shared"
+            cmd: |
+              cargo llvm-cov nextest --no-report --ignore-run-fail --lib --workspace
+              cargo llvm-cov nextest --no-report --ignore-run-fail --test mock_tenko
+              cargo llvm-cov nextest --no-report --ignore-run-fail --test mock_dtako
+              cargo llvm-cov nextest --no-report --ignore-run-fail --test mock_devices
+              cargo llvm-cov nextest --no-report --ignore-run-fail --test mock_carins
+              cargo llvm-cov nextest --no-report --ignore-run-fail --test mock_trouble --test trouble_test
+              cargo llvm-cov nextest --no-report --ignore-run-fail --test mock_misc --test archive_repo_test
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.92.0
@@ -100,18 +108,31 @@ jobs:
       - name: Delete stale caches
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # rust-flickr#28 実験で確定した「最新 3 世代保持」(Refs #426)。
+          # PR の restore-key 探索が main 直近 3 世代を見られるようにし、
+          # Cargo.lock 変動時の exact-match 不能を緩和する。
+          KEEP_GENERATIONS: '3'
         run: |
+          set -euo pipefail
           echo "::group::Current cache usage"
           gh cache list -R ${{ github.repository }} --sort size_in_bytes --order desc --limit 20 \
-            --json key,sizeInBytes --jq '.[] | "\(.sizeInBytes / 1048576 | floor)MB\t\(.key)"'
+            --json key,sizeInBytes --jq '.[] | "\(.sizeInBytes / 1048576 | floor)MB\t\(.key)"' || true
           echo "::endgroup::"
 
-          echo "::group::Cleaning stale rust-cache entries"
+          echo "::group::Cleaning stale rust-cache entries (keep latest $KEEP_GENERATIONS per base)"
+          # SIGPIPE 回避 (rust-flickr#32 で確定): `gh cache list ... | python3 - <<PY` だと
+          # gh の stdout buffer flush と Python の stdin 読込タイミング次第で gh 側が
+          # SIGPIPE を食らい、set -o pipefail が exit 141 で fail させる
+          # (rust-flickr の Step 1 / Step 3 main run で 2 回再現)。pipe を消して
+          # 中間ファイル経由の 2 段にして race を完全に消す。
           gh cache list -R ${{ github.repository }} --limit 200 \
             --json id,key,sizeInBytes,lastAccessedAt \
-            --jq '.[] | select(.key | startswith("v0-rust-"))' | python3 -c "
-          import json, sys
-          entries = [json.loads(line) for line in sys.stdin]
+            --jq '.[] | select(.key | startswith("v0-rust-"))' \
+            > /tmp/rust-cache-entries.jsonl || true
+          python3 - < /tmp/rust-cache-entries.jsonl <<'PY'
+          import json, os, sys
+          keep = int(os.environ.get("KEEP_GENERATIONS", "3"))
+          entries = [json.loads(line) for line in sys.stdin if line.strip()]
           groups = {}
           for e in entries:
               base = '-'.join(e['key'].rsplit('-', 1)[:-1])
@@ -119,16 +140,15 @@ jobs:
           to_delete = []
           for base, items in groups.items():
               items.sort(key=lambda x: x['lastAccessedAt'], reverse=True)
-              to_delete.extend(items[1:])
-          for d in to_delete:
-              print(f\"Deleting {d['sizeInBytes']//1048576}MB {d['key']}\")
+              to_delete.extend(items[keep:])
           with open('/tmp/cache-ids.txt', 'w') as f:
               for d in to_delete:
+                  print(f"Deleting {d['sizeInBytes']//1048576}MB {d['key']}")
                   f.write(str(d['id']) + '\n')
-          print(f'Total: {len(to_delete)} stale entries')
-          "
-          if [ -f /tmp/cache-ids.txt ]; then
-            while read id; do
+          print(f"Total: {len(to_delete)} stale entries (keep={keep})")
+          PY
+          if [ -s /tmp/cache-ids.txt ]; then
+            while read -r id; do
               gh cache delete "$id" -R ${{ github.repository }} 2>/dev/null || true
             done < /tmp/cache-ids.txt
           fi
@@ -203,8 +223,12 @@ jobs:
       - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: swatinem/rust-cache@v2
         with:
-          shared-key: test-${{ matrix.group.name }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          # rust-flickr#28-#32 で確定した「shared-key 統合 + 非対称 save-if」設計 (Refs #426)。
+          # cache-warm の test-shared 1 job だけが save し、本 test-matrix の並列 7 job は
+          # read-only restore に徹する。これで並列 save 競合 (actions/cache 先勝ちで
+          # 中途半端な target/ に上書きされる問題) を完全に回避する。
+          shared-key: test-shared
+          save-if: 'false'
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-llvm-cov@0.8.4,cargo-nextest
