@@ -280,6 +280,17 @@ YAML
                 secretKeyRef:
                   key: latest
                   name: gemini-api-key
+            # email-receiver Worker からの internal ingest (POST /api/dtako/tickets) 用。
+            # empty なら src/routes/mod.rs::internal_shared_secret_router が empty router
+            # を返し、ingest route が disable される safe fallback (Refs ippoan/email-receiver#1)。
+            # ippoan auth-worker / cdp-relay / hcreaderworker / ref-files-worker と
+            # 同じ INTERNAL_SHARED_SECRET secret を共有 (prod/staging 統合済、
+            # Refs auth-worker CLAUDE.md "2026-05-24")。
+            - name: INTERNAL_SHARED_SECRET
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: INTERNAL_SHARED_SECRET
 YAML
 }
 
