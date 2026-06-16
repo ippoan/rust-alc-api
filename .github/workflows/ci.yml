@@ -602,7 +602,7 @@ jobs:
     steps:
       - name: Probe /health/secret-fingerprint
         env:
-          CONSUMER_URL: 'https://rust-alc-api-staging-566bls5vfq-an.a.run.app/health/secret-fingerprint'
+          CONSUMER_URL: 'https://rust-alc-api-staging-566bls5vfq-an.a.run.app/api/health/secret-fingerprint'
           SECRET_NAME: 'INTERNAL_SHARED_SECRET'
         run: |
           set -euo pipefail
