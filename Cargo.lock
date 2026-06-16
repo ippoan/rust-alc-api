@@ -231,6 +231,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "sqlx",
+ "tokio",
  "tracing",
  "ts-rs",
  "uuid",
