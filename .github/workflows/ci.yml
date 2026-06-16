@@ -45,7 +45,9 @@ jobs:
           # cmd は --workspace --all-targets --no-run の 1 invocation で、cargo の
           # jobs server が全 test binary を内部で並列 build → wall time は元の matrix 7
           # 並列と同等 (~2-3 分)。--no-run で test 実行はせず build artifact のみ作成。
-          - { name: "test-shared", key: "test-shared", cmd: "cargo llvm-cov nextest --no-report --no-run --workspace --all-targets" }
+          # cargo-llvm-cov 0.8.4 で `--no-report` と `--no-run` は併用不可 (Refs #426, run 27612447687 で実機 fail)。
+          # `--no-run` のみで instrumented build artifact を target/ に残せる。
+          - { name: "test-shared", key: "test-shared", cmd: "cargo llvm-cov nextest --no-run --workspace --all-targets" }
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.92.0
