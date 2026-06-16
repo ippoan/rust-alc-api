@@ -13,6 +13,7 @@ chrono = { version = "0.4", features = ["serde"] }
 csv = "1"
 hex = "0.4"
 hmac = "0.12"
+reqwest = { version = "0.12", features = ["json"] }
 ring = "0.17"
 sha2 = "0.10"
 serde = { version = "1", features = ["derive"] }
@@ -23,3 +24,4 @@ uuid = { version = "1", features = ["v4", "serde"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt"] }
+wiremock = "0.6"
