@@ -286,6 +286,9 @@ YAML
             # ippoan auth-worker / cdp-relay / hcreaderworker / ref-files-worker と
             # 同じ INTERNAL_SHARED_SECRET secret を共有 (prod/staging 統合済、
             # Refs auth-worker CLAUDE.md "2026-05-24")。
+            # 2026-06-16: GCP/CF 値 drift で email-receiver から 401 を踏み、rotate 実施
+            # (GCP v2 + CF 上書き)。本コメント更新は新 revision 強制作成のためのトリガー
+            # (= Cloud Run の env キャッシュを invalidate)。
             - name: INTERNAL_SHARED_SECRET
               valueFrom:
                 secretKeyRef:
