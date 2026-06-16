@@ -442,8 +442,25 @@ async fn main() -> anyhow::Result<()> {
         std::env::var("SCRAPER_URL").unwrap_or_else(|_| "http://localhost:8081".into());
     tracing::info!("Scraper URL: {}", scraper_url);
 
+    // email-receiver Worker からの internal ingest 経路 (`POST /api/dtako/tickets` 等)。
+    // INTERNAL_SHARED_SECRET env が空なら mount しない (= caller が None を渡すことで
+    // routes::internal_shared_secret_router が empty router を返す)。main.rs は coverage
+    // 対象外なのでここで env を読み conditional logic を持つのが安全 (Refs
+    // ippoan/email-receiver#1)。
+    let internal_secret = std::env::var("INTERNAL_SHARED_SECRET")
+        .ok()
+        .filter(|s| !s.is_empty());
+    if internal_secret.is_none() {
+        tracing::warn!(
+            "INTERNAL_SHARED_SECRET not set; /api/dtako/tickets internal routes are disabled"
+        );
+    }
+    let api_router = rust_alc_api::routes::router().merge(
+        rust_alc_api::routes::internal_shared_secret_router(internal_secret),
+    );
+
     let app = Router::new()
-        .nest("/api", rust_alc_api::routes::router())
+        .nest("/api", api_router)
         .layer(Extension(google_verifier))
         .layer(Extension(jwt_secret))
         .layer(Extension(
