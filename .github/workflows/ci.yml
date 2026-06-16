@@ -42,12 +42,13 @@ jobs:
           # test-matrix 7 並列 (lib + mock-*) が共有する 1 つの cache。
           # rust-flickr#28-#32 の実験で確定した「shared-key 統合 + main warm 1 job
           # だけ save」設計 (Refs #426)。
-          # cmd は --workspace --all-targets --no-run の 1 invocation で、cargo の
-          # jobs server が全 test binary を内部で並列 build → wall time は元の matrix 7
-          # 並列と同等 (~2-3 分)。--no-run で test 実行はせず build artifact のみ作成。
-          # cargo-llvm-cov 0.8.4 で `--no-report` と `--no-run` は併用不可 (Refs #426, run 27612447687 で実機 fail)。
-          # `--no-run` のみで instrumented build artifact を target/ に残せる。
-          - { name: "test-shared", key: "test-shared", cmd: "cargo llvm-cov nextest --no-run --workspace --all-targets" }
+          # cmd は --workspace --all-targets で全 test binary を 1 cargo invocation で
+          # build (cargo の jobs server が内部並列)。--no-report で coverage report
+          # 生成抑制、--ignore-run-fail で DB 必要 test が一部 fail しても許容。
+          # 注意: cargo-llvm-cov 0.8.4 の --no-run は cargo test の --no-run と意味が
+          # 異なる (report subcommand の旧名で profraw 必須)。build only にしたければ
+          # --no-run を使わず、test 実行 + --ignore-run-fail のパターンを使う。
+          - { name: "test-shared", key: "test-shared", cmd: "cargo llvm-cov nextest --no-report --ignore-run-fail --workspace --all-targets" }
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.92.0
