@@ -226,6 +226,7 @@ dependencies = [
  "csv",
  "hex",
  "hmac",
+ "reqwest",
  "ring",
  "serde",
  "serde_json",
@@ -235,6 +236,7 @@ dependencies = [
  "tracing",
  "ts-rs",
  "uuid",
+ "wiremock",
 ]
 
 [[package]]

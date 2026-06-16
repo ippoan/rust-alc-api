@@ -583,26 +583,54 @@ jobs:
           ci_dashboard_base_url: https://ci-dashboard.ippoan.org
           webhook_secret: ${{ secrets.RELEASE_WAVE_WEBHOOK_SECRET }}
 
-  # staging deploy 直後に、Cloud Run env (= GCP SM secretKeyRef で解決済み)
-  # と GCP Secret Manager の値が一致するかを突き合わせる (= cross-store drift
-  # の自動検出)。詳細は ippoan/rust-alc-api#424 / ippoan/email-receiver#1。
+  # staging deploy 直後に、Cloud Run env (= secretKeyRef で revision 作成時に
+  # 解決済み) と GCP Secret Manager の現 latest version の値が一致するかを
+  # staging service 自身に問い合わせる (= cross-store drift の自動検出)。
+  #
+  # service 自身が GCP SM を読む設計のため CI runner は GCP 認証不要 — 単 curl で
+  # `{match: bool}` を assert するだけ。WIF / gcloud / secretAccessor grant は不要。
+  # Refs ippoan/rust-alc-api#424 / ippoan/email-receiver#1。
   # PR run のみ (tag push の production deploy は対象外)。
   drift-check-staging:
+    name: Drift Check (staging)
     needs: [deploy]
     if: >-
       always() &&
       github.event_name == 'pull_request' &&
       needs.deploy.result == 'success'
-    uses: ippoan/ci-workflows/.github/workflows/drift-check.yml@main
-    permissions:
-      id-token: write
-      contents: read
-    with:
-      consumer_url: 'https://rust-alc-api-staging-566bls5vfq-an.a.run.app/health/secret-fingerprint'
-      secret_name: 'INTERNAL_SHARED_SECRET'
-      gcp_project: 'cloudsql-sv'
-      gcp_wif_provider: ${{ vars.GCP_WIF_PROVIDER }}
-      gcp_wif_service_account: ${{ vars.GCP_WIF_SERVICE_ACCOUNT_STAGING }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe /health/secret-fingerprint
+        env:
+          CONSUMER_URL: 'https://rust-alc-api-staging-566bls5vfq-an.a.run.app/health/secret-fingerprint'
+          SECRET_NAME: 'INTERNAL_SHARED_SECRET'
+        run: |
+          set -euo pipefail
+          RES=$(curl -sS -w '\n%{http_code}' --max-time 15 \
+            "${CONSUMER_URL}?name=${SECRET_NAME}" || true)
+          STATUS=$(printf '%s' "$RES" | tail -n1)
+          BODY=$(printf '%s' "$RES" | sed '$d')
+          {
+            echo "# drift-check"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Secret | \`$SECRET_NAME\` |"
+            echo "| URL | \`$CONSUMER_URL\` |"
+            echo "| HTTP | \`$STATUS\` |"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$STATUS" != "200" ]; then
+            echo "::error::consumer endpoint returned HTTP $STATUS (expected 200)"
+            echo "Body: $BODY"
+            exit 1
+          fi
+          MATCH=$(printf '%s' "$BODY" | jq -r '.match // false')
+          if [ "$MATCH" != "true" ]; then
+            echo "::error::DRIFT: $SECRET_NAME on Cloud Run env ≠ GCP Secret Manager latest"
+            exit 1
+          fi
+          echo "::notice ::✓ $SECRET_NAME match on $CONSUMER_URL"
 
   auto-merge:
     name: Auto Merge
