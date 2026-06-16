@@ -32,6 +32,7 @@ fn resolve_backend<'a>(path: &str, state: &'a ProxyState) -> &'a str {
     {
         state.carins_url.as_deref().unwrap_or(&state.backend_url)
     } else if api_path.starts_with("/dtako-")
+        || api_path.starts_with("/dtako/")
         || api_path.starts_with("/upload")
         || api_path.starts_with("/uploads")
         || api_path.starts_with("/recalculate")
@@ -262,6 +263,16 @@ mod tests {
         );
         assert_eq!(
             resolve_backend("/api/internal/pending", &state),
+            "http://dtako:8084"
+        );
+        // dtako tickets routes (alc-dtako::dtako_tickets, Refs ippoan/email-receiver#1)
+        // — `/api/dtako/...` (スラッシュ) を dtako-api に振る。
+        assert_eq!(
+            resolve_backend("/api/dtako/tickets", &state),
+            "http://dtako:8084"
+        );
+        assert_eq!(
+            resolve_backend("/api/dtako/tickets/abc/scraped", &state),
             "http://dtako:8084"
         );
     }
