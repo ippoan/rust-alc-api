@@ -14,6 +14,7 @@ pub use alc_dtako::dtako_operations;
 pub use alc_dtako::dtako_restraint_report;
 pub use alc_dtako::dtako_restraint_report_pdf;
 pub use alc_dtako::dtako_scraper;
+pub use alc_dtako::dtako_tickets;
 pub use alc_dtako::dtako_upload;
 pub use alc_dtako::dtako_vehicles;
 pub use alc_dtako::dtako_work_times;
@@ -125,6 +126,7 @@ pub fn router() -> Router<AppState> {
         .merge(dtako_restraint_report::tenant_router())
         .merge(dtako_restraint_report_pdf::tenant_router())
         .merge(dtako_scraper::tenant_router())
+        .merge(dtako_tickets::tenant_router())
         .merge(dtako_work_times::tenant_router())
         .merge(dtako_daily_hours::tenant_router())
         .merge(dtako_upload::tenant_router())
@@ -168,6 +170,7 @@ pub fn router() -> Router<AppState> {
         .merge(notify_read_tracker::public_router())
         .merge(notify_viewer::public_router())
         .merge(access_requests::public_router())
+        .merge(dtako_tickets::public_close_router())
         .merge(trouble_schedules::fire_router());
 
     Router::new()
@@ -175,4 +178,45 @@ pub fn router() -> Router<AppState> {
         .merge(jwt_protected)
         .merge(internal_protected)
         .merge(tenant_protected)
+}
+
+/// email-receiver Worker から `POST /api/dtako/tickets` を受ける internal ingest
+/// router。`INTERNAL_SHARED_SECRET` env が空 (= 未配布) なら呼出し側で disable
+/// する (= caller が `internal_shared_secret_router(None)` を渡せば empty router、
+/// `Some(secret)` を渡せば middleware + extension 付きで実装する safe fallback、
+/// Refs ippoan/email-receiver#1)。
+///
+/// 本関数自体は env を読まない (= テスト容易性 + main.rs 側で env を読み caller が
+/// branch する設計、`src/main.rs` の deploy/staging 区分けと同様)。
+pub fn internal_shared_secret_router(internal_secret: Option<String>) -> Router<AppState> {
+    match internal_secret {
+        Some(secret) if !secret.is_empty() => Router::new()
+            .merge(dtako_tickets::internal_router())
+            .layer(axum_middleware::from_fn(
+                alc_core::auth_middleware::require_internal_shared_secret,
+            ))
+            .layer(axum::Extension(
+                alc_core::auth_middleware::InternalSharedSecret(secret),
+            )),
+        _ => Router::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `internal_shared_secret_router` の両分岐 (`None` / 空 / Some 非空) を
+    /// 呼ぶだけのカバレッジテスト。Router 自体の挙動は dtako-api の integration
+    /// test がカバーする。ここでは Router build path が panic なく通る + 両分岐
+    /// 行が llvm-cov に乗ることだけを保証する。
+    #[test]
+    fn internal_shared_secret_router_branches() {
+        // None → empty Router (`_ =>` ブランチ)
+        let _ = internal_shared_secret_router(None);
+        // Some("") → empty Router (`_ =>` ブランチ、guard 不一致)
+        let _ = internal_shared_secret_router(Some(String::new()));
+        // Some(non-empty) → middleware + extension 付き Router (`Some(secret)` ブランチ)
+        let _ = internal_shared_secret_router(Some("test-secret".to_string()));
+    }
 }
