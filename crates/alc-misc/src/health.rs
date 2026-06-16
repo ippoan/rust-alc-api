@@ -61,7 +61,7 @@ async fn secret_fingerprint(
             .name
             .chars()
             .next()
-            .map_or(false, |c| c.is_ascii_alphabetic())
+            .is_some_and(|c| c.is_ascii_alphabetic())
         || !q
             .name
             .chars()
