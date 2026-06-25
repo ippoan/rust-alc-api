@@ -41,6 +41,33 @@ async fn tenant_exists(pool: Option<&sqlx::PgPool>, tenant_id: Uuid) -> bool {
     }
 }
 
+/// device token (X-Device-Token) を `devices` テーブルで検証する (Refs #434)。
+///
+/// `tenant_exists` (fail-open) と異なり、こちらは **fail-closed**: pool が `None`
+/// (= 検証不能) でも DB エラーでも `false` を返す。device token は署名・所有確認の
+/// 代替なので、検証できないなら通さない (= 無認証アクセスを許さない)。
+///
+/// RLS + SECURITY DEFINER (`alc_api.verify_device_token`, migration 116) 経由で
+/// (tenant_id, settings_token, status='active') の一致を確認する。
+async fn device_token_valid(pool: Option<&sqlx::PgPool>, tenant_id: Uuid, token: Uuid) -> bool {
+    let Some(pool) = pool else {
+        return false;
+    };
+    match sqlx::query_scalar::<_, bool>("SELECT alc_api.verify_device_token($1, $2)")
+        .bind(tenant_id)
+        .bind(token)
+        .fetch_one(pool)
+        .await
+    {
+        Ok(valid) => valid,
+        // 検証クエリ自体が失敗した = 検証不能なので fail-closed (通さない)。
+        Err(e) => {
+            tracing::warn!("device token verification query failed: {e}");
+            false
+        }
+    }
+}
+
 /// JWT 必須ミドルウェア — 管理ページ用
 ///
 /// Authorization: Bearer <jwt> ヘッダーから JWT を検証し、
@@ -123,6 +150,73 @@ pub async fn require_tenant(
     if !tenant_exists(pool, tenant_id).await {
         // 一行に収める (上記 JWT 経路と同理由: 複数行 warn! は llvm-cov で uncovered 計上)。
         tracing::warn!("tenant {tenant_id} not in tenants table (X-Tenant-ID); returning 401");
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    req.extensions_mut().insert(TenantId(tenant_id));
+    Ok(next.run(req).await)
+}
+
+/// テナント認証ミドルウェア — キオスク (device token) 対応版 (Refs #434)
+///
+/// `require_tenant` の bare X-Tenant-ID フォールバック (= 有効な UUID を知るだけで
+/// 通過できる無認証アクセス) を塞いだ版。sensitive route は `require_jwt` へ、
+/// device token を持つキオスクが実際に必要な最小 route だけを本ミドルウェアに乗せる。
+///
+/// 1. Authorization: Bearer <jwt> があれば JWT を検証 (管理者モード)
+/// 2. なければ **X-Tenant-ID + X-Device-Token の両方**を要求し、
+///    `devices` テーブルで device token を検証 (キオスクモード、fail-closed)
+/// 3. X-Tenant-ID 単独 (device token 無し) → 401
+pub async fn require_tenant_or_device(
+    jwt_secret: Option<Extension<JwtSecret>>,
+    validation_pool: Option<Extension<TenantValidationPool>>,
+    mut req: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    let pool = validation_pool
+        .as_ref()
+        .and_then(|Extension(p)| p.0.as_ref());
+
+    // まず JWT を試行 (require_tenant と同じフラット化で llvm-cov 問題回避)
+    if let Some(Ok(claims)) = extract_bearer_token(&req)
+        .zip(jwt_secret.as_ref())
+        .map(|(token, Extension(secret))| verify_access_token(token, secret))
+    {
+        if !tenant_exists(pool, claims.tenant_id).await {
+            let tid = claims.tenant_id;
+            tracing::warn!("tenant {tid} not in tenants table (JWT); returning 401");
+            return Err(StatusCode::UNAUTHORIZED);
+        }
+        let auth_user = AuthUser {
+            user_id: claims.sub,
+            email: claims.email,
+            name: claims.name.clone(),
+            tenant_id: claims.tenant_id,
+            tenant_slug: claims.org_slug,
+            role: claims.role,
+        };
+        req.extensions_mut().insert(TenantId(claims.tenant_id));
+        req.extensions_mut().insert(auth_user);
+        return Ok(next.run(req).await);
+    }
+
+    // キオスク経路: X-Tenant-ID + X-Device-Token の両方を要求 (= bare X-Tenant-ID 拒否)
+    let tenant_id = req
+        .headers()
+        .get("X-Tenant-ID")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| Uuid::parse_str(v).ok())
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+    let device_token = req
+        .headers()
+        .get("X-Device-Token")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| Uuid::parse_str(v).ok())
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    if !device_token_valid(pool, tenant_id, device_token).await {
+        // 一行に収める (llvm-cov で複数行 warn! が uncovered 計上されるため)。
+        tracing::warn!("device token invalid for tenant {tenant_id}; returning 401");
         return Err(StatusCode::UNAUTHORIZED);
     }
 
@@ -541,5 +635,75 @@ mod tests {
         // 長さ違い + 空。
         assert!(!constant_time_eq(b"", b"x"));
         assert!(!constant_time_eq(b"x", b""));
+    }
+
+    // -----------------------------------------------------------------
+    // require_tenant_or_device — DB 不要な分岐 (Refs #434)
+    // DB 必須の分岐 (JWT + 実在 tenant / 実 device token 検証) は
+    // tests/mock_tests/mock_require_tenant_or_device_test.rs (実 DB) でカバーする。
+    // -----------------------------------------------------------------
+
+    /// `pool` 引数で TenantValidationPool を差し替えられる require_tenant_or_device 用
+    /// テストアプリ。JwtSecret は常に layer する (Authorization 無しなら JWT 経路は skip)。
+    fn app_tenant_or_device(pool: Option<sqlx::PgPool>) -> Router {
+        Router::new()
+            .route("/t", get(echo_tenant))
+            .layer(axum_middleware::from_fn(require_tenant_or_device))
+            .layer(Extension(TenantValidationPool(pool)))
+            .layer(Extension(JwtSecret(
+                "unit-test-secret-256-bits-long!!".to_string(),
+            )))
+    }
+
+    #[tokio::test]
+    async fn tenant_or_device_no_headers_unauthorized() {
+        // JWT 無し + X-Tenant-ID 無し → 401 (tenant_id 欠落)。
+        let resp = send(app_tenant_or_device(None), req("/t")).await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn tenant_or_device_bare_tenant_id_unauthorized() {
+        // #434 の核心: 有効 UUID を X-Tenant-ID 単独で送っても device token 無しなら 401。
+        let resp = send(
+            app_tenant_or_device(None),
+            req_with_headers("/t", &[("X-Tenant-ID", &Uuid::new_v4().to_string())]),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn tenant_or_device_invalid_device_token_format_unauthorized() {
+        // X-Device-Token が UUID として parse できない → 401 (device_token 欠落扱い)。
+        let resp = send(
+            app_tenant_or_device(None),
+            req_with_headers(
+                "/t",
+                &[
+                    ("X-Tenant-ID", &Uuid::new_v4().to_string()),
+                    ("X-Device-Token", "not-a-uuid"),
+                ],
+            ),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn tenant_or_device_token_present_but_pool_none_fail_closed() {
+        // device token が UUID 形式でも、pool=None (検証不能) なら fail-closed で 401。
+        let resp = send(
+            app_tenant_or_device(None),
+            req_with_headers(
+                "/t",
+                &[
+                    ("X-Tenant-ID", &Uuid::new_v4().to_string()),
+                    ("X-Device-Token", &Uuid::new_v4().to_string()),
+                ],
+            ),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
     }
 }
