@@ -534,6 +534,11 @@ jobs:
           RELEASE_WAVE_WEBHOOK_SECRET: ${{ secrets.RELEASE_WAVE_WEBHOOK_SECRET }}
           REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
+          # flip 前 (no-traffic 0%) で上がった production image の識別子。
+          # ci-dashboard が consumer に **flip 前** retest を fan-out する anchor
+          # (Refs ippoan/ci-dashboard#427)。staging report (current_image) と同じく
+          # github.sha = `ghcr.io/ippoan/rust-alc-api:<sha>` を consumer が pull する。
+          STAGED_IMAGE: ${{ github.sha }}
           GCP_PROJECT: cloudsql-sv
           GCP_REGION: asia-northeast1
         run: |
@@ -564,7 +569,8 @@ jobs:
           payload=$(jq -nc \
             --arg repo "$REPO" --arg version_id "$version_id" --arg tag "$TAG" \
             --arg preview_url "${preview_url:-}" \
-            '{repo: $repo, version_id: $version_id, tag: $tag, preview_url: $preview_url}
+            --arg staged_image "${STAGED_IMAGE:-}" \
+            '{repo: $repo, version_id: $version_id, tag: $tag, preview_url: $preview_url, staged_image: $staged_image}
              | with_entries(select(.value != ""))')
           echo "reporting pending release: repo=$REPO tag=$TAG version_id=$version_id"
           # fail-loud: 報告に失敗すると Pending releases に出ず flip できないのに、
