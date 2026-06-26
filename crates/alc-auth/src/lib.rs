@@ -37,7 +37,7 @@ pub fn public_router() -> Router<AppState> {
         .route("/auth/login", post(password_login))
 }
 
-/// 保護ルート (JWT 必須、require_jwt ミドルウェアの後ろに配置)
+/// 保護ルート (require_tenant_header の後ろに配置。前段 proxy が注入する identity を信頼)
 pub fn protected_router() -> Router<AppState> {
     Router::new()
         .route("/auth/me", get(me))

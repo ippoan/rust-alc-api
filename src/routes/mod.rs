@@ -74,11 +74,13 @@ pub use alc_trouble::workflow as trouble_workflow;
 
 use axum::{middleware as axum_middleware, Router};
 
-use crate::middleware::auth::{require_internal_jwt, require_jwt, require_tenant};
+use crate::middleware::auth::{require_internal_jwt, require_tenant_header};
 use crate::AppState;
 
 pub fn router() -> Router<AppState> {
-    // JWT 必須ルート
+    // 管理者ルート — 注入 identity (X-User-*) を信頼 (Refs #434)。
+    // 前段 proxy / gateway が introspect 検証済みの identity を注入する前提。
+    // role 判定は各ハンドラが AuthUser から行う。
     let jwt_protected = Router::new()
         .merge(auth::protected_router())
         .merge(access_requests::protected_router())
@@ -87,7 +89,7 @@ pub fn router() -> Router<AppState> {
         .merge(tenant_users::router())
         .merge(members::router())
         .merge(api_tokens::router())
-        .layer(axum_middleware::from_fn(require_jwt));
+        .layer(axum_middleware::from_fn(require_tenant_header));
 
     // 内部 API ルート (auth-worker 等の信頼できる呼び出し元のみ、aud=alc-api-internal)
     let internal_protected = Router::new()
@@ -95,7 +97,9 @@ pub fn router() -> Router<AppState> {
         .merge(health_canary::internal_router())
         .layer(axum_middleware::from_fn(require_internal_jwt));
 
-    // テナント対応ルート (JWT or X-Tenant-ID)
+    // テナント対応ルート — 注入 identity (X-Tenant-ID + 任意 X-User-*) を信頼 (Refs #434)。
+    // 旧 require_tenant の bare X-Tenant-ID フォールバック / ローカル JWT 検証は撤去。
+    // キオスク経路も含め前段 proxy が introspect 検証 → header 注入する。
     let tenant_protected = Router::new()
         .merge(employees::tenant_router())
         .merge(measurements::router())
@@ -156,7 +160,7 @@ pub fn router() -> Router<AppState> {
         .merge(trouble_task_types::tenant_router())
         .merge(trouble_task_statuses::tenant_router())
         .merge(trouble_lineworks_members::tenant_router())
-        .layer(axum_middleware::from_fn(require_tenant));
+        .layer(axum_middleware::from_fn(require_tenant_header));
 
     // 公開ルート (認証不要)
     let public_routes = Router::new()

@@ -14,7 +14,7 @@ use alc_core::models::{
 };
 
 /// nuxt_dtako_logs から JWT 経由で叩く一覧 / 詳細。
-/// `require_tenant` middleware 配下に nest される想定。
+/// `require_tenant_header` middleware 配下に nest される想定。
 pub fn tenant_router<S>() -> Router<S>
 where
     DtakoState: axum::extract::FromRef<S>,
