@@ -466,6 +466,14 @@ async fn main() -> anyhow::Result<()> {
         .layer(Extension(
             rust_alc_api::middleware::auth::TenantValidationPool(state.pool.clone()),
         ))
+        // require_tenant の X-Tenant-ID 経路を proxy 限定にする共有 secret (Refs #434)。
+        // env `TENANT_PROXY_SECRET` 未設定なら空 = gate off (従来動作)。全 consumer が
+        // secret 送出に移行後、env を入れて有効化する (= 段階的 rollout)。
+        .layer(Extension(
+            rust_alc_api::middleware::auth::TenantProxySecret(
+                std::env::var("TENANT_PROXY_SECRET").unwrap_or_default(),
+            ),
+        ))
         .layer(Extension(rust_alc_api::routes::dtako_scraper::ScraperUrl(
             scraper_url,
         )))

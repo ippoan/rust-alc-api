@@ -196,7 +196,7 @@ jobs:
           - { name: "mock-devices", cmd: "--test mock_devices" }
           - { name: "mock-carins", cmd: "--test mock_carins" }
           - { name: "mock-trouble", cmd: "--test mock_trouble --test trouble_test" }
-          - { name: "mock-misc", cmd: "--test mock_misc --test archive_repo_test --test require_tenant_or_device_test" }
+          - { name: "mock-misc", cmd: "--test mock_misc --test archive_repo_test --test require_tenant_or_device_test --test require_tenant_proxy_test" }
     services:
       postgres:
         image: postgres:16
