@@ -2,12 +2,31 @@
 members = [".", "crates/alc-auth", "crates/alc-auth-jwt", "crates/alc-camera", "crates/alc-camera-api", "crates/alc-carins", "crates/alc-core", "crates/alc-csv-parser", "crates/alc-compare", "crates/alc-devices", "crates/alc-dtako", "crates/alc-misc", "crates/alc-notify", "crates/alc-pdf", "crates/alc-storage", "crates/alc-tenko", "crates/alc-trouble", "crates/carins-api", "crates/dtako-api", "crates/gateway", "crates/tenko-api", "crates/trouble-api"]
 resolver = "2"
 
-# 依存クレートだけ opt-level=2 で最適化 (Refs #438)。RSA/JWT/TLS 等の暗号処理を
-# unoptimized (debug) で実行すると release の数十倍遅く、CI の `Tests (lib)` shard の
-# 律速 (run 90s) だった。自前コード (= 計装対象) は opt-level 0 のまま据え置くので、
-# 計装コンパイル速度も coverage 100% gate も維持される。
-[profile.dev.package."*"]
-opt-level = 2
+# 暗号 bignum crate だけ opt-level=3 で最適化 (Refs #438)。
+#
+# lib shard の遅さの正体は「テストが実行時に 2048bit RSA 鍵を生成」していること
+# (auth_google.rs / clients/line.rs の `RsaPrivateKey::new(OsRng, 2048)`)。鍵生成は
+# `num-bigint-dig` の素数判定が支配的で、unoptimized debug では 1 回 ~8s かかる。
+# CI は cargo nextest (テスト 1 件 = 1 プロセス) なので OnceLock メモ化が効かず、
+# `test_key()` を触る全テストが毎回 ~8s 払っていた。
+#
+# 当初は `[profile.dev.package."*"]` で全依存を opt-level=2 にしたが (PR #442)、
+# **lib は 177s→129s に短縮された一方、コンパイル律速の mock-* 6 shard が依存を
+# 重コンパイルする羽目になり各 +46〜96s 悪化** → CI 全体の律速が lib(177s) から
+# mock-tenko(203s) に移り、トータルで悪化した。そこで鍵生成の hot path crate だけに
+# 絞り、mock shard への巻き添えコンパイルを排除する。
+#
+# Google JWT 検証 (auth_google) を auth-worker へ、LINE RS256 を notify 専用 Worker へ
+# 分離する移行 (別 issue 進行中) が完了すれば、rust-alc-api から RSA 自体が退出するので
+# このブロックごと削除できる。
+[profile.dev.package.num-bigint-dig]
+opt-level = 3
+
+[profile.dev.package.num-integer]
+opt-level = 3
+
+[profile.dev.package.rsa]
+opt-level = 3
 
 [package]
 name = "rust-alc-api"
