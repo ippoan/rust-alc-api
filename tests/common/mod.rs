@@ -582,6 +582,49 @@ pub fn create_test_dtako_zip_rich() -> Vec<u8> {
 }
 
 /// テスト用 axum サーバーを起動し、base URL を返す
+/// テスト用 proxy emulation middleware (Refs #434)。
+///
+/// 本番では CF proxy (alc-app / carins / nuxt-items) が auth-worker `/auth/introspect`
+/// で user/device JWT を検証し、検証済み identity を `X-Tenant-ID` / `X-User-*` ヘッダー
+/// として注入する。rust-alc-api 自身は JWT 検証を行わず注入 identity を信頼する。
+///
+/// テストハーネスは従来どおり `Authorization: Bearer <jwt>` を送るので、この middleware
+/// が proxy 役を演じて JWT を検証 → identity ヘッダーに変換し、production の
+/// `require_tenant_header` がそれを信頼する形を再現する。Bearer が無い / 検証失敗なら
+/// 何も注入しない (= bare X-Tenant-ID キオスクテストや無認証 401 テストは素通り)。
+async fn test_proxy_inject(
+    axum::Extension(jwt_secret): axum::Extension<JwtSecret>,
+    mut req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use rust_alc_api::auth::jwt::verify_access_token;
+    let verified = req
+        .headers()
+        .get("Authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .and_then(|token| verify_access_token(token, &jwt_secret).ok());
+    if let Some(claims) = verified {
+        let h = req.headers_mut();
+        if let Ok(v) = claims.tenant_id.to_string().parse() {
+            h.insert("X-Tenant-ID", v);
+        }
+        if let Ok(v) = claims.sub.to_string().parse() {
+            h.insert("X-User-ID", v);
+        }
+        if let Ok(v) = claims.email.parse() {
+            h.insert("X-User-Email", v);
+        }
+        if let Ok(v) = claims.role.parse() {
+            h.insert("X-User-Role", v);
+        }
+        if let Some(slug) = claims.org_slug.and_then(|s| s.parse().ok()) {
+            h.insert("X-Tenant-Slug", slug);
+        }
+    }
+    next.run(req).await
+}
+
 pub async fn spawn_test_server(state: AppState) -> String {
     spawn_test_server_with_scraper(state, "http://localhost:9999").await
 }
@@ -616,11 +659,15 @@ pub async fn spawn_test_server_with_scraper(state: AppState, scraper_url: &str) 
 
     let app = Router::new()
         .nest("/api", rust_alc_api::routes::router())
+        // テスト用 proxy emulation (Refs #434)。#434 で rust-alc-api は JWT 検証を
+        // 撤去し、注入された identity ヘッダー (X-Tenant-ID / X-User-*) を信頼する
+        // dumb backend になった。本番では CF proxy が auth-worker introspect で検証
+        // して注入する。テストは従来どおり `Authorization: Bearer <jwt>` を送るので、
+        // ここで JWT → identity ヘッダーに変換し proxy 役を演じる。`.nest` 直後に
+        // layer することで require_tenant_header より外側で先に走る。
+        .layer(axum::middleware::from_fn(test_proxy_inject))
         .layer(Extension(google_verifier))
         .layer(Extension(jwt_secret))
-        .layer(Extension(
-            rust_alc_api::middleware::auth::TenantValidationPool(state.pool.clone()),
-        ))
         .layer(Extension(ScraperUrl(scraper_url.to_string())))
         .layer(cors)
         .with_state(state);

@@ -1,6 +1,6 @@
 ---
 name: rust-alc-api-map
-generated-from: rust-alc-api:41beda4b750fb3e3ee01f9b5c5134809a828706b
+generated-from: rust-alc-api:c1dc0446e29a2a3877bc183bb926e123f11fe640
 paths: [crates/, src/, migrations/]
 description: rust-alc-api (アルコールチェッカー基盤の Rust/Axum Cargo workspace — 13 domain crate + gateway/tenko/carins/dtako/trouble の複数バイナリ、PostgreSQL+RLS、Cloud Run) の構造ナビゲーション。どの crate に何のルートがあるか / monolith(rust-alc-api) と per-domain API + gateway の二系統 / RLS・migration・deploy/release 分離の gotcha を 1 枚にまとめる。トリガー:「rust-alc-api」「alc-api」「alc-notify」「alc-tenko」「alc-trouble」「alc-carins」「alc-dtako」「gateway」「tenko-api」「carins-api」「dtako-api」「trouble-api」「RLS テナント」「sqlx migration」「ts-rs」「Release Wave」「Bazel」等。
 ---
@@ -48,10 +48,17 @@ monolith と per-domain API は同じ domain crate (`alc-tenko` 等) を共有 �
   carins/dtako/notify/trouble は別バケット+別 R2 キー)、巨大な `AppState` に全 Pg*Repository を組み立て、
   `.nest("/api", rust_alc_api::routes::router())`。背景 task: 60s ごと `check_overdue_schedules`。
 - **router 本体**: `src/routes/mod.rs` — 各 domain crate のルートを re-export し `router()` で結線。
-  middleware: `require_jwt` (管理) / `require_tenant` (JWT→`X-Tenant-ID` フォールバック) / `require_internal_jwt`。
-  `require_tenant` の X-Tenant-ID 経路は `TenantProxySecret` (env `TENANT_PROXY_SECRET`) 設定時に
-  `X-Tenant-Proxy-Secret` の一致を要求し、信頼できる alc-app proxy 経由のみ許可する (#434、空なら gate off)。
-  `require_tenant_or_device` (#436) は device-token 方式の旧実装で現状未配線 (proxy-secret 方式に転換)。
+  middleware: `require_tenant_header` (tenant/admin 共通、注入 identity 信頼) / `require_internal_jwt`
+  (auth-worker→internal ingest、aud=alc-api-internal) / `require_internal_shared_secret`
+  (email-receiver→`/api/dtako/tickets`)。
+  **#434 で monolith のローカル JWT 検証を撤去**: 旧 `require_jwt` / `require_tenant` (bare X-Tenant-ID
+  フォールバック) / `TenantProxySecret` gate (#437) / 未配線の `require_tenant_or_device` (#436、device-token)
+  を全削除し、tenant/admin 経路を `require_tenant_header` に一本化した。rust-alc-api は JWT を検証せず、
+  前段 proxy (CF Worker = alc-app/carins/nuxt-items、または per-domain gateway) が auth-worker
+  `/auth/introspect` で検証して注入する `X-Tenant-ID` / `X-User-*` ヘッダーを信頼する dumb backend。
+  外部直叩き防止は **Cloud Run IAM 網層ロックダウン** (proxy の OIDC ID token のみ到達可) が担う
+  (確定アーキ #4807535677、step 3)。テストは `tests/common/mod.rs` の `test_proxy_inject` が proxy 役で
+  Bearer JWT → identity ヘッダーに変換し従来テストを無改修で通す。
 - **gateway**: `crates/gateway/src/{main,routes,proxy,auth,config}.rs`。`is_public_route` に
   列挙された path (health / auth/* / tenko-call register / devices register / staging / notify line-webhook
   等) は JWT skip でそのまま proxy。

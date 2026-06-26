@@ -20,7 +20,7 @@ use alc_core::AppState;
 
 use crate::clients::lineworks::{LineworksBotClient, LineworksBotConfig};
 
-/// Admin (require_tenant) ルート群。
+/// Admin (require_tenant_header) ルート群。
 pub fn tenant_router() -> Router<AppState> {
     Router::new()
         .route("/notify/lineworks/channels", get(list_channels))

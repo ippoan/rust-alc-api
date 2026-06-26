@@ -3,257 +3,7 @@ pub use crate::middleware::{AuthUser, TenantId};
 use axum::{extract::Request, http::StatusCode, middleware::Next, response::Response, Extension};
 use uuid::Uuid;
 
-use crate::auth_jwt::{verify_access_token, verify_internal_token, JwtSecret};
-
-/// `require_tenant` が tenant の実在確認に使う DB pool を Extension で受け渡すための newtype。
-///
-/// `AppState.pool` と同じ `Option<PgPool>` を保持する。`None` の場合 (mock テスト等で
-/// DB を持たないケース) は実在確認をスキップする (= fail-open)。
-/// main / テストハーネスの router 構築時に `Extension(TenantValidationPool(state.pool.clone()))`
-/// を layer する。
-#[derive(Clone)]
-pub struct TenantValidationPool(pub Option<sqlx::PgPool>);
-
-/// `require_tenant` の X-Tenant-ID 経路を信頼できる proxy 経由に限定するための共有 secret
-/// (Refs #434)。alc-app server proxy が device JWT を introspect 検証 → `X-Tenant-ID` +
-/// `X-Tenant-Proxy-Secret` を注入して rust-alc-api に転送する。proxy だけが secret を持つので、
-/// **外部からの bare X-Tenant-ID 直叩き (= #434 の無認証アクセス) を拒否できる**。
-///
-/// 値が空文字列 (= env `TENANT_PROXY_SECRET` 未設定) の場合は gate を **無効化** し従来動作
-/// (bare X-Tenant-ID 許可) に倒す。これにより全 consumer が secret 送出に移行するまで
-/// 段階的に有効化できる (= 非破壊な rollout)。JWT 経路には影響しない。
-#[derive(Clone)]
-pub struct TenantProxySecret(pub String);
-
-/// resolve 済みの tenant_id が `tenants` テーブルに実在するか確認する。
-///
-/// 揮発性 staging DB で tenant が消えると、ブラウザの JWT は古い tenant_id を持つが
-/// `tenants` に無く、`*_tenant_id_fkey` FK 違反で INSERT が 500 にラップされる。
-/// ここで先に 401 を返すことで、フロント (nuxt-trouble) の `onUnauthorized` →
-/// `clearAuth()` → `/login` 自動再ログインフローに乗せ、新 tenant 作成で回復させる。
-///
-/// pool が `None` (DB 無し) の場合は確認できないので `true` を返してスキップする。
-async fn tenant_exists(pool: Option<&sqlx::PgPool>, tenant_id: Uuid) -> bool {
-    let Some(pool) = pool else {
-        return true;
-    };
-    match sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM tenants WHERE id = $1)")
-        .bind(tenant_id)
-        .fetch_one(pool)
-        .await
-    {
-        Ok(exists) => exists,
-        // DB エラー時は実在確認自体が失敗しているだけなので fail-open。
-        // (FK 違反由来の 500 はこの後の handler 側で従来どおり起きる)
-        Err(e) => {
-            tracing::warn!("tenant existence check query failed: {e}");
-            true
-        }
-    }
-}
-
-/// device token (X-Device-Token) を `devices` テーブルで検証する (Refs #434)。
-///
-/// `tenant_exists` (fail-open) と異なり、こちらは **fail-closed**: pool が `None`
-/// (= 検証不能) でも DB エラーでも `false` を返す。device token は署名・所有確認の
-/// 代替なので、検証できないなら通さない (= 無認証アクセスを許さない)。
-///
-/// RLS + SECURITY DEFINER (`alc_api.verify_device_token`, migration 116) 経由で
-/// (tenant_id, settings_token, status='active') の一致を確認する。
-async fn device_token_valid(pool: Option<&sqlx::PgPool>, tenant_id: Uuid, token: Uuid) -> bool {
-    let Some(pool) = pool else {
-        return false;
-    };
-    match sqlx::query_scalar::<_, bool>("SELECT alc_api.verify_device_token($1, $2)")
-        .bind(tenant_id)
-        .bind(token)
-        .fetch_one(pool)
-        .await
-    {
-        Ok(valid) => valid,
-        // 検証クエリ自体が失敗した = 検証不能なので fail-closed (通さない)。
-        Err(e) => {
-            tracing::warn!("device token verification query failed: {e}");
-            false
-        }
-    }
-}
-
-/// JWT 必須ミドルウェア — 管理ページ用
-///
-/// Authorization: Bearer <jwt> ヘッダーから JWT を検証し、
-/// AuthUser と TenantId を Extension に挿入する。
-pub async fn require_jwt(
-    Extension(jwt_secret): Extension<JwtSecret>,
-    mut req: Request,
-    next: Next,
-) -> Result<Response, StatusCode> {
-    let token = extract_bearer_token(&req).ok_or(StatusCode::UNAUTHORIZED)?;
-
-    let claims = verify_access_token(token, &jwt_secret).map_err(|e| {
-        tracing::warn!("JWT verification failed: {e}");
-        StatusCode::UNAUTHORIZED
-    })?;
-
-    let auth_user = AuthUser {
-        user_id: claims.sub,
-        email: claims.email,
-        name: claims.name.clone(),
-        tenant_id: claims.tenant_id,
-        tenant_slug: claims.org_slug,
-        role: claims.role,
-    };
-
-    req.extensions_mut().insert(TenantId(claims.tenant_id));
-    req.extensions_mut().insert(auth_user);
-    Ok(next.run(req).await)
-}
-
-/// テナント認証ミドルウェア — キオスクモード対応
-///
-/// 1. Authorization: Bearer <jwt> があれば JWT を検証 (管理者モード)
-/// 2. なければ X-Tenant-ID ヘッダーにフォールバック (キオスクモード)
-pub async fn require_tenant(
-    jwt_secret: Option<Extension<JwtSecret>>,
-    validation_pool: Option<Extension<TenantValidationPool>>,
-    proxy_secret: Option<Extension<TenantProxySecret>>,
-    mut req: Request,
-    next: Next,
-) -> Result<Response, StatusCode> {
-    let pool = validation_pool
-        .as_ref()
-        .and_then(|Extension(p)| p.0.as_ref());
-
-    // まず JWT を試行 (フラット化: 閉じ括弧の llvm-cov 問題回避)
-    if let Some(Ok(claims)) = extract_bearer_token(&req)
-        .zip(jwt_secret.as_ref())
-        .map(|(token, Extension(secret))| verify_access_token(token, secret))
-    {
-        // tenant が DB に実在しないなら 401 を返す (揮発性 staging で tenant が消えた
-        // ケース。フロントの自動 logout → 再ログインで回復させる)。
-        if !tenant_exists(pool, claims.tenant_id).await {
-            // 一行 warn! に収めるため tenant_id を一旦束縛 (複数行 `tracing::warn!` は
-            // llvm-cov が format 引数行を別 region 0 カウントし coverage 100% を割る、PR #364)。
-            let tid = claims.tenant_id;
-            tracing::warn!("tenant {tid} not in tenants table (JWT); returning 401");
-            return Err(StatusCode::UNAUTHORIZED);
-        }
-        let auth_user = AuthUser {
-            user_id: claims.sub,
-            email: claims.email,
-            name: claims.name.clone(),
-            tenant_id: claims.tenant_id,
-            tenant_slug: claims.org_slug,
-            role: claims.role,
-        };
-        req.extensions_mut().insert(TenantId(claims.tenant_id));
-        req.extensions_mut().insert(auth_user);
-        return Ok(next.run(req).await);
-    }
-
-    // フォールバック: X-Tenant-ID ヘッダー (proxy 経由キオスクモード)
-    //
-    // proxy secret が設定 (非空) されていれば `X-Tenant-Proxy-Secret` の一致を要求する。
-    // = 信頼できる alc-app proxy 以外からの bare X-Tenant-ID 直叩きを拒否 (#434)。
-    // 空 (env 未設定) なら gate off で従来動作 (= 段階的 rollout 用)。
-    let configured = proxy_secret
-        .as_ref()
-        .map(|Extension(s)| s.0.as_str())
-        .unwrap_or("");
-    if !configured.is_empty() {
-        let provided = req
-            .headers()
-            .get("X-Tenant-Proxy-Secret")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("");
-        if !constant_time_eq(configured.as_bytes(), provided.as_bytes()) {
-            return Err(StatusCode::UNAUTHORIZED);
-        }
-    }
-
-    let tenant_id = req
-        .headers()
-        .get("X-Tenant-ID")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| Uuid::parse_str(v).ok())
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-
-    if !tenant_exists(pool, tenant_id).await {
-        // 一行に収める (上記 JWT 経路と同理由: 複数行 warn! は llvm-cov で uncovered 計上)。
-        tracing::warn!("tenant {tenant_id} not in tenants table (X-Tenant-ID); returning 401");
-        return Err(StatusCode::UNAUTHORIZED);
-    }
-
-    req.extensions_mut().insert(TenantId(tenant_id));
-    Ok(next.run(req).await)
-}
-
-/// テナント認証ミドルウェア — キオスク (device token) 対応版 (Refs #434)
-///
-/// `require_tenant` の bare X-Tenant-ID フォールバック (= 有効な UUID を知るだけで
-/// 通過できる無認証アクセス) を塞いだ版。sensitive route は `require_jwt` へ、
-/// device token を持つキオスクが実際に必要な最小 route だけを本ミドルウェアに乗せる。
-///
-/// 1. Authorization: Bearer <jwt> があれば JWT を検証 (管理者モード)
-/// 2. なければ **X-Tenant-ID + X-Device-Token の両方**を要求し、
-///    `devices` テーブルで device token を検証 (キオスクモード、fail-closed)
-/// 3. X-Tenant-ID 単独 (device token 無し) → 401
-pub async fn require_tenant_or_device(
-    jwt_secret: Option<Extension<JwtSecret>>,
-    validation_pool: Option<Extension<TenantValidationPool>>,
-    mut req: Request,
-    next: Next,
-) -> Result<Response, StatusCode> {
-    let pool = validation_pool
-        .as_ref()
-        .and_then(|Extension(p)| p.0.as_ref());
-
-    // まず JWT を試行 (require_tenant と同じフラット化で llvm-cov 問題回避)
-    if let Some(Ok(claims)) = extract_bearer_token(&req)
-        .zip(jwt_secret.as_ref())
-        .map(|(token, Extension(secret))| verify_access_token(token, secret))
-    {
-        if !tenant_exists(pool, claims.tenant_id).await {
-            let tid = claims.tenant_id;
-            tracing::warn!("tenant {tid} not in tenants table (JWT); returning 401");
-            return Err(StatusCode::UNAUTHORIZED);
-        }
-        let auth_user = AuthUser {
-            user_id: claims.sub,
-            email: claims.email,
-            name: claims.name.clone(),
-            tenant_id: claims.tenant_id,
-            tenant_slug: claims.org_slug,
-            role: claims.role,
-        };
-        req.extensions_mut().insert(TenantId(claims.tenant_id));
-        req.extensions_mut().insert(auth_user);
-        return Ok(next.run(req).await);
-    }
-
-    // キオスク経路: X-Tenant-ID + X-Device-Token の両方を要求 (= bare X-Tenant-ID 拒否)
-    let tenant_id = req
-        .headers()
-        .get("X-Tenant-ID")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| Uuid::parse_str(v).ok())
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-    let device_token = req
-        .headers()
-        .get("X-Device-Token")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| Uuid::parse_str(v).ok())
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-
-    if !device_token_valid(pool, tenant_id, device_token).await {
-        // 一行に収める (llvm-cov で複数行 warn! が uncovered 計上されるため)。
-        tracing::warn!("device token invalid for tenant {tenant_id}; returning 401");
-        return Err(StatusCode::UNAUTHORIZED);
-    }
-
-    req.extensions_mut().insert(TenantId(tenant_id));
-    Ok(next.run(req).await)
-}
+use crate::auth_jwt::{verify_internal_token, JwtSecret};
 
 /// 内部 API 用 JWT 検証ミドルウェア
 ///
@@ -274,10 +24,22 @@ pub async fn require_internal_jwt(
     Ok(next.run(req).await)
 }
 
-/// X-Tenant-ID ヘッダーのみで認証するミドルウェア (gateway 配下の内部サービス用)
+/// 注入された identity ヘッダーを信頼するミドルウェア (Refs #434)
 ///
-/// Gateway が JWT を検証済みで X-Tenant-ID ヘッダーを注入している前提。
-/// AuthUser も X-User-ID / X-User-Email / X-User-Role ヘッダーから復元する。
+/// **前段の trusted proxy (CF Worker = alc-app / carins / nuxt-items、または
+/// per-domain API gateway) が auth-worker `/auth/introspect` で user/device JWT を
+/// 検証し、検証済み identity を `X-Tenant-ID` / `X-User-ID` / `X-User-Email` /
+/// `X-User-Role` ヘッダーとして注入している前提**。rust-alc-api 自身は JWT 検証を
+/// 行わず、注入された identity を信頼するだけの dumb backend に徹する。
+///
+/// #434 で monolith の `require_jwt` / `require_tenant` (= ローカル JWT 検証 +
+/// bare X-Tenant-ID フォールバック) を撤去し、tenant/admin 経路をこのミドルウェアに
+/// 一本化した。外部からの直叩き防止は **Cloud Run IAM による網層ロックダウン**
+/// (proxy の OIDC ID token のみ到達可) が担う (= 確定アーキ #4807535677、step 3)。
+///
+/// - `X-Tenant-ID` 欠落 → 401
+/// - `X-User-ID` / `X-User-Email` / `X-User-Role` が揃えば AuthUser も復元する
+///   (admin 経路の role 判定はハンドラ側が AuthUser から行う)
 pub async fn require_tenant_header(mut req: Request, next: Next) -> Result<Response, StatusCode> {
     let tenant_id = req
         .headers()
@@ -330,7 +92,7 @@ pub async fn require_tenant_header(mut req: Request, next: Next) -> Result<Respo
 /// ヘッダーで検証する middleware。timing-safe 比較。
 ///
 /// 認証ヘッダーが揃えば追加で `X-Tenant-ID` から `TenantId` extension を挿入する
-/// (`require_tenant` のフォールバックパターンと同じ規約)。X-Tenant-ID 欠落時は 401。
+/// (`require_tenant_header` と同じ規約)。X-Tenant-ID 欠落時は 401。
 ///
 /// 使用箇所: email-receiver Worker → `POST /api/dtako/tickets` 等の internal ingest
 /// 経路。本 middleware を `from_fn_with_state` ではなく `Extension(InternalSharedSecret)`
@@ -666,121 +428,5 @@ mod tests {
         // 長さ違い + 空。
         assert!(!constant_time_eq(b"", b"x"));
         assert!(!constant_time_eq(b"x", b""));
-    }
-
-    // -----------------------------------------------------------------
-    // require_tenant_or_device — DB 不要な分岐 (Refs #434)
-    // DB 必須の分岐 (JWT + 実在 tenant / 実 device token 検証) は
-    // tests/mock_tests/mock_require_tenant_or_device_test.rs (実 DB) でカバーする。
-    // -----------------------------------------------------------------
-
-    /// `pool` 引数で TenantValidationPool を差し替えられる require_tenant_or_device 用
-    /// テストアプリ。JwtSecret は常に layer する (Authorization 無しなら JWT 経路は skip)。
-    fn app_tenant_or_device(pool: Option<sqlx::PgPool>) -> Router {
-        Router::new()
-            .route("/t", get(echo_tenant))
-            .layer(axum_middleware::from_fn(require_tenant_or_device))
-            .layer(Extension(TenantValidationPool(pool)))
-            .layer(Extension(JwtSecret(
-                "unit-test-secret-256-bits-long!!".to_string(),
-            )))
-    }
-
-    #[tokio::test]
-    async fn tenant_or_device_no_headers_unauthorized() {
-        // JWT 無し + X-Tenant-ID 無し → 401 (tenant_id 欠落)。
-        let resp = send(app_tenant_or_device(None), req("/t")).await;
-        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
-    }
-
-    #[tokio::test]
-    async fn tenant_or_device_bare_tenant_id_unauthorized() {
-        // #434 の核心: 有効 UUID を X-Tenant-ID 単独で送っても device token 無しなら 401。
-        let resp = send(
-            app_tenant_or_device(None),
-            req_with_headers("/t", &[("X-Tenant-ID", &Uuid::new_v4().to_string())]),
-        )
-        .await;
-        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
-    }
-
-    #[tokio::test]
-    async fn tenant_or_device_invalid_device_token_format_unauthorized() {
-        // X-Device-Token が UUID として parse できない → 401 (device_token 欠落扱い)。
-        let resp = send(
-            app_tenant_or_device(None),
-            req_with_headers(
-                "/t",
-                &[
-                    ("X-Tenant-ID", &Uuid::new_v4().to_string()),
-                    ("X-Device-Token", "not-a-uuid"),
-                ],
-            ),
-        )
-        .await;
-        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
-    }
-
-    #[tokio::test]
-    async fn tenant_or_device_token_present_but_pool_none_fail_closed() {
-        // device token が UUID 形式でも、pool=None (検証不能) なら fail-closed で 401。
-        let resp = send(
-            app_tenant_or_device(None),
-            req_with_headers(
-                "/t",
-                &[
-                    ("X-Tenant-ID", &Uuid::new_v4().to_string()),
-                    ("X-Device-Token", &Uuid::new_v4().to_string()),
-                ],
-            ),
-        )
-        .await;
-        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
-    }
-
-    // -----------------------------------------------------------------
-    // require_tenant の proxy-secret gate (Refs #434) — DB 不要な分岐。
-    // gate 有効 + 正しい secret で通る経路は tests/require_tenant_proxy_test.rs
-    // (実 DB) でカバーする。
-    // -----------------------------------------------------------------
-
-    /// proxy secret を layer した require_tenant 用テストアプリ。JwtSecret も layer する
-    /// (Authorization 無しなら JWT 経路は skip → X-Tenant-ID 経路へ)。
-    fn app_require_tenant_proxy(secret: &str) -> Router {
-        Router::new()
-            .route("/t", get(echo_tenant))
-            .layer(axum_middleware::from_fn(require_tenant))
-            .layer(Extension(TenantProxySecret(secret.to_string())))
-            .layer(Extension(JwtSecret(
-                "unit-test-secret-256-bits-long!!".to_string(),
-            )))
-    }
-
-    #[tokio::test]
-    async fn require_tenant_proxy_secret_missing_header_unauthorized() {
-        // gate 有効 (secret 設定済み) + X-Tenant-ID あり + proxy header 無し → 401 (#434 核心)。
-        let resp = send(
-            app_require_tenant_proxy("proxy-secret"),
-            req_with_headers("/t", &[("X-Tenant-ID", &Uuid::new_v4().to_string())]),
-        )
-        .await;
-        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
-    }
-
-    #[tokio::test]
-    async fn require_tenant_proxy_secret_wrong_header_unauthorized() {
-        // proxy header が secret と不一致 → 401。
-        let resp = send(
-            app_require_tenant_proxy("proxy-secret"),
-            req_with_headers(
-                "/t",
-                &[
-                    ("X-Tenant-ID", &Uuid::new_v4().to_string()),
-                    ("X-Tenant-Proxy-Secret", "wrong-secret"),
-                ],
-            ),
-        )
-        .await;
-        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
     }
 }
