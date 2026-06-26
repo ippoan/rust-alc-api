@@ -1,6 +1,6 @@
 ---
 name: rust-alc-api-map
-generated-from: rust-alc-api:86a6be12d65bacc5c517ada164956c64e01fa98a
+generated-from: rust-alc-api:41beda4b750fb3e3ee01f9b5c5134809a828706b
 paths: [crates/, src/, migrations/]
 description: rust-alc-api (アルコールチェッカー基盤の Rust/Axum Cargo workspace — 13 domain crate + gateway/tenko/carins/dtako/trouble の複数バイナリ、PostgreSQL+RLS、Cloud Run) の構造ナビゲーション。どの crate に何のルートがあるか / monolith(rust-alc-api) と per-domain API + gateway の二系統 / RLS・migration・deploy/release 分離の gotcha を 1 枚にまとめる。トリガー:「rust-alc-api」「alc-api」「alc-notify」「alc-tenko」「alc-trouble」「alc-carins」「alc-dtako」「gateway」「tenko-api」「carins-api」「dtako-api」「trouble-api」「RLS テナント」「sqlx migration」「ts-rs」「Release Wave」「Bazel」等。
 ---
@@ -48,9 +48,10 @@ monolith と per-domain API は同じ domain crate (`alc-tenko` 等) を共有 �
   carins/dtako/notify/trouble は別バケット+別 R2 キー)、巨大な `AppState` に全 Pg*Repository を組み立て、
   `.nest("/api", rust_alc_api::routes::router())`。背景 task: 60s ごと `check_overdue_schedules`。
 - **router 本体**: `src/routes/mod.rs` — 各 domain crate のルートを re-export し `router()` で結線。
-  middleware: `require_jwt` (管理) / `require_tenant` (JWT→`X-Tenant-ID` フォールバック) / `require_internal_jwt` /
-  `require_tenant_or_device` (JWT or `X-Tenant-ID`+`X-Device-Token`、bare `X-Tenant-ID` 単独は 401。
-  device token は migration 116 `verify_device_token` SECURITY DEFINER で fail-closed 検証。#434)。
+  middleware: `require_jwt` (管理) / `require_tenant` (JWT→`X-Tenant-ID` フォールバック) / `require_internal_jwt`。
+  `require_tenant` の X-Tenant-ID 経路は `TenantProxySecret` (env `TENANT_PROXY_SECRET`) 設定時に
+  `X-Tenant-Proxy-Secret` の一致を要求し、信頼できる alc-app proxy 経由のみ許可する (#434、空なら gate off)。
+  `require_tenant_or_device` (#436) は device-token 方式の旧実装で現状未配線 (proxy-secret 方式に転換)。
 - **gateway**: `crates/gateway/src/{main,routes,proxy,auth,config}.rs`。`is_public_route` に
   列挙された path (health / auth/* / tenko-call register / devices register / staging / notify line-webhook
   等) は JWT skip でそのまま proxy。
