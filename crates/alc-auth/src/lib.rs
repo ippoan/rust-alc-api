@@ -19,6 +19,14 @@ use alc_core::auth_middleware::AuthUser;
 use alc_core::repository::auth::AuthRepository;
 use alc_core::AppState;
 
+/// `STAGING_MODE=true` かどうか (alc-misc::staging と同判定)。
+/// staging 限定の挙動 (新規ユーザーへの自動テナント作成) の gate に使う。
+fn is_staging_mode() -> bool {
+    std::env::var("STAGING_MODE")
+        .map(|v| v == "true")
+        .unwrap_or(false)
+}
+
 /// 公開ルート (認証不要)
 pub fn public_router() -> Router<AppState> {
     Router::new()
@@ -155,6 +163,22 @@ async fn issue_tokens_for_google_claims(
                     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
                 if let Some(t) = domain_tenant {
+                    (t.id, "admin".to_string())
+                } else if is_staging_mode() {
+                    // staging は揮発 DB で cold start ごとにユーザー/テナントが消えるため、
+                    // 新規 Google ユーザーは毎回「招待もドメイン一致もない」状態になる。
+                    // それを 403 で弾くと staging の login が常に不能になるので、
+                    // STAGING_MODE のときだけ #332 前の自動テナント作成を復活させる
+                    // (prod は下の FORBIDDEN を維持してゴミテナントを作らない)。
+                    // Refs rust-alc-api#434
+                    let t = repo
+                        .create_tenant_with_domain(&email_domain)
+                        .await
+                        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                    tracing::info!(
+                        "staging auto-provisioned tenant for email={}",
+                        google_claims.email
+                    );
                     (t.id, "admin".to_string())
                 } else {
                     // 3. 招待もドメイン一致もない → ログイン拒否 (テナントを勝手に作らない)
