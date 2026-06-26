@@ -2,6 +2,13 @@
 members = [".", "crates/alc-auth", "crates/alc-auth-jwt", "crates/alc-camera", "crates/alc-camera-api", "crates/alc-carins", "crates/alc-core", "crates/alc-csv-parser", "crates/alc-compare", "crates/alc-devices", "crates/alc-dtako", "crates/alc-misc", "crates/alc-notify", "crates/alc-pdf", "crates/alc-storage", "crates/alc-tenko", "crates/alc-trouble", "crates/carins-api", "crates/dtako-api", "crates/gateway", "crates/tenko-api", "crates/trouble-api"]
 resolver = "2"
 
+# 依存クレートだけ opt-level=2 で最適化 (Refs #438)。RSA/JWT/TLS 等の暗号処理を
+# unoptimized (debug) で実行すると release の数十倍遅く、CI の `Tests (lib)` shard の
+# 律速 (run 90s) だった。自前コード (= 計装対象) は opt-level 0 のまま据え置くので、
+# 計装コンパイル速度も coverage 100% gate も維持される。
+[profile.dev.package."*"]
+opt-level = 2
+
 [package]
 name = "rust-alc-api"
 version = "0.1.0"
