@@ -1,6 +1,6 @@
 ---
 name: rust-alc-api-map
-generated-from: rust-alc-api:c1dc0446e29a2a3877bc183bb926e123f11fe640
+generated-from: rust-alc-api:22b14612aa842b69f4b77847d593f3ccff934be0
 paths: [crates/, src/, migrations/]
 description: rust-alc-api (アルコールチェッカー基盤の Rust/Axum Cargo workspace — 13 domain crate + gateway/tenko/carins/dtako/trouble の複数バイナリ、PostgreSQL+RLS、Cloud Run) の構造ナビゲーション。どの crate に何のルートがあるか / monolith(rust-alc-api) と per-domain API + gateway の二系統 / RLS・migration・deploy/release 分離の gotcha を 1 枚にまとめる。トリガー:「rust-alc-api」「alc-api」「alc-notify」「alc-tenko」「alc-trouble」「alc-carins」「alc-dtako」「gateway」「tenko-api」「carins-api」「dtako-api」「trouble-api」「RLS テナント」「sqlx migration」「ts-rs」「Release Wave」「Bazel」等。
 ---
@@ -30,7 +30,7 @@ monolith と per-domain API は同じ domain crate (`alc-tenko` 等) を共有 �
 | crate | 役割 / 主要ルート群 |
 |---|---|
 | `alc-core` | 共通基盤: models / repository trait / `auth_middleware` / `realtime_bus` / `redact_broadcast`。ts-rs 型 export 元 |
-| `alc-auth` | Google / LINE WORKS OAuth、JWT。`routes/mod.rs` で `auth` として re-export |
+| `alc-auth` | Google / LINE WORKS OAuth、JWT。`routes/mod.rs` で `auth` として re-export。`issue_tokens_for_google_claims` は招待→ドメイン一致の順で tenant 解決し、どちらも無ければ prod は 403 (#332 ゴミテナント防止)。**`STAGING_MODE=true` のときだけ #332 前の `create_tenant_with_domain` 自動作成を復活** (揮発 DB で毎回新規ユーザーになる staging login の救済、Refs #434) |
 | `alc-misc` | health (`/health` + `/health/secret-fingerprint?name=&expected=` = 任意 env の sha256[0..8] と `expected` 突合、`{match: bool}` のみ返し oracle 防止。cross-store drift を CI で自動検出、Refs ippoan/rust-alc-api#424 / ippoan/ci-workflows#131) / health_canary / measurements / employees / items / api_tokens / sso_admin / tenant_users / timecard / access_requests / staging / upload / bot_admin / driver_info / members / communication_items / carrying_items / guidance_records |
 | `alc-tenko` | 点呼: tenko_call / tenko_records / tenko_schedules / tenko_sessions / tenko_webhooks / daily_health / equipment_failures / health_baselines |
 | `alc-carins` | 車検証(carins): car_inspections / car_inspection_files / carins_files / nfc_tags |
