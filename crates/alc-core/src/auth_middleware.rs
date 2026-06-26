@@ -14,6 +14,17 @@ use crate::auth_jwt::{verify_access_token, verify_internal_token, JwtSecret};
 #[derive(Clone)]
 pub struct TenantValidationPool(pub Option<sqlx::PgPool>);
 
+/// `require_tenant` の X-Tenant-ID 経路を信頼できる proxy 経由に限定するための共有 secret
+/// (Refs #434)。alc-app server proxy が device JWT を introspect 検証 → `X-Tenant-ID` +
+/// `X-Tenant-Proxy-Secret` を注入して rust-alc-api に転送する。proxy だけが secret を持つので、
+/// **外部からの bare X-Tenant-ID 直叩き (= #434 の無認証アクセス) を拒否できる**。
+///
+/// 値が空文字列 (= env `TENANT_PROXY_SECRET` 未設定) の場合は gate を **無効化** し従来動作
+/// (bare X-Tenant-ID 許可) に倒す。これにより全 consumer が secret 送出に移行するまで
+/// 段階的に有効化できる (= 非破壊な rollout)。JWT 経路には影響しない。
+#[derive(Clone)]
+pub struct TenantProxySecret(pub String);
+
 /// resolve 済みの tenant_id が `tenants` テーブルに実在するか確認する。
 ///
 /// 揮発性 staging DB で tenant が消えると、ブラウザの JWT は古い tenant_id を持つが
@@ -105,6 +116,7 @@ pub async fn require_jwt(
 pub async fn require_tenant(
     jwt_secret: Option<Extension<JwtSecret>>,
     validation_pool: Option<Extension<TenantValidationPool>>,
+    proxy_secret: Option<Extension<TenantProxySecret>>,
     mut req: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
@@ -139,7 +151,26 @@ pub async fn require_tenant(
         return Ok(next.run(req).await);
     }
 
-    // フォールバック: X-Tenant-ID ヘッダー (キオスクモード)
+    // フォールバック: X-Tenant-ID ヘッダー (proxy 経由キオスクモード)
+    //
+    // proxy secret が設定 (非空) されていれば `X-Tenant-Proxy-Secret` の一致を要求する。
+    // = 信頼できる alc-app proxy 以外からの bare X-Tenant-ID 直叩きを拒否 (#434)。
+    // 空 (env 未設定) なら gate off で従来動作 (= 段階的 rollout 用)。
+    let configured = proxy_secret
+        .as_ref()
+        .map(|Extension(s)| s.0.as_str())
+        .unwrap_or("");
+    if !configured.is_empty() {
+        let provided = req
+            .headers()
+            .get("X-Tenant-Proxy-Secret")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        if !constant_time_eq(configured.as_bytes(), provided.as_bytes()) {
+            return Err(StatusCode::UNAUTHORIZED);
+        }
+    }
+
     let tenant_id = req
         .headers()
         .get("X-Tenant-ID")
@@ -700,6 +731,52 @@ mod tests {
                 &[
                     ("X-Tenant-ID", &Uuid::new_v4().to_string()),
                     ("X-Device-Token", &Uuid::new_v4().to_string()),
+                ],
+            ),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    // -----------------------------------------------------------------
+    // require_tenant の proxy-secret gate (Refs #434) — DB 不要な分岐。
+    // gate 有効 + 正しい secret で通る経路は tests/require_tenant_proxy_test.rs
+    // (実 DB) でカバーする。
+    // -----------------------------------------------------------------
+
+    /// proxy secret を layer した require_tenant 用テストアプリ。JwtSecret も layer する
+    /// (Authorization 無しなら JWT 経路は skip → X-Tenant-ID 経路へ)。
+    fn app_require_tenant_proxy(secret: &str) -> Router {
+        Router::new()
+            .route("/t", get(echo_tenant))
+            .layer(axum_middleware::from_fn(require_tenant))
+            .layer(Extension(TenantProxySecret(secret.to_string())))
+            .layer(Extension(JwtSecret(
+                "unit-test-secret-256-bits-long!!".to_string(),
+            )))
+    }
+
+    #[tokio::test]
+    async fn require_tenant_proxy_secret_missing_header_unauthorized() {
+        // gate 有効 (secret 設定済み) + X-Tenant-ID あり + proxy header 無し → 401 (#434 核心)。
+        let resp = send(
+            app_require_tenant_proxy("proxy-secret"),
+            req_with_headers("/t", &[("X-Tenant-ID", &Uuid::new_v4().to_string())]),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn require_tenant_proxy_secret_wrong_header_unauthorized() {
+        // proxy header が secret と不一致 → 401。
+        let resp = send(
+            app_require_tenant_proxy("proxy-secret"),
+            req_with_headers(
+                "/t",
+                &[
+                    ("X-Tenant-ID", &Uuid::new_v4().to_string()),
+                    ("X-Tenant-Proxy-Secret", "wrong-secret"),
                 ],
             ),
         )
