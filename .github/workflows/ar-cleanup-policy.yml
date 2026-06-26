@@ -1,0 +1,71 @@
+name: AR Cleanup Policy
+
+# Artifact Registry の cleanup policy を IaC として正本管理する workflow。
+#
+# 背景: 共有 AR リポジトリ `ghcr` (cloudsql-sv) には以前から手動適用された
+# cleanup policy が効いており、これが「AR サイズが時々減る」正体だった
+# (Google がサーバーサイドで日次実行)。本 workflow はその現状値を
+# `.github/artifact-registry-cleanup-policy.json` に写し取って apply し、
+# 手動設定の消失リスクを無くし、内容変更を PR レビューに乗せる。
+#
+# 注意 (挙動は変えない方針なので現状値そのまま。下記は将来の検討メモ):
+#   1. cleanup policy は image 単位ではなく **AR リポジトリ `ghcr` 単位**。
+#      `ghcr` は daiun-salary / secrets-inventory-gcp / rust-flickr 等も
+#      push する共有 repo なので、本 workflow は全 consumer の image 削除
+#      ルールを所有する。本来は ci-workflows 等の共有 repo が持つ方が筋。
+#   2. `keepCount:1` + `7日削除` は **7日より前の revision へのロールバックを
+#      壊し得る** (image 実体が AR から消えて revision が起動不能)。
+#      Release Wave で過去 revision に戻す運用なら keepCount を増やす検討余地。
+
+on:
+  schedule:
+    - cron: '37 4 * * 1'    # Mondays 04:37 UTC (ar-size-audit と時間をずらす)
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'true で dry-run apply (実削除はせず policy だけ評価)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_WIF_SERVICE_ACCOUNT_STAGING }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Apply AR cleanup policy
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+        run: |
+          set -euo pipefail
+          DRY_RUN_FLAG=""
+          if [ "$DRY_RUN" = "true" ]; then
+            DRY_RUN_FLAG="--dry-run"
+            echo "::notice::applying cleanup policy in DRY-RUN mode (no deletions)"
+          fi
+          gcloud artifacts repositories set-cleanup-policies ghcr \
+            --project="$GCP_PROJECT_ID" \
+            --location="$GCP_REGION" \
+            --policy=.github/artifact-registry-cleanup-policy.json \
+            $DRY_RUN_FLAG
+
+      - name: Show effective policy
+        run: |
+          set -euo pipefail
+          gcloud artifacts repositories describe ghcr \
+            --project="${{ vars.GCP_PROJECT_ID }}" \
+            --location="${{ vars.GCP_REGION }}" \
+            --format='yaml(cleanupPolicies, cleanupPolicyDryRun)'
