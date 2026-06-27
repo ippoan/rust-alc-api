@@ -358,6 +358,7 @@ async fn distribute(
         if let Some(rc) = viewer_register.as_ref() {
             let body = build_register_body(
                 delivery.read_token,
+                tenant_id,
                 &view_r2_key,
                 document_id,
                 delivery.recipient_id,

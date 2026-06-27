@@ -57,9 +57,13 @@ impl ViewerRegisterClient {
 }
 
 /// register-view へ送る JSON body を組み立てる (pure)。
+/// `tenant_id` は viewer Worker が既読を `read:{tenant_id}:{document_id}:{recipient_id}` に
+/// テナント前置で記録し、管理画面 read-status をサーバ側でテナント分離するために要る
+/// (KV multi-tenant の定石 = tenant prefix。Refs #434)。
 #[allow(clippy::too_many_arguments)]
 pub fn build_register_body(
     token: Uuid,
+    tenant_id: Uuid,
     r2_key: &str,
     document_id: Uuid,
     recipient_id: Uuid,
@@ -72,6 +76,7 @@ pub fn build_register_body(
 ) -> serde_json::Value {
     json!({
         "token": token.to_string(),
+        "tenant_id": tenant_id.to_string(),
         "r2_key": r2_key,
         "document_id": document_id.to_string(),
         "recipient_id": recipient_id.to_string(),
@@ -97,10 +102,12 @@ mod tests {
     #[test]
     fn build_register_body_shape() {
         let token = Uuid::nil();
+        let tenant = Uuid::nil();
         let doc = Uuid::nil();
         let rcp = Uuid::nil();
         let body = build_register_body(
             token,
+            tenant,
             "tenant/m/file.pdf",
             doc,
             rcp,
@@ -112,6 +119,7 @@ mod tests {
             ts("2026-07-04T00:00:00Z"),
         );
         assert_eq!(body["token"], token.to_string());
+        assert_eq!(body["tenant_id"], tenant.to_string());
         assert_eq!(body["r2_key"], "tenant/m/file.pdf");
         assert_eq!(body["document_id"], doc.to_string());
         assert_eq!(body["recipient_id"], rcp.to_string());
@@ -126,6 +134,7 @@ mod tests {
     #[test]
     fn build_register_body_nulls() {
         let body = build_register_body(
+            Uuid::nil(),
             Uuid::nil(),
             "k",
             Uuid::nil(),
@@ -160,6 +169,7 @@ mod tests {
             "sek".into(),
         );
         let body = build_register_body(
+            Uuid::nil(),
             Uuid::nil(),
             "k",
             Uuid::nil(),
