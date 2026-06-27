@@ -189,6 +189,11 @@ impl AuthRepository for MockAuthRepository {
         })
     }
 
+    async fn ensure_tenant_exists(&self, _tenant_id: Uuid) -> Result<(), sqlx::Error> {
+        check_fail!(self);
+        Ok(())
+    }
+
     async fn get_tenant_by_id(&self, _id: Uuid) -> Result<Option<Tenant>, sqlx::Error> {
         check_fail!(self);
         Ok(self.return_tenant.lock().unwrap().clone())
