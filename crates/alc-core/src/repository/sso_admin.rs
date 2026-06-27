@@ -33,7 +33,8 @@ pub trait SsoAdminRepository: Send + Sync {
         enabled: bool,
     ) -> Result<SsoConfigRow, sqlx::Error>;
 
-    /// SSO 設定の作成/更新 (client_secret_encrypted なし)
+    /// SSO 設定の更新 (client_secret_encrypted なし = UPDATE only)。
+    /// 既存 config が無ければ RowNotFound (= 新規作成には secret 必須)。
     async fn upsert_config_without_secret(
         &self,
         tenant_id: Uuid,
@@ -44,6 +45,6 @@ pub trait SsoAdminRepository: Send + Sync {
         enabled: bool,
     ) -> Result<SsoConfigRow, sqlx::Error>;
 
-    /// SSO 設定の削除
-    async fn delete_config(&self, tenant_id: Uuid, provider: &str) -> Result<(), sqlx::Error>;
+    /// SSO 設定の削除。削除した行数を返す (0 = 該当なし → handler が 404)
+    async fn delete_config(&self, tenant_id: Uuid, provider: &str) -> Result<u64, sqlx::Error>;
 }

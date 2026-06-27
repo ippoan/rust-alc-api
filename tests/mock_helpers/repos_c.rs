@@ -112,12 +112,15 @@ impl NfcTagRepository for MockNfcTagRepository {
 
 pub struct MockSsoAdminRepository {
     pub fail_next: AtomicBool,
+    /// true なら delete_config が 0 行 (= 該当なし) を返す
+    pub delete_zero: AtomicBool,
 }
 
 impl Default for MockSsoAdminRepository {
     fn default() -> Self {
         Self {
             fail_next: AtomicBool::new(false),
+            delete_zero: AtomicBool::new(false),
         }
     }
 }
@@ -172,9 +175,13 @@ impl SsoAdminRepository for MockSsoAdminRepository {
         })
     }
 
-    async fn delete_config(&self, _tenant_id: Uuid, _provider: &str) -> Result<(), sqlx::Error> {
+    async fn delete_config(&self, _tenant_id: Uuid, _provider: &str) -> Result<u64, sqlx::Error> {
         check_fail!(self);
-        Ok(())
+        if self.delete_zero.load(std::sync::atomic::Ordering::SeqCst) {
+            Ok(0)
+        } else {
+            Ok(1)
+        }
     }
 }
 
