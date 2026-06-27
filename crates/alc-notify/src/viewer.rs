@@ -22,6 +22,22 @@ use uuid::Uuid;
 use alc_core::repository::notify_deliveries::DeliveryViewInfo;
 use alc_core::AppState;
 
+/// auth-worker (= viewer Worker) が OIDC (`aud=alc-api-internal`) で叩く内部 view route。
+/// lockdown (`allUsers` 削除) 後は公開 `/api/notify/v/*` が rust に到達できなくなるため、
+/// Worker が KV cache + R2 直配信するのに必要な r2_key + メタを返す経路を `require_internal_jwt`
+/// 配下で提供する (Refs #434)。値 (r2_key 含む) は trusted caller 限定なので返して良い。
+pub fn internal_router() -> Router<AppState> {
+    Router::new()
+        .route(
+            "/internal/notify/view/{token}",
+            axum::routing::get(internal_view),
+        )
+        .route(
+            "/internal/notify/view/{token}/read",
+            axum::routing::post(internal_mark_read),
+        )
+}
+
 pub fn public_router() -> Router<AppState> {
     Router::new()
         .route("/notify/v/{token}", axum::routing::get(view_metadata))
@@ -225,6 +241,71 @@ async fn view_image(
     Ok((StatusCode::OK, headers, jpeg_bytes).into_response())
 }
 
+/// internal view 経路の応答。公開 `ViewMetadata` と違い **r2_key を含む**
+/// (trusted caller = viewer Worker が R2 直 fetch するのに使う)。
+#[derive(serde::Serialize, Debug, PartialEq)]
+pub struct InternalViewInfo {
+    pub r2_key: String,
+    pub file_name: Option<String>,
+    pub file_size_bytes: Option<i64>,
+    pub source_subject: Option<String>,
+    pub source_sender: Option<String>,
+    pub source_received_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub expire_at: chrono::DateTime<chrono::Utc>,
+}
+
+pub(crate) fn build_internal_view_info(info: &DeliveryViewInfo) -> InternalViewInfo {
+    InternalViewInfo {
+        r2_key: info.r2_key.clone(),
+        file_name: info.file_name.clone(),
+        file_size_bytes: info.file_size_bytes,
+        source_subject: info.source_subject.clone(),
+        source_sender: info.source_sender.clone(),
+        source_received_at: info.source_received_at,
+        expire_at: info.expire_at,
+    }
+}
+
+/// GET /api/internal/notify/view/{token} — viewer Worker 用。
+/// r2_key + メタを返す。期限切れは 410、存在しなければ 404。既読化はしない
+/// (`/read` の責務)。
+async fn internal_view(
+    State(state): State<AppState>,
+    Path(token): Path<Uuid>,
+) -> Result<Json<InternalViewInfo>, StatusCode> {
+    let info = state
+        .notify_deliveries
+        .get_for_view(token)
+        .await
+        .map_err(|e| {
+            tracing::error!("internal_view get_for_view: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    check_not_expired(info.expire_at, chrono::Utc::now())?;
+    Ok(Json(build_internal_view_info(&info)))
+}
+
+/// POST /api/internal/notify/view/{token}/read — viewer Worker が viewer ページ
+/// 表示時に 1 回だけ叩いて既読化する (旧 public `/api/notify/read/{token}` の置換)。
+/// 既読済みでも 204 (idempotent)、存在しなければ 404。
+async fn internal_mark_read(
+    State(state): State<AppState>,
+    Path(token): Path<Uuid>,
+) -> Result<StatusCode, StatusCode> {
+    state
+        .notify_deliveries
+        .mark_read(token)
+        .await
+        .map_err(|e| {
+            tracing::error!("internal_mark_read: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .ok_or(StatusCode::NOT_FOUND)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -255,6 +336,25 @@ mod tests {
         assert_eq!(m.expire_at, info.expire_at);
         let json = serde_json::to_string(&m).unwrap();
         assert!(!json.contains("r2_key"));
+        assert!(!json.contains("document_id"));
+        assert!(!json.contains("tenant_id"));
+    }
+
+    #[test]
+    fn build_internal_view_info_includes_r2_key() {
+        let info = sample_info(24);
+        let v = build_internal_view_info(&info);
+        assert_eq!(v.r2_key, info.r2_key);
+        assert_eq!(v.file_name, info.file_name);
+        assert_eq!(v.file_size_bytes, info.file_size_bytes);
+        assert_eq!(v.source_subject, info.source_subject);
+        assert_eq!(v.source_sender, info.source_sender);
+        assert_eq!(v.source_received_at, info.source_received_at);
+        assert_eq!(v.expire_at, info.expire_at);
+        // 公開 ViewMetadata と違い internal は r2_key を JSON に含む
+        let json = serde_json::to_string(&v).unwrap();
+        assert!(json.contains("r2_key"));
+        // document_id / tenant_id は internal でも露出しない
         assert!(!json.contains("document_id"));
         assert!(!json.contains("tenant_id"));
     }
