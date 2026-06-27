@@ -19,6 +19,9 @@ use alc_core::auth_middleware::AuthUser;
 use alc_core::repository::auth::AuthRepository;
 use alc_core::AppState;
 
+mod internal;
+pub use internal::internal_router;
+
 /// `STAGING_MODE=true` かどうか (alc-misc::staging と同判定)。
 /// staging 限定の挙動 (新規ユーザーへの自動テナント作成) の gate に使う。
 fn is_staging_mode() -> bool {
