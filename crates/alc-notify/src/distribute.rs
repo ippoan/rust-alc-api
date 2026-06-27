@@ -328,8 +328,10 @@ async fn distribute(
         }
     }
 
-    let api_origin =
-        std::env::var("API_ORIGIN").unwrap_or_else(|_| "https://localhost:8080".into());
+    // viewer / image のリンク先は **nuxt-notify Worker** (= KV+R2 配信、#434 cutover)。
+    // 旧 rust `/api/notify/read/*` `/api/notify/v/*` は使わない (read-tracking は viewer
+    // ページ表示時に Worker が KV へ記録する)。
+    let frontend = crate::read_tracker::frontend_url();
 
     let line_client = LineClient::new();
     let lw_client = LineworksBotClient::new();
@@ -371,18 +373,21 @@ async fn distribute(
             }
         }
 
-        let read_url = format!("{}/api/notify/read/{}", api_origin, delivery.read_token);
+        // 詳細リンクは Worker の viewer ページ。表示時に Worker が KV へ既読記録する。
+        let view_url = crate::read_tracker::build_view_url(&frontend, delivery.read_token);
         // 画像を併送する場合は本文の「▶ 詳細: {url}」行を省く (画像 inline で見えるので冗長)。
         // 画像なし (テキストのみ) の場合は従来通り URL を入れる。
-        let message_url: Option<&str> = if send_image { None } else { Some(&read_url) };
+        let message_url: Option<&str> = if send_image { None } else { Some(&view_url) };
         let message = build_distribute_message(&doc, message_url);
         // 注: URL を `.jpg` 終わりにするのは必須。LINE Messaging API / LINE WORKS
         // Bot は image message の `originalContentUrl` を **拡張子で** 画像判定
         // するため、`/image` (拡張子なし) だと URL がテキストリンクとして表示される。
+        // Worker の image route は redacted(.jpg) のみ配信 (非 redacted は 415)。
         let image_url = if send_image {
             Some(format!(
                 "{}/api/notify/v/{}/image.jpg",
-                api_origin, delivery.read_token
+                frontend.trim_end_matches('/'),
+                delivery.read_token
             ))
         } else {
             None
