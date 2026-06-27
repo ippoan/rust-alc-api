@@ -133,6 +133,34 @@ auth-worker が発行する JWT の `org` クレームは rust-logi の `organiz
 | `OAUTH_STATE_SECRET` | LINE WORKS OAuth state HMAC 署名 | Secret Manager |
 | `API_ORIGIN` | LINE WORKS OAuth callback URL のオリジン | 環境変数 |
 
+### 認証の auth-worker 移管 (#434、移行中)
+
+LINE / LINE WORKS の OAuth オーケストレーションを **auth-worker に移管**し、rust は
+DB プリミティブを `/api/internal/auth/*` (`require_internal_jwt` 配下) で公開する
+だけの dumb backend にする。確定アーキ (Refs #434):
+
+```
+1. browser ──▶ auth.ippoan.org/oauth/line/redirect        (ログイン開始)
+2. auth-worker ──▶ LINE authorize                          (リダイレクト)
+3. user 承認 ──▶ auth-worker/oauth/line/callback?code=…
+4. auth-worker が LINE と code 交換 → profile 取得          (auth-worker が直接)
+5. auth-worker ──OIDC(aud=alc-api-internal)──▶ rust /api/internal/auth/users/…
+                                                           ← ユーザー確認/upsert
+6. rust ──▶ auth-worker に user 情報(id/tenant/role/slug)  ← rust→auth-worker ユーザー情報
+7. auth-worker が JWT を発行(JWT_SECRET で署名)
+8. auth-worker が cookie(logi_auth_token=JWT)をセット + redirect_uri#token=… で戻す ← cookie でログイン保持
+```
+
+- **2 つの OIDC の使い分け**: ログイン中の internal call は `aud=alc-api-internal`
+  (`/api/internal/auth/*`)、ログイン後のデータ API は `aud=service URL`
+  (`require_tenant_header`、tenant/user はヘッダ注入)。`/alc-proxy` は service-URL
+  audience でしか mint しないため、consumer が `/alc-proxy` 経由で internal route に
+  到達しても `aud` 不一致で弾かれる (confused-deputy 防止、Cloud Run custom audiences)。
+- rust は cookie も browser JWT も**一切見ない** (dumb backend)。発行・検証・cookie は
+  auth-worker が持つ。
+- 実装: `crates/alc-auth/src/internal.rs` (`internal_router`)。`require_internal_jwt`
+  は lockdown 時に OIDC custom-audience 検証へ置換予定。
+
 ## ストレージバックエンド切り替え
 
 - `STORAGE_BACKEND=r2` → Cloudflare R2 (`rust-s3` crate)

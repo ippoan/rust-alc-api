@@ -95,6 +95,7 @@ pub fn router() -> Router<AppState> {
     let internal_protected = Router::new()
         .merge(notify_lineworks_channels::internal_router())
         .merge(health_canary::internal_router())
+        .merge(auth::internal_router())
         .layer(axum_middleware::from_fn(require_internal_jwt));
 
     // テナント対応ルート — 注入 identity (X-Tenant-ID + 任意 X-User-*) を信頼 (Refs #434)。
