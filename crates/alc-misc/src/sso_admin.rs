@@ -117,10 +117,7 @@ async fn upsert_config(
     config.map(Json).map_err(|e| {
         // secret 無し更新で対象 config が無い場合は新規作成不可 → 400
         if encrypted_secret.is_none() && matches!(e, sqlx::Error::RowNotFound) {
-            tracing::warn!(
-                "SSO upsert without secret but no existing config (provider={})",
-                body.provider
-            );
+            tracing::warn!("SSO upsert without secret but config missing");
             return StatusCode::BAD_REQUEST;
         }
         tracing::error!("Failed to upsert SSO config: {e}");
