@@ -27,6 +27,19 @@ async fn setup_failing() -> (String, String) {
     (base_url, auth_header)
 }
 
+/// Helper: mock whose delete_config returns 0 rows (= 該当なし).
+async fn setup_delete_zero() -> (String, String) {
+    let mock = Arc::new(MockSsoAdminRepository::default());
+    mock.delete_zero.store(true, Ordering::SeqCst);
+    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
+    state.sso_admin = mock;
+    let tenant_id = uuid::Uuid::new_v4();
+    let base_url = crate::common::spawn_test_server(state).await;
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+    let auth_header = format!("Bearer {jwt}");
+    (base_url, auth_header)
+}
+
 // =========================================================================
 // GET /api/admin/sso/configs
 // =========================================================================
@@ -247,8 +260,11 @@ async fn test_upsert_config_no_auth() {
     assert_eq!(res.status(), 401);
 }
 
+/// secret 無し upsert は UPDATE only。対象 config が無い (RowNotFound) 場合は
+/// 新規作成不可なので 400。mock の check_fail! は RowNotFound を返すため、この
+/// path の「対象なし」= 400 を検証する (with_secret は同じ RowNotFound でも 500)。
 #[tokio::test]
-async fn test_upsert_config_without_secret_db_error() {
+async fn test_upsert_config_without_secret_missing_returns_400() {
     let (base_url, auth_header) = setup_failing().await;
     let client = reqwest::Client::new();
 
@@ -263,7 +279,7 @@ async fn test_upsert_config_without_secret_db_error() {
         .send()
         .await
         .unwrap();
-    assert_eq!(res.status(), 500);
+    assert_eq!(res.status(), 400);
 }
 
 #[tokio::test]
@@ -372,6 +388,22 @@ async fn test_delete_config_no_auth() {
         .await
         .unwrap();
     assert_eq!(res.status(), 401);
+}
+
+/// delete_config が 0 行 (= 該当テナントに該当 provider なし) → 404
+#[tokio::test]
+async fn test_delete_config_not_found() {
+    let (base_url, auth_header) = setup_delete_zero().await;
+    let client = reqwest::Client::new();
+
+    let res = client
+        .delete(format!("{base_url}/api/admin/sso/configs"))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({ "provider": "lineworks" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 404);
 }
 
 #[tokio::test]

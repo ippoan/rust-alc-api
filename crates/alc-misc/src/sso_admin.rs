@@ -115,6 +115,14 @@ async fn upsert_config(
     };
 
     config.map(Json).map_err(|e| {
+        // secret 無し更新で対象 config が無い場合は新規作成不可 → 400
+        if encrypted_secret.is_none() && matches!(e, sqlx::Error::RowNotFound) {
+            tracing::warn!(
+                "SSO upsert without secret but no existing config (provider={})",
+                body.provider
+            );
+            return StatusCode::BAD_REQUEST;
+        }
         tracing::error!("Failed to upsert SSO config: {e}");
         StatusCode::INTERNAL_SERVER_ERROR
     })
@@ -130,7 +138,7 @@ async fn delete_config(
         return Err(StatusCode::FORBIDDEN);
     }
 
-    state
+    let rows = state
         .sso_admin
         .delete_config(auth_user.tenant_id, &body.provider)
         .await
@@ -138,6 +146,11 @@ async fn delete_config(
             tracing::error!("Failed to delete SSO config: {e}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
+
+    // 0 行 = 該当テナントに該当 provider の config が無い → 404 で明示
+    if rows == 0 {
+        return Err(StatusCode::NOT_FOUND);
+    }
 
     Ok(StatusCode::NO_CONTENT)
 }
