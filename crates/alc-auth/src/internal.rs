@@ -25,7 +25,6 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use alc_core::models::User;
-use alc_core::repository::auth::AuthRepository;
 use alc_core::AppState;
 
 type ErrorResponse = (StatusCode, Json<serde_json::Value>);
