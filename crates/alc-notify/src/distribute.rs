@@ -16,6 +16,7 @@ use alc_core::AppState;
 
 use crate::clients::line::{LineClient, LineConfig};
 use crate::clients::lineworks::{LineworksBotClient, LineworksBotConfig};
+use crate::viewer_register::{build_register_body, ViewerRegisterClient};
 
 pub fn tenant_router() -> Router<AppState> {
     Router::new()
@@ -333,6 +334,16 @@ async fn distribute(
     let line_client = LineClient::new();
     let lw_client = LineworksBotClient::new();
 
+    // viewer Worker (nuxt-notify) の KV へ view:{token} を登録する client (Refs #434)。
+    // env 未設定なら None (= 非破壊)。viewer が配信する r2_key は redacted 優先
+    // (= rust viewer の COALESCE(redacted_r2_key, r2_key) と一致させる)。
+    let viewer_register = ViewerRegisterClient::from_env();
+    let view_r2_key = doc
+        .redacted_r2_key
+        .clone()
+        .unwrap_or_else(|| doc.r2_key.clone());
+    let view_expire = chrono::Utc::now() + chrono::Duration::days(retention_days as i64);
+
     // image メッセージは PDF + extracted_data.logistics がある時のみ送る
     // (PDF 以外、または配車手配票でない PDF は画像送信しない)
     let send_image = should_send_image(&doc);
@@ -341,6 +352,25 @@ async fn distribute(
     let mut failed = 0;
 
     for (delivery, recipient) in deliveries.iter().zip(recipients.iter()) {
+        // KV 登録は best-effort。失敗しても配信は止めない (旧 viewer / 再配信が fallback)。
+        if let Some(rc) = viewer_register.as_ref() {
+            let body = build_register_body(
+                delivery.read_token,
+                &view_r2_key,
+                document_id,
+                delivery.recipient_id,
+                doc.file_name.as_deref(),
+                doc.file_size_bytes,
+                doc.source_subject.as_deref(),
+                doc.source_sender.as_deref(),
+                Some(doc.created_at),
+                view_expire,
+            );
+            if let Err(e) = rc.register(&body).await {
+                tracing::warn!("register-view: {e}");
+            }
+        }
+
         let read_url = format!("{}/api/notify/read/{}", api_origin, delivery.read_token);
         // 画像を併送する場合は本文の「▶ 詳細: {url}」行を省く (画像 inline で見えるので冗長)。
         // 画像なし (テキストのみ) の場合は従来通り URL を入れる。
