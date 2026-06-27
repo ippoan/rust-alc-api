@@ -104,6 +104,17 @@ impl AuthRepository for PgAuthRepository {
         ))
     }
 
+    async fn ensure_tenant_exists(&self, tenant_id: Uuid) -> Result<(), sqlx::Error> {
+        // short_id は DEFAULT 生成、name は placeholder。既存ならそのまま。
+        sqlx::query(
+            "INSERT INTO tenants (id, name) VALUES ($1, 'LINE WORKS (staging auto)') ON CONFLICT (id) DO NOTHING",
+        )
+        .bind(tenant_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     async fn get_tenant_by_id(&self, id: Uuid) -> Result<Option<Tenant>, sqlx::Error> {
         sqlx::query_as::<_, Tenant>("SELECT * FROM tenants WHERE id = $1")
             .bind(id)

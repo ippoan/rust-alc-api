@@ -48,6 +48,10 @@ pub trait AuthRepository: Send + Sync {
 
     async fn create_tenant_with_domain(&self, email_domain: &str) -> Result<Tenant, sqlx::Error>;
 
+    /// 指定 id の tenant が無ければ最小行を作る (冪等)。staging の揮発 DB で
+    /// SSO config の tenant_id が dangling になった時の救済用 (STAGING_MODE 限定)。
+    async fn ensure_tenant_exists(&self, tenant_id: Uuid) -> Result<(), sqlx::Error>;
+
     async fn get_tenant_by_id(&self, id: Uuid) -> Result<Option<Tenant>, sqlx::Error>;
 
     async fn get_tenant_slug(&self, tenant_id: Uuid) -> Result<Option<String>, sqlx::Error>;

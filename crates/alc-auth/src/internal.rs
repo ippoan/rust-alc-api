@@ -129,6 +129,22 @@ pub fn internal_router() -> Router<AppState> {
         .route("/internal/auth/refresh-token", post(save_refresh_token))
 }
 
+/// staging の揮発 DB では SSO config の tenant_id が dangling になり得る
+/// (`sso_provider_configs.tenant_id` に FK が無い)。その tenant で user を作ると
+/// `users_tenant_id_fkey` 違反で 500 になる。STAGING_MODE 限定で tenant を先に
+/// 冪等作成して救済する (Google login の自動 tenant 作成と同方針)。本番では
+/// tenant が永続なので dangling は起きず、この救済は走らない (no-op)。
+async fn ensure_tenant_for_staging(state: &AppState, tenant_id: Uuid) -> Result<(), ErrorResponse> {
+    if crate::is_staging_mode() {
+        state
+            .auth
+            .ensure_tenant_exists(tenant_id)
+            .await
+            .map_err(|e| internal_error("ensure_tenant_exists", e))?;
+    }
+    Ok(())
+}
+
 /// tenant slug を解決して `InternalUserWithSlug` を返す共通ヘルパ。
 async fn with_slug(state: &AppState, user: User) -> ApiResult<InternalUserWithSlug> {
     let slug = state
@@ -185,6 +201,7 @@ async fn upsert_lineworks_user(
     State(state): State<AppState>,
     Json(b): Json<UpsertLineworksBody>,
 ) -> ApiResult<InternalUserWithSlug> {
+    ensure_tenant_for_staging(&state, b.tenant_id).await?;
     let existing = state
         .auth
         .find_user_by_lineworks_id(&b.lineworks_id)
@@ -214,6 +231,7 @@ async fn upsert_line_user(
     State(state): State<AppState>,
     Json(b): Json<UpsertLineBody>,
 ) -> ApiResult<InternalUserWithSlug> {
+    ensure_tenant_for_staging(&state, b.tenant_id).await?;
     let existing = state
         .auth
         .find_user_by_line_user_id(&b.line_user_id)
