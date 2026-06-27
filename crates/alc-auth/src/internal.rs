@@ -21,6 +21,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -120,6 +121,7 @@ pub fn internal_router() -> Router<AppState> {
             "/internal/auth/recipients/by-line-id",
             get(recipients_by_line_id),
         )
+        .route("/internal/auth/refresh-token", post(save_refresh_token))
 }
 
 /// tenant slug を解決して `InternalUserWithSlug` を返す共通ヘルパ。
@@ -273,6 +275,30 @@ async fn register_line_recipient(
         .register_line_recipient(b.tenant_id, &b.name, &b.line_user_id)
         .await
         .map_err(|e| internal_error("register_line_recipient", e))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ---------- POST /internal/auth/refresh-token ----------
+
+#[derive(Debug, Deserialize)]
+struct SaveRefreshTokenBody {
+    user_id: Uuid,
+    /// hex(sha256(raw)) — auth-worker 側で生成済みの hash (raw は載せない)。
+    refresh_hash: String,
+    expires_at: DateTime<Utc>,
+}
+
+/// auth-worker が発行した refresh token の hash を保存する。raw token は
+/// auth-worker が browser に返すのみで、ここには hash しか渡さない (rust は raw を持たない)。
+async fn save_refresh_token(
+    State(state): State<AppState>,
+    Json(b): Json<SaveRefreshTokenBody>,
+) -> Result<StatusCode, ErrorResponse> {
+    state
+        .auth
+        .save_refresh_token(b.user_id, &b.refresh_hash, b.expires_at)
+        .await
+        .map_err(|e| internal_error("save_refresh_token", e))?;
     Ok(StatusCode::NO_CONTENT)
 }
 
