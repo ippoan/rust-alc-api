@@ -47,22 +47,40 @@ impl SsoAdminRepository for PgSsoAdminRepository {
         enabled: bool,
     ) -> Result<SsoConfigRow, sqlx::Error> {
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
-        // 競合 key は (provider, external_org_id) = resolve_sso_config の引き key に揃える。
-        // 同じ LW org (external_org_id) の config は 1 つだけ存在し、保存した tenant が
-        // 所有者になる (tenant_id も EXCLUDED で付け替え)。これにより staging の tenant
-        // churn で別 tenant に orphan が残っても「最新の保存が引き取る」で 500 を避ける。
-        // 本番 (alc_api_app + RLS) では他 tenant の行は RLS で不可視 = ON CONFLICT の
-        // UPDATE 対象にならず、他人の LW org を乗っ取れない (= cross-tenant 防御は維持)。
-        // 旧 (tenant_id, provider) / (provider, client_id) UNIQUE と衝突しうるが、
-        // 1 tenant = 1 LW org の運用では発生しない (将来 migration で整理予定)。
+        // cross-tenant UNIQUE (provider, external_org_id / client_id) は「1 LW org =
+        // 1 tenant」を保証する所有権境界。これを跨いで tenant_id を付け替えると別
+        // tenant の config を乗っ取れてしまう (cross-tenant takeover) ため絶対にしない。
+        //
+        // staging の揮発 DB は tenant churn で「同じ人間の別 tenant」に orphan を残し、
+        // それが cross-tenant UNIQUE に衝突して保存を 500 にする。これは staging 固有の
+        // 事故なので **STAGING_MODE のときだけ** orphan を明示削除して解消する。
+        // 本番 (STAGING_MODE 無効 + alc_api_app/RLS) では削除しない = tenant は永続で
+        // cross-tenant 衝突は「別の実テナント」= 正当な境界。衝突時は下の INSERT が
+        // UNIQUE 違反を返し、勝手な付け替え/削除はしない。
+        if std::env::var("STAGING_MODE").as_deref() == Ok("true") {
+            sqlx::query(
+                r#"
+                DELETE FROM sso_provider_configs
+                WHERE provider = $1
+                  AND tenant_id <> $2
+                  AND (external_org_id = $3 OR client_id = $4)
+                "#,
+            )
+            .bind(provider)
+            .bind(tenant_id)
+            .bind(external_org_id)
+            .bind(client_id)
+            .execute(&mut *tc.conn)
+            .await?;
+        }
         sqlx::query_as::<_, SsoConfigRow>(
             r#"
             INSERT INTO sso_provider_configs (tenant_id, provider, client_id, client_secret_encrypted, external_org_id, woff_id, enabled)
             VALUES ($1, $2, $3, $4, $5, $6, $7)
-            ON CONFLICT (provider, external_org_id) DO UPDATE SET
-                tenant_id = EXCLUDED.tenant_id,
+            ON CONFLICT (tenant_id, provider) DO UPDATE SET
                 client_id = EXCLUDED.client_id,
                 client_secret_encrypted = EXCLUDED.client_secret_encrypted,
+                external_org_id = EXCLUDED.external_org_id,
                 woff_id = EXCLUDED.woff_id,
                 enabled = EXCLUDED.enabled,
                 updated_at = NOW()
