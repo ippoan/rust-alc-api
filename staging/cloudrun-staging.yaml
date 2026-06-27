@@ -34,7 +34,7 @@ spec:
               valueFrom:
                 secretKeyRef:
                   key: latest
-                  name: alc-api-staging-jwt-secret
+                  name: JWT_SECRET
             - name: RUST_LOG
               value: "gateway=info,tower_http=info"
           resources:
@@ -74,11 +74,15 @@ spec:
             - name: RUST_LOG
               value: "info"
             # Secrets — secretKeyRef で Secret Manager から注入
+            # JWT_SECRET は auth-worker (cookie 再署名) と HS256 鍵共有が必要 (#218)。
+            # render.sh は GCP `JWT_SECRET` に統一済みだが staging manifest が
+            # `alc-api-staging-jwt-secret` のまま取り残され、auth-worker 署名 token を
+            # rust /api/admin/* が検証できず 401 になっていた (Refs #434)。同 entry に揃える。
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:
                   key: latest
-                  name: alc-api-staging-jwt-secret
+                  name: JWT_SECRET
             - name: GOOGLE_CLIENT_ID
               valueFrom:
                 secretKeyRef:
