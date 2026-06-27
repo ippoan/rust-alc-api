@@ -89,11 +89,16 @@ pub struct RecipientTenant {
 }
 
 fn internal_error(context: &str, err: impl std::fmt::Display) -> ErrorResponse {
-    tracing::error!("internal auth endpoint error ({context}): {err}");
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(serde_json::json!({ "error": "internal_error" })),
-    )
+    let detail = err.to_string();
+    tracing::error!("internal auth endpoint error ({context}): {detail}");
+    // staging (揮発 DB) でのみ DB エラー詳細を response に載せて診断を高速化する。
+    // 本番は内部エラー文言を隠す (情報漏洩防止)。
+    let body = if std::env::var("STAGING_MODE").as_deref() == Ok("true") {
+        serde_json::json!({ "error": "internal_error", "context": context, "detail": detail })
+    } else {
+        serde_json::json!({ "error": "internal_error" })
+    };
+    (StatusCode::INTERNAL_SERVER_ERROR, Json(body))
 }
 
 fn not_found(error: &str) -> ErrorResponse {
