@@ -145,4 +145,35 @@ impl SsoAdminRepository for PgSsoAdminRepository {
                 .await?;
         Ok(result.rows_affected())
     }
+
+    async fn get_tenant_for_export(
+        &self,
+        tenant_id: Uuid,
+    ) -> Result<Option<TenantInfoForExport>, sqlx::Error> {
+        sqlx::query_as::<_, TenantInfoForExport>(
+            "SELECT id, name, slug, email_domain, created_at FROM tenants WHERE id = $1",
+        )
+        .bind(tenant_id)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
+    async fn list_configs_for_export(
+        &self,
+        tenant_id: Uuid,
+    ) -> Result<Vec<SsoConfigExportRow>, sqlx::Error> {
+        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
+        sqlx::query_as::<_, SsoConfigExportRow>(
+            r#"
+            SELECT id, tenant_id, provider, client_id, client_secret_encrypted,
+                   external_org_id, enabled, woff_id, created_at, updated_at
+            FROM sso_provider_configs
+            WHERE tenant_id = $1
+            ORDER BY provider
+            "#,
+        )
+        .bind(tenant_id)
+        .fetch_all(&mut *tc.conn)
+        .await
+    }
 }

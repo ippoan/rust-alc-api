@@ -5,7 +5,9 @@ use uuid::Uuid;
 
 use rust_alc_api::db::models::*;
 use rust_alc_api::db::repository::nfc_tags::NfcTagRepository;
-use rust_alc_api::db::repository::sso_admin::{SsoAdminRepository, SsoConfigRow};
+use rust_alc_api::db::repository::sso_admin::{
+    SsoAdminRepository, SsoConfigExportRow, SsoConfigRow, TenantInfoForExport,
+};
 use rust_alc_api::db::repository::tenant_users::{TenantUsersRepository, UserRow};
 use rust_alc_api::db::repository::tenko_call::{
     DriverInfo, RegisterDriverResult, TenkoCallDriverRow, TenkoCallNumberRow, TenkoCallRepository,
@@ -114,6 +116,10 @@ pub struct MockSsoAdminRepository {
     pub fail_next: AtomicBool,
     /// true なら delete_config が 0 行 (= 該当なし) を返す
     pub delete_zero: AtomicBool,
+    pub return_tenant_for_export: std::sync::Mutex<Option<TenantInfoForExport>>,
+    pub return_configs_for_export: std::sync::Mutex<Vec<SsoConfigExportRow>>,
+    pub fail_tenant_for_export: AtomicBool,
+    pub fail_configs_for_export: AtomicBool,
 }
 
 impl Default for MockSsoAdminRepository {
@@ -121,6 +127,10 @@ impl Default for MockSsoAdminRepository {
         Self {
             fail_next: AtomicBool::new(false),
             delete_zero: AtomicBool::new(false),
+            return_tenant_for_export: std::sync::Mutex::new(None),
+            return_configs_for_export: std::sync::Mutex::new(Vec::new()),
+            fail_tenant_for_export: AtomicBool::new(false),
+            fail_configs_for_export: AtomicBool::new(false),
         }
     }
 }
@@ -182,6 +192,26 @@ impl SsoAdminRepository for MockSsoAdminRepository {
         } else {
             Ok(1)
         }
+    }
+
+    async fn get_tenant_for_export(
+        &self,
+        _tenant_id: Uuid,
+    ) -> Result<Option<TenantInfoForExport>, sqlx::Error> {
+        if self.fail_tenant_for_export.swap(false, Ordering::SeqCst) {
+            return Err(sqlx::Error::RowNotFound);
+        }
+        Ok(self.return_tenant_for_export.lock().unwrap().clone())
+    }
+
+    async fn list_configs_for_export(
+        &self,
+        _tenant_id: Uuid,
+    ) -> Result<Vec<SsoConfigExportRow>, sqlx::Error> {
+        if self.fail_configs_for_export.swap(false, Ordering::SeqCst) {
+            return Err(sqlx::Error::RowNotFound);
+        }
+        Ok(self.return_configs_for_export.lock().unwrap().clone())
     }
 }
 

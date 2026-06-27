@@ -1,13 +1,16 @@
 /// SSO Provider Config 管理 REST API
 /// auth-worker の admin/sso ページから呼ばれる
 use axum::{
-    extract::State,
+    extract::{Query, State},
     http::StatusCode,
     routing::{delete, get, post},
     Extension, Json, Router,
 };
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 
+use crate::bot_admin::is_developer_email;
 use alc_core::auth_middleware::AuthUser;
 use alc_core::repository::sso_admin::SsoConfigRow;
 use alc_core::AppState;
@@ -32,11 +35,17 @@ struct DeleteRequest {
     provider: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct ExportQuery {
+    tenant_id: uuid::Uuid,
+}
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/admin/sso/configs", get(list_configs))
         .route("/admin/sso/configs", post(upsert_config))
         .route("/admin/sso/configs", delete(delete_config))
+        .route("/admin/sso/configs/export", get(export_configs))
 }
 
 /// GET /admin/sso/configs — テナントの SSO 設定一覧
@@ -150,6 +159,61 @@ async fn delete_config(
     }
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// GET /admin/sso/configs/export — developer 限定。
+/// staging import と互換のシェイプ (sso_provider_configs のみ populate) で吐く。
+async fn export_configs(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    Query(params): Query<ExportQuery>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    if !is_developer_email(&auth_user.email) {
+        tracing::warn!("sso export refused: {}", auth_user.email);
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    let tid = params.tenant_id;
+
+    let tenant = state
+        .sso_admin
+        .get_tenant_for_export(tid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to fetch tenant for sso export: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    let sso_provider_configs = state
+        .sso_admin
+        .list_configs_for_export(tid)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to fetch sso_provider_configs for export: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    Ok(Json(json!({
+        "version": 1,
+        "exported_at": Utc::now().to_rfc3339(),
+        "tenant_id": tid.to_string(),
+        "data": {
+            "tenant": tenant,
+            "users": [],
+            "employees": [],
+            "devices": [],
+            "tenko_schedules": [],
+            "webhook_configs": [],
+            "tenant_allowed_emails": [],
+            "sso_provider_configs": sso_provider_configs,
+            "tenko_call_numbers": [],
+            "tenko_call_drivers": [],
+            "bot_configs": [],
+            "notify_line_configs": [],
+            "notify_recipients": []
+        }
+    })))
 }
 
 /// AES-256-GCM で暗号化（rust-logi と同じ形式）
