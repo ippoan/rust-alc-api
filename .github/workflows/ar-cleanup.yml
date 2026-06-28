@@ -120,14 +120,15 @@ jobs:
 
       - name: Report repository size
         if: always()
+        continue-on-error: true # size 表示の失敗で cleanup job を落とさない
         run: |
-          # sizeBytes は `repositories list` でのみ返る。集計に lag があり削除直後は旧値の場合あり。
-          SIZE=$(gcloud artifacts repositories list \
-            --project="$PROJECT" --location="$REGION" \
-            --filter='name~/ghcr$' --format='value(sizeBytes)' 2>/dev/null | head -1)
-          SIZE=${SIZE:-0}
+          # `value(sizeBytes)` は gcloud が MB float に整形して返すことがあり整数演算が壊れる。
+          # ar-size-audit と同じく json から sizeBytes(bytes) を取り python で MB 換算する。
+          MB=$(gcloud artifacts repositories list \
+                 --project="$PROJECT" --location="$REGION" --format='json' 2>/dev/null \
+               | python3 -c 'import json,sys; r=[x for x in json.load(sys.stdin) if x["name"].endswith("/ghcr")]; print(round(int(r[0].get("sizeBytes",0))/1024/1024,1) if r else "unknown")' 2>/dev/null)
           {
             echo "## AR cleanup"
             echo ""
-            echo "ghcr repo size: $(( SIZE / 1024 / 1024 )) MB (集計 lag あり)"
+            echo "ghcr repo size: ${MB:-unknown} MB (集計 lag あり、削除直後は旧値の場合あり)"
           } >> "$GITHUB_STEP_SUMMARY"
