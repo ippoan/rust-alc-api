@@ -31,10 +31,17 @@ impl ViewerRegisterClient {
     }
 
     pub fn with_endpoint(endpoint: String, secret: String) -> Self {
+        // redirect(none): CF Access gate に当たると 302→cloudflareaccess login→200 と
+        // 追従されて success に誤判定される (Refs #434 handoff: silent fail で KV 未登録)。
+        // 302/3xx は非 2xx として `Err` に倒す。
+        let http = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .expect("reqwest client build with redirect=none");
         Self {
             endpoint,
             secret,
-            http: reqwest::Client::new(),
+            http,
         }
     }
 
@@ -197,6 +204,27 @@ mod tests {
         );
         let err = client.register(&json!({})).await.unwrap_err();
         assert!(err.contains("401"));
+    }
+
+    #[tokio::test]
+    async fn register_302_redirect_is_err() {
+        // CF Access gate に当たると 302→cloudflareaccess login → 追従すると 200 を success
+        // 誤判定。Policy::none() で 302 を非 2xx として `Err` に倒すことを固定する (Refs #434)。
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(
+                ResponseTemplate::new(302)
+                    .insert_header("location", "https://example.cloudflareaccess.com/login"),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = ViewerRegisterClient::with_endpoint(
+            format!("{}/api/notify/register-view", server.uri()),
+            "sek".into(),
+        );
+        let err = client.register(&json!({})).await.unwrap_err();
+        assert!(err.contains("302"), "expected 302 in err, got: {err}");
     }
 
     #[tokio::test]
