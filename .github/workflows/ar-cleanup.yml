@@ -1,0 +1,133 @@
+name: Artifact Registry cleanup (rust-alc-api images)
+
+# `ghcr` は GHCR の pull-through cache (REMOTE_REPOSITORY)。GCP cleanup policy は
+# sweep が ~日次なので、より細かく回すため self-host する。
+#
+# 方式: 「動作中 (in-use) の digest だけ残し、それ以外を全削除」。
+#   1. Cloud Run の現行リビジョンが参照している digest を keep-set にする
+#      (+ 各 image の現行 :latest / :dev tag の digest も保護 = tag 参照の sidecar 対策)。
+#   2. keep-set 以外を multi-pass で delete。keep した index の子 manifest は
+#      "referenced by parent manifests" で削除拒否され**自動的に残る** (= multi-arch
+#      の親子問題が、ここでは keep-set の子を守る保護機構として働く)。crane 不要。
+#   3. 古い index は親が無いので削除成功 → その子は孤児化 → 次 pass で削除。
+#      → 「動作中の group だけ」に収束して自然に止まる。
+#
+# 安全性:
+#   - keep-set が空 (Cloud Run 取得失敗等) なら **abort** して live を消さない。
+#   - rollback (flip-back) で過去 revision に戻す時、その image は cache から消えて
+#     いても GHCR (恒久正本) から digest 単位で re-pull される (cold start 数秒の遅延)。
+#
+# 前提: secrets.GCP_SA_KEY の SA に `roles/artifactregistry.repoAdmin` (`ghcr` repo)
+#       + Cloud Run 読み取り (`roles/run.viewer` 相当) が必要。
+
+on:
+  schedule:
+    - cron: '23 * * * *' # 毎時
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: '削除せず対象を列挙するだけ'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ar-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    env:
+      BASE: asia-northeast1-docker.pkg.dev/cloudsql-sv/ghcr/ghcr.io/ippoan
+      REGION: asia-northeast1
+      PROJECT: cloudsql-sv
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
+      IMAGES: >-
+        rust-alc-api rust-alc-api-gateway rust-alc-api-tenko rust-alc-api-carins
+        rust-alc-api-dtako rust-alc-api-trouble rust-alc-api-camera
+        rust-alc-api-staging rust-alc-api-tenko-staging rust-alc-api-carins-staging
+        rust-alc-api-dtako-staging rust-alc-api-trouble-staging
+        rust-alc-api-camera-staging rust-alc-api-staging-db
+    steps:
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Build keep-set (in-use digests)
+        run: |
+          set -uo pipefail
+          KEEP="$RUNNER_TEMP/keep.txt"
+          : > "$KEEP"
+
+          # 1. Cloud Run 現行リビジョンが参照する digest (digest-pin container + sidecar)
+          for svc in $(gcloud run services list --region="$REGION" --project="$PROJECT" \
+                --filter='metadata.name~rust-alc-api' --format='value(metadata.name)' 2>/dev/null); do
+            gcloud run services describe "$svc" --region="$REGION" --project="$PROJECT" \
+              --format='value(spec.template.spec.containers[].image)' 2>/dev/null
+          done | grep -oE 'sha256:[0-9a-f]+' >> "$KEEP" || true
+
+          # 2. 各 image の現行 :latest / :dev tag の digest (tag 参照の sidecar 等を保護)
+          for img in $IMAGES; do
+            for tag in latest dev; do
+              gcloud artifacts docker images describe "$BASE/$img:$tag" \
+                --format='value(image_summary.digest)' 2>/dev/null >> "$KEEP" || true
+            done
+          done
+
+          sort -u "$KEEP" -o "$KEEP"
+          n=$(wc -l < "$KEEP")
+          echo "keep-set size: $n"
+          echo "KEEP=$KEEP" >> "$GITHUB_ENV"
+
+          # 安全装置: keep-set が空なら live を消す恐れがあるので abort
+          if [ "$n" -eq 0 ]; then
+            echo "::error::keep-set is empty (Cloud Run/tag 取得失敗?) — aborting to avoid deleting live images"
+            exit 1
+          fi
+
+      - name: Delete versions not in keep-set (multi-pass)
+        run: |
+          set -uo pipefail
+          echo "dry-run: $DRY_RUN / keep-set: $(wc -l < "$KEEP") digests"
+          PASSES=3
+          [ "$DRY_RUN" = "true" ] && PASSES=1
+          for pass in $(seq 1 "$PASSES"); do
+            echo "===== pass $pass ====="
+            for img in $IMAGES; do
+              gcloud artifacts docker images list "$BASE/$img" \
+                --format='value(version)' 2>/dev/null \
+              | while read -r d; do
+                  [ -z "$d" ] && continue
+                  grep -qxF "$d" "$KEEP" && continue   # in-use → 残す
+                  if [ "$DRY_RUN" = "true" ]; then
+                    echo "[dry-run] would delete $img@$d"
+                  else
+                    # keep した index の子は "referenced by parent" で失敗 → そのまま残る (正しい)
+                    if gcloud artifacts docker images delete "$BASE/$img@$d" \
+                         --delete-tags --quiet >/dev/null 2>&1; then
+                      echo "deleted $img@$d"
+                    else
+                      echo "skip(parent-ref/transient) $img@$d"
+                    fi
+                  fi
+                done
+            done
+          done
+
+      - name: Report repository size
+        if: always()
+        run: |
+          # sizeBytes は `repositories list` でのみ返る。集計に lag があり削除直後は旧値の場合あり。
+          SIZE=$(gcloud artifacts repositories list \
+            --project="$PROJECT" --location="$REGION" \
+            --filter='name~/ghcr$' --format='value(sizeBytes)' 2>/dev/null | head -1)
+          SIZE=${SIZE:-0}
+          {
+            echo "## AR cleanup"
+            echo ""
+            echo "ghcr repo size: $(( SIZE / 1024 / 1024 )) MB (集計 lag あり)"
+          } >> "$GITHUB_STEP_SUMMARY"
