@@ -1,0 +1,74 @@
+name: dep-graph
+
+# `crates/...` (21 crate) の Bazel 依存グラフを `.dot` / `.svg` で出力し、
+# GitHub Actions artifact として公開する。ci-dashboard の
+# `/dep-graph/rust-alc-api` page から最新 artifact を取得して表示する。
+#
+# Refs ippoan/ci-dashboard#? (ci-dashboard 側 PR で番号確定後に更新)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'crates/**'
+      - 'BUILD.bazel'
+      - 'MODULE.bazel'
+      - '.github/workflows/dep-graph.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dep-graph-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  generate:
+    name: Generate dependency graph
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ippoan/setup-bazel@main
+        with:
+          disk-cache: bazel-depgraph
+          external-cache: true
+          repository-cache: true
+
+      - name: Install graphviz
+        run: sudo apt-get update && sudo apt-get install -y graphviz
+
+      - name: Query workspace dependency graph
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          bazel query --output=graph 'deps(//crates/...)' > out/deps.dot
+          dot -Tsvg out/deps.dot -o out/deps.svg
+
+      - name: Write metadata
+        env:
+          REPO: ${{ github.repository }}
+          COMMIT_SHA: ${{ github.sha }}
+          REF: ${{ github.ref }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          GENERATED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          jq -n \
+            --arg repo "$REPO" \
+            --arg commit_sha "$COMMIT_SHA" \
+            --arg ref "$REF" \
+            --arg generated_at "$GENERATED_AT" \
+            --arg workflow_run_id "$RUN_ID" \
+            '{repo: $repo, commit_sha: $commit_sha, ref: $ref, generated_at: $generated_at, workflow_run_id: $workflow_run_id}' \
+            > out/meta.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dep-graph
+          path: out/
+          retention-days: 90
+          if-no-files-found: error
