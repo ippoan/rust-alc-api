@@ -93,9 +93,12 @@ jobs:
       - name: Report repository size
         if: always()
         run: |
-          SIZE=$(gcloud artifacts repositories describe ghcr \
+          # sizeBytes は `repositories list` でのみ返る (`describe` では空 → 0 になる)。
+          # repo メタの size は集計に lag があるため、削除直後は旧値が残ることがある。
+          SIZE=$(gcloud artifacts repositories list \
             --project=cloudsql-sv --location=asia-northeast1 \
-            --format='value(sizeBytes)' 2>/dev/null || echo 0)
+            --filter='name~/ghcr$' --format='value(sizeBytes)' 2>/dev/null | head -1)
+          SIZE=${SIZE:-0}
           echo "## AR cleanup" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "ghcr repo size: $(( SIZE / 1024 / 1024 )) MB" >> "$GITHUB_STEP_SUMMARY"
+          echo "ghcr repo size: $(( SIZE / 1024 / 1024 )) MB (集計 lag あり、削除直後は旧値の場合あり)" >> "$GITHUB_STEP_SUMMARY"
