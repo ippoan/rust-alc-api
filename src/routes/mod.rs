@@ -101,19 +101,14 @@ pub fn router() -> Router<AppState> {
         .merge(auth::internal_router())
         .layer(axum_middleware::from_fn(require_internal_jwt))
         // #434 Phase D: lockdown 後の OIDC dual-accept を有効化する設定 (env 解決、Extension 注入)。
-        // INTERNAL_AUTH_TRUST_OIDC=1 の時だけ aud=alc-api-internal の GoogleTokenVerifier を注入し、
-        // require_internal_jwt が JWKS で署名検証して OIDC を受理する。require_internal_jwt の外側に
-        // 置き、ハンドラ実行時に Extension を解決できるようにする。
-        .layer(Extension(InternalOidcTrust(
-            if std::env::var("INTERNAL_AUTH_TRUST_OIDC").as_deref() == Ok("1") {
-                Some(GoogleTokenVerifier::new(
-                    INTERNAL_AUD.to_string(),
-                    String::new(),
-                ))
-            } else {
-                None
-            },
-        )));
+        // verifier (aud=alc-api-internal) は常時構築し enabled は env で gate する (分岐レス = coverage
+        // 100% を保つ。enabled=false の間は require_internal_jwt が verifier を呼ばない)。OIDC が
+        // enabled の時、require_internal_jwt が JWKS で署名検証して受理する。require_internal_jwt の
+        // 外側に置き、ハンドラ実行時に Extension を解決できるようにする。
+        .layer(Extension(InternalOidcTrust {
+            enabled: std::env::var("INTERNAL_AUTH_TRUST_OIDC").as_deref() == Ok("1"),
+            verifier: GoogleTokenVerifier::new(INTERNAL_AUD.to_string(), String::new()),
+        }));
 
     // テナント対応ルート — 注入 identity (X-Tenant-ID + 任意 X-User-*) を信頼 (Refs #434)。
     // 旧 require_tenant の bare X-Tenant-ID フォールバック / ローカル JWT 検証は撤去。
