@@ -11,8 +11,8 @@
 
 pub use alc_auth_jwt::{
     create_internal_token, create_refresh_token, current_env_label, hash_refresh_token,
-    refresh_token_expires_at, verify_access_token, verify_internal_token, AccessTokenInput,
-    AppClaims, InternalClaims, JwtSecret, ACCESS_TOKEN_EXPIRY_SECS, INTERNAL_AUD,
+    refresh_token_expires_at, verify_access_token, verify_internal_oidc_aud, verify_internal_token,
+    AccessTokenInput, AppClaims, InternalClaims, JwtSecret, ACCESS_TOKEN_EXPIRY_SECS, INTERNAL_AUD,
     REFRESH_TOKEN_EXPIRY_DAYS,
 };
 

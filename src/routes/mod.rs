@@ -72,9 +72,9 @@ pub use alc_trouble::tasks as trouble_tasks;
 pub use alc_trouble::tickets as trouble_tickets;
 pub use alc_trouble::workflow as trouble_workflow;
 
-use axum::{middleware as axum_middleware, Router};
+use axum::{middleware as axum_middleware, Extension, Router};
 
-use crate::middleware::auth::{require_internal_jwt, require_tenant_header};
+use crate::middleware::auth::{require_internal_jwt, require_tenant_header, InternalOidcTrust};
 use crate::AppState;
 
 pub fn router() -> Router<AppState> {
@@ -97,7 +97,12 @@ pub fn router() -> Router<AppState> {
         .merge(notify_viewer::internal_router())
         .merge(health_canary::internal_router())
         .merge(auth::internal_router())
-        .layer(axum_middleware::from_fn(require_internal_jwt));
+        .layer(axum_middleware::from_fn(require_internal_jwt))
+        // #434 Phase D: lockdown 後の OIDC dual-accept を有効化するフラグ (env 解決、Extension 注入)。
+        // require_internal_jwt の外側に置き、ハンドラ実行時に Extension を解決できるようにする。
+        .layer(Extension(InternalOidcTrust(
+            std::env::var("INTERNAL_AUTH_TRUST_OIDC").as_deref() == Ok("1"),
+        )));
 
     // テナント対応ルート — 注入 identity (X-Tenant-ID + 任意 X-User-*) を信頼 (Refs #434)。
     // 旧 require_tenant の bare X-Tenant-ID フォールバック / ローカル JWT 検証は撤去。
