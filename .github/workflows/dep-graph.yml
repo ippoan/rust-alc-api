@@ -42,21 +42,42 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y graphviz
 
       - name: Query workspace dependency graph
-        # `deps(//crates/...)` をそのまま流すと rules_rust crate_universe の
-        # external 依存 (数百 crate の transitive deps) が全部出て、生成 DOT が
-        # 巨大化して dot -Tsvg が 6 時間 timeout した (run #28321493713 で実測)。
-        # ここで見たいのは workspace 21 crate 間の **相互依存**だけなので
-        # `intersect //crates/...` で graph を workspace 内 target に絞り、
-        # `--noimplicit_deps` で toolchain 等の暗黙依存も除外する。
+        # 可視化方針 (Refs ippoan/ci-dashboard#443):
+        #
+        # - `deps(...) intersect //crates/...` で workspace 内 target に絞る
+        #   (rules_rust の external crate 数百個を除外、PR #465 で確定)
+        # - `kind('rust_(library|binary)', ...)` で `_test` ターゲットを除外
+        #   (test ノードが lib と並ぶと 42 ノードになって横長になるため)
+        # - `--noimplicit_deps` で toolchain 暗黙依存も除外
+        #
+        # 生成された DOT は `//crates/alc-misc:alc-misc` 形式の冗長な label
+        # が並ぶので sed で `:` 以前を削って `alc-misc` だけにする。
+        # dot コマンドには layout 系オプション (`concentrate=true` で
+        # エッジ束ね、`rankdir=TB` で縦長配置、node を box+塗り) を渡す。
         run: |
           set -euo pipefail
           mkdir -p out
           bazel query \
             --noimplicit_deps \
             --output=graph \
-            'deps(//crates/...) intersect //crates/...' \
-            > out/deps.dot
-          dot -Tsvg out/deps.dot -o out/deps.svg
+            "kind('rust_(library|binary)', deps(//crates/...) intersect //crates/...)" \
+            > out/deps.raw.dot
+
+          # node label の短縮: "//crates/alc-misc:alc-misc" -> "alc-misc"
+          # (頭の // と最後の : までを削除。test ノードは既に query で除外済み。)
+          sed -E 's|//crates/[^:"]*:||g' out/deps.raw.dot > out/deps.dot
+
+          dot -Tsvg out/deps.dot -o out/deps.svg \
+            -Grankdir=TB \
+            -Gconcentrate=true \
+            -Granksep=0.5 \
+            -Gnodesep=0.3 \
+            -Nshape=box \
+            -Nstyle="rounded,filled" \
+            -Nfillcolor="#e8f0fe" \
+            -Nfontname="Helvetica" \
+            -Nfontsize=11 \
+            -Eweight=2
 
       - name: Write metadata
         env:
