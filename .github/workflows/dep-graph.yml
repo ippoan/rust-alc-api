@@ -42,10 +42,20 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y graphviz
 
       - name: Query workspace dependency graph
+        # `deps(//crates/...)` をそのまま流すと rules_rust crate_universe の
+        # external 依存 (数百 crate の transitive deps) が全部出て、生成 DOT が
+        # 巨大化して dot -Tsvg が 6 時間 timeout した (run #28321493713 で実測)。
+        # ここで見たいのは workspace 21 crate 間の **相互依存**だけなので
+        # `intersect //crates/...` で graph を workspace 内 target に絞り、
+        # `--noimplicit_deps` で toolchain 等の暗黙依存も除外する。
         run: |
           set -euo pipefail
           mkdir -p out
-          bazel query --output=graph 'deps(//crates/...)' > out/deps.dot
+          bazel query \
+            --noimplicit_deps \
+            --output=graph \
+            'deps(//crates/...) intersect //crates/...' \
+            > out/deps.dot
           dot -Tsvg out/deps.dot -o out/deps.svg
 
       - name: Write metadata
