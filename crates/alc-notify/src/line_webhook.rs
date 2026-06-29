@@ -156,8 +156,11 @@ async fn find_config_by_signature(
         private_key_encrypted: Option<String>,
     }
 
+    // #434: SECURITY DEFINER 関数で RLS をバイパスして列挙する。生クエリだと未認証パスで
+    // `app.current_tenant_id` が '' のとき RLS の `''::UUID` キャストが 500 する (072/074 の
+    // lookup_line_config_by_channel と同じ認証前アクセス用関数、migration 117)。
     let configs: Vec<ConfigRow> = sqlx::query_as(
-        "SELECT tenant_id, channel_id, channel_secret_encrypted, key_id, private_key_encrypted FROM alc_api.notify_line_configs WHERE enabled = TRUE",
+        "SELECT tenant_id, channel_id, channel_secret_encrypted, key_id, private_key_encrypted FROM alc_api.list_enabled_line_configs()",
     )
     .fetch_all(pool)
     .await
