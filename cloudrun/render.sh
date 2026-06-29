@@ -142,6 +142,8 @@ emit_env_backend() {
               value: "alc-fcm"
             - name: STAGING_MODE
               value: "$( [[ "$ENV" == "staging" ]] && echo "true" || echo "false" )"
+            - name: INTERNAL_AUTH_TRUST_OIDC
+              value: "$( [[ "$ENV" == "staging" ]] && echo "1" || echo "0" )"
             - name: RUST_LOG
               value: "info"
 YAML
@@ -507,6 +509,17 @@ if [[ "$ENV" == "staging" && "$SERVICE" != "gateway" ]]; then
     run.googleapis.com/launch-stage: BETA"
 fi
 
+# #434 Phase D 準備: backend に custom audience alc-api-internal を許可する。
+# allUsers 削除後の lockdown で auth-worker が aud=alc-api-internal の OIDC token を
+# mint して invoker 認証する経路に必要 (public のままなら Cloud Run IAM 非強制で無害)。
+# step 1 では INTERNAL_AUTH_TRUST_OIDC で app 側が JWKS 自前検証するため必須ではないが、
+# lockdown 本flip 時の churn を減らすため staging backend のみ先行投入する。
+CUSTOM_AUDIENCES=""
+if [[ "$ENV" == "staging" && "$SERVICE" == "backend" ]]; then
+  CUSTOM_AUDIENCES="
+    run.googleapis.com/custom-audiences: '[\"alc-api-internal\"]'"
+fi
+
 cat <<YAML
 apiVersion: serving.knative.dev/v1
 kind: Service
@@ -514,7 +527,7 @@ metadata:
   name: ${SERVICE_NAME}
   labels:
     cloud.googleapis.com/location: ${REGION}
-  annotations:${LAUNCH_STAGE}
+  annotations:${LAUNCH_STAGE}${CUSTOM_AUDIENCES}
     run.googleapis.com/ingress: ${INGRESS}
 spec:
   template:
