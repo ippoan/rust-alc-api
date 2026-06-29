@@ -3,14 +3,21 @@ pub use crate::middleware::{AuthUser, TenantId};
 use axum::{extract::Request, http::StatusCode, middleware::Next, response::Response, Extension};
 use uuid::Uuid;
 
-use crate::auth_jwt::{verify_internal_oidc_aud, verify_internal_token, JwtSecret};
+use crate::auth_google::GoogleTokenVerifier;
+use crate::auth_jwt::{verify_internal_token, JwtSecret};
 
-/// lockdown (`allUsers` 削除) 後に internal-auth の OIDC 経路を有効化するフラグ
+/// lockdown (`allUsers` 削除) 後に internal-auth の OIDC 経路を有効化する設定
 /// (Refs #434 Phase D)。`require_internal_jwt` 配下に Extension で注入する。
-/// `true` の時だけ Google OIDC (aud=alc-api-internal) を受理 (それまでは HS256 のみ = 非破壊)。
-/// app 配線側で `INTERNAL_AUTH_TRUST_OIDC` env から解決する (Extension 注入なのでテストは決定的)。
-#[derive(Clone, Copy, Debug)]
-pub struct InternalOidcTrust(pub bool);
+/// `enabled` が true の時だけ Google OIDC (aud=alc-api-internal) を **署名検証して**受理する
+/// (それまでは HS256 のみ = 非破壊)。`verifier` は `client_id=alc-api-internal` で構築した
+/// `GoogleTokenVerifier` で、enabled に関わらず常時構築する (= 配線を分岐レスにし coverage を
+/// 100% に保つ。enabled=false の間は未使用)。app 配線側で `INTERNAL_AUTH_TRUST_OIDC` env から
+/// `enabled` を解決する (Extension 注入なのでテストは決定的)。
+#[derive(Clone)]
+pub struct InternalOidcTrust {
+    pub enabled: bool,
+    pub verifier: GoogleTokenVerifier,
+}
 
 /// 内部 API 用 JWT 検証ミドルウェア
 ///
@@ -21,9 +28,9 @@ pub struct InternalOidcTrust(pub bool);
 ///
 /// #434 Phase D の lockdown 移行用に **dual-accept**:
 /// 1. 従来の HS256 internal JWT (`verify_internal_token`) — 移行前/現行。
-/// 2. `INTERNAL_AUTH_TRUST_OIDC=1` の時のみ、Google OIDC (aud=alc-api-internal) を受理
-///    (`verify_internal_oidc_aud`)。署名は Cloud Run IAM が検証済みの前提で aud のみ確認。
-///    flag off の間は完全に dormant (非破壊)。
+/// 2. `InternalOidcTrust.enabled` の時のみ、Google OIDC (aud=alc-api-internal) を
+///    **JWKS で RS256 署名検証**して受理 (`GoogleTokenVerifier::verify_internal_oidc`)。
+///    `enabled=false` の間は完全に dormant (非破壊)。
 pub async fn require_internal_jwt(
     Extension(jwt_secret): Extension<JwtSecret>,
     Extension(oidc_trust): Extension<InternalOidcTrust>,
@@ -35,8 +42,14 @@ pub async fn require_internal_jwt(
     if verify_internal_token(token, &jwt_secret).is_ok() {
         return Ok(next.run(req).await);
     }
-    // 2) lockdown 後の OIDC 経路 (flag gated)。
-    if oidc_trust.0 && verify_internal_oidc_aud(token).is_ok() {
+    // 2) lockdown 後の OIDC 経路 (enabled の時のみ、JWKS で署名検証込み)。
+    if oidc_trust.enabled
+        && oidc_trust
+            .verifier
+            .verify_internal_oidc(token)
+            .await
+            .is_ok()
+    {
         return Ok(next.run(req).await);
     }
     tracing::warn!("internal JWT verification failed");
@@ -261,14 +274,35 @@ mod tests {
         app_internal_jwt_with(false)
     }
 
-    fn app_internal_jwt_with(oidc: bool) -> Router {
+    fn app_internal_jwt_with(enabled: bool) -> Router {
         Router::new()
             .route("/i", get(echo_ok))
             .layer(axum_middleware::from_fn(require_internal_jwt))
-            .layer(Extension(InternalOidcTrust(oidc)))
+            .layer(Extension(InternalOidcTrust {
+                enabled,
+                verifier: test_oidc_verifier(),
+            }))
             .layer(Extension(JwtSecret(
                 "test-internal-secret-256-bits!!!".to_string(),
             )))
+    }
+
+    /// test_claims モードの verifier (`verify_internal_oidc("test-valid-token")` が Ok)。
+    fn test_oidc_verifier() -> GoogleTokenVerifier {
+        use crate::auth_google::GoogleClaims;
+        GoogleTokenVerifier::with_test_claims(
+            crate::auth_jwt::INTERNAL_AUD.to_string(),
+            GoogleClaims {
+                sub: "sa-123".to_string(),
+                email: String::new(),
+                name: String::new(),
+                picture: None,
+                email_verified: false,
+                aud: crate::auth_jwt::INTERNAL_AUD.to_string(),
+                iss: "https://accounts.google.com".to_string(),
+                exp: (chrono::Utc::now().timestamp() + 3600) as u64,
+            },
+        )
     }
 
     async fn echo_ok() -> &'static str {
@@ -339,46 +373,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn internal_jwt_oidc_aud_accepted_when_trust_enabled() {
-        // OIDC trust on + aud=alc-api-internal の OIDC token (別 secret 署名 = HS256 不一致) は
-        // 受理される (Cloud Run IAM が署名検証済みの前提、Refs #434 Phase D)。
-        use crate::auth_jwt::create_internal_token;
-        let other = JwtSecret("different-secret-key-256-bits!!".to_string());
-        let token = create_internal_token(&other, "auth-worker", 60).unwrap(); // aud=alc-api-internal
+    async fn internal_jwt_oidc_accepted_when_trust_enabled() {
+        // OIDC verifier 注入 + 署名検証 OK (test_claims モードの "test-valid-token") は受理。
+        // HS256 では通らない token なので OIDC 経路に入る (Refs #434 Phase D)。
         let resp = send(
             app_internal_jwt_with(true),
-            req_with_headers("/i", &[("Authorization", &format!("Bearer {token}"))]),
+            req_with_headers("/i", &[("Authorization", "Bearer test-valid-token")]),
         )
         .await;
         assert_eq!(resp.status(), StatusCode::OK);
     }
 
     #[tokio::test]
-    async fn internal_jwt_oidc_wrong_aud_rejected_when_trust_enabled() {
-        // OIDC trust on でも aud が alc-api-internal でなければ拒否 (confused-deputy 防止)。
-        use crate::auth_jwt::create_access_token;
-        use crate::models::User;
-        let secret = JwtSecret("test-internal-secret-256-bits!!!".to_string());
-        let user = User {
-            id: Uuid::new_v4(),
-            tenant_id: Uuid::new_v4(),
-            google_sub: Some("g".to_string()),
-            lineworks_id: None,
-            line_user_id: None,
-            email: "u@e.com".to_string(),
-            name: "u".to_string(),
-            role: "admin".to_string(),
-            username: None,
-            password_hash: None,
-            refresh_token_hash: None,
-            refresh_token_expires_at: None,
-            created_at: chrono::Utc::now(),
-        };
-        // ユーザー JWT は aud を持たない → HS256 でも OIDC でも弾かれる。
-        let token = create_access_token(&user, &secret, None).unwrap();
+    async fn internal_jwt_oidc_rejected_when_signature_invalid() {
+        // OIDC verifier 注入でも署名検証に失敗する token は拒否 (署名検証は無効化していない)。
         let resp = send(
             app_internal_jwt_with(true),
-            req_with_headers("/i", &[("Authorization", &format!("Bearer {token}"))]),
+            req_with_headers("/i", &[("Authorization", "Bearer not-a-valid-token")]),
         )
         .await;
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
