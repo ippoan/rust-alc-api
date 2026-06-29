@@ -14,10 +14,12 @@ pub fn is_public_route(path: &str) -> bool {
         || api_path.starts_with("/devices/register/status/")
         || api_path.starts_with("/devices/register/claim")
         || api_path.starts_with("/staging/")
-        || api_path.starts_with("/notify/line-webhook")
+        || api_path.starts_with("/notify/line/webhook")
         || api_path.starts_with("/notify/read/")
         || api_path.starts_with("/access-requests")
-        || api_path.starts_with("/trouble/schedules/") && api_path.ends_with("/fire")
+    // #434 lockdown: trouble schedule fire は internal 経路 (/api/internal/trouble/...) に移動。
+    // LINE webhook も internal 版を併設 (dual-mount)。internal 経路は public ではないので
+    // ここには列挙しない (gateway は元の Authorization=OIDC をそのまま backend へ forward)。
 }
 
 #[cfg(test)]
@@ -51,17 +53,12 @@ mod tests {
         assert!(is_public_route("/api/staging/export"));
         assert!(is_public_route("/api/staging/import"));
 
-        // notify public
-        assert!(is_public_route("/api/notify/line-webhook"));
+        // notify public (LINE webhook は実パス slash 区切り)
+        assert!(is_public_route("/api/notify/line/webhook"));
         assert!(is_public_route("/api/notify/read/abc"));
 
         // access-requests (public POST)
         assert!(is_public_route("/api/access-requests"));
-
-        // trouble schedule fire (Cloud Tasks callback)
-        assert!(is_public_route(
-            "/api/trouble/schedules/550e8400-e29b-41d4-a716-446655440000/fire"
-        ));
     }
 
     #[test]
@@ -87,5 +84,15 @@ mod tests {
         assert!(!is_public_route("/api/trouble/tickets"));
         assert!(!is_public_route("/api/trouble/notification-prefs"));
         assert!(!is_public_route("/api/trouble/schedules"));
+
+        // #434 lockdown: schedule fire は internal 化 → public ではない
+        assert!(!is_public_route(
+            "/api/trouble/schedules/550e8400-e29b-41d4-a716-446655440000/fire"
+        ));
+        // internal 経路は public 扱いしない (gateway は OIDC をそのまま forward)
+        assert!(!is_public_route("/api/internal/notify/line/webhook"));
+        assert!(!is_public_route(
+            "/api/internal/trouble/schedules/550e8400-e29b-41d4-a716-446655440000/fire"
+        ));
     }
 }

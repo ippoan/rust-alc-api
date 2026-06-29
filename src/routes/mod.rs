@@ -97,6 +97,8 @@ pub fn router() -> Router<AppState> {
     let internal_protected = Router::new()
         .merge(notify_lineworks_channels::internal_router())
         .merge(notify_viewer::internal_router())
+        .merge(notify_line_webhook::internal_router())
+        .merge(trouble_schedules::internal_fire_router())
         .merge(health_canary::internal_router())
         .merge(auth::internal_router())
         .layer(axum_middleware::from_fn(require_internal_jwt))
@@ -187,8 +189,9 @@ pub fn router() -> Router<AppState> {
         .merge(notify_read_tracker::public_router())
         .merge(notify_viewer::public_router())
         .merge(access_requests::public_router())
-        .merge(dtako_tickets::public_close_router())
-        .merge(trouble_schedules::fire_router());
+        .merge(dtako_tickets::public_close_router());
+    // #434 lockdown: trouble schedule fire は internal_protected へ移動
+    // (`/api/internal/trouble/schedules/{id}/fire`)。bare public 経路は廃止。
 
     Router::new()
         .merge(public_routes)

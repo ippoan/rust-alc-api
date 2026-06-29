@@ -112,9 +112,11 @@ async fn main() {
         .allow_methods(Any)
         .allow_headers(Any);
 
+    // #434 lockdown: schedule fire は backend monolith の internal_protected
+    // (`/api/internal/trouble/schedules/{id}/fire`, require_internal_jwt) に集約。
+    // gateway は `/api/internal/*` を backend へ振るため trouble-api では mount しない。
     let app = Router::new()
         .route("/health", axum::routing::get(|| async { "ok" }))
-        .merge(alc_trouble::schedules::fire_router())
         .merge(tenant_protected)
         .with_state(state)
         .layer(axum::extract::DefaultBodyLimit::max(20 * 1024 * 1024)) // 20MB
