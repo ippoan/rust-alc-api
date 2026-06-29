@@ -1,6 +1,6 @@
 ---
 name: rust-alc-api-map
-generated-from: rust-alc-api:786c7704e7211c64750043a7f7f5518acfbdbdce
+generated-from: rust-alc-api:0ddb0d8c40f3f2a48552cff821e4d72267181719
 paths: [crates/, src/, migrations/]
 description: rust-alc-api (アルコールチェッカー基盤の Rust/Axum Cargo workspace — 13 domain crate + gateway/tenko/carins/dtako/trouble の複数バイナリ、PostgreSQL+RLS、Cloud Run) の構造ナビゲーション。どの crate に何のルートがあるか / monolith(rust-alc-api) と per-domain API + gateway の二系統 / RLS・migration・deploy/release 分離の gotcha を 1 枚にまとめる。トリガー:「rust-alc-api」「alc-api」「alc-notify」「alc-tenko」「alc-trouble」「alc-carins」「alc-dtako」「gateway」「tenko-api」「carins-api」「dtako-api」「trouble-api」「RLS テナント」「sqlx migration」「ts-rs」「Release Wave」「Bazel」等。
 ---
@@ -49,7 +49,10 @@ monolith と per-domain API は同じ domain crate (`alc-tenko` 等) を共有 �
   `.nest("/api", rust_alc_api::routes::router())`。背景 task: 60s ごと `check_overdue_schedules`。
 - **router 本体**: `src/routes/mod.rs` — 各 domain crate のルートを re-export し `router()` で結線。
   middleware: `require_tenant_header` (tenant/admin 共通、注入 identity 信頼) / `require_internal_jwt`
-  (auth-worker→internal ingest、aud=alc-api-internal) / `require_internal_shared_secret`
+  (auth-worker→internal ingest、aud=alc-api-internal。**#434 Phase D で HS256 / Google OIDC の
+  dual-accept 化**: `INTERNAL_AUTH_TRUST_OIDC=1` (`InternalOidcTrust` Extension) の時のみ
+  `verify_internal_oidc_aud` で OIDC を受理、署名は Cloud Run IAM が検証済み前提で aud のみ確認。
+  flag off は HS256 のみ = 非破壊) / `require_internal_shared_secret`
   (email-receiver→`/api/dtako/tickets`)。
   **#434 で monolith のローカル JWT 検証を撤去**: 旧 `require_jwt` / `require_tenant` (bare X-Tenant-ID
   フォールバック) / `TenantProxySecret` gate (#437) / 未配線の `require_tenant_or_device` (#436、device-token)
