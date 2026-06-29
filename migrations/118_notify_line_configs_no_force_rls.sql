@@ -1,0 +1,19 @@
+-- LINE webhook 署名照合 500 の真因修正 (Refs #434, follow-up to migration 117)
+--
+-- 117 で SECURITY DEFINER 関数 `list_enabled_line_configs()` を入れたが、072 で
+-- `FORCE ROW LEVEL SECURITY` が有効なため **テーブル所有者 (= SECURITY DEFINER 関数の
+-- 実行ロール) にも RLS が適用され**、未認証 webhook パスの空 tenant context
+-- (`app.current_tenant_id = ''`) で RLS ポリシー `current_setting(...)::UUID` が
+-- '' を uuid キャストして 500 し続けていた (Cloud Run ログ: alc_notify::line_webhook
+-- "invalid input syntax for type uuid")。
+--
+-- FORCE を外すと、所有者として実行される SECURITY DEFINER 関数
+-- (`list_enabled_line_configs` / `lookup_line_config_by_channel`) が RLS をバイパスして
+-- 全テナントの enabled config を列挙できる (= 認証前アクセスの本来の意図)。
+-- `devices` テーブルは元から FORCE 無しで同じ SECURITY DEFINER パターンが機能している。
+--
+-- app ロール (`alc_api_app`, NOBYPASSRLS, テーブル非所有者) には RLS が引き続き
+-- 適用されるため、通常の tenant スコープ CRUD のテナント分離は維持される
+-- (FORCE は所有者コンテキストにのみ影響し、本テーブルの所有者コンテキストは上記
+-- pre-auth SECURITY DEFINER 関数だけ)。
+ALTER TABLE alc_api.notify_line_configs NO FORCE ROW LEVEL SECURITY;
