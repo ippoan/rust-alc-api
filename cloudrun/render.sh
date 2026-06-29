@@ -509,14 +509,23 @@ if [[ "$ENV" == "staging" && "$SERVICE" != "gateway" ]]; then
     run.googleapis.com/launch-stage: BETA"
 fi
 
-# #434 Phase D: backend に custom audience alc-api-internal を許可する。
-# allUsers 削除後の lockdown で auth-worker が aud=alc-api-internal の OIDC token を
-# mint して invoker 認証する経路に必要 (public のままなら Cloud Run IAM 非強制で無害)。
-# staging で実証済み、prod flip に向けて staging/prod 両 env の backend に投入する。
+# #434 Phase D: backend に custom audience を許可する (allUsers 削除後の lockdown 用)。
+#   - `alc-api-internal`: /alc-internal-proxy が internal route を叩く時の aud。両 env 共通。
+#   - `<ALC_API_ORIGIN>`: /alc-proxy がデータ API を叩く時の aud (= auth-worker の
+#     ALC_API_ORIGIN を mint)。prod は **カスタムドメイン** https://alc-api.ippoan.org
+#     を使うため、Cloud Run IAM の default audience (run.app URL) では受理されず
+#     custom-audiences への明示登録が必須。staging は run.app URL = default audience
+#     なので登録不要 (alc-api-internal だけで足りる)。
+# public のままなら IAM 非強制で無害。
 CUSTOM_AUDIENCES=""
 if [[ "$SERVICE" == "backend" ]]; then
+  if [[ "$ENV" == "staging" ]]; then
+    AUDS='["alc-api-internal"]'
+  else
+    AUDS='["alc-api-internal","https://alc-api.ippoan.org"]'
+  fi
   CUSTOM_AUDIENCES="
-    run.googleapis.com/custom-audiences: '[\"alc-api-internal\"]'"
+    run.googleapis.com/custom-audiences: '${AUDS}'"
 fi
 
 cat <<YAML
