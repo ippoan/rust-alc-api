@@ -50,8 +50,9 @@ monolith と per-domain API は同じ domain crate (`alc-tenko` 等) を共有 �
 - **router 本体**: `src/routes/mod.rs` — 各 domain crate のルートを re-export し `router()` で結線。
   middleware: `require_tenant_header` (tenant/admin 共通、注入 identity 信頼) / `require_internal_jwt`
   (auth-worker→internal ingest、aud=alc-api-internal。**#434 Phase D で HS256 / Google OIDC の
-  dual-accept 化**: `INTERNAL_AUTH_TRUST_OIDC=1` (`InternalOidcTrust` Extension) の時のみ
-  `verify_internal_oidc_aud` で OIDC を受理、署名は Cloud Run IAM が検証済み前提で aud のみ確認。
+  dual-accept 化**: `InternalOidcTrust(Some(verifier))` Extension (env `INTERNAL_AUTH_TRUST_OIDC=1`
+  で注入) の時のみ `GoogleTokenVerifier::verify_internal_oidc` が JWKS で RS256 署名検証 +
+  iss + aud=alc-api-internal + exp して OIDC を受理 (Cloud Run IAM に加えた app 層 defense-in-depth)。
   flag off は HS256 のみ = 非破壊) / `require_internal_shared_secret`
   (email-receiver→`/api/dtako/tickets`)。
   **#434 で monolith のローカル JWT 検証を撤去**: 旧 `require_jwt` / `require_tenant` (bare X-Tenant-ID

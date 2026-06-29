@@ -162,6 +162,19 @@ impl GoogleTokenVerifier {
 
     /// Google ID トークンを検証し、クレームを返す
     pub async fn verify(&self, id_token: &str) -> Result<GoogleClaims, VerifyError> {
+        let claims = self.verify_claims(id_token).await?;
+
+        // email_verified チェック (human Google Sign-In 用)。
+        if !claims.email_verified {
+            return Err(VerifyError::EmailNotVerified);
+        }
+
+        Ok(claims)
+    }
+
+    /// 署名 (JWKS RS256) + `iss` (Google) + `aud` (client_id / extra) + `exp` を検証して
+    /// claims を返す。`email_verified` は確認しない (machine token = SA OIDC でも通すため)。
+    async fn verify_claims(&self, id_token: &str) -> Result<GoogleClaims, VerifyError> {
         // テストモード: 固定 claims を返す
         if let Some(ref claims) = self.test_claims {
             if id_token == "test-valid-token" {
@@ -181,7 +194,7 @@ impl GoogleTokenVerifier {
         let decoding_key = DecodingKey::from_rsa_components(&key.n, &key.e)
             .map_err(|_| VerifyError::InvalidKey)?;
 
-        // 検証パラメータ
+        // 検証パラメータ (RS256 のみ = alg confusion 防止)
         let mut validation = Validation::new(Algorithm::RS256);
         validation.set_issuer(&[GOOGLE_ISSUER, "accounts.google.com"]);
         let mut audiences: Vec<&str> = vec![&self.client_id];
@@ -197,14 +210,17 @@ impl GoogleTokenVerifier {
                 VerifyError::InvalidToken
             })?;
 
-        let claims = token_data.claims;
+        Ok(token_data.claims)
+    }
 
-        // email_verified チェック
-        if !claims.email_verified {
-            return Err(VerifyError::EmailNotVerified);
-        }
-
-        Ok(claims)
+    /// lockdown (`allUsers` 削除) 後の internal-auth OIDC を **暗号学的に検証**する
+    /// (Refs #434 Phase D)。`client_id` を `alc-api-internal` にした verifier に対し、
+    /// Google JWKS で RS256 署名・`iss=accounts.google.com`・`aud=alc-api-internal`・`exp` を
+    /// 検証する。`email_verified` は要求しない (auth-worker が mint する SA machine token は
+    /// email を持たないため)。Cloud Run IAM 網層に加えた app 層の defense-in-depth で、
+    /// IAM 誤設定時も署名なしトークンを受理しない。
+    pub async fn verify_internal_oidc(&self, id_token: &str) -> Result<(), VerifyError> {
+        self.verify_claims(id_token).await.map(|_| ())
     }
 
     /// キャッシュから kid に一致するキーを検索
@@ -276,6 +292,7 @@ pub enum VerifyError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::auth_jwt::INTERNAL_AUD;
     use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
     use jsonwebtoken::{encode, EncodingKey, Header};
     use rsa::pkcs1::EncodeRsaPrivateKey;
@@ -470,6 +487,88 @@ mod tests {
         let verifier = GoogleTokenVerifier::new("cid".into(), "csec".into());
         let result = verifier.verify("not-a-jwt").await;
         assert!(matches!(result, Err(VerifyError::InvalidToken)));
+    }
+
+    // --- verify_internal_oidc (Refs #434 Phase D) ---
+
+    #[tokio::test]
+    async fn test_verify_internal_oidc_test_claims_ok() {
+        // test_claims モード: "test-valid-token" は Ok。
+        let v = GoogleTokenVerifier::with_test_claims(
+            INTERNAL_AUD.to_string(),
+            test_claims(INTERNAL_AUD),
+        );
+        assert!(v.verify_internal_oidc("test-valid-token").await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_verify_internal_oidc_test_claims_reject() {
+        let v = GoogleTokenVerifier::with_test_claims(
+            INTERNAL_AUD.to_string(),
+            test_claims(INTERNAL_AUD),
+        );
+        assert!(matches!(
+            v.verify_internal_oidc("other-token").await,
+            Err(VerifyError::InvalidToken)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_verify_internal_oidc_accepts_machine_token_without_email() {
+        // SA machine token (email_verified=false) も署名検証 OK なら受理される
+        // (verify() なら EmailNotVerified で弾かれるが verify_internal_oidc は email を見ない)。
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let server = MockServer::start().await;
+        std::env::set_var("GOOGLE_JWKS_URL", format!("{}/jwks", server.uri()));
+
+        let key = test_key();
+        let (n, e) = (&key.n, &key.e);
+        let mut claims = test_claims(INTERNAL_AUD);
+        claims.email = String::new();
+        claims.email_verified = false; // machine token
+        let token = create_test_jwt(&claims, TEST_KID);
+
+        Mock::given(method("GET"))
+            .and(path("/jwks"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(build_jwks_response(n, e)))
+            .mount(&server)
+            .await;
+
+        let verifier = GoogleTokenVerifier::new(INTERNAL_AUD.to_string(), String::new());
+        let result = verifier.verify_internal_oidc(&token).await;
+        assert!(result.is_ok());
+
+        // 同じ machine token を verify() に通すと email_verified=false で弾かれる (対比)。
+        assert!(matches!(
+            verifier.verify(&token).await,
+            Err(VerifyError::EmailNotVerified)
+        ));
+
+        std::env::remove_var("GOOGLE_JWKS_URL");
+    }
+
+    #[tokio::test]
+    async fn test_verify_internal_oidc_wrong_aud_rejected() {
+        // aud が alc-api-internal でない署名済 token は拒否 (confused-deputy 防止)。
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let server = MockServer::start().await;
+        std::env::set_var("GOOGLE_JWKS_URL", format!("{}/jwks", server.uri()));
+
+        let key = test_key();
+        let (n, e) = (&key.n, &key.e);
+        let claims = test_claims("https://some-service.a.run.app"); // service-URL aud
+        let token = create_test_jwt(&claims, TEST_KID);
+
+        Mock::given(method("GET"))
+            .and(path("/jwks"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(build_jwks_response(n, e)))
+            .mount(&server)
+            .await;
+
+        let verifier = GoogleTokenVerifier::new(INTERNAL_AUD.to_string(), String::new());
+        assert!(verifier.verify_internal_oidc(&token).await.is_err());
+
+        std::env::remove_var("GOOGLE_JWKS_URL");
     }
 
     #[tokio::test]

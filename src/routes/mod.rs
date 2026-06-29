@@ -74,6 +74,8 @@ pub use alc_trouble::workflow as trouble_workflow;
 
 use axum::{middleware as axum_middleware, Extension, Router};
 
+use crate::auth::google::GoogleTokenVerifier;
+use crate::auth::jwt::INTERNAL_AUD;
 use crate::middleware::auth::{require_internal_jwt, require_tenant_header, InternalOidcTrust};
 use crate::AppState;
 
@@ -98,10 +100,19 @@ pub fn router() -> Router<AppState> {
         .merge(health_canary::internal_router())
         .merge(auth::internal_router())
         .layer(axum_middleware::from_fn(require_internal_jwt))
-        // #434 Phase D: lockdown 後の OIDC dual-accept を有効化するフラグ (env 解決、Extension 注入)。
-        // require_internal_jwt の外側に置き、ハンドラ実行時に Extension を解決できるようにする。
+        // #434 Phase D: lockdown 後の OIDC dual-accept を有効化する設定 (env 解決、Extension 注入)。
+        // INTERNAL_AUTH_TRUST_OIDC=1 の時だけ aud=alc-api-internal の GoogleTokenVerifier を注入し、
+        // require_internal_jwt が JWKS で署名検証して OIDC を受理する。require_internal_jwt の外側に
+        // 置き、ハンドラ実行時に Extension を解決できるようにする。
         .layer(Extension(InternalOidcTrust(
-            std::env::var("INTERNAL_AUTH_TRUST_OIDC").as_deref() == Ok("1"),
+            if std::env::var("INTERNAL_AUTH_TRUST_OIDC").as_deref() == Ok("1") {
+                Some(GoogleTokenVerifier::new(
+                    INTERNAL_AUD.to_string(),
+                    String::new(),
+                ))
+            } else {
+                None
+            },
         )));
 
     // テナント対応ルート — 注入 identity (X-Tenant-ID + 任意 X-User-*) を信頼 (Refs #434)。
