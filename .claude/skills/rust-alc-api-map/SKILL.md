@@ -1,6 +1,6 @@
 ---
 name: rust-alc-api-map
-generated-from: rust-alc-api:0ddb0d8c40f3f2a48552cff821e4d72267181719
+generated-from: rust-alc-api:7df01c5d1682d9291636b3594b2e46e434ce52ef
 paths: [crates/, src/, migrations/]
 description: rust-alc-api (アルコールチェッカー基盤の Rust/Axum Cargo workspace — 13 domain crate + gateway/tenko/carins/dtako/trouble の複数バイナリ、PostgreSQL+RLS、Cloud Run) の構造ナビゲーション。どの crate に何のルートがあるか / monolith(rust-alc-api) と per-domain API + gateway の二系統 / RLS・migration・deploy/release 分離の gotcha を 1 枚にまとめる。トリガー:「rust-alc-api」「alc-api」「alc-notify」「alc-tenko」「alc-trouble」「alc-carins」「alc-dtako」「gateway」「tenko-api」「carins-api」「dtako-api」「trouble-api」「RLS テナント」「sqlx migration」「ts-rs」「Release Wave」「Bazel」等。
 ---
@@ -35,8 +35,8 @@ monolith と per-domain API は同じ domain crate (`alc-tenko` 等) を共有 �
 | `alc-tenko` | 点呼: tenko_call / tenko_records / tenko_schedules / tenko_sessions / tenko_webhooks / daily_health / equipment_failures / health_baselines |
 | `alc-carins` | 車検証(carins): car_inspections / car_inspection_files / carins_files / nfc_tags |
 | `alc-dtako` | デジタコ: dtako_* (csv_proxy / daily_hours / drivers / logs / operations / restraint_report(_pdf) / scraper / tickets / upload / vehicles / work_times / y_time_export / event_classifications) / vehicle_settings_dumps。`dtako_tickets` は email-receiver Worker から SD カードエラー通知メールを起票し F-VOS3020 設定 ZIP DL → QR で close する pipeline (Refs ippoan/email-receiver#1)。tenant_router (JWT) + internal_router (`INTERNAL_SHARED_SECRET` + `X-Tenant-ID`) + public_close_router (`close_token` のみ) の 3 経路 |
-| `alc-trouble` | トラブル管理: tickets / files / workflow / categories / offices / progress_statuses / schedules / tasks / task_types / task_statuses / notifications / notifier / cloud_tasks / lineworks_members |
-| `alc-notify` | LINE/LINE WORKS 配信: recipients / groups / documents / distribute / ingest / line_config / line_webhook / lineworks_* / read_tracker / viewer / email_documents / extract / redact / background_extract / background_redaction |
+| `alc-trouble` | トラブル管理: tickets / files / workflow / categories / offices / progress_statuses / schedules / tasks / task_types / task_statuses / notifications / notifier / cloud_tasks / lineworks_members。**schedule fire は #434 lockdown で internal 化**: `schedules::internal_fire_router` (`/api/internal/trouble/schedules/{id}/fire`, `require_internal_jwt`) を monolith の internal_protected に集約。旧 bare public `fire_router` は撤去 (現状 `cloud_tasks: None` で未配線)。trouble-api サブサービスは fire を mount しない (gateway が `/api/internal/*` を backend へ振るため) |
+| `alc-notify` | LINE/LINE WORKS 配信: recipients / groups / documents / distribute / ingest / line_config / line_webhook / lineworks_* / read_tracker / viewer / email_documents / extract / redact / background_extract / background_redaction。**`line_webhook` は #434 lockdown で internal_router 併設**: `/api/internal/notify/line/webhook` (`require_internal_jwt`、auth-worker の public 受け口が OIDC mint で forward)。署名検証 (全テナント channel secret 照合) は rust 側。`public_router` (`/notify/line/webhook`) は LINE Console URL 切替 + allUsers 削除までの移行期間 dual-mount |
 | `alc-devices` | デバイス登録 (`devices`) |
 | `alc-storage` | StorageBackend trait + R2 / GCS / HttpProxy 実装 |
 | `alc-csv-parser` / `alc-compare` | CSV パース / 比較ロジック |
@@ -64,8 +64,12 @@ monolith と per-domain API は同じ domain crate (`alc-tenko` 等) を共有 �
   (確定アーキ #4807535677、step 3)。テストは `tests/common/mod.rs` の `test_proxy_inject` が proxy 役で
   Bearer JWT → identity ヘッダーに変換し従来テストを無改修で通す。
 - **gateway**: `crates/gateway/src/{main,routes,proxy,auth,config}.rs`。`is_public_route` に
-  列挙された path (health / auth/* / tenko-call register / devices register / staging / notify line-webhook
-  等) は JWT skip でそのまま proxy。
+  列挙された path (health / auth/* / tenko-call register / devices register / staging /
+  `/notify/line/webhook` / notify read / access-requests 等) は JWT skip でそのまま proxy。
+  **#434 lockdown**: trouble schedule fire は public 列挙から外し internal 化、LINE webhook の
+  判定 path も `/notify/line-webhook` (誤) → `/notify/line/webhook` (実パス) に修正。
+  `resolve_backend` は `/api/internal/*` を **dtako_url (fallback backend)** へ振る = internal
+  ルートは monolith backend が処理する。
 
 ## gotcha (CLAUDE.md / README 由来)
 

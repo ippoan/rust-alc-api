@@ -19,6 +19,19 @@ pub fn public_router() -> Router<AppState> {
     Router::new().route("/notify/line/webhook", axum::routing::post(handle_webhook))
 }
 
+/// lockdown 後の経路 (#434)。LINE platform は Google OIDC を付けられないため、auth-worker
+/// の public 受け口 `POST /line/webhook` が raw body + `x-line-signature` を OIDC mint で
+/// `/api/internal/notify/line/webhook` に forward する。署名検証は rust 側で行う
+/// (`handle_webhook` が全テナント channel secret と照合)。`require_internal_jwt` 配下に
+/// mount する。public_router は LINE Developer Console の webhook URL 切替 + allUsers 削除
+/// までの移行期間に残す (dual-mount)。
+pub fn internal_router() -> Router<AppState> {
+    Router::new().route(
+        "/internal/notify/line/webhook",
+        axum::routing::post(handle_webhook),
+    )
+}
+
 #[derive(serde::Deserialize)]
 struct WebhookBody {
     #[allow(dead_code)]

@@ -27,13 +27,17 @@ where
         )
 }
 
-/// Cloud Tasks から呼ばれるルート (認証は別途)
-pub fn fire_router<S>() -> Router<S>
+/// スケジューラ (Cloud Tasks 等) から呼ばれる fire ルートの internal 版 (#434 lockdown)。
+/// `require_internal_jwt` (aud=alc-api-internal) 配下に mount する。スケジューラは Google OIDC を
+/// 直接付けられないため、auth-worker (OIDC mint) 経由で `/api/internal/trouble/schedules/{id}/fire`
+/// を叩く。現状 `cloud_tasks` は未配線 (None) なので caller は居ないが、lockdown 後に経路を
+/// 開けておくための internal mount。bare public は廃止 (IAM + ルート両面で塞ぐ)。
+pub fn internal_fire_router<S>() -> Router<S>
 where
     TroubleState: axum::extract::FromRef<S>,
     S: Clone + Send + Sync + 'static,
 {
-    Router::new().route("/trouble/schedules/{id}/fire", post(fire_schedule))
+    Router::new().route("/internal/trouble/schedules/{id}/fire", post(fire_schedule))
 }
 
 async fn create_schedule(
