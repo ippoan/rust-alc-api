@@ -195,6 +195,31 @@ pub fn verify_internal_token(
     Ok(token_data.claims)
 }
 
+/// lockdown (`allUsers` 削除) 後の OIDC 経路の検証 (Refs #434 Phase D)。
+///
+/// Cloud Run IAM (`--add-custom-audiences=alc-api-internal`) が **Google 署名を検証済み**で
+/// あることを前提に、本関数は `aud == alc-api-internal` と `exp` のみを確認する
+/// (confused-deputy 防止: `/alc-proxy` が mint する service-URL aud の OIDC を弾く)。
+/// 署名検証は IAM 網層が担保するため行わない。**`require_internal_jwt` 側で
+/// `INTERNAL_AUTH_TRUST_OIDC=1` の時だけ本経路に入る** (= lockdown 後限定。それまでは
+/// HS256 の `verify_internal_token` のみ)。
+pub fn verify_internal_oidc_aud(
+    token: &str,
+) -> Result<InternalClaims, jsonwebtoken::errors::Error> {
+    let mut validation = Validation::new(Algorithm::RS256); // Google OIDC は RS256
+                                                            // 署名は IAM が検証済み。alg header check 用に RS256 (本番) と HS256 (テスト) を許可。
+    validation.algorithms = vec![Algorithm::RS256, Algorithm::HS256];
+    validation.insecure_disable_signature_validation();
+    validation.validate_exp = true;
+    validation.set_audience(&[INTERNAL_AUD]);
+    let token_data = decode::<InternalClaims>(
+        token,
+        &DecodingKey::from_secret(b"unused-iam-verifies-signature"),
+        &validation,
+    )?;
+    Ok(token_data.claims)
+}
+
 pub const INTERNAL_AUD: &str = "alc-api-internal";
 
 /// Refresh token を生成し、(raw_token, hash) を返す
@@ -360,6 +385,83 @@ mod tests {
             )
             .unwrap();
             assert!(verify_internal_token(&token, &secret).is_err());
+        });
+    }
+
+    #[test]
+    fn test_internal_oidc_aud_accepts_correct_aud_without_signature() {
+        test_group!("内部JWT");
+        test_case!(
+            "OIDC: aud=alc-api-internal は署名検証なしで受理 (IAM 検証前提)",
+            {
+                use jsonwebtoken::{encode as jwt_encode, EncodingKey, Header};
+                let now = Utc::now();
+                let claims = InternalClaims {
+                    iss: "https://accounts.google.com".to_string(),
+                    aud: INTERNAL_AUD.to_string(),
+                    iat: now.timestamp(),
+                    exp: (now + Duration::seconds(3600)).timestamp(),
+                    env: None,
+                };
+                // verify_internal_token (HS256) では通らない別 secret で署名 → 署名は無視されることを示す。
+                let token = jwt_encode(
+                    &Header::new(Algorithm::HS256),
+                    &claims,
+                    &EncodingKey::from_secret(b"some-other-key-not-shared-secret"),
+                )
+                .unwrap();
+                let got = verify_internal_oidc_aud(&token).unwrap();
+                assert_eq!(got.aud, INTERNAL_AUD);
+            }
+        );
+    }
+
+    #[test]
+    fn test_internal_oidc_aud_rejects_wrong_aud() {
+        test_group!("内部JWT");
+        test_case!(
+            "OIDC: service-URL 等の別 aud は拒否 (confused-deputy 防止)",
+            {
+                use jsonwebtoken::{encode as jwt_encode, EncodingKey, Header};
+                let now = Utc::now();
+                let claims = InternalClaims {
+                    iss: "https://accounts.google.com".to_string(),
+                    aud: "https://rust-alc-api-xxxx.a.run.app".to_string(),
+                    iat: now.timestamp(),
+                    exp: (now + Duration::seconds(3600)).timestamp(),
+                    env: None,
+                };
+                let token = jwt_encode(
+                    &Header::new(Algorithm::HS256),
+                    &claims,
+                    &EncodingKey::from_secret(b"k"),
+                )
+                .unwrap();
+                assert!(verify_internal_oidc_aud(&token).is_err());
+            }
+        );
+    }
+
+    #[test]
+    fn test_internal_oidc_aud_rejects_expired() {
+        test_group!("内部JWT");
+        test_case!("OIDC: 期限切れは拒否", {
+            use jsonwebtoken::{encode as jwt_encode, EncodingKey, Header};
+            let now = Utc::now();
+            let claims = InternalClaims {
+                iss: "https://accounts.google.com".to_string(),
+                aud: INTERNAL_AUD.to_string(),
+                iat: (now - Duration::seconds(7200)).timestamp(),
+                exp: (now - Duration::seconds(3600)).timestamp(),
+                env: None,
+            };
+            let token = jwt_encode(
+                &Header::new(Algorithm::HS256),
+                &claims,
+                &EncodingKey::from_secret(b"k"),
+            )
+            .unwrap();
+            assert!(verify_internal_oidc_aud(&token).is_err());
         });
     }
 
