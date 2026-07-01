@@ -87,10 +87,18 @@ smoke-staging-ingest → drift-check-staging → auto-merge gate という「PR 
 staging deploy 検証」の運用ポリシー・順序・merge gate はそのまま。むしろ staging
 image の build 失敗は CI 前半 (build-image) で早く検出されるようになる。
 
-**実測:**
+**実測 (PR #485、[run 28551859880](https://github.com/ippoan/rust-alc-api/actions/runs/28551859880) vs 旧構成の直前 run [28551174949](https://github.com/ippoan/rust-alc-api/actions/runs/28551174949)):**
 
-- 変更前: deploy leg ~4 分 (3 直列 hop)
-- 変更後: (PR の CI 実測後に記入。見込み ~1.5 分 = deploy-services 1 hop 分)
+- deploy leg (最初の Deploy job 開始 → 最後の Deploy job 完了):
+  **164s → 99s (-65s、40% 削減)**。同日連続 run の比較。queue 遅延が乗る run
+  では旧構成は ~4 分に達していた (staging build 46s + services 1m + hop 間
+  ギャップの実測 screenshot)
+- 新構成では deploy-services と Deploy gateway が同時刻 (+216s) にスタート
+  していることを確認 (並列化が効いている)
+- build-image は staging image 統合 + cold cache で一時的に +10〜55s
+  (backend 142s→197s が最大)。テスト群 (最大 193s) と並列のため critical path
+  への影響は backend の +6s のみ。`<name>-staging` buildx cache と bazel
+  disk-cache (//:migrate) が温まれば縮む見込み
 
 ## 検証済みで「効果薄い / スコープ外」と判断した案 (Refs #482)
 
