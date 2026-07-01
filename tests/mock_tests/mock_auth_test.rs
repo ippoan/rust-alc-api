@@ -20,6 +20,7 @@ use rust_alc_api::db::repository::auth::SsoConfigRow;
 async fn test_require_jwt_invalid_token_returns_401() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockAuthRepository::default());
     let mut state = setup_mock_app_state();
@@ -47,6 +48,7 @@ async fn test_require_jwt_invalid_token_returns_401() {
 async fn test_google_login_existing_user() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let tenant_id = Uuid::new_v4();
     let user = mock_user(tenant_id);
@@ -84,6 +86,7 @@ async fn test_google_login_existing_user() {
 async fn test_google_login_new_user_no_invitation_rejected() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     // return_user = None → no invitation → no domain tenant
     // → 勝手に新テナントを作らず 403 で拒否する (Refs #332)
@@ -111,6 +114,7 @@ async fn test_google_login_new_user_no_invitation_rejected() {
 async fn test_google_login_new_user_via_invitation() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let tenant_id = Uuid::new_v4();
     let mock = Arc::new(MockAuthRepository::default());
@@ -148,6 +152,7 @@ async fn test_google_login_new_user_via_invitation() {
 async fn test_google_login_new_user_via_email_domain() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let tenant_id = Uuid::new_v4();
     let mock = Arc::new(MockAuthRepository::default());
@@ -187,6 +192,7 @@ async fn test_google_login_new_user_via_email_domain() {
 async fn test_google_login_invalid_token() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockAuthRepository::default());
     let mut state = setup_mock_app_state();
@@ -212,6 +218,7 @@ async fn test_google_login_invalid_token() {
 async fn test_google_login_db_error() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockAuthRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
@@ -238,6 +245,7 @@ async fn test_google_login_db_error() {
 async fn test_refresh_token_success() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let tenant_id = Uuid::new_v4();
     let user = mock_user(tenant_id);
@@ -271,6 +279,7 @@ async fn test_refresh_token_success() {
 async fn test_refresh_token_invalid() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     // return_refresh_user = None → user not found → 401
     let mock = Arc::new(MockAuthRepository::default());
@@ -297,6 +306,7 @@ async fn test_refresh_token_invalid() {
 async fn test_refresh_token_db_error() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockAuthRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
@@ -323,6 +333,7 @@ async fn test_refresh_token_db_error() {
 async fn test_me_success() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let tenant_id = Uuid::new_v4();
     let mock = Arc::new(MockAuthRepository::default());
@@ -354,6 +365,7 @@ async fn test_me_success() {
 async fn test_me_unauthorized() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockAuthRepository::default());
     let mut state = setup_mock_app_state();
@@ -378,6 +390,7 @@ async fn test_me_unauthorized() {
 async fn test_logout_success() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let tenant_id = Uuid::new_v4();
     let mock = Arc::new(MockAuthRepository::default());
@@ -405,6 +418,7 @@ async fn test_logout_success() {
 async fn test_logout_unauthorized() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockAuthRepository::default());
     let mut state = setup_mock_app_state();
@@ -429,6 +443,7 @@ async fn test_logout_unauthorized() {
 async fn test_logout_db_error() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let tenant_id = Uuid::new_v4();
     let mock = Arc::new(MockAuthRepository::default());
@@ -457,6 +472,7 @@ async fn test_logout_db_error() {
 async fn test_my_orgs_success() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let tenant_id = Uuid::new_v4();
     let mock = Arc::new(MockAuthRepository::default());
@@ -499,6 +515,7 @@ async fn test_my_orgs_success() {
 async fn test_my_orgs_empty() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let tenant_id = Uuid::new_v4();
     // return_tenant = None → empty organizations
@@ -530,6 +547,7 @@ async fn test_my_orgs_empty() {
 async fn test_my_orgs_db_error() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let tenant_id = Uuid::new_v4();
     let mock = Arc::new(MockAuthRepository::default());
@@ -558,6 +576,7 @@ async fn test_my_orgs_db_error() {
 async fn test_my_orgs_unauthorized() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockAuthRepository::default());
     let mut state = setup_mock_app_state();
@@ -583,6 +602,7 @@ async fn test_my_orgs_unauthorized() {
 async fn test_woff_config_success() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockAuthRepository::default());
     *mock.return_sso_config.lock().unwrap() = Some(SsoConfigRow {
@@ -619,6 +639,7 @@ async fn test_woff_config_success() {
 async fn test_woff_config_not_found() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     // return_sso_config = None → 404
     let mock = Arc::new(MockAuthRepository::default());
@@ -646,6 +667,7 @@ async fn test_woff_config_not_found() {
 async fn test_woff_config_no_woff_id() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockAuthRepository::default());
     *mock.return_sso_config.lock().unwrap() = Some(SsoConfigRow {
@@ -680,6 +702,7 @@ async fn test_woff_config_no_woff_id() {
 async fn test_woff_config_db_error() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockAuthRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
@@ -707,6 +730,7 @@ async fn test_woff_config_db_error() {
 async fn test_woff_config_missing_domain() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockAuthRepository::default());
     let mut state = setup_mock_app_state();
@@ -732,6 +756,7 @@ async fn test_woff_config_missing_domain() {
 async fn test_google_code_login_valid_code() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     // GoogleTokenVerifier in test mode accepts "test-valid-code"
     let mock = Arc::new(MockAuthRepository::default());
@@ -773,6 +798,7 @@ async fn test_google_code_login_valid_code() {
 async fn test_google_code_login_invalid_code() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockAuthRepository::default());
     let mut state = setup_mock_app_state();
@@ -801,6 +827,7 @@ async fn test_google_code_login_invalid_code() {
 async fn test_lineworks_redirect_missing_domain() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     std::env::set_var("OAUTH_STATE_SECRET", "test-state-secret");
 
     let mock = Arc::new(MockAuthRepository::default());
@@ -832,6 +859,7 @@ async fn test_lineworks_redirect_missing_domain() {
 async fn test_lineworks_redirect_sso_not_found() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     std::env::set_var("OAUTH_STATE_SECRET", "test-state-secret");
 
     // return_sso_config = None → 404
@@ -863,6 +891,7 @@ async fn test_lineworks_redirect_sso_not_found() {
 async fn test_lineworks_redirect_success() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     std::env::set_var("OAUTH_STATE_SECRET", "test-state-secret");
 
     let mock = Arc::new(MockAuthRepository::default());
@@ -904,6 +933,7 @@ async fn test_lineworks_redirect_success() {
 async fn test_lineworks_redirect_with_address() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     std::env::set_var("OAUTH_STATE_SECRET", "test-state-secret");
 
     let mock = Arc::new(MockAuthRepository::default());
@@ -943,6 +973,7 @@ async fn test_lineworks_redirect_with_address() {
 async fn test_lineworks_redirect_db_error() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     std::env::set_var("OAUTH_STATE_SECRET", "test-state-secret");
 
     let mock = Arc::new(MockAuthRepository::default());
@@ -974,6 +1005,7 @@ async fn test_lineworks_redirect_db_error() {
 async fn test_google_redirect_success() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     std::env::set_var("OAUTH_STATE_SECRET", "test-state-secret");
 
     let mock = Arc::new(MockAuthRepository::default());
@@ -1007,6 +1039,7 @@ async fn test_google_redirect_success() {
 async fn test_google_redirect_missing_state_secret() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     std::env::remove_var("OAUTH_STATE_SECRET");
 
     let mock = Arc::new(MockAuthRepository::default());
@@ -1073,6 +1106,7 @@ fn encrypt_secret_for_test(plaintext: &str, key_material: &str) -> String {
 async fn test_google_callback_success() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     std::env::set_var("OAUTH_STATE_SECRET", "test-state-secret");
     std::env::set_var("API_ORIGIN", "http://localhost:0");
 
@@ -1129,6 +1163,7 @@ async fn test_google_callback_success() {
 async fn test_google_callback_missing_state_secret() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     std::env::remove_var("OAUTH_STATE_SECRET");
 
     let mock = Arc::new(MockAuthRepository::default());
@@ -1159,6 +1194,7 @@ async fn test_google_callback_missing_state_secret() {
 async fn test_google_callback_invalid_state() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     std::env::set_var("OAUTH_STATE_SECRET", "test-state-secret");
 
     let mock = Arc::new(MockAuthRepository::default());
@@ -1189,6 +1225,7 @@ async fn test_google_callback_invalid_state() {
 async fn test_google_callback_invalid_code() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     std::env::set_var("OAUTH_STATE_SECRET", "test-state-secret");
 
     let mock = Arc::new(MockAuthRepository::default());
@@ -1229,6 +1266,7 @@ async fn test_google_callback_invalid_code() {
 async fn test_google_callback_new_user() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     std::env::set_var("OAUTH_STATE_SECRET", "test-state-secret");
 
     // return_user = None → new user。招待もドメイン一致もないと #332 で 403 に
@@ -1285,6 +1323,7 @@ async fn test_google_callback_new_user() {
 async fn test_lineworks_redirect_missing_state_secret() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     std::env::remove_var("OAUTH_STATE_SECRET");
 
     let mock = Arc::new(MockAuthRepository::default());
@@ -1315,6 +1354,7 @@ async fn test_lineworks_redirect_missing_state_secret() {
 async fn test_lineworks_callback_success() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     let oauth_secret = "test-state-secret";
     std::env::set_var("OAUTH_STATE_SECRET", oauth_secret);
 
@@ -1424,6 +1464,7 @@ async fn test_lineworks_callback_success() {
 async fn test_lineworks_callback_existing_user() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     let oauth_secret = "test-state-secret";
     std::env::set_var("OAUTH_STATE_SECRET", oauth_secret);
 
@@ -1532,6 +1573,7 @@ async fn test_lineworks_callback_existing_user() {
 async fn test_lineworks_callback_missing_state_secret() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     std::env::remove_var("OAUTH_STATE_SECRET");
 
     let mock = Arc::new(MockAuthRepository::default());
@@ -1562,6 +1604,7 @@ async fn test_lineworks_callback_missing_state_secret() {
 async fn test_lineworks_callback_invalid_state() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     std::env::set_var("OAUTH_STATE_SECRET", "test-state-secret");
 
     let mock = Arc::new(MockAuthRepository::default());
@@ -1592,6 +1635,7 @@ async fn test_lineworks_callback_invalid_state() {
 async fn test_lineworks_callback_sso_not_found() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     let oauth_secret = "test-state-secret";
     std::env::set_var("OAUTH_STATE_SECRET", oauth_secret);
 
@@ -1634,6 +1678,7 @@ async fn test_lineworks_callback_sso_not_found() {
 async fn test_lineworks_callback_decrypt_fails() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     let oauth_secret = "test-state-secret";
     std::env::set_var("OAUTH_STATE_SECRET", oauth_secret);
 
@@ -1684,6 +1729,7 @@ async fn test_lineworks_callback_decrypt_fails() {
 async fn test_lineworks_callback_token_exchange_fails() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     let oauth_secret = "test-state-secret";
     std::env::set_var("OAUTH_STATE_SECRET", oauth_secret);
 
@@ -1756,6 +1802,7 @@ async fn test_lineworks_callback_token_exchange_fails() {
 async fn test_lineworks_callback_profile_fetch_fails() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     let oauth_secret = "test-state-secret";
     std::env::set_var("OAUTH_STATE_SECRET", oauth_secret);
 
@@ -1846,6 +1893,7 @@ async fn test_lineworks_callback_profile_fetch_fails() {
 async fn test_lineworks_callback_create_user_fails() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     let oauth_secret = "test-state-secret";
     std::env::set_var("OAUTH_STATE_SECRET", oauth_secret);
 
@@ -1946,6 +1994,7 @@ async fn test_lineworks_callback_create_user_fails() {
 async fn test_woff_auth_success() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let mock_server = wiremock::MockServer::start().await;
     std::env::set_var(
@@ -2007,6 +2056,7 @@ async fn test_woff_auth_success() {
 async fn test_woff_auth_existing_user() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let mock_server = wiremock::MockServer::start().await;
     std::env::set_var(
@@ -2081,6 +2131,7 @@ async fn test_woff_auth_existing_user() {
 async fn test_woff_auth_sso_not_found() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     // return_sso_config = None → 404
     let mock = Arc::new(MockAuthRepository::default());
@@ -2110,6 +2161,7 @@ async fn test_woff_auth_sso_not_found() {
 async fn test_woff_auth_profile_fails() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let mock_server = wiremock::MockServer::start().await;
     std::env::set_var(
@@ -2165,6 +2217,7 @@ async fn test_woff_auth_profile_fails() {
 async fn test_woff_auth_db_error() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockAuthRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
@@ -2194,6 +2247,7 @@ async fn test_woff_auth_db_error() {
 async fn test_google_callback_two_part_domain() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     std::env::set_var("OAUTH_STATE_SECRET", "test-state-secret");
 
     let mock = Arc::new(MockAuthRepository::default());
@@ -2247,6 +2301,7 @@ async fn test_google_callback_two_part_domain() {
 async fn test_google_callback_http_redirect_uri() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     std::env::set_var("OAUTH_STATE_SECRET", "test-state-secret");
 
     let mock = Arc::new(MockAuthRepository::default());
@@ -2303,6 +2358,7 @@ async fn test_google_callback_http_redirect_uri() {
 async fn test_switch_org_success() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let current_tenant_id = Uuid::new_v4();
     let target_tenant_id = Uuid::new_v4();
@@ -2357,6 +2413,7 @@ async fn test_switch_org_success() {
 async fn test_switch_org_user_not_found() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let current_tenant_id = Uuid::new_v4();
     let target_tenant_id = Uuid::new_v4();
@@ -2388,6 +2445,7 @@ async fn test_switch_org_user_not_found() {
 async fn test_switch_org_invalid_uuid() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let tenant_id = Uuid::new_v4();
     let mock = Arc::new(MockAuthRepository::default());
@@ -2416,6 +2474,7 @@ async fn test_switch_org_invalid_uuid() {
 async fn test_switch_org_db_error() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let tenant_id = Uuid::new_v4();
     let target_tenant_id = Uuid::new_v4();
@@ -2447,6 +2506,7 @@ async fn test_switch_org_db_error() {
 async fn test_switch_org_unauthorized() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockAuthRepository::default());
     let mut state = setup_mock_app_state();
@@ -2472,6 +2532,7 @@ async fn test_switch_org_unauthorized() {
 async fn test_line_redirect_success() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     std::env::set_var("OAUTH_STATE_SECRET", "test-state-secret");
     std::env::set_var("LINE_LOGIN_CHANNEL_ID", "test-line-channel-id");
     std::env::set_var("API_ORIGIN", "http://localhost:0");
@@ -2509,6 +2570,7 @@ async fn test_line_redirect_success() {
 async fn test_line_redirect_with_tenant_id() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     std::env::set_var("OAUTH_STATE_SECRET", "test-state-secret");
     std::env::set_var("LINE_LOGIN_CHANNEL_ID", "test-line-channel-id");
     std::env::set_var("API_ORIGIN", "http://localhost:0");
@@ -2547,6 +2609,7 @@ async fn test_line_redirect_with_tenant_id() {
 async fn test_line_redirect_missing_state_secret() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     std::env::remove_var("OAUTH_STATE_SECRET");
     std::env::set_var("LINE_LOGIN_CHANNEL_ID", "test-line-channel-id");
 
@@ -2580,6 +2643,7 @@ async fn test_line_redirect_missing_state_secret() {
 async fn test_line_redirect_missing_channel_id() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     std::env::set_var("OAUTH_STATE_SECRET", "test-state-secret");
     std::env::remove_var("LINE_LOGIN_CHANNEL_ID");
 
@@ -2611,6 +2675,7 @@ async fn test_line_redirect_missing_channel_id() {
 async fn test_line_select_tenant_success() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let tenant_id = Uuid::new_v4();
     let user = User {
@@ -2666,6 +2731,7 @@ async fn test_line_select_tenant_success() {
 async fn test_line_select_tenant_new_user() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let tenant_id = Uuid::new_v4();
 
@@ -2703,6 +2769,7 @@ async fn test_line_select_tenant_new_user() {
 async fn test_line_select_tenant_forbidden() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let tenant_id = Uuid::new_v4();
     let other_tenant_id = Uuid::new_v4();
@@ -2739,6 +2806,7 @@ async fn test_line_select_tenant_forbidden() {
 async fn test_line_select_tenant_db_error() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let tenant_id = Uuid::new_v4();
 
@@ -2771,6 +2839,7 @@ async fn test_line_select_tenant_db_error() {
 async fn test_password_login_success() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let tenant_id = Uuid::new_v4();
 
@@ -2837,6 +2906,7 @@ async fn test_password_login_success() {
 async fn test_password_login_wrong_password() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let tenant_id = Uuid::new_v4();
 
@@ -2895,6 +2965,7 @@ async fn test_password_login_wrong_password() {
 async fn test_password_login_user_not_found() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let tenant_id = Uuid::new_v4();
 
@@ -2927,6 +2998,7 @@ async fn test_password_login_user_not_found() {
 async fn test_password_login_no_hash() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let tenant_id = Uuid::new_v4();
 
@@ -2977,6 +3049,7 @@ async fn test_password_login_no_hash() {
 async fn test_password_login_invalid_org_id() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockAuthRepository::default());
     let mut state = setup_mock_app_state();
@@ -3006,6 +3079,7 @@ async fn test_password_login_invalid_org_id() {
 async fn test_password_login_db_error() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let tenant_id = Uuid::new_v4();
 
@@ -3083,6 +3157,7 @@ async fn test_line_callback_existing_user() {
     std::env::set_var("LINE_LOGIN_CHANNEL_SECRET", "s");
     std::env::set_var("LINE_API_BASE", mock_server.uri());
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let p = lineworks::state::StatePayload {
         redirect_uri: "https://e.com/cb".into(),
@@ -3148,6 +3223,7 @@ async fn test_line_callback_zero_tenants() {
     std::env::set_var("LINE_LOGIN_CHANNEL_SECRET", "s");
     std::env::set_var("LINE_API_BASE", mock_server.uri());
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let p = lineworks::state::StatePayload {
         redirect_uri: "https://e.com/cb".into(),
@@ -3219,6 +3295,7 @@ async fn test_line_callback_one_tenant() {
     std::env::set_var("LINE_LOGIN_CHANNEL_SECRET", "s");
     std::env::set_var("LINE_API_BASE", mock_server.uri());
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let p = lineworks::state::StatePayload {
         redirect_uri: "https://e.com/cb".into(),
@@ -3289,6 +3366,7 @@ async fn test_line_callback_multiple_tenants() {
     std::env::set_var("LINE_LOGIN_CHANNEL_SECRET", "s");
     std::env::set_var("LINE_API_BASE", mock_server.uri());
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let p = lineworks::state::StatePayload {
         redirect_uri: "https://e.com/s".into(),
@@ -3330,6 +3408,7 @@ async fn test_line_callback_invalid_state_param() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("OAUTH_STATE_SECRET", "s");
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     let state = setup_mock_app_state();
     let base_url = crate::common::spawn_test_server(state).await;
     let client = reqwest::Client::builder()
@@ -3368,6 +3447,7 @@ async fn test_line_callback_token_exchange_fails() {
     std::env::set_var("LINE_LOGIN_CHANNEL_SECRET", "s");
     std::env::set_var("LINE_API_BASE", mock_server.uri());
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let p = lineworks::state::StatePayload {
         redirect_uri: "https://e.com/cb".into(),
@@ -3423,6 +3503,7 @@ async fn test_line_callback_profile_fetch_fails() {
     std::env::set_var("LINE_LOGIN_CHANNEL_SECRET", "s");
     std::env::set_var("LINE_API_BASE", mock_server.uri());
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let p = lineworks::state::StatePayload {
         redirect_uri: "https://e.com/cb".into(),
@@ -3458,6 +3539,7 @@ async fn test_line_callback_missing_channel_id() {
     let ss = "ss-ch-missing";
     std::env::set_var("OAUTH_STATE_SECRET", ss);
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     std::env::remove_var("LINE_LOGIN_CHANNEL_ID");
     std::env::remove_var("LINE_LOGIN_CHANNEL_SECRET");
 
@@ -3524,6 +3606,7 @@ async fn test_line_callback_qr_invite() {
     std::env::set_var("LINE_LOGIN_CHANNEL_SECRET", "s");
     std::env::set_var("LINE_API_BASE", mock_server.uri());
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let p = lineworks::state::StatePayload {
         redirect_uri: "https://e.com/cb".into(),

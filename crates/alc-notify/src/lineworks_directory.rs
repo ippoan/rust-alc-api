@@ -28,12 +28,10 @@ pub struct DirectoryUser {
 }
 
 fn encryption_key() -> Result<String, (StatusCode, Json<serde_json::Value>)> {
-    std::env::var("SSO_ENCRYPTION_KEY")
-        .or_else(|_| std::env::var("JWT_SECRET"))
-        .map_err(|_| {
-            tracing::error!("SSO_ENCRYPTION_KEY or JWT_SECRET not set");
-            internal_error("encryption_key_missing")
-        })
+    std::env::var("SSO_ENCRYPTION_KEY").map_err(|_| {
+        tracing::error!("SSO_ENCRYPTION_KEY not set");
+        internal_error("encryption_key_missing")
+    })
 }
 
 fn internal_error(msg: &str) -> (StatusCode, Json<serde_json::Value>) {
