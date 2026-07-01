@@ -19,6 +19,7 @@ async fn test_list_configs_success() {
     test_case!("管理者は空のリストを取得できる", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
         std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
         let mock = Arc::new(MockBotAdminRepository::default());
         let mut state = setup_mock_app_state();
@@ -47,6 +48,7 @@ async fn test_list_configs_forbidden_for_viewer() {
     test_case!("viewer ロールは FORBIDDEN", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
         std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
         let mock = Arc::new(MockBotAdminRepository::default());
         let mut state = setup_mock_app_state();
@@ -73,6 +75,7 @@ async fn test_list_configs_db_error() {
     test_case!("DB エラー時に 500 を返す", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
         std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
         let mock = Arc::new(MockBotAdminRepository::default());
         mock.fail_next.store(true, Ordering::SeqCst);
@@ -104,6 +107,7 @@ async fn test_create_config_success() {
     test_case!("新規作成が成功する", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
         std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
         let mock = Arc::new(MockBotAdminRepository::default());
         let mut state = setup_mock_app_state();
@@ -146,6 +150,7 @@ async fn test_create_config_with_explicit_provider_and_disabled() {
     test_case!("provider を明示指定、enabled=false で作成", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
         std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
         let mock = Arc::new(MockBotAdminRepository::default());
         let mut state = setup_mock_app_state();
@@ -183,6 +188,7 @@ async fn test_create_config_forbidden_for_viewer() {
     test_case!("viewer ロールは FORBIDDEN", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
         std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
         let mock = Arc::new(MockBotAdminRepository::default());
         let mut state = setup_mock_app_state();
@@ -215,6 +221,7 @@ async fn test_create_config_db_error() {
     test_case!("DB エラー時に 500 を返す", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
         std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
         let mock = Arc::new(MockBotAdminRepository::default());
         mock.fail_next.store(true, Ordering::SeqCst);
@@ -252,6 +259,7 @@ async fn test_update_config_success() {
     test_case!("既存設定の更新が成功する", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
         std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
         let mock = Arc::new(MockBotAdminRepository::default());
         let mut state = setup_mock_app_state();
@@ -291,6 +299,7 @@ async fn test_update_config_with_secrets() {
     test_case!("client_secret と private_key を同時に更新", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
         std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
         let mock = Arc::new(MockBotAdminRepository::default());
         let mut state = setup_mock_app_state();
@@ -329,6 +338,7 @@ async fn test_create_config_with_bot_secret() {
         {
             let _guard = crate::common::ENV_LOCK.lock().unwrap();
             std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+            std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
             let mock = Arc::new(MockBotAdminRepository::default());
             let mut state = setup_mock_app_state();
@@ -365,6 +375,7 @@ async fn test_update_config_with_bot_secret() {
         {
             let _guard = crate::common::ENV_LOCK.lock().unwrap();
             std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+            std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
             let mock = Arc::new(MockBotAdminRepository::default());
             let mut state = setup_mock_app_state();
@@ -401,6 +412,7 @@ async fn test_update_config_with_empty_bot_secret_skipped() {
     test_case!("空文字の bot_secret は更新スキップ", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
         std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
         let mock = Arc::new(MockBotAdminRepository::default());
         let mut state = setup_mock_app_state();
@@ -438,6 +450,7 @@ async fn test_create_config_with_bot_secret_update_fails() {
         {
             let _guard = crate::common::ENV_LOCK.lock().unwrap();
             std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+            std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
             // create_config は成功させ、update_bot_secret だけを失敗させる
             let mock = Arc::new(MockBotAdminRepository::default());
@@ -475,6 +488,7 @@ async fn test_update_bot_secret_db_error() {
     test_case!("update_bot_secret 失敗時に 500", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
         std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
         // fail_next を 1 回だけ true → 最初の呼び出しが失敗。
         // update_config よりも先に update_bot_secret が呼ばれることを期待。
@@ -515,6 +529,7 @@ async fn test_update_config_with_empty_secrets() {
         {
             let _guard = crate::common::ENV_LOCK.lock().unwrap();
             std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+            std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
             let mock = Arc::new(MockBotAdminRepository::default());
             let mut state = setup_mock_app_state();
@@ -552,6 +567,7 @@ async fn test_update_config_invalid_uuid() {
     test_case!("不正な UUID は BAD_REQUEST", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
         std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
         let mock = Arc::new(MockBotAdminRepository::default());
         let mut state = setup_mock_app_state();
@@ -585,6 +601,7 @@ async fn test_update_config_forbidden_for_viewer() {
     test_case!("viewer ロールは FORBIDDEN", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
         std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
         let mock = Arc::new(MockBotAdminRepository::default());
         let mut state = setup_mock_app_state();
@@ -618,6 +635,7 @@ async fn test_update_config_db_error() {
     test_case!("update_config の DB エラーで 500", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
         std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
         let mock = Arc::new(MockBotAdminRepository::default());
         mock.fail_next.store(true, Ordering::SeqCst);
@@ -700,6 +718,7 @@ async fn test_delete_config_success() {
     test_case!("設定の削除が成功する", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
         std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
         let mock = Arc::new(MockBotAdminRepository::default());
         let mut state = setup_mock_app_state();
@@ -729,6 +748,7 @@ async fn test_delete_config_invalid_uuid() {
     test_case!("不正な UUID は BAD_REQUEST", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
         std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
         let mock = Arc::new(MockBotAdminRepository::default());
         let mut state = setup_mock_app_state();
@@ -758,6 +778,7 @@ async fn test_delete_config_forbidden_for_viewer() {
     test_case!("viewer ロールは FORBIDDEN", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
         std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
         let mock = Arc::new(MockBotAdminRepository::default());
         let mut state = setup_mock_app_state();
@@ -787,6 +808,7 @@ async fn test_delete_config_db_error() {
     test_case!("DB エラー時に 500 を返す", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
         std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
         let mock = Arc::new(MockBotAdminRepository::default());
         mock.fail_next.store(true, Ordering::SeqCst);
@@ -860,6 +882,7 @@ async fn test_get_config_secrets_success() {
             let _guard = crate::common::ENV_LOCK.lock().unwrap();
             let key = "test-encryption-key-for-secrets";
             std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+            std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
             std::env::set_var("SSO_ENCRYPTION_KEY", key);
 
             let config_id = Uuid::new_v4();
@@ -918,6 +941,7 @@ async fn test_get_config_secrets_with_bot_secret() {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
         let key = "test-encryption-key-bot-secret";
         std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
         std::env::set_var("SSO_ENCRYPTION_KEY", key);
 
         let config_id = Uuid::new_v4();
@@ -966,6 +990,7 @@ async fn test_get_config_secrets_bot_secret_decrypt_error() {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
         let key = "test-key-bot-secret-fail";
         std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
         std::env::set_var("SSO_ENCRYPTION_KEY", key);
 
         let config_id = Uuid::new_v4();
@@ -1011,6 +1036,7 @@ async fn test_get_config_secrets_forbidden_viewer() {
     test_case!("viewer ロールは FORBIDDEN", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
         std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
         let mock = Arc::new(MockBotAdminRepository::default());
         let mut state = setup_mock_app_state();
@@ -1040,6 +1066,7 @@ async fn test_get_config_secrets_not_found() {
     test_case!("存在しない config は 404", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
         std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
         let mock = Arc::new(MockBotAdminRepository::default());
         // return_config_with_secrets is None by default -> 404
@@ -1070,6 +1097,7 @@ async fn test_get_config_secrets_db_error() {
     test_case!("DB エラー時に 500 を返す", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
         std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
         let mock = Arc::new(MockBotAdminRepository::default());
         mock.fail_next.store(true, Ordering::SeqCst);
@@ -1101,6 +1129,7 @@ async fn test_get_config_secrets_decrypt_error() {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
         let key = "test-key-for-decrypt-fail";
         std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
         std::env::set_var("SSO_ENCRYPTION_KEY", key);
 
         let config_id = Uuid::new_v4();
@@ -1147,6 +1176,7 @@ async fn test_get_config_secrets_short_ciphertext() {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
         let key = "test-key-short";
         std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
         std::env::set_var("SSO_ENCRYPTION_KEY", key);
 
         let config_id = Uuid::new_v4();
@@ -1196,6 +1226,7 @@ async fn test_get_config_secrets_private_key_decrypt_error() {
             let _guard = crate::common::ENV_LOCK.lock().unwrap();
             let key = "test-key-pk-fail";
             std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+            std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
             std::env::set_var("SSO_ENCRYPTION_KEY", key);
 
             let config_id = Uuid::new_v4();
@@ -1305,6 +1336,7 @@ async fn test_export_configs_success() {
     test_case!("developer email + tenant + 1 config", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
         std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
         let prev = set_dev_emails(dev_email());
 
         let mock = Arc::new(MockBotAdminRepository::default());
@@ -1379,6 +1411,7 @@ async fn test_export_configs_forbidden_for_non_developer() {
     test_case!("DEVELOPER_EMAILS に含まれない user は 403", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
         std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
         let prev = set_dev_emails(dev_email());
 
         let mock = Arc::new(MockBotAdminRepository::default());
@@ -1414,6 +1447,7 @@ async fn test_export_configs_tenant_not_found() {
     test_case!("テナントが存在しない場合は 404", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
         std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
         let prev = set_dev_emails(dev_email());
 
         let mock = Arc::new(MockBotAdminRepository::default());
@@ -1450,6 +1484,7 @@ async fn test_export_configs_tenant_db_error() {
     test_case!("tenant 取得時の DB エラーで 500", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
         std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
         let prev = set_dev_emails(dev_email());
 
         let mock = Arc::new(MockBotAdminRepository::default());
@@ -1486,6 +1521,7 @@ async fn test_export_configs_configs_db_error() {
     test_case!("bot_configs 取得時の DB エラーで 500", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
         std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
         let prev = set_dev_emails(dev_email());
 
         let mock = Arc::new(MockBotAdminRepository::default());

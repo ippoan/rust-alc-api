@@ -31,12 +31,10 @@ async fn upsert_config(
     Extension(tenant): Extension<TenantId>,
     Json(input): Json<UpsertLineConfig>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let key = std::env::var("SSO_ENCRYPTION_KEY")
-        .or_else(|_| std::env::var("JWT_SECRET"))
-        .map_err(|_| {
-            tracing::error!("SSO_ENCRYPTION_KEY or JWT_SECRET not set");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    let key = std::env::var("SSO_ENCRYPTION_KEY").map_err(|_| {
+        tracing::error!("SSO_ENCRYPTION_KEY not set");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     let channel_secret_encrypted = encrypt_secret(&input.channel_secret, &key).map_err(|e| {
         tracing::error!("encrypt channel_secret: {e}");

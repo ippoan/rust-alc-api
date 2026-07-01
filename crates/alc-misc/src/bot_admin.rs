@@ -268,9 +268,7 @@ async fn upsert_config(
         return Err(StatusCode::FORBIDDEN);
     }
 
-    let key = std::env::var("SSO_ENCRYPTION_KEY")
-        .or_else(|_| std::env::var("JWT_SECRET"))
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let key = std::env::var("SSO_ENCRYPTION_KEY").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let provider = body.provider.as_deref().unwrap_or("lineworks");
     let enabled = body.enabled.unwrap_or(true);
@@ -409,9 +407,7 @@ async fn get_config_secrets(
         return Err(StatusCode::FORBIDDEN);
     }
 
-    let key = std::env::var("SSO_ENCRYPTION_KEY")
-        .or_else(|_| std::env::var("JWT_SECRET"))
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let key = std::env::var("SSO_ENCRYPTION_KEY").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let row = state
         .bot_admin

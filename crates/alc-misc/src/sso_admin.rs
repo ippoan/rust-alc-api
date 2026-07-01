@@ -86,7 +86,6 @@ async fn upsert_config(
             None
         } else {
             let key = std::env::var("SSO_ENCRYPTION_KEY")
-                .or_else(|_| std::env::var("JWT_SECRET"))
                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
             Some(encrypt_secret(secret, &key).expect("AES-256-GCM encrypt infallible"))
         }

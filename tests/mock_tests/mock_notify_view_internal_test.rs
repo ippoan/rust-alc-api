@@ -45,6 +45,7 @@ async fn test_internal_view_success() {
     test_case!("有効な token は r2_key + メタを返す", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
         std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
         let mut state = setup_mock_app_state();
         let _mock = install_mock(&mut state);
         let base_url = crate::common::spawn_test_server(state).await;
@@ -75,6 +76,7 @@ async fn test_internal_view_not_found() {
     test_case!("存在しない token は 404", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
         std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
         let mut state = setup_mock_app_state();
         let mock = install_mock(&mut state);
         *mock.view_override.lock().unwrap() = Some(None);
@@ -98,6 +100,7 @@ async fn test_internal_view_expired() {
     test_case!("期限切れ token は 410 Gone", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
         std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
         let mut state = setup_mock_app_state();
         let mock = install_mock(&mut state);
         *mock.view_override.lock().unwrap() = Some(Some(sample_view(-1)));
@@ -121,6 +124,7 @@ async fn test_internal_view_db_error() {
     test_case!("get_for_view が失敗すると 500", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
         std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
         let mut state = setup_mock_app_state();
         let mock = install_mock(&mut state);
         mock.fail_next.store(true, Ordering::SeqCst);
@@ -144,6 +148,7 @@ async fn test_internal_view_requires_internal_jwt() {
     test_case!("internal JWT なしは 401", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
         std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
         let mut state = setup_mock_app_state();
         let _mock = install_mock(&mut state);
         let base_url = crate::common::spawn_test_server(state).await;
@@ -168,6 +173,7 @@ async fn test_internal_mark_read_success() {
     test_case!("有効な token の既読化は 204", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
         std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
         let mut state = setup_mock_app_state();
         let _mock = install_mock(&mut state);
         let base_url = crate::common::spawn_test_server(state).await;
@@ -190,6 +196,7 @@ async fn test_internal_mark_read_not_found() {
     test_case!("存在しない token の既読化は 404", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
         std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
         let mut state = setup_mock_app_state();
         let mock = install_mock(&mut state);
         mock.mark_read_none.store(true, Ordering::SeqCst);
@@ -213,6 +220,7 @@ async fn test_internal_mark_read_db_error() {
     test_case!("mark_read が失敗すると 500", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
         std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
         let mut state = setup_mock_app_state();
         let mock = install_mock(&mut state);
         mock.fail_next.store(true, Ordering::SeqCst);

@@ -20,6 +20,7 @@ use rust_alc_api::routes::dtako_scraper::ScrapeHistoryItem;
 async fn test_get_scrape_history_success_empty() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockDtakoScraperRepository::default());
     let mut state = setup_mock_app_state();
@@ -49,6 +50,7 @@ async fn test_get_scrape_history_success_empty() {
 async fn test_get_scrape_history_with_data() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let item = ScrapeHistoryItem {
         id: Uuid::new_v4(),
@@ -92,6 +94,7 @@ async fn test_get_scrape_history_with_data() {
 async fn test_get_scrape_history_with_query_params() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockDtakoScraperRepository::default());
     let mut state = setup_mock_app_state();
@@ -119,6 +122,7 @@ async fn test_get_scrape_history_with_query_params() {
 async fn test_get_scrape_history_db_error() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockDtakoScraperRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
@@ -147,6 +151,7 @@ async fn test_get_scrape_history_db_error() {
 async fn test_get_scrape_history_unauthorized() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockDtakoScraperRepository::default());
     let mut state = setup_mock_app_state();
@@ -171,6 +176,7 @@ async fn test_get_scrape_history_unauthorized() {
 async fn test_trigger_scrape_connection_refused() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     // メタデータサーバーへの接続を即座に失敗させる
     std::env::set_var("GCP_METADATA_URL", "http://127.0.0.1:1");
 
@@ -207,6 +213,7 @@ async fn test_trigger_scrape_connection_refused() {
 async fn test_trigger_scrape_with_all_fields() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     std::env::set_var("GCP_METADATA_URL", "http://127.0.0.1:1");
 
     let mock = Arc::new(MockDtakoScraperRepository::default());
@@ -242,6 +249,7 @@ async fn test_trigger_scrape_with_all_fields() {
 async fn test_trigger_scrape_empty_body() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     std::env::set_var("GCP_METADATA_URL", "http://127.0.0.1:1");
 
     let mock = Arc::new(MockDtakoScraperRepository::default());
@@ -272,6 +280,7 @@ async fn test_trigger_scrape_empty_body() {
 async fn test_trigger_scrape_no_body() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     std::env::set_var("GCP_METADATA_URL", "http://127.0.0.1:1");
 
     let mock = Arc::new(MockDtakoScraperRepository::default());
@@ -303,6 +312,7 @@ async fn test_trigger_scrape_no_body() {
 async fn test_trigger_scrape_unauthorized() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     std::env::set_var("GCP_METADATA_URL", "http://127.0.0.1:1");
 
     let mock = Arc::new(MockDtakoScraperRepository::default());
@@ -332,6 +342,7 @@ async fn test_trigger_scrape_unauthorized() {
 async fn test_trigger_scrape_scraper_returns_500() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     // Mock metadata server (returns 404 so get_id_token fails silently)
     let metadata_server = MockServer::start().await;
@@ -378,6 +389,7 @@ async fn test_trigger_scrape_scraper_returns_500() {
 async fn test_trigger_scrape_metadata_server_non_success() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     // Mock metadata server returns 403
     let metadata_server = MockServer::start().await;
@@ -425,6 +437,7 @@ async fn test_trigger_scrape_metadata_server_non_success() {
 async fn test_trigger_scrape_metadata_server_success_bearer_auth() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     // Mock metadata server returns a token
     let metadata_server = MockServer::start().await;
@@ -474,6 +487,7 @@ async fn test_trigger_scrape_metadata_server_success_bearer_auth() {
 async fn test_trigger_scrape_sse_stream_with_results() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     std::env::set_var("GCP_METADATA_URL", "http://127.0.0.1:1");
 
     // Mock scraper returns SSE stream with result events
@@ -544,6 +558,7 @@ async fn test_trigger_scrape_sse_stream_with_results() {
 async fn test_trigger_scrape_sse_stream_no_start_date() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     std::env::set_var("GCP_METADATA_URL", "http://127.0.0.1:1");
 
     let scraper_server = MockServer::start().await;
@@ -597,6 +612,7 @@ async fn test_trigger_scrape_sse_stream_no_start_date() {
 async fn test_trigger_scrape_sse_stream_invalid_date() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     std::env::set_var("GCP_METADATA_URL", "http://127.0.0.1:1");
 
     let scraper_server = MockServer::start().await;
@@ -652,6 +668,7 @@ async fn test_trigger_scrape_sse_stream_invalid_date() {
 async fn test_trigger_scrape_sse_stream_non_json_data() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     std::env::set_var("GCP_METADATA_URL", "http://127.0.0.1:1");
 
     let scraper_server = MockServer::start().await;
@@ -713,6 +730,7 @@ async fn test_trigger_scrape_sse_stream_non_json_data() {
 async fn test_trigger_scrape_sse_stream_progress_only() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     std::env::set_var("GCP_METADATA_URL", "http://127.0.0.1:1");
 
     let scraper_server = MockServer::start().await;
@@ -772,6 +790,7 @@ async fn test_trigger_scrape_sse_stream_progress_only() {
 async fn test_trigger_scrape_sse_result_no_comp_id() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     std::env::set_var("GCP_METADATA_URL", "http://127.0.0.1:1");
 
     let scraper_server = MockServer::start().await;
@@ -829,6 +848,7 @@ async fn test_trigger_scrape_sse_result_no_comp_id() {
 async fn test_trigger_scrape_sse_result_missing_status() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     std::env::set_var("GCP_METADATA_URL", "http://127.0.0.1:1");
 
     let scraper_server = MockServer::start().await;
@@ -886,6 +906,7 @@ async fn test_trigger_scrape_sse_result_missing_status() {
 async fn test_trigger_scrape_sse_stream_empty_data() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     std::env::set_var("GCP_METADATA_URL", "http://127.0.0.1:1");
 
     let scraper_server = MockServer::start().await;
@@ -945,6 +966,7 @@ async fn test_trigger_scrape_sse_stream_empty_data() {
 async fn test_trigger_scrape_full_flow_with_metadata_and_sse() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     // Mock metadata server returns a valid token
     let metadata_server = MockServer::start().await;
@@ -1009,6 +1031,7 @@ async fn test_trigger_scrape_full_flow_with_metadata_and_sse() {
 async fn test_trigger_scrape_sse_stream_with_comments() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     std::env::set_var("GCP_METADATA_URL", "http://127.0.0.1:1");
 
     let scraper_server = MockServer::start().await;
@@ -1067,6 +1090,7 @@ async fn test_trigger_scrape_client_disconnect() {
 
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     std::env::remove_var("GCP_METADATA_URL");
 
     // 生 TCP サーバーでイベントをゆっくり送信 → client が先に drop
@@ -1129,6 +1153,7 @@ async fn test_trigger_scrape_stream_error() {
 
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
     std::env::remove_var("METADATA_URL");
 
     // 生 TCP サーバーで不正な chunked レスポンスを返す

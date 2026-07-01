@@ -169,12 +169,10 @@ async fn find_config_by_signature(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    let enc_key = std::env::var("SSO_ENCRYPTION_KEY")
-        .or_else(|_| std::env::var("JWT_SECRET"))
-        .map_err(|_| {
-            tracing::error!("SSO_ENCRYPTION_KEY or JWT_SECRET not set");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    let enc_key = std::env::var("SSO_ENCRYPTION_KEY").map_err(|_| {
+        tracing::error!("SSO_ENCRYPTION_KEY not set");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     for cfg in &configs {
         let Ok(channel_secret) = decrypt_secret(&cfg.channel_secret_encrypted, &enc_key) else {

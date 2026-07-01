@@ -20,9 +20,7 @@ pub trait TroubleNotifier: Send + Sync {
 }
 
 fn encryption_key() -> Result<String, String> {
-    std::env::var("SSO_ENCRYPTION_KEY")
-        .or_else(|_| std::env::var("JWT_SECRET"))
-        .map_err(|_| "SSO_ENCRYPTION_KEY or JWT_SECRET not set".to_string())
+    std::env::var("SSO_ENCRYPTION_KEY").map_err(|_| "SSO_ENCRYPTION_KEY not set".to_string())
 }
 
 pub async fn resolve_lineworks_config(

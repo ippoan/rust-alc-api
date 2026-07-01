@@ -15,6 +15,7 @@ use serde_json::Value;
 async fn test_create_measurement_success() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
@@ -49,6 +50,7 @@ async fn test_create_measurement_success() {
 async fn test_create_measurement_db_error() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockMeasurementsRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
@@ -86,6 +88,7 @@ async fn test_create_measurement_db_error() {
 async fn test_create_measurement_invalid_result_type() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
@@ -118,6 +121,7 @@ async fn test_create_measurement_invalid_result_type() {
 async fn test_create_measurement_invalid_json() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
@@ -145,6 +149,7 @@ async fn test_create_measurement_invalid_json() {
 async fn test_start_measurement_success() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
@@ -177,6 +182,7 @@ async fn test_start_measurement_success() {
 async fn test_start_measurement_db_error() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockMeasurementsRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
@@ -212,6 +218,7 @@ async fn test_start_measurement_db_error() {
 async fn test_list_measurements_success() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
@@ -242,6 +249,7 @@ async fn test_list_measurements_success() {
 async fn test_list_measurements_db_error() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockMeasurementsRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
@@ -272,6 +280,7 @@ async fn test_list_measurements_db_error() {
 async fn test_get_measurement_not_found() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
@@ -298,6 +307,7 @@ async fn test_get_measurement_not_found() {
 async fn test_get_measurement_found() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockMeasurementsRepository::default());
     mock.return_some.store(true, Ordering::SeqCst);
@@ -331,6 +341,7 @@ async fn test_get_measurement_found() {
 async fn test_get_measurement_db_error() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockMeasurementsRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
@@ -362,6 +373,7 @@ async fn test_get_measurement_db_error() {
 async fn test_update_measurement_success() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockMeasurementsRepository::default());
     mock.return_some.store(true, Ordering::SeqCst);
@@ -402,6 +414,7 @@ async fn test_update_measurement_success() {
 async fn test_update_measurement_without_status_success() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockMeasurementsRepository::default());
     mock.return_some.store(true, Ordering::SeqCst);
@@ -441,6 +454,7 @@ async fn test_update_measurement_without_status_success() {
 async fn test_update_measurement_not_found() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     // return_some defaults to false → update returns None → 404
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
@@ -473,6 +487,7 @@ async fn test_update_measurement_not_found() {
 async fn test_update_measurement_db_error() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let mock = Arc::new(MockMeasurementsRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
@@ -509,6 +524,7 @@ async fn test_update_measurement_db_error() {
 async fn test_update_measurement_invalid_result_type() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
@@ -540,6 +556,7 @@ async fn test_update_measurement_invalid_result_type() {
 async fn test_update_measurement_invalid_status() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
@@ -571,6 +588,7 @@ async fn test_update_measurement_invalid_status() {
 async fn test_update_measurement_invalid_json() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
@@ -599,6 +617,7 @@ async fn test_update_measurement_invalid_json() {
 async fn test_get_face_photo_success() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let mock_storage = Arc::new(MockStorage::new("test-bucket"));
     let photo_key = "tenant123/face-photo/abc.jpg";
@@ -640,6 +659,7 @@ async fn test_get_face_photo_success() {
 async fn test_get_face_photo_no_url() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let mock_repo = Arc::new(MockMeasurementsRepository::default());
     mock_repo.return_some.store(true, Ordering::SeqCst);
@@ -672,6 +692,7 @@ async fn test_get_face_photo_no_url() {
 async fn test_get_face_photo_measurement_not_found() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     // return_some defaults to false → get returns None → 404
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
@@ -699,6 +720,7 @@ async fn test_get_face_photo_measurement_not_found() {
 async fn test_get_face_photo_db_error() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let mock_repo = Arc::new(MockMeasurementsRepository::default());
     mock_repo.fail_next.store(true, Ordering::SeqCst);
@@ -730,6 +752,7 @@ async fn test_get_face_photo_db_error() {
 async fn test_get_video_success() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let mock_storage = Arc::new(MockStorage::new("test-bucket"));
     let video_key = "tenant123/blow-video/abc.webm";
@@ -771,6 +794,7 @@ async fn test_get_video_success() {
 async fn test_get_video_no_url() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let mock_repo = Arc::new(MockMeasurementsRepository::default());
     mock_repo.return_some.store(true, Ordering::SeqCst);
@@ -803,6 +827,7 @@ async fn test_get_video_no_url() {
 async fn test_get_video_measurement_not_found() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     // return_some defaults to false → get returns None → 404
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
@@ -830,6 +855,7 @@ async fn test_get_video_measurement_not_found() {
 async fn test_get_video_db_error() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let mock_repo = Arc::new(MockMeasurementsRepository::default());
     mock_repo.fail_next.store(true, Ordering::SeqCst);
@@ -861,6 +887,7 @@ async fn test_get_video_db_error() {
 async fn test_measurements_no_auth() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let base_url = crate::common::spawn_test_server(state).await;
@@ -936,6 +963,7 @@ async fn test_measurements_no_auth() {
 async fn test_get_face_photo_storage_download_error() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let mock_storage = Arc::new(MockStorage::new("test-bucket"));
     // URL points to a key that does NOT exist in storage
@@ -973,6 +1001,7 @@ async fn test_get_face_photo_storage_download_error() {
 async fn test_get_video_storage_download_error() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let mock_storage = Arc::new(MockStorage::new("test-bucket"));
     let missing_url = "https://mock-storage/test-bucket/nonexistent/video.webm".to_string();
@@ -1010,6 +1039,7 @@ async fn test_get_video_storage_download_error() {
 async fn test_get_face_photo_extract_key_fails() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let mock_repo = Arc::new(MockMeasurementsRepository::default());
     mock_repo.return_some.store(true, Ordering::SeqCst);
@@ -1044,6 +1074,7 @@ async fn test_get_face_photo_extract_key_fails() {
 async fn test_get_video_extract_key_fails() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let mock_repo = Arc::new(MockMeasurementsRepository::default());
     mock_repo.return_some.store(true, Ordering::SeqCst);
@@ -1077,6 +1108,7 @@ async fn test_get_video_extract_key_fails() {
 async fn test_measurements_with_tenant_header() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
 
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
