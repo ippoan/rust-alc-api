@@ -312,11 +312,15 @@ emit_env_gateway() {
               value: "PLACEHOLDER_TROUBLE_URL"
             - name: CAMERA_API_URL
               value: "PLACEHOLDER_CAMERA_URL"
-            - name: JWT_SECRET
+            # Refs #479 PR-2: gateway は JWT_SECRET を持たず、ユーザー JWT の
+            # 検証を auth-worker /auth/introspect に委譲する。
+            - name: AUTH_WORKER_URL
+              value: "$( [[ "$ENV" == "staging" ]] && echo "https://auth-worker-staging.m-tama-ramu.workers.dev" || echo "https://auth.ippoan.org" )"
+            - name: INTERNAL_SHARED_SECRET
               valueFrom:
                 secretKeyRef:
                   key: latest
-                  name: $(jwt_secret_name)
+                  name: INTERNAL_SHARED_SECRET
             - name: RUST_LOG
               value: "gateway=info,tower_http=info"
 YAML
