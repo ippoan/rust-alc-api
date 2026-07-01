@@ -228,7 +228,10 @@ impl AuthRepository for PgAuthRepository {
         &self,
         line_user_id: &str,
     ) -> Result<Option<User>, sqlx::Error> {
-        sqlx::query_as::<_, User>("SELECT * FROM users WHERE line_user_id = $1")
+        // SECURITY DEFINER 関数経由で RLS をバイパス (migration 121)。LINE ログイン中の
+        // pre-auth 横断逆引きが users RLS + プール接続の残留 tenant GUC に依存して
+        // 500 / 未検出になる非対称を根治 (recipient 側 076/119 と対称)。
+        sqlx::query_as::<_, User>("SELECT * FROM alc_api.find_user_by_line_user_id($1)")
             .bind(line_user_id)
             .fetch_optional(&self.pool)
             .await
