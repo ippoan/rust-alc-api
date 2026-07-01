@@ -61,6 +61,37 @@ Bazel build + staging deploy を PR CI に含む運用)。改善は「同一ソ�
   critical path への影響なし。`ts-bindings-*` artifact (19.7 KB) も lib shard から
   正常に upload されたことを確認
 
+### deploy chain の直列 hop 削減 (staging image 統合 + gateway 並列化)
+
+PR CI の deploy leg (~4 分実測) は `staging-images (max 46s) → deploy-services
+(max 60s) → deploy-gateway (56s)` の 3 直列 hop で、hop ごとに runner 起動 +
+checkout + gcloud auth/setup (~20-40s) が乗ることが支配要因だった (service 数の
+matrix は並列なので支配要因ではない)。変更:
+
+- **staging app image の build を ci.yml build-image job に統合** — 旧
+  staging-images job は「prod image から `docker create/cp` でバイナリ抽出 →
+  再パッケージ」だったが、build-image は bazel-bin にバイナリを既に持つので
+  直接 build できる。staging entrypoint が使う `migrate` は各 service job で
+  `//:migrate` を追加 build (BUILD.bazel で deps を sqlx/tokio/anyhow に slim 化
+  済みなので増分はほぼ migrate 本体のみ)。buildx gha cache (scope:
+  `<name>-staging`) で apt/PDFium layer もキャッシュされる (旧 job は cache 無しで
+  毎回 apt-get + PDFium DL していた)
+- **staging-db image build を ci.yml の並列 job に移設** — deploy の needs に
+  入るが build-image / coverage-check より速く終わるため critical path に乗らない
+- **deploy-gateway を deploy-services と並列化** — gateway が必要なのは各 service
+  の `status.url` のみで、Cloud Run の URL は revision が変わっても不変。
+  完全新規環境の bootstrap (service 未作成) のみ re-run が必要
+
+**image レベルの検証の位置は不変**: staging deploy (deploy-services) → 
+smoke-staging-ingest → drift-check-staging → auto-merge gate という「PR ごと
+staging deploy 検証」の運用ポリシー・順序・merge gate はそのまま。むしろ staging
+image の build 失敗は CI 前半 (build-image) で早く検出されるようになる。
+
+**実測:**
+
+- 変更前: deploy leg ~4 分 (3 直列 hop)
+- 変更後: (PR の CI 実測後に記入。見込み ~1.5 分 = deploy-services 1 hop 分)
+
 ## 検証済みで「効果薄い / スコープ外」と判断した案 (Refs #482)
 
 - **FROM scratch image 化**: docker build は既に軽い (3-9s、Bazel がコンパイルを担い、

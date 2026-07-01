@@ -27,79 +27,14 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Staging: build staging images (entrypoint.sh + sidecar)
+  # NOTE (Refs #482): staging image (app / db) の build は ci.yml 側に移設した。
+  #   - staging app image → ci.yml build-image job (bazel-bin から直接 build)
+  #   - staging-db image  → ci.yml staging-db job
+  # 本 workflow が呼ばれる時点 (ci.yml deploy job の needs 充足後) で
+  # ${REPO}${suffix}-staging:${sha} / ${REPO}-staging-db:latest は push 済み。
+  # これにより deploy leg の直列 hop が staging-images → deploy-services →
+  # deploy-gateway の 3 段から deploy-services ∥ deploy-gateway の 1 段になる。
   # ---------------------------------------------------------------------------
-  staging-db:
-    name: "Build staging-db"
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build and push staging-db
-        run: |
-          docker build -f staging/Dockerfile.postgres \
-            -t ${{ env.REPO }}-staging-db:latest .
-          docker push ${{ env.REPO }}-staging-db:latest
-
-  staging-images:
-    name: "Build staging ${{ matrix.service }}"
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    strategy:
-      fail-fast: true
-      matrix:
-        include:
-          - { service: backend, suffix: "",       binary: rust-alc-api }
-          - { service: tenko,   suffix: "-tenko", binary: tenko-api }
-          - { service: carins,  suffix: "-carins", binary: carins-api }
-          - { service: dtako,   suffix: "-dtako",   binary: dtako-api }
-          - { service: trouble, suffix: "-trouble", binary: trouble-api }
-          - { service: camera,  suffix: "-camera",  binary: alc-camera-api }
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build staging image
-        run: |
-          SHA="${{ inputs.image_sha }}"
-          REPO="${{ env.REPO }}"
-          SUFFIX="${{ matrix.suffix }}"
-          BIN="${{ matrix.binary }}"
-
-          mkdir -p ctx/staging
-
-          # Extract service binary
-          docker create --name extract-svc "${REPO}${SUFFIX}:${SHA}"
-          docker cp "extract-svc:/usr/local/bin/${BIN}" ctx/
-          docker rm extract-svc
-
-          # Extract migrate + migrations from backend image
-          docker create --name extract-mig "${REPO}:${SHA}"
-          docker cp extract-mig:/usr/local/bin/migrate ctx/
-          docker cp extract-mig:/app/migrations ctx/
-          docker rm extract-mig
-
-          cp staging/Dockerfile.app ctx/Dockerfile
-          cp staging/entrypoint.sh ctx/staging/
-
-          docker build --build-arg "BINARY_NAME=${BIN}" \
-            -t "${REPO}${SUFFIX}-staging:${SHA}" ctx/
-          docker push "${REPO}${SUFFIX}-staging:${SHA}"
-
   # ---------------------------------------------------------------------------
   # Production: promote dev → version tag
   # ---------------------------------------------------------------------------
@@ -175,10 +110,12 @@ jobs:
   # ---------------------------------------------------------------------------
   deploy-services:
     name: "Deploy ${{ matrix.service }}"
-    needs: [staging-db, staging-images, promote-images, migrate]
+    # PR (staging): staging image 群は ci.yml (build-image / staging-db) で
+    # push 済みなので待つものが無く、即 deploy に入る (Refs #482)。
+    needs: [promote-images, migrate]
     if: >-
       always() && (
-        (github.event_name == 'pull_request' && needs.staging-images.result == 'success' && needs.staging-db.result == 'success') ||
+        github.event_name == 'pull_request' ||
         (startsWith(github.ref, 'refs/tags/v') && needs.migrate.result == 'success')
       )
     runs-on: ubuntu-latest
@@ -365,9 +302,19 @@ jobs:
   # ---------------------------------------------------------------------------
   deploy-gateway:
     name: "Deploy gateway"
-    needs: [deploy-services]
+    # deploy-services と並列 (Refs #482)。gateway が必要とするのは各 service の
+    # `status.url` だけで、Cloud Run の URL は revision が変わっても不変のため
+    # deploy-services の完了を待つ理由がない (service が存在しさえすればよい)。
+    # 例外は完全新規環境の bootstrap (service 未作成で describe が空を返す) のみ
+    # — その場合は deploy-services 完走後に re-run すれば正しい URL で render
+    # される。旧 needs: [deploy-services] は直列 hop ~1 分を deploy leg に
+    # 追加していた。
+    needs: [promote-images, migrate]
     if: >-
-      always() && needs.deploy-services.result == 'success'
+      always() && (
+        github.event_name == 'pull_request' ||
+        (startsWith(github.ref, 'refs/tags/v') && needs.migrate.result == 'success')
+      )
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -43,8 +43,15 @@ rust_binary(
     name = "migrate",
     srcs = ["src/bin/migrate.rs"],
     compile_data = glob(["migrations/**"]),
-    deps = all_crate_deps(normal = True),
-    proc_macro_deps = all_crate_deps(proc_macro = True),
+    # migrate.rs は sqlx/tokio/anyhow しか使わない。all_crate_deps(normal) だと
+    # root package の全 external deps を要求し、staging image 用に //:migrate を
+    # 全 build-image matrix job (per-service bazel cache) で build する際に
+    # monolith の dep closure を抱え込むため、明示 deps に絞る (Refs #482)。
+    deps = [
+        "@crates//:anyhow",
+        "@crates//:sqlx",
+        "@crates//:tokio",
+    ],
 )
 
 rust_binary(
