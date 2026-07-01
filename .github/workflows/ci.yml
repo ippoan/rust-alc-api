@@ -38,7 +38,9 @@ jobs:
       matrix:
         target:
           # check job 用 (test と build profile が違うため別 cache に分離)。
-          - { name: "check", key: "check", cmd: "cargo clippy --workspace -- -D warnings && cargo test export_bindings --workspace" }
+          # TS bindings 生成は test-matrix(lib) に統合済み (Refs #482) なので
+          # ここは clippy のみ warm する。
+          - { name: "check", key: "check", cmd: "cargo clippy --workspace -- -D warnings" }
           # test-matrix 7 並列 (lib + mock-*) が共有する 1 つの cache。
           # rust-flickr#28-#32 の実験で確定した「shared-key 統合 + main warm 1 job
           # だけ save」設計 (Refs #426)。
@@ -170,16 +172,12 @@ jobs:
         env:
           SCCACHE_GHA_ENABLED: "true"
           RUSTC_WRAPPER: "sccache"
-      - name: Generate TypeScript bindings
-        run: cargo test export_bindings --workspace
-        env:
-          SCCACHE_GHA_ENABLED: "true"
-          RUSTC_WRAPPER: "sccache"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ts-bindings-${{ github.sha }}
-          path: crates/*/bindings/**/*.ts
-          retention-days: 90
+      # TS bindings 生成 (cargo test export_bindings --workspace) はここから削除し
+      # test-matrix(lib) に統合した (Refs #482)。ts-rs の export_bindings_* は
+      # 各 crate の lib target 内 #[test] なので、lib shard の
+      # `cargo llvm-cov nextest --lib --workspace` が同じ .ts を生成する
+      # (coverage 計装は出力内容に影響しない、diff 検証済み)。check job で
+      # test profile のビルドを重複させない。
 
   test-matrix:
     name: Tests (${{ matrix.group.name }})
@@ -259,6 +257,20 @@ jobs:
           name: coverage-${{ matrix.group.name }}
           path: /tmp/llvm-cov-output.txt
           retention-days: 1
+
+      # ts-rs の export_bindings_* テスト (lib target 内 #[test]) が上の lib shard
+      # 実行で .ts を生成するので、ここで artifact 化する (check job から移設、
+      # Refs #482)。scripts/export-ts-bindings.sh がこの artifact 名で download
+      # する契約は不変。将来 nextest filter 等で export テストが走らなくなった
+      # 場合に無音で空 artifact にならないよう if-no-files-found: error で
+      # loud fail させる。
+      - uses: actions/upload-artifact@v4
+        if: matrix.group.name == 'lib'
+        with:
+          name: ts-bindings-${{ github.sha }}
+          path: crates/*/bindings/**/*.ts
+          retention-days: 90
+          if-no-files-found: error
 
   coverage-check:
     name: Coverage Check

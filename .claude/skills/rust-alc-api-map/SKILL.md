@@ -106,7 +106,10 @@ monolith と per-domain API は同じ domain crate (`alc-tenko` 等) を共有 �
   `scope:rust-alc-api` plan Issue を作り `npm run snapshot` で `manifests/production.snapshot.json` 更新。
   pre-commit (`.githooks`) + CI `snapshot-check` job が drift/stale-sha を検出。`SKIP_CLIPPY=1` で commit 時 clippy skip 可。
 - **ts-rs**: 各 crate が `#[ts(export)]` で TS 型を生成 (`cargo test export_bindings`)。フロント
-  (nuxt-*) が型同期する。型変更時は export_bindings を回す。
+  (nuxt-*) が型同期する。型変更時は export_bindings を回す。生成元は alc-core / alc-misc /
+  alc-carins の 3 crate のみ (alc-auth は ts-rs 依存だけあって derive 未使用)。CI での
+  `ts-bindings-${sha}` artifact は **test-matrix(lib) shard が生成** する (check job ではない、
+  Refs #482 / 下記 CI 節)。
 - **長時間 compute と Cloud Run**: `tokio::spawn` で background compute → fire-and-forget broadcast は
   やらない (Cloud Run は応答後に CPU を絞る)。`RealtimeBus` / `RedactBroadcaster` で対処。CLAUDE.md 該当節参照。
 
@@ -126,6 +129,11 @@ monolith と per-domain API は同じ domain crate (`alc-tenko` 等) を共有 �
   domain 別 (`tests/mock_tenko` `mock_dtako` `mock_carins` `mock_trouble` `mock_devices` `mock_misc`)。
 - **その他 workflow**: `migration-safety-check.yml` (適用済み migration の破壊的変更検査) /
   `release-wave.yml` (Release Wave caller、`repository_dispatch` で cloudrun flip を受ける)。
+- **CI 速度の tracking**: [`docs/ci-speed-tracking.md`](../../../docs/ci-speed-tracking.md) が SoT
+  (Refs #482)。PR CI は同一ソースに対し「coverage 計装 (test-matrix)」と「Bazel fastbuild
+  (build-image)」の 2 profile ビルドが走る (プロファイル統合は原理的に不可)。check job の
+  test profile 重複ビルド (TS bindings 生成) は #482 で test-matrix(lib) に統合済み。
+  Bazel remote cache は健全 (実測済み) — 遅く見えても cache 設定を疑う前にこの doc を読む。
 
 ## 関連 skill
 
