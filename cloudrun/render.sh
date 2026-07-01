@@ -142,8 +142,6 @@ emit_env_backend() {
               value: "alc-fcm"
             - name: STAGING_MODE
               value: "$( [[ "$ENV" == "staging" ]] && echo "true" || echo "false" )"
-            - name: INTERNAL_AUTH_TRUST_OIDC
-              value: "1"
             - name: RUST_LOG
               value: "info"
 YAML

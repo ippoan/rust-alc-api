@@ -79,7 +79,18 @@ use crate::auth::jwt::INTERNAL_AUD;
 use crate::middleware::auth::{require_internal_jwt, require_tenant_header, InternalOidcTrust};
 use crate::AppState;
 
-pub fn router() -> Router<AppState> {
+/// prod 用の `InternalOidcTrust` を構築する (aud=alc-api-internal、JWKS RS256 検証)。
+/// main.rs から `router()` に渡す。テストは `GoogleTokenVerifier::with_test_claims`
+/// で構築した trust を渡す (Refs #479 — HS256 dual-accept 撤去で OIDC 一本化。
+/// DI 引数化したのは、Extension を router 内部で固定すると外側 layer で上書き
+/// できず、テストが実 JWKS 検証を通せないため)。
+pub fn internal_oidc_trust() -> InternalOidcTrust {
+    InternalOidcTrust {
+        verifier: GoogleTokenVerifier::new(INTERNAL_AUD.to_string(), String::new()),
+    }
+}
+
+pub fn router(internal_oidc: InternalOidcTrust) -> Router<AppState> {
     // 管理者ルート — 注入 identity (X-User-*) を信頼 (Refs #434)。
     // 前段 proxy / gateway が introspect 検証済みの identity を注入する前提。
     // role 判定は各ハンドラが AuthUser から行う。
@@ -102,15 +113,11 @@ pub fn router() -> Router<AppState> {
         .merge(health_canary::internal_router())
         .merge(auth::internal_router())
         .layer(axum_middleware::from_fn(require_internal_jwt))
-        // #434 Phase D: lockdown 後の OIDC dual-accept を有効化する設定 (env 解決、Extension 注入)。
-        // verifier (aud=alc-api-internal) は常時構築し enabled は env で gate する (分岐レス = coverage
-        // 100% を保つ。enabled=false の間は require_internal_jwt が verifier を呼ばない)。OIDC が
-        // enabled の時、require_internal_jwt が JWKS で署名検証して受理する。require_internal_jwt の
-        // 外側に置き、ハンドラ実行時に Extension を解決できるようにする。
-        .layer(Extension(InternalOidcTrust {
-            enabled: std::env::var("INTERNAL_AUTH_TRUST_OIDC").as_deref() == Ok("1"),
-            verifier: GoogleTokenVerifier::new(INTERNAL_AUD.to_string(), String::new()),
-        }));
+        // OIDC 検証設定 (Refs #479 — HS256 dual-accept 撤去で OIDC 一本化)。
+        // require_internal_jwt の外側に置き、ハンドラ実行時に Extension を解決
+        // できるようにする。verifier は呼び出し元 (main.rs = 実 JWKS / テスト =
+        // with_test_claims) が注入する。
+        .layer(Extension(internal_oidc));
 
     // テナント対応ルート — 注入 identity (X-Tenant-ID + 任意 X-User-*) を信頼 (Refs #434)。
     // 旧 require_tenant の bare X-Tenant-ID フォールバック / ローカル JWT 検証は撤去。
@@ -238,5 +245,15 @@ mod tests {
         let _ = internal_shared_secret_router(Some(String::new()));
         // Some(non-empty) → middleware + extension 付き Router (`Some(secret)` ブランチ)
         let _ = internal_shared_secret_router(Some("test-secret".to_string()));
+    }
+
+    /// `internal_oidc_trust()` (prod 用 OIDC trust 構築) のカバレッジテスト
+    /// (Refs #479)。verifier の検証挙動自体は alc-core の auth_middleware /
+    /// auth_google テストがカバーする。ここでは prod 構築 path が panic なく
+    /// 通ることだけを保証する (JWKS fetch は verify 時まで遅延されるため
+    /// ネットワーク非依存)。
+    #[test]
+    fn internal_oidc_trust_builds() {
+        let _ = internal_oidc_trust();
     }
 }

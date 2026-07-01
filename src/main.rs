@@ -455,9 +455,10 @@ async fn main() -> anyhow::Result<()> {
             "INTERNAL_SHARED_SECRET not set; /api/dtako/tickets internal routes are disabled"
         );
     }
-    let api_router = rust_alc_api::routes::router().merge(
-        rust_alc_api::routes::internal_shared_secret_router(internal_secret),
-    );
+    let api_router = rust_alc_api::routes::router(rust_alc_api::routes::internal_oidc_trust())
+        .merge(rust_alc_api::routes::internal_shared_secret_router(
+            internal_secret,
+        ));
 
     let app = Router::new()
         .nest("/api", api_router)
