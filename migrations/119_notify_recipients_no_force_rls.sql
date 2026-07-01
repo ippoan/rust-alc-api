@@ -1,0 +1,18 @@
+-- LINE ログイン中の recipients 検索 500 の真因修正 (Refs #434, follow-up to migration 118)
+--
+-- `find_recipient_by_line_user_id()` (migration 081) は SECURITY DEFINER 関数で
+-- `notify_recipients` を line_user_id で全テナント横断検索する (ログイン中は
+-- まだ tenant context が確立していないため)。069 で `FORCE ROW LEVEL SECURITY` が
+-- 有効なため **テーブル所有者 (= SECURITY DEFINER 関数の実行ロール) にも RLS が
+-- 適用され**、未認証経路の空 tenant context (`app.current_tenant_id = ''`) で RLS
+-- ポリシー `current_setting(...)::UUID` が '' を uuid キャストして 500 していた
+-- (Cloud Run ログ: alc_auth::internal "invalid input syntax for type uuid")。
+-- #434 lockdown 実地検証 (prod flip) で LINE ログイン時に実害が発覚。
+--
+-- 118 (notify_line_configs) と同じ根治: FORCE を外すと、所有者として実行される
+-- SECURITY DEFINER 関数 (`find_recipient_by_line_user_id`) が RLS をバイパスして
+-- 全テナントの recipient を検索できる (= 認証前アクセスの本来の意図)。
+--
+-- app ロール (`alc_api_app`, NOBYPASSRLS, テーブル非所有者) には RLS が引き続き
+-- 適用されるため、通常の tenant スコープ CRUD のテナント分離は維持される。
+ALTER TABLE alc_api.notify_recipients NO FORCE ROW LEVEL SECURITY;

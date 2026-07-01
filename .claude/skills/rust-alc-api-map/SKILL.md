@@ -1,6 +1,6 @@
 ---
 name: rust-alc-api-map
-generated-from: rust-alc-api:ed66bfb4f0a14fe68bba8f8eafe5104e3fadef14
+generated-from: rust-alc-api:466be820891008db0fb2dac5555e6cbc1f6f87a8
 paths: [crates/, src/, migrations/]
 description: rust-alc-api (アルコールチェッカー基盤の Rust/Axum Cargo workspace — 13 domain crate + gateway/tenko/carins/dtako/trouble の複数バイナリ、PostgreSQL+RLS、Cloud Run) の構造ナビゲーション。どの crate に何のルートがあるか / monolith(rust-alc-api) と per-domain API + gateway の二系統 / RLS・migration・deploy/release 分離の gotcha を 1 枚にまとめる。トリガー:「rust-alc-api」「alc-api」「alc-notify」「alc-tenko」「alc-trouble」「alc-carins」「alc-dtako」「gateway」「tenko-api」「carins-api」「dtako-api」「trouble-api」「RLS テナント」「sqlx migration」「ts-rs」「Release Wave」「Bazel」等。
 ---
@@ -82,6 +82,16 @@ monolith と per-domain API は同じ domain crate (`alc-tenko` 等) を共有 �
   `crates/alc-core/src/tenant.rs::TenantConn` が `set_current_tenant` で `app.current_tenant_id` を
   立てて RLS に委ねるが、本番 (alc_api_app) でしか効かない。staging も対象にするクエリは
   **WHERE tenant_id を明示**すること (Refs #434、sso_admin で実害)。
+- **pre-auth SECURITY DEFINER + FORCE ROW LEVEL SECURITY の罠**: 未認証経路 (LINE webhook /
+  LINE login / notify viewer `/v/{token}` 等) が cross-tenant 検索用の SECURITY DEFINER 関数
+  を叩く時、対象テーブルに `FORCE ROW LEVEL SECURITY` が有効かつポリシーが
+  `current_setting('app.current_tenant_id', true)::UUID` を `NULLIF` でガードせず直接キャストして
+  いると、tenant context 未設定 (空文字) で `invalid input syntax for type uuid: ""` 500 になる
+  (テーブル所有者 = SECURITY DEFINER 実行ロールにも FORCE 下では RLS が適用されるため)。
+  `devices`/`bot_configs`/carins 系は `NULLIF(..., '')::UUID` でガード済みで安全、
+  `notify_line_configs`(#434 migration 118)/`notify_recipients`(119)/`notify_deliveries`+`notify_documents`(120)
+  は同じ穴があり `NO FORCE ROW LEVEL SECURITY` で修正済み。新しい pre-auth SECURITY DEFINER 関数を
+  追加する時は対象テーブルの RLS ポリシーの cast パターンを確認すること。
 - **migration 不変条件**: 適用済み `migrations/*.sql` を絶対に変更しない (sqlx が SHA-384 検証、不一致で起動不能)。
   修正は新ファイル追加。migration は **Cloud Run Jobs** (`rust-alc-api-migrate`) で deploy 前に実行
   (`main.rs` から `sqlx::migrate!()` は削除済み = 起動時自動適用なし)。
