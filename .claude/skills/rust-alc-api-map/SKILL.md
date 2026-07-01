@@ -74,6 +74,13 @@ monolith と per-domain API は同じ domain crate (`alc-tenko` 等) を共有 �
 
 ## gotcha (CLAUDE.md / README 由来)
 
+- **保存 secret の暗号鍵は `SSO_ENCRYPTION_KEY` 必須** (Refs #479 PR-1)。LINE channel
+  secret / LINE WORKS bot secret / SSO client_secret の AES-256-GCM 鍵素材
+  (`SHA-256(SSO_ENCRYPTION_KEY)`、`alc-core::auth_lineworks::{encrypt,decrypt}_secret`)。
+  旧 `or_else(JWT_SECRET)` の env-presence fallback は撤去済み — 未設定は loud に 500。
+  復号側は auth-worker (同 secret の CF binding) と共有。render.sh は backend にのみ注入
+  (暗号化経路を実行するのは monolith だけ。trouble-api は notifier: None)。
+
 - **DB 接続**: `alc_api_app` ロール (NOBYPASSRLS → RLS 有効) で、**直接接続 port 5432** を使う
   (Supavisor 6543 は `set_config` がリセットされ RLS テナント分離が壊れる)。
   `DATABASE_URL` に `?options=-c search_path=alc_api` 必須。
