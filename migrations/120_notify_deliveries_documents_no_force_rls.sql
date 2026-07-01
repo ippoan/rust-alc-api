@@ -1,0 +1,24 @@
+-- notify 公開 viewer (/v/{token}) の同種 RLS 500 を事前修正 (Refs #434, follow-up to 118/119)
+--
+-- `lookup_delivery_for_view()` (migration 107) は SECURITY DEFINER 関数で
+-- `notify_deliveries` と `notify_documents` を read_token だけで JOIN 検索する
+-- (viewer ページは未認証、まだ tenant context が確立していない)。071/070 で
+-- `FORCE ROW LEVEL SECURITY` が有効かつ、両テーブルのポリシーは
+-- `tenant_id = current_setting('app.current_tenant_id', true)::UUID` を
+-- NULLIF でガードせずに直接キャストしているため、空 tenant context
+-- (`app.current_tenant_id = ''`) では他の SECURITY DEFINER 関数
+-- (list_enabled_line_configs / find_recipient_by_line_user_id) と同じ
+-- "invalid input syntax for type uuid" で 500 になる。
+--
+-- #434 lockdown 実地検証で LINE ログイン (notify_recipients, migration 119) の
+-- 実害が見つかったのを機に、同一パターンを静的に洗い出して先行修正する
+-- (viewer ページはまだ実害が出ていないが、pre-auth cross-tenant lookup という
+-- 構造は完全に同じでいつでも起こり得る)。
+--
+-- 118/119 と同じ根治: FORCE を外すことで、所有者として実行される
+-- SECURITY DEFINER 関数が RLS をバイパスして全テナントの delivery/document を
+-- 検索できる (= 認証前アクセスの本来の意図)。app ロール (`alc_api_app`,
+-- NOBYPASSRLS、テーブル非所有者) には引き続き RLS が適用されるため、通常の
+-- tenant スコープ CRUD のテナント分離は維持される。
+ALTER TABLE alc_api.notify_deliveries NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE alc_api.notify_documents NO FORCE ROW LEVEL SECURITY;
