@@ -1,6 +1,6 @@
 ---
 name: rust-alc-api-map
-generated-from: rust-alc-api:9641c4bd31861a675148afdf72f10a3989b5ae85
+generated-from: rust-alc-api:bb215b961d14a9d3af0c61e6a33af419059d3465
 paths: [crates/, src/, migrations/]
 description: rust-alc-api (アルコールチェッカー基盤の Rust/Axum Cargo workspace — 13 domain crate + gateway/tenko/carins/dtako/trouble の複数バイナリ、PostgreSQL+RLS、Cloud Run) の構造ナビゲーション。どの crate に何のルートがあるか / monolith(rust-alc-api) と per-domain API + gateway の二系統 / RLS・migration・deploy/release 分離の gotcha を 1 枚にまとめる。トリガー:「rust-alc-api」「alc-api」「alc-notify」「alc-tenko」「alc-trouble」「alc-carins」「alc-dtako」「gateway」「tenko-api」「carins-api」「dtako-api」「trouble-api」「RLS テナント」「sqlx migration」「ts-rs」「Release Wave」「Bazel」等。
 ---
@@ -46,14 +46,15 @@ monolith と per-domain API は同じ domain crate (`alc-tenko` 等) を共有 �
 
 - **monolith**: `src/main.rs` — DATABASE_URL で `PgPool`、Storage backend (`STORAGE_BACKEND` = r2/gcs、
   carins/dtako/notify/trouble は別バケット+別 R2 キー)、巨大な `AppState` に全 Pg*Repository を組み立て、
-  `.nest("/api", rust_alc_api::routes::router())`。背景 task: 60s ごと `check_overdue_schedules`。
+  `.nest("/api", rust_alc_api::routes::router(internal_oidc_trust()))`。背景 task: 60s ごと `check_overdue_schedules`。
 - **router 本体**: `src/routes/mod.rs` — 各 domain crate のルートを re-export し `router()` で結線。
   middleware: `require_tenant_header` (tenant/admin 共通、注入 identity 信頼) / `require_internal_jwt`
-  (auth-worker→internal ingest、aud=alc-api-internal。**#434 Phase D で HS256 / Google OIDC の
-  dual-accept 化**: `InternalOidcTrust{enabled,verifier}` Extension (env `INTERNAL_AUTH_TRUST_OIDC=1`
-  で enabled) の時のみ `GoogleTokenVerifier::verify_internal_oidc` が JWKS で RS256 署名検証 +
-  iss + aud=alc-api-internal + exp して OIDC を受理 (Cloud Run IAM に加えた app 層 defense-in-depth)。
-  flag off は HS256 のみ = 非破壊) / `require_internal_shared_secret`
+  (auth-worker→internal ingest、aud=alc-api-internal。**#479 で HS256 dual-accept を撤去し
+  Google OIDC 一本化**: `GoogleTokenVerifier::verify_internal_oidc` が JWKS で RS256 署名検証 +
+  iss + aud=alc-api-internal + exp を検証 (Cloud Run IAM に加えた app 層 defense-in-depth)。
+  `InternalOidcTrust{verifier}` は `router()` の **DI 引数** — prod は `internal_oidc_trust()`
+  (main.rs)、テストは `with_test_claims` verifier を注入。旧 `INTERNAL_AUTH_TRUST_OIDC` env と
+  共有 JWT_SECRET での HS256 受理は削除済み) / `require_internal_shared_secret`
   (email-receiver→`/api/dtako/tickets`)。
   **#434 で monolith のローカル JWT 検証を撤去**: 旧 `require_jwt` / `require_tenant` (bare X-Tenant-ID
   フォールバック) / `TenantProxySecret` gate (#437) / 未配線の `require_tenant_or_device` (#436、device-token)
