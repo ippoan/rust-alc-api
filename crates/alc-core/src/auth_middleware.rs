@@ -4,55 +4,45 @@ use axum::{extract::Request, http::StatusCode, middleware::Next, response::Respo
 use uuid::Uuid;
 
 use crate::auth_google::GoogleTokenVerifier;
-use crate::auth_jwt::{verify_internal_token, JwtSecret};
 
-/// lockdown (`allUsers` 削除) 後に internal-auth の OIDC 経路を有効化する設定
-/// (Refs #434 Phase D)。`require_internal_jwt` 配下に Extension で注入する。
-/// `enabled` が true の時だけ Google OIDC (aud=alc-api-internal) を **署名検証して**受理する
-/// (それまでは HS256 のみ = 非破壊)。`verifier` は `client_id=alc-api-internal` で構築した
-/// `GoogleTokenVerifier` で、enabled に関わらず常時構築する (= 配線を分岐レスにし coverage を
-/// 100% に保つ。enabled=false の間は未使用)。app 配線側で `INTERNAL_AUTH_TRUST_OIDC` env から
-/// `enabled` を解決する (Extension 注入なのでテストは決定的)。
+/// internal-auth の OIDC 検証設定。`require_internal_jwt` 配下に Extension で注入する。
+/// `verifier` は `client_id=alc-api-internal` で構築した `GoogleTokenVerifier`。
+/// app 配線 (`routes::router` の引数経由、prod は main.rs / テストは
+/// `with_test_claims`) で注入するため、テストは決定的。
+///
+/// #479 で #434 Phase D の HS256 dual-accept (`enabled` flag + 共有 `JWT_SECRET`
+/// 検証) を撤去し、Google OIDC (aud=alc-api-internal、JWKS RS256 署名検証) に
+/// 一本化した。全呼び出し元 (auth-worker `internalAuthToken` / Cloud Scheduler)
+/// は OIDC mint 済み。
 #[derive(Clone)]
 pub struct InternalOidcTrust {
-    pub enabled: bool,
     pub verifier: GoogleTokenVerifier,
 }
 
-/// 内部 API 用 JWT 検証ミドルウェア
+/// 内部 API 用 OIDC 検証ミドルウェア
 ///
-/// `Authorization: Bearer <jwt>` を要求し、`aud == "alc-api-internal"` を強制する。
-/// auth-worker が LINE WORKS webhook を受け取って rust-alc-api に転送する際の
-/// `/api/internal/*` ルート保護に使う。通常のユーザー JWT (`AppClaims`) は
-/// `aud` を持たないため弾かれる。
+/// `Authorization: Bearer <token>` を要求し、Google OIDC (aud=alc-api-internal) を
+/// **JWKS で RS256 署名検証**して受理する (`GoogleTokenVerifier::verify_internal_oidc`)。
+/// auth-worker が internal 呼び出し (`/api/internal/*`) に使う。通常のユーザー JWT
+/// (HS256 / aud 無し) は署名検証で弾かれる。
 ///
-/// #434 Phase D の lockdown 移行用に **dual-accept**:
-/// 1. 従来の HS256 internal JWT (`verify_internal_token`) — 移行前/現行。
-/// 2. `InternalOidcTrust.enabled` の時のみ、Google OIDC (aud=alc-api-internal) を
-///    **JWKS で RS256 署名検証**して受理 (`GoogleTokenVerifier::verify_internal_oidc`)。
-///    `enabled=false` の間は完全に dormant (非破壊)。
+/// 旧 HS256 internal JWT (`verify_internal_token` + 共有 `JWT_SECRET`) の受理は
+/// #479 で撤去した — 全呼び出し元が OIDC を mint する (auth-worker#340)。
 pub async fn require_internal_jwt(
-    Extension(jwt_secret): Extension<JwtSecret>,
     Extension(oidc_trust): Extension<InternalOidcTrust>,
     req: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
     let token = extract_bearer_token(&req).ok_or(StatusCode::UNAUTHORIZED)?;
-    // 1) HS256 internal JWT (移行前/現行)。
-    if verify_internal_token(token, &jwt_secret).is_ok() {
-        return Ok(next.run(req).await);
-    }
-    // 2) lockdown 後の OIDC 経路 (enabled の時のみ、JWKS で署名検証込み)。
-    if oidc_trust.enabled
-        && oidc_trust
-            .verifier
-            .verify_internal_oidc(token)
-            .await
-            .is_ok()
+    if oidc_trust
+        .verifier
+        .verify_internal_oidc(token)
+        .await
+        .is_ok()
     {
         return Ok(next.run(req).await);
     }
-    tracing::warn!("internal JWT verification failed");
+    tracing::warn!("internal OIDC verification failed");
     Err(StatusCode::UNAUTHORIZED)
 }
 
@@ -271,20 +261,12 @@ mod tests {
     }
 
     fn app_internal_jwt() -> Router {
-        app_internal_jwt_with(false)
-    }
-
-    fn app_internal_jwt_with(enabled: bool) -> Router {
         Router::new()
             .route("/i", get(echo_ok))
             .layer(axum_middleware::from_fn(require_internal_jwt))
             .layer(Extension(InternalOidcTrust {
-                enabled,
                 verifier: test_oidc_verifier(),
             }))
-            .layer(Extension(JwtSecret(
-                "test-internal-secret-256-bits!!!".to_string(),
-            )))
     }
 
     /// test_claims モードの verifier (`verify_internal_oidc("test-valid-token")` が Ok)。
@@ -310,8 +292,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn internal_jwt_ok() {
-        use crate::auth_jwt::create_internal_token;
+    async fn internal_jwt_oidc_ok() {
+        // OIDC verifier (test_claims モード) の署名検証 OK トークンは受理。
+        let resp = send(
+            app_internal_jwt(),
+            req_with_headers("/i", &[("Authorization", "Bearer test-valid-token")]),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn internal_jwt_hs256_no_longer_accepted() {
+        // #479 regression: 旧 HS256 internal JWT (共有 JWT_SECRET 署名) は
+        // dual-accept 撤去後は拒否されること。
+        use crate::auth_jwt::{create_internal_token, JwtSecret};
         let secret = JwtSecret("test-internal-secret-256-bits!!!".to_string());
         let token = create_internal_token(&secret, "auth-worker", 60).unwrap();
         let resp = send(
@@ -319,7 +314,7 @@ mod tests {
             req_with_headers("/i", &[("Authorization", &format!("Bearer {token}"))]),
         )
         .await;
-        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]
@@ -330,8 +325,8 @@ mod tests {
 
     #[tokio::test]
     async fn internal_jwt_user_token_rejected() {
-        // ユーザー JWT は aud を持たないので拒否されること
-        use crate::auth_jwt::create_access_token;
+        // ユーザー JWT (HS256 / aud 無し) は OIDC 署名検証で拒否されること
+        use crate::auth_jwt::{create_access_token, JwtSecret};
         use crate::models::User;
         let secret = JwtSecret("test-internal-secret-256-bits!!!".to_string());
         let user = User {
@@ -359,36 +354,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn internal_jwt_wrong_secret_rejected() {
-        use crate::auth_jwt::create_internal_token;
-        let other = JwtSecret("different-secret-key-256-bits!!".to_string());
-        let token = create_internal_token(&other, "auth-worker", 60).unwrap();
-        // OIDC trust off (既定) なので、HS256 不一致 = 401 (dual-accept の OIDC 経路に入らない)。
+    async fn internal_jwt_oidc_rejected_when_signature_invalid() {
+        // 署名検証に失敗する token は拒否 (署名検証は無効化していない)。
         let resp = send(
             app_internal_jwt(),
-            req_with_headers("/i", &[("Authorization", &format!("Bearer {token}"))]),
-        )
-        .await;
-        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
-    }
-
-    #[tokio::test]
-    async fn internal_jwt_oidc_accepted_when_trust_enabled() {
-        // OIDC verifier 注入 + 署名検証 OK (test_claims モードの "test-valid-token") は受理。
-        // HS256 では通らない token なので OIDC 経路に入る (Refs #434 Phase D)。
-        let resp = send(
-            app_internal_jwt_with(true),
-            req_with_headers("/i", &[("Authorization", "Bearer test-valid-token")]),
-        )
-        .await;
-        assert_eq!(resp.status(), StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn internal_jwt_oidc_rejected_when_signature_invalid() {
-        // OIDC verifier 注入でも署名検証に失敗する token は拒否 (署名検証は無効化していない)。
-        let resp = send(
-            app_internal_jwt_with(true),
             req_with_headers("/i", &[("Authorization", "Bearer not-a-valid-token")]),
         )
         .await;

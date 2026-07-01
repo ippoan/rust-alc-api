@@ -489,11 +489,13 @@ pub fn create_test_jwt(tenant_id: Uuid, role: &str) -> String {
     create_access_token(&user, &secret, None).expect("Failed to create test JWT")
 }
 
-/// 内部 API 用のテスト JWT を発行 (aud=alc-api-internal)
+/// 内部 API 用のテスト token を返す (aud=alc-api-internal)。
+///
+/// #479 で `require_internal_jwt` は Google OIDC 一本化 (HS256 dual-accept 撤去)
+/// されたため、`spawn_test_server` が注入する test_claims モードの
+/// `GoogleTokenVerifier` が受理する固定 token を返す。
 pub fn create_test_internal_jwt() -> String {
-    let secret = JwtSecret(TEST_JWT_SECRET.to_string());
-    rust_alc_api::auth::jwt::create_internal_token(&secret, "test-auth-worker", 60)
-        .expect("Failed to create test internal JWT")
+    "test-valid-token".to_string()
 }
 
 /// dtako テスト用の最小 ZIP (KUDGURI.csv + KUDGIVT.csv) を生成
@@ -625,6 +627,28 @@ async fn test_proxy_inject(
     next.run(req).await
 }
 
+/// テスト用 `InternalOidcTrust` (test_claims モード)。`create_test_internal_jwt()`
+/// が返す "test-valid-token" だけを受理する (Refs #479 — OIDC 一本化後の
+/// internal route テスト用)。
+fn internal_oidc_trust_for_tests() -> rust_alc_api::middleware::auth::InternalOidcTrust {
+    use rust_alc_api::auth::google::{GoogleClaims, GoogleTokenVerifier};
+    rust_alc_api::middleware::auth::InternalOidcTrust {
+        verifier: GoogleTokenVerifier::with_test_claims(
+            rust_alc_api::auth::jwt::INTERNAL_AUD.to_string(),
+            GoogleClaims {
+                sub: "test-internal-sa".to_string(),
+                email: String::new(),
+                name: String::new(),
+                picture: None,
+                email_verified: false,
+                aud: rust_alc_api::auth::jwt::INTERNAL_AUD.to_string(),
+                iss: "https://accounts.google.com".to_string(),
+                exp: 9999999999,
+            },
+        ),
+    }
+}
+
 pub async fn spawn_test_server(state: AppState) -> String {
     spawn_test_server_with_scraper(state, "http://localhost:9999").await
 }
@@ -658,7 +682,10 @@ pub async fn spawn_test_server_with_scraper(state: AppState, scraper_url: &str) 
         .allow_headers(Any);
 
     let app = Router::new()
-        .nest("/api", rust_alc_api::routes::router())
+        .nest(
+            "/api",
+            rust_alc_api::routes::router(internal_oidc_trust_for_tests()),
+        )
         // テスト用 proxy emulation (Refs #434)。#434 で rust-alc-api は JWT 検証を
         // 撤去し、注入された identity ヘッダー (X-Tenant-ID / X-User-*) を信頼する
         // dumb backend になった。本番では CF proxy が auth-worker introspect で検証
