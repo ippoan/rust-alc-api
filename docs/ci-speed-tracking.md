@@ -53,10 +53,13 @@ Bazel build + staging deploy を PR CI に含む運用)。改善は「同一ソ�
 - `cache-warm` の check warm cmd を clippy のみに縮小
 - artifact 名 / パス / retention 不変 → `scripts/export-ts-bindings.sh` の契約に影響なし
 
-**実測:**
+**実測 ([run 28550523724](https://github.com/ippoan/rust-alc-api/actions/runs/28550523724)):**
 
 - 変更前: Format & Lint job 141s (うち bindings 生成 ~74s)
-- 変更後: (PR #483 の CI 実測後に記入)
+- 変更後: Format & Lint job **65s (-76s、54% 短縮)**
+- Tests (lib): 129s — bindings upload 追加後も mock shard 群 (161〜192s) より短く、
+  critical path への影響なし。`ts-bindings-*` artifact (19.7 KB) も lib shard から
+  正常に upload されたことを確認
 
 ## 検証済みで「効果薄い / スコープ外」と判断した案 (Refs #482)
 
