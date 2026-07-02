@@ -19,12 +19,6 @@ ENV="${2:?Usage: render.sh <service> <environment> <image_sha>}"
 IMAGE_SHA="${3:?Usage: render.sh <service> <environment> <image_sha>}"
 shift 3
 
-# Required env vars (fed from GitHub Actions `vars.*`)
-# Only the services that actually emit SCRAPER_URL need the var
-if [[ "$SERVICE" == "backend" || "$SERVICE" == "dtako" ]]; then
-  : "${ENV_SCRAPER_URL:?ENV_SCRAPER_URL not set (expected GitHub vars.SCRAPER_URL)}"
-fi
-
 STAGING_URL=""
 DB_IMAGE=""
 # production no-traffic deploy 用 (Refs #137 Phase 5 / ci-dashboard#157):
@@ -131,8 +125,6 @@ emit_env_backend() {
               value: "$(notify_redact_broadcast_url)"
             - name: NOTIFY_REDACT_2STAGE
               value: "1"
-            - name: SCRAPER_URL
-              value: "${ENV_SCRAPER_URL:?ENV_SCRAPER_URL not set (GitHub vars.SCRAPER_URL)}"
             - name: FCM_PROJECT_ID
               value: "alc-fcm"
             - name: STAGING_MODE
@@ -361,8 +353,6 @@ emit_env_dtako() {
                 secretKeyRef:
                   key: latest
                   name: dtako-r2-secret-key
-            - name: SCRAPER_URL
-              value: "${ENV_SCRAPER_URL:?ENV_SCRAPER_URL not set (GitHub vars.SCRAPER_URL)}"
             # email-receiver Worker からの internal ingest (POST /api/dtako/tickets)
             # 検証用。empty なら dtako-api/src/main.rs:114 で internal route を disable
             # するので、未投入の prod でも safe fallback。値は ippoan 4 worker と共有
