@@ -117,6 +117,10 @@ pub fn internal_router() -> Router<AppState> {
             post(upsert_lineworks_user),
         )
         .route("/internal/auth/users/upsert-line", post(upsert_line_user))
+        .route(
+            "/internal/auth/users/upsert-google",
+            post(upsert_google_user),
+        )
         .route("/internal/auth/users/by-line-id", get(user_by_line_id))
         .route(
             "/internal/auth/recipients/register-line",
@@ -244,6 +248,82 @@ async fn upsert_line_user(
             .create_user_line(b.tenant_id, &b.line_user_id, &b.name)
             .await
             .map_err(|e| internal_error("create_user_line", e))?,
+    };
+    with_slug(&state, user).await
+}
+
+// ---------- POST /internal/auth/users/upsert-google ----------
+
+#[derive(Debug, Deserialize)]
+struct UpsertGoogleBody {
+    google_sub: String,
+    email: String,
+    name: String,
+}
+
+/// Google ログイン (auth-worker がオーケストレーション) の user 解決/作成。
+/// 旧 `/api/auth/google` (#479 PR-3 で撤去) の `issue_tokens_for_google_claims` から
+/// JWT 発行を除いた DB プリミティブ。初回ログインの tenant 解決は
+/// 招待 (tenant_allowed_emails 完全一致) → tenants.email_domain 一致 →
+/// STAGING_MODE なら自動テナント作成 → それ以外 403 の順 (Refs #332 / #434)。
+async fn upsert_google_user(
+    State(state): State<AppState>,
+    Json(b): Json<UpsertGoogleBody>,
+) -> ApiResult<InternalUserWithSlug> {
+    let existing = state
+        .auth
+        .find_user_by_google_sub(&b.google_sub)
+        .await
+        .map_err(|e| internal_error("find_user_by_google_sub", e))?;
+    let user = match existing {
+        Some(u) => u,
+        None => {
+            let email_domain = b.email.split('@').nth(1).unwrap_or("default").to_string();
+            let invitation = state
+                .auth
+                .find_invitation_by_email(&b.email)
+                .await
+                .map_err(|e| internal_error("find_invitation_by_email", e))?;
+            let (tenant_id, role) = if let Some(inv) = &invitation {
+                (inv.tenant_id, inv.role.clone())
+            } else {
+                let domain_tenant = state
+                    .auth
+                    .find_tenant_by_email_domain(&email_domain)
+                    .await
+                    .map_err(|e| internal_error("find_tenant_by_email_domain", e))?;
+                if let Some(t) = domain_tenant {
+                    (t.id, "admin".to_string())
+                } else if crate::is_staging_mode() {
+                    // staging は揮発 DB で cold start ごとに tenant が消えるため、
+                    // 自動テナント作成で login 不能を防ぐ (prod はゴミテナント防止で
+                    // 403 のまま、Refs #332)。
+                    let t = state
+                        .auth
+                        .create_tenant_with_domain(&email_domain)
+                        .await
+                        .map_err(|e| internal_error("create_tenant_with_domain", e))?;
+                    tracing::info!("staging auto-provisioned tenant for email={}", b.email);
+                    (t.id, "admin".to_string())
+                } else {
+                    tracing::warn!("google login rejected: no tenant match email={}", b.email);
+                    return Err((
+                        StatusCode::FORBIDDEN,
+                        Json(serde_json::json!({ "error": "no_tenant_for_email" })),
+                    ));
+                }
+            };
+            let user = state
+                .auth
+                .create_user_google(tenant_id, &b.google_sub, &b.email, &b.name, &role)
+                .await
+                .map_err(|e| internal_error("create_user_google", e))?;
+            // 招待レコードを消費 (使い済み)
+            if let Some(inv) = &invitation {
+                let _ = state.auth.delete_invitation(inv.id).await;
+            }
+            user
+        }
     };
     with_slug(&state, user).await
 }
