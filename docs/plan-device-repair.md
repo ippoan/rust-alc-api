@@ -208,8 +208,8 @@ Response `201`:
 
 | 変数 | 用途 |
 |---|---|
-| `AUTH_WORKER_URL` | 既存 gateway crate と同名 (rust-alc-api 本体では新規)。auth-worker の base URL |
-| `RE_PAIR_INTERNAL_SHARED_SECRET` | pair-internal 呼び出し用の shared secret (auth-worker 側で allowlist する専用 secret。既存 `INTERNAL_SHARED_SECRET` の再利用ではなく新規 secret を発行する — 用途混在を避ける) |
+| `AUTH_WORKER_URL` | 既存 gateway crate と同名 (rust-alc-api backend では新規)。auth-worker の base URL |
+| `INTERNAL_SHARED_SECRET` | pair-internal 呼び出し用の shared secret。既存 (dtako ingest 等と共用、ippoan 4 worker 間で共有済み) を再利用する — 新規 secret は発行しない (用途ごとに secret を増やさない方針) |
 | `RE_PAIR_REQUIRE_ADMIN` | デフォルト `true`。`false` にすると window 判定をスキップ (段階導入用、本番では常に true 運用) |
 | `RE_PAIR_REQUIRE_TOKEN` | デフォルト `false`。`true` で settings_token 2-factor 化 |
 | `RE_PAIR_WINDOW_SECS` | デフォルト `900` |
@@ -256,6 +256,6 @@ issue #495 の Acceptance Criteria はそのまま本 doc のテスト方針で�
 
 - Cloudflare WAF rate rule の具体的なルール定義はインフラ設定側 (本 repo
   scope 外)
-- staging/prod への `AUTH_WORKER_URL` / `RE_PAIR_INTERNAL_SHARED_SECRET`
-  (auth-worker 側の `INTERNAL_SHARED_SECRET*` binding と同値) の実投入
-  (secrets-inventory 経由、インフラ作業)
+- staging/prod への `AUTH_WORKER_URL` の実投入は `cloudrun/render.sh`
+  (`emit_env_backend`) に組み込み済み。`INTERNAL_SHARED_SECRET` は既存の
+  backend 用 secretKeyRef をそのまま流用するため追加投入は不要

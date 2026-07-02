@@ -90,8 +90,11 @@ impl HttpDevicePairClient {
         }
     }
 
-    /// `AUTH_WORKER_URL` / `RE_PAIR_INTERNAL_SHARED_SECRET` が両方揃っていれば
+    /// `AUTH_WORKER_URL` / `INTERNAL_SHARED_SECRET` が両方揃っていれば
     /// `Some`。片方でも欠けていれば re-pair 機能は未設定 (`None`) とする。
+    /// shared secret は既存 `INTERNAL_SHARED_SECRET` (dtako ingest 等と共用の
+    /// ippoan 4 worker 間 secret) を再利用する。新規 secret は発行しない
+    /// (用途ごとに secret を増やさない方針)。
     pub fn from_env() -> Option<Self> {
         Self::from_env_lookup(|k| std::env::var(k).ok())
     }
@@ -99,7 +102,7 @@ impl HttpDevicePairClient {
     /// env 依存を分離したテスト可能な実装 (`redact_broadcast::from_env_lookup` と同パターン)。
     fn from_env_lookup<F: Fn(&str) -> Option<String>>(getter: F) -> Option<Self> {
         let auth_worker_url = getter("AUTH_WORKER_URL").filter(|s| !s.is_empty())?;
-        let shared_secret = getter("RE_PAIR_INTERNAL_SHARED_SECRET").filter(|s| !s.is_empty())?;
+        let shared_secret = getter("INTERNAL_SHARED_SECRET").filter(|s| !s.is_empty())?;
         Some(Self::new(&auth_worker_url, shared_secret))
     }
 }
@@ -156,7 +159,7 @@ mod tests {
     #[test]
     fn from_env_lookup_none_when_url_missing() {
         assert!(HttpDevicePairClient::from_env_lookup(|k| {
-            if k == "RE_PAIR_INTERNAL_SHARED_SECRET" {
+            if k == "INTERNAL_SHARED_SECRET" {
                 Some("secret".to_string())
             } else {
                 None
@@ -182,7 +185,7 @@ mod tests {
         assert!(HttpDevicePairClient::from_env_lookup(|k| {
             match k {
                 "AUTH_WORKER_URL" => Some(String::new()),
-                "RE_PAIR_INTERNAL_SHARED_SECRET" => Some("secret".to_string()),
+                "INTERNAL_SHARED_SECRET" => Some("secret".to_string()),
                 _ => None,
             }
         })
@@ -194,7 +197,7 @@ mod tests {
         assert!(HttpDevicePairClient::from_env_lookup(|k| {
             match k {
                 "AUTH_WORKER_URL" => Some("https://auth.example.com".to_string()),
-                "RE_PAIR_INTERNAL_SHARED_SECRET" => Some(String::new()),
+                "INTERNAL_SHARED_SECRET" => Some(String::new()),
                 _ => None,
             }
         })
@@ -205,7 +208,7 @@ mod tests {
     fn from_env_lookup_returns_some_when_both_set() {
         let client = HttpDevicePairClient::from_env_lookup(|k| match k {
             "AUTH_WORKER_URL" => Some("https://auth.example.com".to_string()),
-            "RE_PAIR_INTERNAL_SHARED_SECRET" => Some("secret".to_string()),
+            "INTERNAL_SHARED_SECRET" => Some("secret".to_string()),
             _ => None,
         })
         .unwrap();
@@ -227,18 +230,18 @@ mod tests {
         // 唯一実 env を触るテスト。このキーは他テストで使われないため並行
         // 実行下でも安全 (redact_broadcast::from_env_uses_real_env と同パターン)。
         let saved_url = std::env::var("AUTH_WORKER_URL").ok();
-        let saved_secret = std::env::var("RE_PAIR_INTERNAL_SHARED_SECRET").ok();
+        let saved_secret = std::env::var("INTERNAL_SHARED_SECRET").ok();
 
         std::env::remove_var("AUTH_WORKER_URL");
-        std::env::remove_var("RE_PAIR_INTERNAL_SHARED_SECRET");
+        std::env::remove_var("INTERNAL_SHARED_SECRET");
         assert!(HttpDevicePairClient::from_env().is_none());
 
         std::env::set_var("AUTH_WORKER_URL", "https://auth.example.com");
-        std::env::set_var("RE_PAIR_INTERNAL_SHARED_SECRET", "secret");
+        std::env::set_var("INTERNAL_SHARED_SECRET", "secret");
         assert!(HttpDevicePairClient::from_env().is_some());
 
         restore_env("AUTH_WORKER_URL", saved_url);
-        restore_env("RE_PAIR_INTERNAL_SHARED_SECRET", saved_secret);
+        restore_env("INTERNAL_SHARED_SECRET", saved_secret);
     }
 
     #[test]
