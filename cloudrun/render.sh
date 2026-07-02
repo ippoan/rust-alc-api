@@ -271,6 +271,14 @@ YAML
                 secretKeyRef:
                   key: latest
                   name: INTERNAL_SHARED_SECRET
+            # kiosk 端末 re-pair (再認証、Refs #495)。alc-devices::device_pair_client が
+            # 両方揃っていないと re-pair 機能自体を無効化する (HttpDevicePairClient::from_env
+            # が None を返し re_pair ハンドラは 404 "device_pair_client not configured")。
+            # shared secret は新規発行せず上の INTERNAL_SHARED_SECRET を再利用する
+            # (auth-worker 側で既に ippoan 4 worker と共有済みの binding、新規 secret を
+            # 増やさない方針)。
+            - name: AUTH_WORKER_URL
+              value: "$( [[ "$ENV" == "staging" ]] && echo "https://auth-worker-staging.m-tama-ramu.workers.dev" || echo "https://auth.ippoan.org" )"
 YAML
 }
 
