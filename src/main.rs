@@ -358,6 +358,8 @@ async fn main() -> anyhow::Result<()> {
         trouble_task_types,
         trouble_task_statuses,
         trouble_storage,
+        device_pair_client: rust_alc_api::device_pair_client::HttpDevicePairClient::from_env()
+            .map(|c| Arc::new(c) as Arc<dyn rust_alc_api::device_pair_client::DevicePairClient>),
         webhook: {
             let wh_repo: Arc<dyn rust_alc_api::db::repository::WebhookRepository> = Arc::new(
                 rust_alc_api::db::repository::PgWebhookRepository::new(pool.clone()),

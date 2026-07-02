@@ -200,6 +200,39 @@ impl DeviceRepository for PgDeviceRepository {
         Ok(())
     }
 
+    async fn get_device_re_pair_state(
+        &self,
+        device_id: Uuid,
+    ) -> Result<Option<RePairStateRow>, sqlx::Error> {
+        sqlx::query_as::<_, RePairStateRow>("SELECT * FROM alc_api.get_device_re_pair_state($1)")
+            .bind(device_id)
+            .fetch_optional(&self.pool)
+            .await
+    }
+
+    async fn record_re_pair_success(
+        &self,
+        tenant_id: Uuid,
+        device_id: Uuid,
+        bind_hardware_id: Option<&str>,
+    ) -> Result<(), sqlx::Error> {
+        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
+        sqlx::query(
+            r#"UPDATE devices
+               SET re_pair_authorized_until = NULL,
+                   last_re_pair_at = NOW(),
+                   re_pair_count = re_pair_count + 1,
+                   hardware_id = COALESCE(hardware_id, $1),
+                   updated_at = NOW()
+               WHERE id = $2"#,
+        )
+        .bind(bind_hardware_id)
+        .bind(device_id)
+        .execute(&mut *tc.conn)
+        .await?;
+        Ok(())
+    }
+
     async fn get_device_settings(
         &self,
         device_id: Uuid,
@@ -708,6 +741,30 @@ impl DeviceRepository for PgDeviceRepository {
         .execute(&mut *tc.conn)
         .await?;
         Ok(result.rows_affected() > 0)
+    }
+
+    async fn authorize_repair(
+        &self,
+        tenant_id: Uuid,
+        id: Uuid,
+        window_secs: i64,
+        reset_binding: bool,
+    ) -> Result<Option<chrono::DateTime<chrono::Utc>>, sqlx::Error> {
+        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
+        let row = sqlx::query_as::<_, (chrono::DateTime<chrono::Utc>,)>(
+            r#"UPDATE devices
+               SET re_pair_authorized_until = NOW() + make_interval(secs => $1::double precision),
+                   hardware_id = CASE WHEN $2 THEN NULL ELSE hardware_id END,
+                   updated_at = NOW()
+               WHERE id = $3 AND status = 'approved'
+               RETURNING re_pair_authorized_until"#,
+        )
+        .bind(window_secs)
+        .bind(reset_binding)
+        .bind(id)
+        .fetch_optional(&mut *tc.conn)
+        .await?;
+        Ok(row.map(|r| r.0))
     }
 
     async fn get_fcm_token_bypass_rls(

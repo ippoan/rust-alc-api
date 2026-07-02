@@ -23,7 +23,7 @@ use rust_alc_api::db::repository::daily_health::DailyHealthRow;
 use rust_alc_api::db::repository::devices::{
     ApproveLookupRow, ClaimLookupRow, CreateRegistrationResult, DeviceRepository, DeviceRow,
     DeviceSettingsRow, DeviceTenantRow, FcmDeviceRow, FcmTestDeviceRow, OtaDeviceRow,
-    RegistrationRequestRow, RegistrationStatusRow,
+    RePairStateRow, RegistrationRequestRow, RegistrationStatusRow,
 };
 use rust_alc_api::db::repository::driver_info::DriverInfoRepository;
 use rust_alc_api::db::repository::driver_info::{
@@ -1027,6 +1027,8 @@ pub struct MockDeviceRepository {
     pub return_code_exists_once: AtomicBool,
     /// get_device_settings / get_registration_status で settings_token (nil UUID) を返す
     pub return_settings_token: AtomicBool,
+    /// get_device_re_pair_state が返す行 (Refs #495)。None なら 404 相当。
+    pub re_pair_state: std::sync::Mutex<Option<RePairStateRow>>,
 }
 
 impl Default for MockDeviceRepository {
@@ -1057,6 +1059,7 @@ impl Default for MockDeviceRepository {
             return_schedule_overnight: AtomicBool::new(false),
             return_code_exists_once: AtomicBool::new(false),
             return_settings_token: AtomicBool::new(false),
+            re_pair_state: std::sync::Mutex::new(None),
         }
     }
 }
@@ -1202,6 +1205,27 @@ impl DeviceRepository for MockDeviceRepository {
         } else {
             Ok(None)
         }
+    }
+
+    async fn get_device_re_pair_state(
+        &self,
+        _device_id: Uuid,
+    ) -> Result<Option<RePairStateRow>, sqlx::Error> {
+        check_fail!(self);
+        Ok(self.re_pair_state.lock().unwrap().clone())
+    }
+
+    async fn record_re_pair_success(
+        &self,
+        _tenant_id: Uuid,
+        _device_id: Uuid,
+        _bind_hardware_id: Option<&str>,
+    ) -> Result<(), sqlx::Error> {
+        check_fail!(self);
+        if self.fail_on_update.swap(false, Ordering::SeqCst) {
+            return Err(sqlx::Error::RowNotFound);
+        }
+        Ok(())
     }
 
     async fn lookup_device_tenant(&self, _device_id: Uuid) -> Result<Option<Uuid>, sqlx::Error> {
@@ -1599,6 +1623,21 @@ impl DeviceRepository for MockDeviceRepository {
         Ok(self.return_data.load(Ordering::SeqCst))
     }
 
+    async fn authorize_repair(
+        &self,
+        _tenant_id: Uuid,
+        _id: Uuid,
+        window_secs: i64,
+        _reset_binding: bool,
+    ) -> Result<Option<DateTime<Utc>>, sqlx::Error> {
+        check_fail!(self);
+        if self.return_data.load(Ordering::SeqCst) {
+            Ok(Some(Utc::now() + chrono::Duration::seconds(window_secs)))
+        } else {
+            Ok(None)
+        }
+    }
+
     async fn get_fcm_token_bypass_rls(
         &self,
         _device_id: Uuid,
@@ -1673,6 +1712,50 @@ impl DeviceRepository for MockDeviceRepository {
         } else {
             Ok(vec![])
         }
+    }
+}
+
+// ============================================================
+// MockDevicePairClient (Refs #495)
+// ============================================================
+
+pub struct MockDevicePairClient {
+    pub fail_next: AtomicBool,
+    pub auth_device_id: String,
+    pub device_secret: String,
+}
+
+impl Default for MockDevicePairClient {
+    fn default() -> Self {
+        Self {
+            fail_next: AtomicBool::new(false),
+            auth_device_id: "mock-auth-device-id".to_string(),
+            device_secret: "mock-device-secret".to_string(),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl rust_alc_api::device_pair_client::DevicePairClient for MockDevicePairClient {
+    async fn mint(
+        &self,
+        _tenant_id: Uuid,
+        _label: &str,
+    ) -> Result<
+        rust_alc_api::device_pair_client::PairedCredential,
+        rust_alc_api::device_pair_client::DevicePairClientError,
+    > {
+        if self.fail_next.swap(false, Ordering::SeqCst) {
+            return Err(
+                rust_alc_api::device_pair_client::DevicePairClientError::Upstream(
+                    "mock failure".to_string(),
+                ),
+            );
+        }
+        Ok(rust_alc_api::device_pair_client::PairedCredential {
+            auth_device_id: self.auth_device_id.clone(),
+            device_secret: self.device_secret.clone(),
+        })
     }
 }
 
