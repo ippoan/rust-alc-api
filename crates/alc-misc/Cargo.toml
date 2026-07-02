@@ -11,8 +11,6 @@ sqlx = { version = "0.8", features = ["postgres", "chrono", "uuid"] }
 base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 csv = "1"
-hex = "0.4"
-hmac = "0.12"
 reqwest = { version = "0.12", features = ["json"] }
 ring = "0.17"
 sha2 = "0.10"

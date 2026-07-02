@@ -17,8 +17,7 @@ async fn test_register_success() {
     test_group!("TenkoCall: register success");
     test_case!("call_number がマスタに存在し登録成功", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
-        std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
-        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
 
         let mock = Arc::new(MockTenkoCallRepository::default());
         mock.return_some.store(true, Ordering::SeqCst);
@@ -52,8 +51,7 @@ async fn test_register_without_employee_code() {
     test_group!("TenkoCall: register without employee_code");
     test_case!("employee_code なしでも登録成功", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
-        std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
-        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
 
         let mock = Arc::new(MockTenkoCallRepository::default());
         mock.return_some.store(true, Ordering::SeqCst);
@@ -84,8 +82,7 @@ async fn test_register_unknown_call_number() {
     test_group!("TenkoCall: register unknown call_number");
     test_case!("未登録の call_number は 400", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
-        std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
-        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
 
         let mock = Arc::new(MockTenkoCallRepository::default());
         // return_some = false (default) → Ok(None) → BAD_REQUEST
@@ -117,8 +114,7 @@ async fn test_register_db_error() {
     test_group!("TenkoCall: register DB error");
     test_case!("DB エラー時に 500 を返す", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
-        std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
-        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
 
         let mock = Arc::new(MockTenkoCallRepository::default());
         mock.fail_next.store(true, Ordering::SeqCst);
@@ -153,8 +149,7 @@ async fn test_tenko_success() {
     test_group!("TenkoCall: tenko success");
     test_case!("登録済みドライバーの点呼が成功", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
-        std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
-        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
 
         let mock = Arc::new(MockTenkoCallRepository::default());
         mock.return_some.store(true, Ordering::SeqCst);
@@ -186,8 +181,7 @@ async fn test_tenko_driver_not_found() {
     test_group!("TenkoCall: tenko driver not found");
     test_case!("未登録ドライバーの点呼は 404", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
-        std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
-        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
 
         let mock = Arc::new(MockTenkoCallRepository::default());
         // return_some = false (default) → Ok(None) → NOT_FOUND
@@ -216,8 +210,7 @@ async fn test_tenko_db_error() {
     test_group!("TenkoCall: tenko DB error");
     test_case!("DB エラー時に 500 を返す", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
-        std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
-        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
 
         let mock = Arc::new(MockTenkoCallRepository::default());
         mock.fail_next.store(true, Ordering::SeqCst);
@@ -250,8 +243,7 @@ async fn test_list_numbers_empty() {
     test_group!("TenkoCall: list_numbers empty");
     test_case!("空のリストを取得できる", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
-        std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
-        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
 
         let mock = Arc::new(MockTenkoCallRepository::default());
         let mut state = setup_mock_app_state();
@@ -279,8 +271,7 @@ async fn test_list_numbers_with_data() {
     test_group!("TenkoCall: list_numbers with data");
     test_case!("データがある場合にリストを取得できる", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
-        std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
-        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
 
         let mock = Arc::new(MockTenkoCallRepository::default());
         mock.return_data.store(true, Ordering::SeqCst);
@@ -315,8 +306,7 @@ async fn test_list_numbers_with_x_tenant_id() {
     test_group!("TenkoCall: list_numbers with X-Tenant-ID");
     test_case!("X-Tenant-ID ヘッダーでもアクセスできる", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
-        std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
-        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
 
         let mock = Arc::new(MockTenkoCallRepository::default());
         let mut state = setup_mock_app_state();
@@ -339,8 +329,7 @@ async fn test_list_numbers_no_auth() {
     test_group!("TenkoCall: list_numbers no auth");
     test_case!("認証なしは 401", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
-        std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
-        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
 
         let mock = Arc::new(MockTenkoCallRepository::default());
         let mut state = setup_mock_app_state();
@@ -362,8 +351,7 @@ async fn test_list_numbers_db_error() {
     test_group!("TenkoCall: list_numbers DB error");
     test_case!("DB エラー時に 500 を返す", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
-        std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
-        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
 
         let mock = Arc::new(MockTenkoCallRepository::default());
         mock.fail_next.store(true, Ordering::SeqCst);
@@ -394,8 +382,7 @@ async fn test_create_number_success() {
     test_group!("TenkoCall: create_number success");
     test_case!("電話番号マスタの追加が成功する", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
-        std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
-        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
 
         let mock = Arc::new(MockTenkoCallRepository::default());
         let mut state = setup_mock_app_state();
@@ -429,8 +416,7 @@ async fn test_create_number_without_tenant_id() {
     test_group!("TenkoCall: create_number without tenant_id");
     test_case!("tenant_id 省略時はデフォルト値を使用", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
-        std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
-        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
 
         let mock = Arc::new(MockTenkoCallRepository::default());
         let mut state = setup_mock_app_state();
@@ -462,8 +448,7 @@ async fn test_create_number_without_label() {
     test_group!("TenkoCall: create_number without label");
     test_case!("label 省略でも成功", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
-        std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
-        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
 
         let mock = Arc::new(MockTenkoCallRepository::default());
         let mut state = setup_mock_app_state();
@@ -495,8 +480,7 @@ async fn test_create_number_no_auth() {
     test_group!("TenkoCall: create_number no auth");
     test_case!("認証なしは 401", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
-        std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
-        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
 
         let mock = Arc::new(MockTenkoCallRepository::default());
         let mut state = setup_mock_app_state();
@@ -521,8 +505,7 @@ async fn test_create_number_db_error() {
     test_group!("TenkoCall: create_number DB error");
     test_case!("DB エラー時に 500 を返す", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
-        std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
-        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
 
         let mock = Arc::new(MockTenkoCallRepository::default());
         mock.fail_next.store(true, Ordering::SeqCst);
@@ -556,8 +539,7 @@ async fn test_delete_number_success() {
     test_group!("TenkoCall: delete_number success");
     test_case!("電話番号マスタの削除が成功する", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
-        std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
-        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
 
         let mock = Arc::new(MockTenkoCallRepository::default());
         let mut state = setup_mock_app_state();
@@ -583,8 +565,7 @@ async fn test_delete_number_no_auth() {
     test_group!("TenkoCall: delete_number no auth");
     test_case!("認証なしは 401", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
-        std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
-        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
 
         let mock = Arc::new(MockTenkoCallRepository::default());
         let mut state = setup_mock_app_state();
@@ -606,8 +587,7 @@ async fn test_delete_number_db_error() {
     test_group!("TenkoCall: delete_number DB error");
     test_case!("DB エラー時に 500 を返す", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
-        std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
-        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
 
         let mock = Arc::new(MockTenkoCallRepository::default());
         mock.fail_next.store(true, Ordering::SeqCst);
@@ -638,8 +618,7 @@ async fn test_list_drivers_empty() {
     test_group!("TenkoCall: list_drivers empty");
     test_case!("空のリストを取得できる", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
-        std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
-        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
 
         let mock = Arc::new(MockTenkoCallRepository::default());
         let mut state = setup_mock_app_state();
@@ -667,8 +646,7 @@ async fn test_list_drivers_with_data() {
     test_group!("TenkoCall: list_drivers with data");
     test_case!("データがある場合にリストを取得できる", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
-        std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
-        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
 
         let mock = Arc::new(MockTenkoCallRepository::default());
         mock.return_data.store(true, Ordering::SeqCst);
@@ -705,8 +683,7 @@ async fn test_list_drivers_no_auth() {
     test_group!("TenkoCall: list_drivers no auth");
     test_case!("認証なしは 401", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
-        std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
-        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
 
         let mock = Arc::new(MockTenkoCallRepository::default());
         let mut state = setup_mock_app_state();
@@ -728,8 +705,7 @@ async fn test_list_drivers_db_error() {
     test_group!("TenkoCall: list_drivers DB error");
     test_case!("DB エラー時に 500 を返す", {
         let _guard = crate::common::ENV_LOCK.lock().unwrap();
-        std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
-        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
 
         let mock = Arc::new(MockTenkoCallRepository::default());
         mock.fail_next.store(true, Ordering::SeqCst);

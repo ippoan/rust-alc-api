@@ -42,30 +42,19 @@ name = "alc-auth"
 version = "0.1.0"
 dependencies = [
  "alc-core",
- "argon2",
  "axum",
  "chrono",
- "reqwest",
  "serde",
  "serde_json",
  "sqlx",
  "tracing",
  "ts-rs",
- "url",
- "urlencoding",
  "uuid",
 ]
 
 [[package]]
 name = "alc-auth-jwt"
 version = "0.1.0"
-dependencies = [
- "chrono",
- "jsonwebtoken",
- "serde",
- "sha2",
- "uuid",
-]
 
 [[package]]
 name = "alc-camera"
@@ -224,8 +213,6 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "csv",
- "hex",
- "hmac",
  "reqwest",
  "ring",
  "serde",

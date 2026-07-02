@@ -3,17 +3,15 @@ name = "alc-auth"
 version = "0.1.0"
 edition = "2021"
 
+# 旧 OAuth handler 群の撤去 (#479 PR-3) で argon2 / reqwest / url / urlencoding は
+# 不要になり削除済み。
 [dependencies]
 alc-core = { path = "../alc-core" }
-argon2 = "0.5"
 axum = "0.8"
 chrono = { version = "0.4", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sqlx = { version = "0.8", features = ["postgres", "chrono", "uuid"] }
-reqwest = { version = "0.12", features = ["json"] }
 tracing = "0.1"
-url = "2"
-urlencoding = "2"
 ts-rs = { version = "10", features = ["chrono-impl", "uuid-impl"] }
 uuid = { version = "1", features = ["v4", "serde"] }

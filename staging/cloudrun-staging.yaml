@@ -30,11 +30,8 @@ spec:
               value: "http://localhost:8083"
             - name: DTAKO_API_URL
               value: "http://localhost:8084"
-            - name: JWT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  key: latest
-                  name: JWT_SECRET
+            # JWT_SECRET は #479 で撤去 (gateway は auth-worker /auth/introspect に
+            # 検証委譲、HS256 鍵を持たない)
             - name: RUST_LOG
               value: "gateway=info,tower_http=info"
           resources:
@@ -74,25 +71,14 @@ spec:
             - name: RUST_LOG
               value: "info"
             # Secrets — secretKeyRef で Secret Manager から注入
-            # JWT_SECRET は auth-worker (cookie 再署名) と HS256 鍵共有が必要 (#218)。
-            # render.sh は GCP `JWT_SECRET` に統一済みだが staging manifest が
-            # `alc-api-staging-jwt-secret` のまま取り残され、auth-worker 署名 token を
-            # rust /api/admin/* が検証できず 401 になっていた (Refs #434)。同 entry に揃える。
-            - name: JWT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  key: latest
-                  name: JWT_SECRET
+            # JWT_SECRET / GOOGLE_CLIENT_SECRET は #479 PR-3 で撤去 (JWT 発行と
+            # OAuth code 交換は auth-worker に完全移管、rust は ID token の
+            # JWKS 検証だけを行う)
             - name: GOOGLE_CLIENT_ID
               valueFrom:
                 secretKeyRef:
                   key: latest
                   name: GOOGLE_CLIENT_ID
-            - name: GOOGLE_CLIENT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  key: latest
-                  name: GOOGLE_CLIENT_SECRET
             - name: R2_ACCESS_KEY
               valueFrom:
                 secretKeyRef:

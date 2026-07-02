@@ -12,8 +12,6 @@ use std::sync::Arc;
 use sqlx::postgres::PgPoolOptions;
 use uuid::Uuid;
 
-use rust_alc_api::auth::jwt::{create_access_token, JwtSecret};
-use rust_alc_api::db::models::User;
 use rust_alc_api::db::repository::{
     PgApiTokensRepository, PgAuthRepository, PgBotAdminRepository, PgCarInspectionRepository,
     PgCarinsFilesRepository, PgCarryingItemsRepository, PgCommunicationItemsRepository,
@@ -39,7 +37,10 @@ use rust_alc_api::AppState;
 
 use mock_storage::MockStorage;
 
-pub const TEST_JWT_SECRET: &str = "test-jwt-secret-for-integration-tests-2026";
+/// テスト用 SSO_ENCRYPTION_KEY (保存 secret の AES-256-GCM 暗号鍵素材)。
+/// 旧名 TEST_JWT_SECRET — JWT の発行・検証は #479 PR-3 で rust から全撤去された
+/// ため、残る用途は SSO_ENCRYPTION_KEY の値のみ (名前もそれに揃えた)。
+pub const TEST_ENCRYPTION_KEY: &str = "test-jwt-secret-for-integration-tests-2026";
 
 /// env::set_var を使うテスト同士の直列化用ロック
 /// (env var はプロセスグローバルなので並列実行すると競合する)
@@ -120,62 +121,27 @@ pub async fn create_test_measurement(
     res.json().await.unwrap()
 }
 
-/// DB にテストユーザーを直接作成し、(user_id, raw_refresh_token) を返す
-pub async fn create_test_user_in_db(
-    pool: &sqlx::PgPool,
-    tenant_id: Uuid,
-    email: &str,
-    role: &str,
-) -> (Uuid, String) {
-    use rust_alc_api::auth::jwt::{
-        create_refresh_token, hash_refresh_token, refresh_token_expires_at,
-    };
-
-    let user_id = Uuid::new_v4();
-    let google_sub = format!("test-gsub-{}", Uuid::new_v4().simple());
-    let (raw_token, token_hash) = create_refresh_token();
-    let expires_at = refresh_token_expires_at();
-
-    sqlx::query(
-        r#"
-        INSERT INTO users (id, tenant_id, google_sub, email, name, role, refresh_token_hash, refresh_token_expires_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        "#,
-    )
-    .bind(user_id)
-    .bind(tenant_id)
-    .bind(&google_sub)
-    .bind(email)
-    .bind("Test User")
-    .bind(role)
-    .bind(&token_hash)
-    .bind(expires_at)
-    .execute(pool)
-    .await
-    .expect("Failed to create test user in DB");
-
-    (user_id, raw_token)
+/// テスト用 opaque token を組み立てる (base64(JSON))。
+///
+/// #479 PR-3 で rust 側の JWT 発行・検証は全撤去されたため、テストハーネスの
+/// Bearer token は JWT ではなく「identity JSON を base64 した opaque token」に
+/// 置き換えた。`test_proxy_inject` (下記) がこれを decode して本番 proxy と
+/// 同じ identity ヘッダー (X-Tenant-ID / X-User-*) に変換する。
+fn encode_test_token(user_id: Uuid, tenant_id: Uuid, email: &str, role: &str) -> String {
+    use base64::Engine;
+    let payload = serde_json::json!({
+        "tenant_id": tenant_id,
+        "sub": user_id,
+        "email": email,
+        "name": "Test User",
+        "role": role,
+    });
+    base64::engine::general_purpose::STANDARD.encode(payload.to_string())
 }
 
-/// 特定ユーザー ID で JWT を発行 (refresh/logout テスト用)
+/// 特定ユーザー ID でテスト用 token を発行 (logout 等、user_id 固定が必要なテスト用)
 pub fn create_test_jwt_for_user(user_id: Uuid, tenant_id: Uuid, email: &str, role: &str) -> String {
-    let secret = JwtSecret(TEST_JWT_SECRET.to_string());
-    let user = User {
-        id: user_id,
-        tenant_id,
-        google_sub: Some("test-google-sub".to_string()),
-        lineworks_id: None,
-        line_user_id: None,
-        email: email.to_string(),
-        name: "Test User".to_string(),
-        role: role.to_string(),
-        username: None,
-        password_hash: None,
-        refresh_token_hash: None,
-        refresh_token_expires_at: None,
-        created_at: chrono::Utc::now(),
-    };
-    create_access_token(&user, &secret, None).expect("Failed to create test JWT")
+    encode_test_token(user_id, tenant_id, email, role)
 }
 
 /// テスト用 MockFcmSender (送信を記録するだけ)
@@ -468,25 +434,9 @@ pub async fn create_test_tenant(pool: &sqlx::PgPool, name: &str) -> Uuid {
     row.0
 }
 
-/// テスト用 JWT を発行
+/// テスト用 token を発行 (user_id は都度新規 UUID)
 pub fn create_test_jwt(tenant_id: Uuid, role: &str) -> String {
-    let secret = JwtSecret(TEST_JWT_SECRET.to_string());
-    let user = User {
-        id: Uuid::new_v4(),
-        tenant_id,
-        google_sub: Some("test-google-sub".to_string()),
-        lineworks_id: None,
-        line_user_id: None,
-        email: "test@example.com".to_string(),
-        name: "Test User".to_string(),
-        role: role.to_string(),
-        username: None,
-        password_hash: None,
-        refresh_token_hash: None,
-        refresh_token_expires_at: None,
-        created_at: chrono::Utc::now(),
-    };
-    create_access_token(&user, &secret, None).expect("Failed to create test JWT")
+    encode_test_token(Uuid::new_v4(), tenant_id, "test@example.com", role)
 }
 
 /// 内部 API 用のテスト token を返す (aud=alc-api-internal)。
@@ -590,38 +540,41 @@ pub fn create_test_dtako_zip_rich() -> Vec<u8> {
 /// で user/device JWT を検証し、検証済み identity を `X-Tenant-ID` / `X-User-*` ヘッダー
 /// として注入する。rust-alc-api 自身は JWT 検証を行わず注入 identity を信頼する。
 ///
-/// テストハーネスは従来どおり `Authorization: Bearer <jwt>` を送るので、この middleware
-/// が proxy 役を演じて JWT を検証 → identity ヘッダーに変換し、production の
-/// `require_tenant_header` がそれを信頼する形を再現する。Bearer が無い / 検証失敗なら
-/// 何も注入しない (= bare X-Tenant-ID キオスクテストや無認証 401 テストは素通り)。
+/// テストハーネスは従来どおり `Authorization: Bearer <token>` を送るので、この
+/// middleware が proxy 役を演じて opaque token (base64(JSON)、`encode_test_token`
+/// 参照) を decode → identity ヘッダーに変換し、production の
+/// `require_tenant_header` がそれを信頼する形を再現する。Bearer が無い / decode
+/// 失敗なら何も注入しない (= bare X-Tenant-ID キオスクテストや無認証 401 テスト
+/// は素通り。旧 JWT 検証失敗時と同じ挙動)。
 async fn test_proxy_inject(
-    axum::Extension(jwt_secret): axum::Extension<JwtSecret>,
     mut req: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
-    use rust_alc_api::auth::jwt::verify_access_token;
-    let verified = req
+    use base64::Engine;
+    let verified: Option<serde_json::Value> = req
         .headers()
         .get("Authorization")
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
-        .and_then(|token| verify_access_token(token, &jwt_secret).ok());
+        .and_then(|token| base64::engine::general_purpose::STANDARD.decode(token).ok())
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok());
     if let Some(claims) = verified {
+        let get = |key: &str| claims.get(key).and_then(|v| v.as_str()).map(String::from);
         let h = req.headers_mut();
-        if let Ok(v) = claims.tenant_id.to_string().parse() {
+        if let Some(v) = get("tenant_id").and_then(|s| s.parse().ok()) {
             h.insert("X-Tenant-ID", v);
         }
-        if let Ok(v) = claims.sub.to_string().parse() {
+        if let Some(v) = get("sub").and_then(|s| s.parse().ok()) {
             h.insert("X-User-ID", v);
         }
-        if let Ok(v) = claims.email.parse() {
+        if let Some(v) = get("email").and_then(|s| s.parse().ok()) {
             h.insert("X-User-Email", v);
         }
-        if let Ok(v) = claims.role.parse() {
+        if let Some(v) = get("role").and_then(|s| s.parse().ok()) {
             h.insert("X-User-Role", v);
         }
-        if let Some(slug) = claims.org_slug.and_then(|s| s.parse().ok()) {
-            h.insert("X-Tenant-Slug", slug);
+        if let Some(v) = get("org_slug").and_then(|s| s.parse().ok()) {
+            h.insert("X-Tenant-Slug", v);
         }
     }
     next.run(req).await
@@ -657,11 +610,9 @@ pub async fn spawn_test_server(state: AppState) -> String {
 pub async fn spawn_test_server_with_scraper(state: AppState, scraper_url: &str) -> String {
     use axum::{Extension, Router};
     use rust_alc_api::auth::google::GoogleTokenVerifier;
-    use rust_alc_api::auth::jwt::JwtSecret;
     use rust_alc_api::routes::dtako_scraper::ScraperUrl;
     use tower_http::cors::{Any, CorsLayer};
 
-    let jwt_secret = JwtSecret(TEST_JWT_SECRET.to_string());
     let google_verifier = GoogleTokenVerifier::with_test_claims(
         "test-google-client-id".to_string(),
         rust_alc_api::auth::google::GoogleClaims {
@@ -689,12 +640,11 @@ pub async fn spawn_test_server_with_scraper(state: AppState, scraper_url: &str) 
         // テスト用 proxy emulation (Refs #434)。#434 で rust-alc-api は JWT 検証を
         // 撤去し、注入された identity ヘッダー (X-Tenant-ID / X-User-*) を信頼する
         // dumb backend になった。本番では CF proxy が auth-worker introspect で検証
-        // して注入する。テストは従来どおり `Authorization: Bearer <jwt>` を送るので、
-        // ここで JWT → identity ヘッダーに変換し proxy 役を演じる。`.nest` 直後に
-        // layer することで require_tenant_header より外側で先に走る。
+        // して注入する。テストは従来どおり `Authorization: Bearer <token>` を送る
+        // ので、ここで opaque token → identity ヘッダーに変換し proxy 役を演じる。
+        // `.nest` 直後に layer することで require_tenant_header より外側で先に走る。
         .layer(axum::middleware::from_fn(test_proxy_inject))
         .layer(Extension(google_verifier))
-        .layer(Extension(jwt_secret))
         .layer(Extension(ScraperUrl(scraper_url.to_string())))
         .layer(cors)
         .with_state(state);

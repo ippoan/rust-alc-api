@@ -30,8 +30,8 @@ monolith と per-domain API は同じ domain crate (`alc-tenko` 等) を共有 �
 | crate | 役割 / 主要ルート群 |
 |---|---|
 | `alc-core` | 共通基盤: models / repository trait / `auth_middleware` / `realtime_bus` / `redact_broadcast`。ts-rs 型 export 元 |
-| `alc-auth` | Google / LINE WORKS OAuth、JWT。`routes/mod.rs` で `auth` として re-export。`issue_tokens_for_google_claims` は招待→ドメイン一致の順で tenant 解決し、どちらも無ければ prod は 403 (#332 ゴミテナント防止)。**`STAGING_MODE=true` のときだけ #332 前の `create_tenant_with_domain` 自動作成を復活** (揮発 DB で毎回新規ユーザーになる staging login の救済、Refs #434)。`internal.rs` (`internal_router`) は **認証 DB プリミティブを `/api/internal/auth/*` で公開** (sso-config 読み / user upsert-line(works) / recipient / refresh-token 保存、`require_internal_jwt` 配下)。OAuth オーケストレーションを auth-worker に移管するための土台で、token は発行せず user + tenant slug を返すのみ (Refs #434 Phase 1/2) |
-| `alc-misc` | health (`/health` + `/health/secret-fingerprint?name=&expected=` = 任意 env の sha256[0..8] と `expected` 突合、`{match: bool}` のみ返し oracle 防止。cross-store drift を CI で自動検出、Refs ippoan/rust-alc-api#424 / ippoan/ci-workflows#131) / health_canary / measurements / employees / items / api_tokens / sso_admin / tenant_users / timecard / access_requests / staging / upload / bot_admin / driver_info / members / communication_items / carrying_items / guidance_records |
+| `alc-auth` | **認証 JWT の発行・検証は auth-worker に完全移管 (#479 PR-3)**。rust に残るのは `internal.rs` の DB プリミティブと me / logout / my_orgs のみ。旧 login/OAuth handler 群 (public_router = Google / LINE / LINE WORKS OAuth / WOFF / password login / refresh / switch-org) は撤去済み。`routes/mod.rs` で `auth` として re-export。`internal.rs` (`internal_router`) は **認証 DB プリミティブを `/api/internal/auth/*` で公開** (sso-config 読み / user upsert-line(works) / recipient / refresh-token 保存、`require_internal_jwt` 配下)。token は発行せず user + tenant slug を返すのみで、JWT 組み立ては auth-worker が行う (Refs #434 / #479)。`alc-auth-jwt` leaf crate は `INTERNAL_AUD` 定数のみ残存 |
+| `alc-misc` | health (`/health` + `/health/secret-fingerprint?name=&expected=` = 任意 env の sha256[0..8] と `expected` 突合、`{match: bool}` のみ返し oracle 防止。cross-store drift を CI で自動検出、Refs ippoan/rust-alc-api#424 / ippoan/ci-workflows#131。health_canary = JWT_SECRET drift 検知は #479 PR-3 の JWT_SECRET 全撤去に伴い削除) / measurements / employees / items / api_tokens / sso_admin / tenant_users / timecard / access_requests / staging / upload / bot_admin / driver_info / members / communication_items / carrying_items / guidance_records |
 | `alc-tenko` | 点呼: tenko_call / tenko_records / tenko_schedules / tenko_sessions / tenko_webhooks / daily_health / equipment_failures / health_baselines |
 | `alc-carins` | 車検証(carins): car_inspections / car_inspection_files / carins_files / nfc_tags |
 | `alc-dtako` | デジタコ: dtako_* (csv_proxy / daily_hours / drivers / logs / operations / restraint_report(_pdf) / scraper / tickets / upload / vehicles / work_times / y_time_export / event_classifications) / vehicle_settings_dumps。`dtako_tickets` は email-receiver Worker から SD カードエラー通知メールを起票し F-VOS3020 設定 ZIP DL → QR で close する pipeline (Refs ippoan/email-receiver#1)。tenant_router (JWT) + internal_router (`INTERNAL_SHARED_SECRET` + `X-Tenant-ID`) + public_close_router (`close_token` のみ) の 3 経路 |
@@ -63,7 +63,10 @@ monolith と per-domain API は同じ domain crate (`alc-tenko` 等) を共有 �
   `/auth/introspect` で検証して注入する `X-Tenant-ID` / `X-User-*` ヘッダーを信頼する dumb backend。
   外部直叩き防止は **Cloud Run IAM 網層ロックダウン** (proxy の OIDC ID token のみ到達可) が担う
   (確定アーキ #4807535677、step 3)。テストは `tests/common/mod.rs` の `test_proxy_inject` が proxy 役で
-  Bearer JWT → identity ヘッダーに変換し従来テストを無改修で通す。
+  Bearer token (base64(JSON) の opaque token) → identity ヘッダーに変換し従来テストを無改修で通す。
+  **JWT_SECRET は rust から全撤去済み (#479 完了)**: main.rs の env 読取 / `Extension(JwtSecret)` /
+  render.sh の secretKeyRef 注入 / `alc-auth-jwt` の HS256 発行・検証関数 / health_canary を全て削除。
+  rust バイナリは HS256 鍵を一切持たず、JWT の発行・検証は auth-worker が単独で担う。
 - **gateway**: `crates/gateway/src/{main,routes,proxy,auth,config}.rs`。`is_public_route` に
   列挙された path (health / auth/* / tenko-call register / devices register / staging /
   `/notify/line/webhook` / notify read / access-requests 等) は認証 skip でそのまま proxy。

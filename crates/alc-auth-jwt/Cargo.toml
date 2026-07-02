@@ -6,9 +6,6 @@ edition = "2021"
 [lints.rust]
 unexpected_cfgs = { level = "allow", check-cfg = ['cfg(coverage)'] }
 
+# JWT 発行・検証の auth-worker 移管 (#479 PR-3) で共有定数のみの crate になった
+# ため依存ゼロ (jsonwebtoken / serde / sha2 / chrono / uuid は撤去済み)。
 [dependencies]
-chrono = { version = "0.4", features = ["serde"] }
-jsonwebtoken = "9"
-serde = { version = "1", features = ["derive"] }
-sha2 = "0.10"
-uuid = { version = "1", features = ["v4", "serde"] }

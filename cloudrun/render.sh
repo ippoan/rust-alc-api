@@ -79,14 +79,9 @@ fi
 # ---------------------------------------------------------------------------
 # Shared secrets (same Secret Manager names for staging and production)
 # ---------------------------------------------------------------------------
-jwt_secret_name() {
-  # Refs #218: auth-worker 側は staging / prod 共に CF Secrets Store の
-  # `JWT_SECRET` 同 entry を bind しており (= 環境統合)、rust-alc-api だけ
-  # staging 専用 `alc-api-staging-jwt-secret` を見ていたため必ず drift していた
-  # (jwt_secret_drift probe で 401 検出)。auth-worker と環境統合 intent を
-  # 揃え、prod / staging とも同じ GCP `JWT_SECRET` を見る。
-  echo "JWT_SECRET"
-}
+# NOTE: JWT_SECRET の注入 (jwt_secret_name helper) は #479 PR-3 で撤去した。
+# JWT の発行・検証は auth-worker に完全移管され、rust-alc-api は HS256 鍵を
+# 一切持たない (internal 認証は Google OIDC / aud=alc-api-internal のみ)。
 
 notify_worker_secret_name() {
   if [[ "$ENV" == "staging" ]]; then echo "notify-worker-secret-staging"
@@ -147,7 +142,7 @@ emit_env_backend() {
 YAML
   # staging のみ: export/import の opt-in 認証 key を注入 (Refs #391)。runtime SA
   # 747065218280-compute@ は project-level secretAccessor で ALC_STAGING_API_KEY も
-  # 解決できる前提 (既存 JWT_SECRET 等と同経路)。新 revision 起動で X-Staging-Key 必須化。
+  # 解決できる前提 (既存 GOOGLE_CLIENT_ID 等と同経路)。新 revision 起動で X-Staging-Key 必須化。
   if [[ "$ENV" == "staging" ]]; then
     cat <<YAML
             - name: DATABASE_URL
@@ -168,21 +163,11 @@ YAML
 YAML
   fi
   cat <<YAML
-            - name: JWT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  key: latest
-                  name: $(jwt_secret_name)
             - name: GOOGLE_CLIENT_ID
               valueFrom:
                 secretKeyRef:
                   key: latest
                   name: GOOGLE_CLIENT_ID
-            - name: GOOGLE_CLIENT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  key: latest
-                  name: GOOGLE_CLIENT_SECRET
             - name: GOOGLE_DEVICE_CLIENT_ID
               valueFrom:
                 secretKeyRef:

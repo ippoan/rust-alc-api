@@ -317,10 +317,9 @@ async fn test_upsert_config_with_secret_no_encryption_key() {
     let (base_url, auth_header) = setup().await;
     let client = reqwest::Client::new();
 
-    // Remove both SSO_ENCRYPTION_KEY and JWT_SECRET to trigger 500
+    // Remove SSO_ENCRYPTION_KEY to trigger 500 (JWT_SECRET fallback は #479 で撤去済み)
     let _lock = crate::common::ENV_LOCK.lock().unwrap();
     std::env::remove_var("SSO_ENCRYPTION_KEY");
-    std::env::remove_var("JWT_SECRET");
 
     let res = client
         .post(format!("{base_url}/api/admin/sso/configs"))
@@ -446,8 +445,7 @@ fn restore_dev_emails(prev: Option<String>) {
 async fn test_export_configs_success() {
     use rust_alc_api::db::repository::sso_admin::{SsoConfigExportRow, TenantInfoForExport};
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
-    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
-    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
     let prev = set_dev_emails(dev_email());
 
     let mock = Arc::new(MockSsoAdminRepository::default());
@@ -508,8 +506,7 @@ async fn test_export_configs_success() {
 #[tokio::test]
 async fn test_export_configs_forbidden_for_non_developer() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
-    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
-    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
     let prev = set_dev_emails(dev_email());
 
     let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
@@ -540,8 +537,7 @@ async fn test_export_configs_forbidden_for_non_developer() {
 #[tokio::test]
 async fn test_export_configs_tenant_not_found() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
-    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
-    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
     let prev = set_dev_emails(dev_email());
 
     // return_tenant_for_export はデフォルト None → handler 側で 404
@@ -573,8 +569,7 @@ async fn test_export_configs_tenant_not_found() {
 #[tokio::test]
 async fn test_export_configs_tenant_db_error() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
-    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
-    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
     let prev = set_dev_emails(dev_email());
 
     let mock = Arc::new(MockSsoAdminRepository::default());
@@ -608,8 +603,7 @@ async fn test_export_configs_tenant_db_error() {
 async fn test_export_configs_configs_db_error() {
     use rust_alc_api::db::repository::sso_admin::TenantInfoForExport;
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
-    std::env::set_var("JWT_SECRET", crate::common::TEST_JWT_SECRET);
-    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_JWT_SECRET);
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
     let prev = set_dev_emails(dev_email());
 
     let mock = Arc::new(MockSsoAdminRepository::default());
