@@ -247,7 +247,7 @@ mod tests {
     #[test]
     fn valid_name_accepts_well_formed_inputs() {
         assert!(valid_name("INTERNAL_SHARED_SECRET"));
-        assert!(valid_name("JWT_SECRET"));
+        assert!(valid_name("OAUTH_STATE_SECRET"));
         assert!(valid_name("a"));
         assert!(valid_name("A-B_C"));
     }

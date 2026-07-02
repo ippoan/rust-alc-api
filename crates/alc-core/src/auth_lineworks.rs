@@ -191,7 +191,7 @@ pub fn encrypt_secret(plaintext: &str, key_material: &str) -> Result<String, Str
 }
 
 /// Decrypt client_secret stored as AES-256-GCM(base64(nonce + ciphertext + tag))
-/// Key is SHA-256 hash of JWT_SECRET (same as rust-logi)
+/// Key is SHA-256 hash of SSO_ENCRYPTION_KEY (Refs #479 PR-1)
 pub fn decrypt_secret(ciphertext_b64: &str, key_material: &str) -> Result<String, String> {
     let mut key_bytes = [0u8; 32];
     let hash = Sha256::digest(key_material.as_bytes());

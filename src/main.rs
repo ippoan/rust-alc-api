@@ -27,7 +27,6 @@ use alc_trouble::repo::{
     trouble_tickets::PgTroubleTicketsRepository, trouble_workflow::PgTroubleWorkflowRepository,
 };
 use rust_alc_api::auth::google::GoogleTokenVerifier;
-use rust_alc_api::auth::jwt::JwtSecret;
 use rust_alc_api::db::repository::{
     PgApiTokensRepository, PgAuthRepository, PgBotAdminRepository, PgCarInspectionRepository,
     PgCarinsFilesRepository, PgCarryingItemsRepository, PgCommunicationItemsRepository,
@@ -65,9 +64,9 @@ async fn main() -> anyhow::Result<()> {
         .parse()
         .expect("PORT must be a number");
 
-    // Google OAuth + JWT 設定
+    // Google OAuth 設定 (JWT_SECRET は #479 PR-3 で撤去 — JWT の発行・検証は
+    // auth-worker に完全移管され、rust 側は HS256 鍵を一切持たない)
     let google_client_id = std::env::var("GOOGLE_CLIENT_ID").expect("GOOGLE_CLIENT_ID must be set");
-    let jwt_secret = std::env::var("JWT_SECRET").expect("JWT_SECRET must be set");
 
     let google_client_secret =
         std::env::var("GOOGLE_CLIENT_SECRET").expect("GOOGLE_CLIENT_SECRET must be set");
@@ -82,7 +81,6 @@ async fn main() -> anyhow::Result<()> {
         .unwrap_or_default();
     let google_verifier = GoogleTokenVerifier::new(google_client_id, google_client_secret)
         .with_extra_client_ids(extra_client_ids);
-    let jwt_secret = JwtSecret(jwt_secret);
 
     let pool = PgPoolOptions::new()
         .max_connections(10)
@@ -463,7 +461,6 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .nest("/api", api_router)
         .layer(Extension(google_verifier))
-        .layer(Extension(jwt_secret))
         .layer(Extension(rust_alc_api::routes::dtako_scraper::ScraperUrl(
             scraper_url,
         )))

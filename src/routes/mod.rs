@@ -29,7 +29,6 @@ pub use alc_misc::driver_info;
 pub use alc_misc::employees;
 pub use alc_misc::guidance_records;
 pub use alc_misc::health;
-pub use alc_misc::health_canary;
 pub use alc_misc::items;
 pub use alc_misc::measurements;
 pub use alc_misc::members;
@@ -110,7 +109,6 @@ pub fn router(internal_oidc: InternalOidcTrust) -> Router<AppState> {
         .merge(notify_viewer::internal_router())
         .merge(notify_line_webhook::internal_router())
         .merge(trouble_schedules::internal_fire_router())
-        .merge(health_canary::internal_router())
         .merge(auth::internal_router())
         .layer(axum_middleware::from_fn(require_internal_jwt))
         // OIDC 検証設定 (Refs #479 — HS256 dual-accept 撤去で OIDC 一本化)。
@@ -184,10 +182,11 @@ pub fn router(internal_oidc: InternalOidcTrust) -> Router<AppState> {
         .merge(trouble_lineworks_members::tenant_router())
         .layer(axum_middleware::from_fn(require_tenant_header));
 
-    // 公開ルート (認証不要)
+    // 公開ルート (認証不要)。旧ログイン経路 (auth::public_router = Google /
+    // LINE / LINE WORKS OAuth / refresh / password login) は auth-worker へ
+    // 完全移管したため撤去 (Refs #479 PR-3)。
     let public_routes = Router::new()
         .merge(health::router())
-        .merge(auth::public_router())
         .merge(tenko_call::public_router())
         .merge(devices::public_router())
         .merge(staging::router())

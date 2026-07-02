@@ -302,13 +302,34 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
     }
 
+    /// 旧 HS256 JWT を模した token をテスト内で直接組み立てる (#479 PR-3 で
+    /// rust 側の HS256 発行関数 `create_internal_token` / `create_access_token`
+    /// は撤去済みのため、jsonwebtoken を直接使って craft する)。
+    fn craft_hs256_jwt(claims: &serde_json::Value, secret: &str) -> String {
+        use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+        encode(
+            &Header::new(Algorithm::HS256),
+            claims,
+            &EncodingKey::from_secret(secret.as_bytes()),
+        )
+        .unwrap()
+    }
+
     #[tokio::test]
     async fn internal_jwt_hs256_no_longer_accepted() {
-        // #479 regression: 旧 HS256 internal JWT (共有 JWT_SECRET 署名) は
-        // dual-accept 撤去後は拒否されること。
-        use crate::auth_jwt::{create_internal_token, JwtSecret};
-        let secret = JwtSecret("test-internal-secret-256-bits!!!".to_string());
-        let token = create_internal_token(&secret, "auth-worker", 60).unwrap();
+        // #479 regression: 旧 HS256 internal JWT (共有 JWT_SECRET 署名、
+        // aud=alc-api-internal で整形されたもの) は dual-accept 撤去後は
+        // 拒否されること。
+        let now = chrono::Utc::now().timestamp();
+        let token = craft_hs256_jwt(
+            &serde_json::json!({
+                "iss": "auth-worker",
+                "aud": crate::auth_jwt::INTERNAL_AUD,
+                "iat": now,
+                "exp": now + 60,
+            }),
+            "test-internal-secret-256-bits!!!",
+        );
         let resp = send(
             app_internal_jwt(),
             req_with_headers("/i", &[("Authorization", &format!("Bearer {token}"))]),
@@ -325,26 +346,21 @@ mod tests {
 
     #[tokio::test]
     async fn internal_jwt_user_token_rejected() {
-        // ユーザー JWT (HS256 / aud 無し) は OIDC 署名検証で拒否されること
-        use crate::auth_jwt::{create_access_token, JwtSecret};
-        use crate::models::User;
-        let secret = JwtSecret("test-internal-secret-256-bits!!!".to_string());
-        let user = User {
-            id: Uuid::new_v4(),
-            tenant_id: Uuid::new_v4(),
-            google_sub: Some("g".to_string()),
-            lineworks_id: None,
-            line_user_id: None,
-            email: "u@e.com".to_string(),
-            name: "u".to_string(),
-            role: "admin".to_string(),
-            username: None,
-            password_hash: None,
-            refresh_token_hash: None,
-            refresh_token_expires_at: None,
-            created_at: chrono::Utc::now(),
-        };
-        let token = create_access_token(&user, &secret, None).unwrap();
+        // ユーザー JWT 相当 (HS256 / aud 無し、auth-worker が発行する access JWT
+        // と同形の claims) は OIDC 署名検証で拒否されること
+        let now = chrono::Utc::now().timestamp();
+        let token = craft_hs256_jwt(
+            &serde_json::json!({
+                "sub": Uuid::new_v4(),
+                "email": "u@e.com",
+                "name": "u",
+                "tenant_id": Uuid::new_v4(),
+                "role": "admin",
+                "iat": now,
+                "exp": now + 3600,
+            }),
+            "test-internal-secret-256-bits!!!",
+        );
         let resp = send(
             app_internal_jwt(),
             req_with_headers("/i", &[("Authorization", &format!("Bearer {token}"))]),
