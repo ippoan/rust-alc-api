@@ -1852,7 +1852,12 @@ struct RePairBody {
     settings_token: Option<Uuid>,
 }
 
-#[derive(Debug, Serialize)]
+// Debug は意図的に derive しない (device_secret を含むため誤 log を防ぐ)。
+// PairedCredential 側 (alc-core::device_pair_client) の redact 済み Debug と
+// 揃えたいところだが、devices.rs は coverage_100.toml の 100% gate 対象
+// (`type = "combined"`) で未使用コードが即 regression になるため、ここでは
+// 単に derive しないことで `{:?}` 誤用をコンパイルエラーで検知する。
+#[derive(Serialize)]
 struct RePairResponse {
     auth_device_id: String,
     device_secret: String,
@@ -1907,29 +1912,37 @@ async fn re_pair(
         return Err(StatusCode::NOT_FOUND);
     };
 
-    let label = format!("alc-app:{}", body.device_id);
-    let credential = pair_client.mint(row.tenant_id, &label).await.map_err(|e| {
-        tracing::error!(
-            "re_pair: pair-internal call failed device_id={} err={e:?}",
-            body.device_id
-        );
+    let device_id = body.device_id;
+    let tenant_id = row.tenant_id;
+    let label = format!("alc-app:{device_id}");
+    let credential = pair_client.mint(tenant_id, &label).await.map_err(|e| {
+        tracing::error!("re_pair: pair-internal call failed device_id={device_id} err={e:?}");
         StatusCode::NOT_FOUND
     })?;
 
-    state
+    let consumed = state
         .devices
-        .record_re_pair_success(row.tenant_id, body.device_id, bind_hardware_id.as_deref())
+        .record_re_pair_success(
+            tenant_id,
+            device_id,
+            row.re_pair_authorized_until,
+            bind_hardware_id.as_deref(),
+        )
         .await
         .map_err(|e| {
             tracing::error!("re_pair: record success failed: {e}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
-    tracing::info!(
-        "device re-pair granted device_id={} tenant_id={}",
-        body.device_id,
-        row.tenant_id
-    );
+    if !consumed {
+        // 並行リクエストが先に window を消費 (or 別 authorize-repair が書き
+        // 換え) していた。mint 済み credential はこの応答では返さない
+        // (auth-worker 側 replace_label で最終的にどちらが有効かは PR2 scope)。
+        tracing::warn!("re_pair denied (race, window already consumed) device_id={device_id}");
+        return Err(StatusCode::NOT_FOUND);
+    }
+
+    tracing::info!("device re-pair granted device_id={device_id} tenant_id={tenant_id}");
 
     Ok((
         no_store,

@@ -1029,6 +1029,9 @@ pub struct MockDeviceRepository {
     pub return_settings_token: AtomicBool,
     /// get_device_re_pair_state が返す行 (Refs #495)。None なら 404 相当。
     pub re_pair_state: std::sync::Mutex<Option<RePairStateRow>>,
+    /// record_re_pair_success の CAS が「他リクエストに先を越された」を
+    /// 模擬する (Refs #495 C-1)。true にすると `Ok(false)` を返す。
+    pub re_pair_window_already_consumed: AtomicBool,
 }
 
 impl Default for MockDeviceRepository {
@@ -1060,6 +1063,7 @@ impl Default for MockDeviceRepository {
             return_code_exists_once: AtomicBool::new(false),
             return_settings_token: AtomicBool::new(false),
             re_pair_state: std::sync::Mutex::new(None),
+            re_pair_window_already_consumed: AtomicBool::new(false),
         }
     }
 }
@@ -1219,13 +1223,14 @@ impl DeviceRepository for MockDeviceRepository {
         &self,
         _tenant_id: Uuid,
         _device_id: Uuid,
+        _expected_authorized_until: Option<DateTime<Utc>>,
         _bind_hardware_id: Option<&str>,
-    ) -> Result<(), sqlx::Error> {
+    ) -> Result<bool, sqlx::Error> {
         check_fail!(self);
         if self.fail_on_update.swap(false, Ordering::SeqCst) {
             return Err(sqlx::Error::RowNotFound);
         }
-        Ok(())
+        Ok(!self.re_pair_window_already_consumed.load(Ordering::SeqCst))
     }
 
     async fn lookup_device_tenant(&self, _device_id: Uuid) -> Result<Option<Uuid>, sqlx::Error> {

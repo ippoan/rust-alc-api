@@ -44,7 +44,7 @@ lockdown (#434) 後、kiosk 端末は auth-worker が発行する device credent
   │                                 │◀── POST /api/devices/re-pair ───│
   │                                 │    { device_id, hardware_id? }  │
   │                                 │                                  │
-  │                                 │ 1. status=='approved' か         │
+  │                                 │ 1. status=='active' か         │
   │                                 │ 2. re_pair_authorized_until      │
   │                                 │    が未来か (admin window 判定)  │
   │                                 │ 3. cooldown (last_re_pair_at)    │
@@ -104,7 +104,7 @@ Response `200`:
 { "authorized_until": "2026-07-02T12:15:00Z" }
 ```
 
-- 対象 device が存在しない / 他 tenant / status != `approved` の場合は `404`
+- 対象 device が存在しない / 他 tenant / status != `active` の場合は `404`
   (既存 `approve_device` 等と同じ tenant scoping パターンを踏襲)
 - window 長は環境変数 `RE_PAIR_WINDOW_SECS` (デフォルト `900` = 15分)
 
@@ -133,10 +133,25 @@ Response `200` (成功時のみ):
 されている唯一の例外 — window/status/TOFU 不一致と cooldown は呼び出し元が
 取りうる対処が違う [今は待て] ので区別してよい、と Fable 相談で確認済み)。
 
+**window 消費はアトミック (compare-and-swap)**: 「read → 判定 → mint →
+`record_re_pair_success`」の間に並行リクエストが割り込むと、両方が判定を
+pass して両方に credential が発行されうる (TOCTOU race)。これを防ぐため
+`record_re_pair_success` は判定時に読んだ `re_pair_authorized_until` を
+`WHERE ... AND re_pair_authorized_until IS NOT DISTINCT FROM $expected` で
+突合する compare-and-swap として実装する。0 行更新 (= 他リクエストが先に
+消費 / 別 authorize-repair が書き換え済み) なら `Ok(false)` を返し、
+呼び出し元は mint 済み credential を返さず 404 にする (Refs #495 PR1
+review, C-1)。
+
+**settings_token の「成功時 rotate」は本 PR では未実装** (S-1)。
+`RE_PAIR_REQUIRE_TOKEN=true` にしても現状は「未提示は許可・提示時は一致
+必須」までで、rotate は後続 PR で settings API の response 拡張と合わせて
+実装する。
+
 判定順序 (pure fn `evaluate_re_pair_request` に切り出し、DB access 無しで
 unit test する):
 
-1. `status == "approved"` でなければ `Deny::NotFound`
+1. `status == "active"` でなければ `Deny::NotFound`
 2. `RE_PAIR_REQUIRE_ADMIN=true` (デフォルト true) の場合、
    `re_pair_authorized_until` が `now` より未来でなければ `Deny::NotFound`
 3. `last_re_pair_at` が `now - RE_PAIR_COOLDOWN_SECS` (デフォルト `600`) より
@@ -189,7 +204,7 @@ Request:
 |---|---|
 | admin window (主防御) | `RE_PAIR_REQUIRE_ADMIN` (デフォルト on) |
 | TOFU hardware bind | `devices.hardware_id`、判定ロジック手順4 |
-| status 厳格化 | 判定ロジック手順1 (approved のみ) |
+| status 厳格化 | 判定ロジック手順1 (active のみ、devices テーブルの稼働状態) |
 | credential rotate | auth-worker PR2 `replace_label` (rust 側は label を渡すだけ) |
 | settings_token co-factor | `RE_PAIR_REQUIRE_TOKEN` (デフォルト off、ratchet) |
 | cooldown | `devices.last_re_pair_at` + `RE_PAIR_COOLDOWN_SECS`。Cloudflare WAF rate rule は別途 alc-app 側 (インフラ設定、PR 外) |
@@ -198,7 +213,7 @@ Request:
 ## テスト方針
 
 - `evaluate_re_pair_request` (pure fn、DB 非依存) の unit test で以下を網羅:
-  - approved 以外は deny
+  - active 以外は deny
   - window 外 (NULL / 過去) は deny、window 内は許可
   - cooldown 内は `TooManyRequests`
   - hardware_id 未 bind → 初回リクエストの値で bind して許可
@@ -208,7 +223,7 @@ Request:
 - integration test (`tests/devices_re_pair_test.rs`、既存 `tests/devices_test.rs`
   のヘルパーを再利用):
   - `authorize-repair` → window 付与 → `re-pair` 成功 → 2 回目は 404 (single-use)
-  - window 外 / status!=approved / 存在しない device_id は全て 404
+  - window 外 / status!=active / 存在しない device_id は全て 404
   - auth-worker 呼び出しは wiremock でモック (`crates/alc-notify` の LINE
     client と同じパターン — `with_endpoints` で差し替え可能にする)
 - DB エラー注入は既存 `RENAME` パターン (SELECT 系) / trigger パターン

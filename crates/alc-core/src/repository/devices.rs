@@ -211,13 +211,18 @@ pub trait DeviceRepository: Send + Sync {
         device_id: Uuid,
     ) -> Result<Option<RePairStateRow>, sqlx::Error>;
 
-    /// re-pair: 成功記録 (window 消費 + カウンタ更新 + hardware_id bind、Refs #495)
+    /// re-pair: 成功記録 (window 消費 + カウンタ更新 + hardware_id bind、Refs #495)。
+    /// `expected_authorized_until` は判定時に読んだ `re_pair_authorized_until` を
+    /// そのまま渡す — compare-and-swap で一致した行だけを更新する (楽観ロック)。
+    /// 並行リクエストが先に window を消費 (or 別 authorize-repair で書き換え)
+    /// していれば 0 行更新となり `Ok(false)` を返す (= 呼び出し元は 404 にする)。
     async fn record_re_pair_success(
         &self,
         tenant_id: Uuid,
         device_id: Uuid,
+        expected_authorized_until: Option<chrono::DateTime<chrono::Utc>>,
         bind_hardware_id: Option<&str>,
-    ) -> Result<(), sqlx::Error>;
+    ) -> Result<bool, sqlx::Error>;
 
     /// デバイス設定取得 (認証不要、SECURITY DEFINER 関数経由)
     async fn get_device_settings(
@@ -392,8 +397,8 @@ pub trait DeviceRepository: Send + Sync {
     ) -> Result<bool, sqlx::Error>;
 
     /// re-pair: 管理者が時限 window を開ける (tenant-scoped、Refs #495)。
-    /// status != 'approved' / 存在しない場合は None。`reset_binding` で
-    /// TOFU hardware_id を同時に NULL clear する。
+    /// status != 'active' (devices テーブルの稼働状態) / 存在しない場合は
+    /// None。`reset_binding` で TOFU hardware_id を同時に NULL clear する。
     async fn authorize_repair(
         &self,
         tenant_id: Uuid,

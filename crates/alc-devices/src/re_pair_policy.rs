@@ -45,7 +45,7 @@ pub fn evaluate_re_pair_request(
     policy: &RePairPolicy,
     now: DateTime<Utc>,
 ) -> RePairDecision {
-    if ctx.status != "approved" {
+    if ctx.status != "active" {
         return RePairDecision::DenyNotFound;
     }
 
@@ -89,7 +89,7 @@ mod tests {
 
     fn base_ctx() -> RePairContext {
         RePairContext {
-            status: "approved".to_string(),
+            status: "active".to_string(),
             authorized_until: None,
             last_re_pair_at: None,
             bound_hardware_id: None,

@@ -29,4 +29,5 @@ AS $$
            hardware_id, settings_token
     FROM alc_api.devices WHERE id = p_device_id;
 $$;
+REVOKE ALL ON FUNCTION alc_api.get_device_re_pair_state(UUID) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION alc_api.get_device_re_pair_state(UUID) TO alc_api_app;

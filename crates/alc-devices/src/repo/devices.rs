@@ -214,23 +214,29 @@ impl DeviceRepository for PgDeviceRepository {
         &self,
         tenant_id: Uuid,
         device_id: Uuid,
+        expected_authorized_until: Option<chrono::DateTime<chrono::Utc>>,
         bind_hardware_id: Option<&str>,
-    ) -> Result<(), sqlx::Error> {
+    ) -> Result<bool, sqlx::Error> {
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
-        sqlx::query(
+        // compare-and-swap: 判定時に読んだ re_pair_authorized_until と一致する
+        // 行だけを更新する。並行リクエストが先に window を消費 (or 別
+        // authorize-repair が書き換え) していれば 0 行 (Refs #495 C-1)。
+        let result = sqlx::query(
             r#"UPDATE devices
                SET re_pair_authorized_until = NULL,
                    last_re_pair_at = NOW(),
                    re_pair_count = re_pair_count + 1,
                    hardware_id = COALESCE(hardware_id, $1),
                    updated_at = NOW()
-               WHERE id = $2"#,
+               WHERE id = $2
+                 AND re_pair_authorized_until IS NOT DISTINCT FROM $3"#,
         )
         .bind(bind_hardware_id)
         .bind(device_id)
+        .bind(expected_authorized_until)
         .execute(&mut *tc.conn)
         .await?;
-        Ok(())
+        Ok(result.rows_affected() > 0)
     }
 
     async fn get_device_settings(
@@ -756,7 +762,7 @@ impl DeviceRepository for PgDeviceRepository {
                SET re_pair_authorized_until = NOW() + make_interval(secs => $1::double precision),
                    hardware_id = CASE WHEN $2 THEN NULL ELSE hardware_id END,
                    updated_at = NOW()
-               WHERE id = $3 AND status = 'approved'
+               WHERE id = $3 AND status = 'active'
                RETURNING re_pair_authorized_until"#,
         )
         .bind(window_secs)
