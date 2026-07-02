@@ -1947,7 +1947,7 @@ async fn re_pair(
     Ok((
         no_store,
         Json(RePairResponse {
-            auth_device_id: credential.auth_device_id,
+            auth_device_id: credential.device_id,
             device_secret: credential.device_secret,
         }),
     ))
