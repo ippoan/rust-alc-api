@@ -1450,6 +1450,10 @@ impl DeviceRepository for MockDeviceRepository {
                 watchdog_running: None,
                 created_at: "2026-01-01T00:00:00Z".to_string(),
                 updated_at: "2026-01-01T00:00:00Z".to_string(),
+                re_pair_authorized_until: None,
+                last_re_pair_at: None,
+                re_pair_count: 0,
+                hardware_id: None,
             }])
         } else {
             Ok(vec![])

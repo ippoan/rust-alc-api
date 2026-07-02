@@ -128,6 +128,10 @@ struct Device {
     watchdog_running: Option<bool>,
     created_at: String,
     updated_at: String,
+    re_pair_authorized_until: Option<String>,
+    last_re_pair_at: Option<String>,
+    re_pair_count: i32,
+    hardware_id: Option<String>,
 }
 
 impl From<DeviceRow> for Device {
@@ -157,6 +161,10 @@ impl From<DeviceRow> for Device {
             watchdog_running: r.watchdog_running,
             created_at: r.created_at,
             updated_at: r.updated_at,
+            re_pair_authorized_until: r.re_pair_authorized_until,
+            last_re_pair_at: r.last_re_pair_at,
+            re_pair_count: r.re_pair_count,
+            hardware_id: r.hardware_id,
         }
     }
 }

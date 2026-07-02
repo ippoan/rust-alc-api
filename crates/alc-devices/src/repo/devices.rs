@@ -399,7 +399,8 @@ impl DeviceRepository for PgDeviceRepository {
                    call_enabled, call_schedule, fcm_token,
                    last_login_employee_id, last_login_employee_name, last_login_employee_role,
                    app_version_code, app_version_name, is_device_owner, is_dev_device,
-                   always_on, watchdog_running, created_at::text, updated_at::text
+                   always_on, watchdog_running, created_at::text, updated_at::text,
+                   re_pair_authorized_until::text, last_re_pair_at::text, re_pair_count, hardware_id
             FROM devices
             ORDER BY created_at DESC
             "#,

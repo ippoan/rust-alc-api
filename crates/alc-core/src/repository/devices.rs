@@ -32,6 +32,11 @@ pub struct DeviceRow {
     pub watchdog_running: Option<bool>,
     pub created_at: String,
     pub updated_at: String,
+    /// re-pair (再認証) 状態。管理者一覧で残り window / 履歴を表示するため (Refs #495)。
+    pub re_pair_authorized_until: Option<String>,
+    pub last_re_pair_at: Option<String>,
+    pub re_pair_count: i32,
+    pub hardware_id: Option<String>,
 }
 
 /// 登録リクエスト情報
