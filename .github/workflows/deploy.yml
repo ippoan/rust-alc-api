@@ -163,7 +163,6 @@ jobs:
       - name: Render and deploy
         id: deploy
         env:
-          ENV_SCRAPER_URL: ${{ vars.SCRAPER_URL }}
           REF_NAME: ${{ inputs.ref_name }}
           SERVICE: ${{ matrix.service }}
         run: |

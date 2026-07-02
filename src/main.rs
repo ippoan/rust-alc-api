@@ -433,11 +433,6 @@ async fn main() -> anyhow::Result<()> {
         ])
         .allow_headers(Any);
 
-    // Scraper URL (optional — dtako-scraper Cloud Run)
-    let scraper_url =
-        std::env::var("SCRAPER_URL").unwrap_or_else(|_| "http://localhost:8081".into());
-    tracing::info!("Scraper URL: {}", scraper_url);
-
     // email-receiver Worker からの internal ingest 経路 (`POST /api/dtako/tickets` 等)。
     // INTERNAL_SHARED_SECRET env が空なら mount しない (= caller が None を渡すことで
     // routes::internal_shared_secret_router が empty router を返す)。main.rs は coverage
@@ -459,9 +454,6 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .nest("/api", api_router)
         .layer(Extension(google_verifier))
-        .layer(Extension(rust_alc_api::routes::dtako_scraper::ScraperUrl(
-            scraper_url,
-        )))
         .layer(Extension(bot_admin_ext))
         .layer(Extension(lw_client))
         .layer(axum::extract::DefaultBodyLimit::max(20 * 1024 * 1024)) // 20MB

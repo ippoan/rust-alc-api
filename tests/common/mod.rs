@@ -602,15 +602,10 @@ fn internal_oidc_trust_for_tests() -> rust_alc_api::middleware::auth::InternalOi
     }
 }
 
+/// テスト用 axum サーバーを起動し、base URL を返す
 pub async fn spawn_test_server(state: AppState) -> String {
-    spawn_test_server_with_scraper(state, "http://localhost:9999").await
-}
-
-/// テスト用 axum サーバーを起動し、base URL を返す (scraper URL 指定)
-pub async fn spawn_test_server_with_scraper(state: AppState, scraper_url: &str) -> String {
     use axum::{Extension, Router};
     use rust_alc_api::auth::google::GoogleTokenVerifier;
-    use rust_alc_api::routes::dtako_scraper::ScraperUrl;
     use tower_http::cors::{Any, CorsLayer};
 
     let google_verifier = GoogleTokenVerifier::with_test_claims(
@@ -645,7 +640,6 @@ pub async fn spawn_test_server_with_scraper(state: AppState, scraper_url: &str) 
         // `.nest` 直後に layer することで require_tenant_header より外側で先に走る。
         .layer(axum::middleware::from_fn(test_proxy_inject))
         .layer(Extension(google_verifier))
-        .layer(Extension(ScraperUrl(scraper_url.to_string())))
         .layer(cors)
         .with_state(state);
 
