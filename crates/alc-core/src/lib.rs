@@ -5,7 +5,6 @@ mod test_macros;
 // Auth modules (formerly alc-auth crate)
 pub mod auth_google;
 pub mod auth_jwt;
-pub mod auth_line;
 pub mod auth_lineworks;
 pub mod auth_middleware;
 

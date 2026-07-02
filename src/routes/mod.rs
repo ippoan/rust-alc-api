@@ -85,7 +85,7 @@ use crate::AppState;
 /// できず、テストが実 JWKS 検証を通せないため)。
 pub fn internal_oidc_trust() -> InternalOidcTrust {
     InternalOidcTrust {
-        verifier: GoogleTokenVerifier::new(INTERNAL_AUD.to_string(), String::new()),
+        verifier: GoogleTokenVerifier::new(INTERNAL_AUD.to_string()),
     }
 }
 

@@ -1,158 +1,13 @@
+//! 保存 secret の AES-256-GCM 暗号化 helper (旧 LINE WORKS OAuth モジュール)。
+//!
+//! LINE WORKS / LINE の OAuth オーケストレーション (authorize URL / code 交換 /
+//! profile 取得 / CSRF state) は auth-worker に移管済みのため撤去した (Refs #479)。
+//! 残るのは DB 保存 secret (LINE channel secret / LINE WORKS bot secret /
+//! SSO client_secret) の暗号化・復号 helper のみ。鍵は SHA-256(SSO_ENCRYPTION_KEY)。
+
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-use reqwest::Client;
 use ring::aead::{self, Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
-use serde::Deserialize;
 use sha2::{Digest, Sha256};
-
-/// LINE WORKS OAuth2 token endpoint (env var override for testing)
-fn token_url() -> String {
-    std::env::var("LINEWORKS_TOKEN_URL")
-        .unwrap_or_else(|_| "https://auth.worksmobile.com/oauth2/v2.0/token".to_string())
-}
-
-/// LINE WORKS user info endpoint (env var override for testing)
-fn userinfo_url() -> String {
-    std::env::var("LINEWORKS_USERINFO_URL")
-        .unwrap_or_else(|_| "https://www.worksapis.com/v1.0/users/me".to_string())
-}
-
-/// LINE WORKS SSO config from DB
-#[derive(Debug, Clone)]
-pub struct LineworksSsoConfig {
-    pub tenant_id: uuid::Uuid,
-    pub client_id: String,
-    pub client_secret: String,
-    pub external_org_id: String,
-    pub woff_id: Option<String>,
-}
-
-/// LINE WORKS token exchange response
-#[derive(Debug, Deserialize)]
-pub struct TokenResponse {
-    pub access_token: String,
-    pub token_type: String,
-    #[serde(deserialize_with = "deserialize_string_or_i64")]
-    pub expires_in: i64,
-    pub scope: Option<String>,
-    pub refresh_token: Option<String>,
-}
-
-fn deserialize_string_or_i64<'de, D>(deserializer: D) -> Result<i64, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    use serde::de;
-    struct StringOrI64;
-    impl<'de> de::Visitor<'de> for StringOrI64 {
-        type Value = i64;
-        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-            f.write_str("string or i64")
-        }
-        fn visit_i64<E: de::Error>(self, v: i64) -> Result<i64, E> {
-            Ok(v)
-        }
-        fn visit_u64<E: de::Error>(self, v: u64) -> Result<i64, E> {
-            Ok(v as i64)
-        }
-        fn visit_str<E: de::Error>(self, v: &str) -> Result<i64, E> {
-            v.parse().map_err(de::Error::custom)
-        }
-    }
-    deserializer.deserialize_any(StringOrI64)
-}
-
-/// LINE WORKS user profile response
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UserProfile {
-    pub user_id: String,
-    pub user_name: Option<UserName>,
-    pub email: Option<String>,
-    pub domain_id: Option<i64>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UserName {
-    pub last_name: Option<String>,
-    pub first_name: Option<String>,
-}
-
-impl UserProfile {
-    pub fn display_name(&self) -> String {
-        if let Some(name) = &self.user_name {
-            let last = name.last_name.as_deref().unwrap_or("");
-            let first = name.first_name.as_deref().unwrap_or("");
-            let full = format!("{}{}", last, first);
-            if full.is_empty() {
-                self.user_id.clone()
-            } else {
-                full
-            }
-        } else {
-            self.user_id.clone()
-        }
-    }
-
-    pub fn email_or_id(&self) -> String {
-        self.email.clone().unwrap_or_else(|| self.user_id.clone())
-    }
-}
-
-/// Exchange authorization code for access token
-pub async fn exchange_code(
-    client: &Client,
-    client_id: &str,
-    client_secret: &str,
-    code: &str,
-    redirect_uri: &str,
-) -> Result<TokenResponse, String> {
-    let resp = client
-        .post(token_url())
-        .form(&[
-            ("grant_type", "authorization_code"),
-            ("client_id", client_id),
-            ("client_secret", client_secret),
-            ("code", code),
-            ("redirect_uri", redirect_uri),
-        ])
-        .send()
-        .await
-        .map_err(|e| format!("Token exchange request failed: {e}"))?;
-
-    let status = resp.status();
-    let body = resp.text().await.unwrap_or_default();
-
-    if !status.is_success() {
-        return Err(format!("Token exchange failed: {status} {body}"));
-    }
-
-    serde_json::from_str::<TokenResponse>(&body)
-        .map_err(|e| format!("Token response parse error: {e}, body: {body}"))
-}
-
-/// Fetch user profile using access token
-pub async fn fetch_user_profile(
-    client: &Client,
-    access_token: &str,
-) -> Result<UserProfile, String> {
-    let resp = client
-        .get(userinfo_url())
-        .bearer_auth(access_token)
-        .send()
-        .await
-        .map_err(|e| format!("User profile request failed: {e}"))?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(format!("User profile fetch failed: {status} {body}"));
-    }
-
-    resp.json::<UserProfile>()
-        .await
-        .map_err(|e| format!("User profile parse error: {e}"))
-}
 
 /// Encrypt plaintext with AES-256-GCM. Key is SHA-256 hash of key_material.
 /// Output: base64(nonce[12] + ciphertext + tag[16])
@@ -247,18 +102,6 @@ pub fn normalize_pem_newlines(s: String) -> String {
     }
 }
 
-/// Build LINE WORKS authorize URL
-pub fn authorize_url(client_id: &str, redirect_uri: &str, state: &str) -> String {
-    format!(
-        "https://auth.worksmobile.com/oauth2/v2.0/authorize?\
-         client_id={client_id}\
-         &redirect_uri={redirect_uri}\
-         &response_type=code\
-         &scope=user.profile.read\
-         &state={state}"
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -317,162 +160,8 @@ mod tests {
     }
 
     #[test]
-    fn test_display_name_full() {
-        test_group!("LINE WORKS OAuth");
-        test_case!("フルネーム表示", {
-            let profile = UserProfile {
-                user_id: "uid".into(),
-                user_name: Some(UserName {
-                    last_name: Some("田中".into()),
-                    first_name: Some("太郎".into()),
-                }),
-                email: Some("tanaka@example.com".into()),
-                domain_id: None,
-            };
-            assert_eq!(profile.display_name(), "田中太郎");
-            assert_eq!(profile.email_or_id(), "tanaka@example.com");
-        });
-    }
-
-    #[test]
-    fn test_display_name_no_name() {
-        test_group!("LINE WORKS OAuth");
-        test_case!("名前なしでユーザーIDフォールバック", {
-            let profile = UserProfile {
-                user_id: "uid123".into(),
-                user_name: None,
-                email: None,
-                domain_id: None,
-            };
-            assert_eq!(profile.display_name(), "uid123");
-            assert_eq!(profile.email_or_id(), "uid123");
-        });
-    }
-
-    #[test]
-    fn test_display_name_empty() {
-        test_group!("LINE WORKS OAuth");
-        test_case!("空の名前でユーザーIDフォールバック", {
-            let profile = UserProfile {
-                user_id: "uid".into(),
-                user_name: Some(UserName {
-                    last_name: None,
-                    first_name: None,
-                }),
-                email: None,
-                domain_id: None,
-            };
-            assert_eq!(profile.display_name(), "uid");
-        });
-    }
-
-    #[test]
-    fn test_authorize_url() {
-        test_group!("LINE WORKS OAuth");
-        test_case!("認可URL生成", {
-            let url = authorize_url("client123", "https://example.com/cb", "state-abc");
-            assert!(url.contains("client_id=client123"));
-            assert!(url.contains("redirect_uri=https://example.com/cb"));
-            assert!(url.contains("state=state-abc"));
-            assert!(url.starts_with("https://auth.worksmobile.com/oauth2/v2.0/authorize"));
-        });
-    }
-
-    #[test]
-    fn test_state_sign_and_verify() {
-        test_group!("LINE WORKS OAuth");
-        test_case!("CSRF state署名と検証", {
-            let payload = state::StatePayload {
-                redirect_uri: "https://example.com".into(),
-                nonce: "nonce123".into(),
-                provider: "lineworks".into(),
-                external_org_id: "org1".into(),
-                iat: state::now_unix(),
-            };
-            let secret = "test-secret-key";
-            let signed = state::sign(&payload, secret);
-            let verified = state::verify(&signed, secret).unwrap();
-            assert_eq!(verified.redirect_uri, "https://example.com");
-            assert_eq!(verified.nonce, "nonce123");
-        });
-    }
-
-    #[test]
-    fn test_state_verify_invalid_signature() {
-        test_group!("LINE WORKS OAuth");
-        test_case!("不正な署名で検証失敗", {
-            let payload = state::StatePayload {
-                redirect_uri: "https://example.com".into(),
-                nonce: "n".into(),
-                provider: "lw".into(),
-                external_org_id: "o".into(),
-                iat: state::now_unix(),
-            };
-            let signed = state::sign(&payload, "secret1");
-            assert!(state::verify(&signed, "wrong-secret").is_err());
-        });
-    }
-
-    #[test]
-    fn test_state_verify_expired() {
-        test_group!("LINE WORKS OAuth");
-        test_case!(
-            "TTL超過 state は署名が有効でも検証失敗 (Refs #393 M-3)",
-            {
-                let iat = 1_700_000_000_u64;
-                let payload = state::StatePayload {
-                    redirect_uri: "https://example.com".into(),
-                    nonce: "n".into(),
-                    provider: "lw".into(),
-                    external_org_id: "o".into(),
-                    iat,
-                };
-                let secret = "secret1";
-                let signed = state::sign(&payload, secret);
-                // TTL 内は通る (境界値ちょうども OK)
-                assert!(state::verify_at(&signed, secret, iat + state::STATE_TTL_SECS).is_ok());
-                // TTL を 1 秒でも超えたら expired
-                let err =
-                    state::verify_at(&signed, secret, iat + state::STATE_TTL_SECS + 1).unwrap_err();
-                assert!(err.contains("expired"));
-            }
-        );
-    }
-
-    #[test]
-    fn test_state_verify_legacy_payload_without_iat_rejected() {
-        test_group!("LINE WORKS OAuth");
-        test_case!(
-            "iat 無し旧フォーマットは serde default 0 → 期限切れ扱い",
-            {
-                use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-                use hmac::{Hmac, Mac};
-                // 旧フォーマット (iat フィールド無し) の state を手組みする
-                let json = r#"{"redirect_uri":"https://example.com","nonce":"n","provider":"lw","external_org_id":"o"}"#;
-                let payload_b64 = URL_SAFE_NO_PAD.encode(json.as_bytes());
-                let secret = "secret1";
-                let mut mac = Hmac::<sha2::Sha256>::new_from_slice(secret.as_bytes()).unwrap();
-                mac.update(payload_b64.as_bytes());
-                let sig = URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
-                let signed = format!("{payload_b64}.{sig}");
-
-                let err = state::verify(&signed, secret).unwrap_err();
-                assert!(err.contains("expired"));
-            }
-        );
-    }
-
-    #[test]
-    fn test_state_verify_invalid_format() {
-        test_group!("LINE WORKS OAuth");
-        test_case!("不正なフォーマットで検証失敗", {
-            assert!(state::verify("no-dot-separator", "secret").is_err());
-        });
-    }
-
-    #[test]
     fn test_encrypt_decrypt_roundtrip() {
-        test_group!("LINE WORKS OAuth");
+        test_group!("secret 暗号化");
         test_case!(
             "encrypt_secret → decrypt_secret ラウンドトリップ",
             {
@@ -488,7 +177,7 @@ mod tests {
 
     #[test]
     fn test_decrypt_secret_wrong_key() {
-        test_group!("LINE WORKS OAuth");
+        test_group!("secret 暗号化");
         test_case!("不正なキーで復号失敗", {
             use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
             use ring::rand::{SecureRandom, SystemRandom};
@@ -518,7 +207,7 @@ mod tests {
 
     #[test]
     fn test_decrypt_secret_invalid_base64() {
-        test_group!("LINE WORKS OAuth");
+        test_group!("secret 暗号化");
         test_case!("不正なBase64で復号失敗", {
             assert!(decrypt_secret("not-base64!!!", "key").is_err());
         });
@@ -526,147 +215,10 @@ mod tests {
 
     #[test]
     fn test_decrypt_secret_too_short() {
-        test_group!("LINE WORKS OAuth");
+        test_group!("secret 暗号化");
         test_case!("短すぎる暗号文で復号失敗", {
             let short = base64::engine::general_purpose::STANDARD.encode(b"short");
             assert!(decrypt_secret(&short, "key").is_err());
         });
-    }
-
-    #[test]
-    fn test_token_response_expires_in_as_i64() {
-        test_group!("LINE WORKS OAuth");
-        test_case!("TokenResponse: expires_in が数値の場合", {
-            let json = r#"{"access_token":"at","token_type":"Bearer","expires_in":3600}"#;
-            let resp: TokenResponse = serde_json::from_str(json).unwrap();
-            assert_eq!(resp.expires_in, 3600);
-            assert_eq!(resp.access_token, "at");
-        });
-    }
-
-    #[test]
-    fn test_token_response_expires_in_as_string() {
-        test_group!("LINE WORKS OAuth");
-        test_case!("TokenResponse: expires_in が文字列の場合", {
-            let json = r#"{"access_token":"at","token_type":"Bearer","expires_in":"7200"}"#;
-            let resp: TokenResponse = serde_json::from_str(json).unwrap();
-            assert_eq!(resp.expires_in, 7200);
-        });
-    }
-
-    #[test]
-    fn test_token_response_expires_in_invalid_string() {
-        test_group!("LINE WORKS OAuth");
-        test_case!("TokenResponse: expires_in が不正文字列の場合", {
-            let json = r#"{"access_token":"at","token_type":"Bearer","expires_in":"not-a-number"}"#;
-            let result = serde_json::from_str::<TokenResponse>(json);
-            assert!(result.is_err());
-        });
-    }
-
-    #[cfg_attr(not(coverage), ignore)]
-    #[test]
-    fn test_string_or_i64_visit_i64_negative() {
-        test_group!("LINE WORKS OAuth");
-        test_case!("TokenResponse: expires_in が負の整数 (visit_i64)", {
-            // serde_json uses visit_i64 for negative integers
-            let json = r#"{"access_token":"at","token_type":"Bearer","expires_in":-1}"#;
-            let resp: TokenResponse = serde_json::from_str(json).unwrap();
-            assert_eq!(resp.expires_in, -1);
-        });
-    }
-
-    #[cfg_attr(not(coverage), ignore)]
-    #[test]
-    fn test_string_or_i64_expecting_error() {
-        test_group!("LINE WORKS OAuth");
-        test_case!(
-            "TokenResponse: expires_in が bool で expecting エラー",
-            {
-                // Boolean triggers expecting() because Visitor doesn't implement visit_bool
-                let json = r#"{"access_token":"at","token_type":"Bearer","expires_in":true}"#;
-                let result = serde_json::from_str::<TokenResponse>(json);
-                assert!(result.is_err());
-                let err = result.unwrap_err().to_string();
-                assert!(err.contains("string or i64"));
-            }
-        );
-    }
-}
-
-/// HMAC-SHA256 state signing for CSRF protection
-pub mod state {
-    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-    use hmac::{Hmac, Mac};
-    use serde::{Deserialize, Serialize};
-    use sha2::Sha256;
-
-    type HmacSha256 = Hmac<Sha256>;
-
-    /// state の有効期限 (秒)。HMAC が有効でも発行から これ を超えた state は
-    /// reject し、無期限 replay を防ぐ (Refs #393 M-3)。
-    pub const STATE_TTL_SECS: u64 = 600;
-
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct StatePayload {
-        pub redirect_uri: String,
-        pub nonce: String,
-        pub provider: String,
-        pub external_org_id: String,
-        /// 発行時刻 (UNIX 秒)。`sign` する側が `now_unix()` で設定する。
-        /// 旧フォーマット (フィールド無し) は 0 に default され期限切れ扱い。
-        #[serde(default)]
-        pub iat: u64,
-    }
-
-    pub fn now_unix() -> u64 {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("system clock before UNIX epoch")
-            .as_secs()
-    }
-
-    pub fn sign(payload: &StatePayload, secret: &str) -> String {
-        let json = serde_json::to_string(payload).unwrap();
-        let payload_b64 = URL_SAFE_NO_PAD.encode(json.as_bytes());
-
-        let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).unwrap();
-        mac.update(payload_b64.as_bytes());
-        let sig = URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
-
-        format!("{payload_b64}.{sig}")
-    }
-
-    pub fn verify(state: &str, secret: &str) -> Result<StatePayload, String> {
-        verify_at(state, secret, now_unix())
-    }
-
-    /// 時刻注入版 (テスト用に `now` を引数で受ける)。署名検証に加えて
-    /// `iat` から `STATE_TTL_SECS` を超えた state を reject する (Refs #393 M-3)。
-    pub fn verify_at(state: &str, secret: &str, now: u64) -> Result<StatePayload, String> {
-        let parts: Vec<&str> = state.splitn(2, '.').collect();
-        if parts.len() != 2 {
-            return Err("Invalid state format".into());
-        }
-        let (payload_b64, sig_b64) = (parts[0], parts[1]);
-
-        let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).unwrap();
-        mac.update(payload_b64.as_bytes());
-        let expected_sig = URL_SAFE_NO_PAD
-            .decode(sig_b64)
-            .map_err(|_| "Invalid signature encoding")?;
-        mac.verify_slice(&expected_sig)
-            .map_err(|_| "State signature verification failed")?;
-
-        let json = URL_SAFE_NO_PAD
-            .decode(payload_b64)
-            .map_err(|_| "Invalid payload encoding")?;
-        let payload: StatePayload =
-            serde_json::from_slice(&json).map_err(|e| format!("State payload parse error: {e}"))?;
-
-        if now.saturating_sub(payload.iat) > STATE_TTL_SECS {
-            return Err("State expired".into());
-        }
-        Ok(payload)
     }
 }

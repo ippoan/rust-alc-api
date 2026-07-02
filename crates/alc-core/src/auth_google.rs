@@ -56,37 +56,23 @@ struct CachedJwks {
     fetched_at: std::time::Instant,
 }
 
-/// Google OAuth token endpoint
-fn google_token_url() -> String {
-    std::env::var("GOOGLE_TOKEN_URL")
-        .unwrap_or_else(|_| "https://oauth2.googleapis.com/token".to_string())
-}
-
-/// Google token endpoint のレスポンス
-#[derive(Debug, Deserialize)]
-struct GoogleTokenResponse {
-    id_token: String,
-}
-
 /// Google ID トークン検証器
 #[derive(Clone)]
 pub struct GoogleTokenVerifier {
     client_id: String,
     /// 追加で受け入れる Client ID (Device Flow 用など)
     extra_client_ids: Vec<String>,
-    client_secret: String,
     http_client: Client,
     jwks_cache: Arc<RwLock<Option<CachedJwks>>>,
-    /// テスト用: Some の場合、verify/exchange_code で固定 claims を返す
+    /// テスト用: Some の場合、verify で固定 claims を返す
     test_claims: Option<Arc<GoogleClaims>>,
 }
 
 impl GoogleTokenVerifier {
-    pub fn new(client_id: String, client_secret: String) -> Self {
+    pub fn new(client_id: String) -> Self {
         Self {
             client_id,
             extra_client_ids: Vec::new(),
-            client_secret,
             http_client: Client::new(),
             jwks_cache: Arc::new(RwLock::new(None)),
             test_claims: None,
@@ -99,12 +85,11 @@ impl GoogleTokenVerifier {
         self
     }
 
-    /// テスト用: verify/exchange_code で固定 claims を返す verifier を作成
+    /// テスト用: verify で固定 claims を返す verifier を作成
     pub fn with_test_claims(client_id: String, claims: GoogleClaims) -> Self {
         Self {
             client_id,
             extra_client_ids: Vec::new(),
-            client_secret: String::new(),
             http_client: Client::new(),
             jwks_cache: Arc::new(RwLock::new(None)),
             test_claims: Some(Arc::new(claims)),
@@ -113,51 +98,6 @@ impl GoogleTokenVerifier {
 
     pub fn client_id(&self) -> &str {
         &self.client_id
-    }
-
-    /// Authorization code を Google token endpoint で交換し、ID token を検証して claims を返す
-    pub async fn exchange_code(
-        &self,
-        code: &str,
-        redirect_uri: &str,
-    ) -> Result<GoogleClaims, VerifyError> {
-        // テストモード
-        if let Some(ref claims) = self.test_claims {
-            if code == "test-valid-code" {
-                return Ok((**claims).clone());
-            }
-            return Err(VerifyError::TokenExchangeFailed);
-        }
-
-        let resp = self
-            .http_client
-            .post(google_token_url())
-            .form(&[
-                ("code", code),
-                ("client_id", &self.client_id),
-                ("client_secret", &self.client_secret),
-                ("redirect_uri", redirect_uri),
-                ("grant_type", "authorization_code"),
-            ])
-            .send()
-            .await
-            .map_err(|e| {
-                tracing::warn!("Google token exchange request failed: {e}");
-                VerifyError::TokenExchangeFailed
-            })?;
-
-        if !resp.status().is_success() {
-            let body = resp.text().await.unwrap_or_default();
-            tracing::warn!("Google token exchange failed: {body}");
-            return Err(VerifyError::TokenExchangeFailed);
-        }
-
-        let token_resp: GoogleTokenResponse = resp.json().await.map_err(|e| {
-            tracing::warn!("Failed to parse Google token response: {e}");
-            VerifyError::TokenExchangeFailed
-        })?;
-
-        self.verify(&token_resp.id_token).await
     }
 
     /// Google ID トークンを検証し、クレームを返す
@@ -285,8 +225,6 @@ pub enum VerifyError {
     JwksFetchFailed,
     #[error("key not found in JWKS")]
     KeyNotFound,
-    #[error("failed to exchange authorization code")]
-    TokenExchangeFailed,
 }
 
 #[cfg(test)]
@@ -390,26 +328,11 @@ mod tests {
         std::env::remove_var("GOOGLE_JWKS_URL");
     }
 
-    #[test]
-    fn test_google_token_url_default() {
-        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        std::env::remove_var("GOOGLE_TOKEN_URL");
-        assert_eq!(google_token_url(), "https://oauth2.googleapis.com/token");
-    }
-
-    #[test]
-    fn test_google_token_url_custom() {
-        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        std::env::set_var("GOOGLE_TOKEN_URL", "http://custom/token");
-        assert_eq!(google_token_url(), "http://custom/token");
-        std::env::remove_var("GOOGLE_TOKEN_URL");
-    }
-
     // --- GoogleTokenVerifier::new ---
 
     #[test]
     fn test_verifier_new() {
-        let v = GoogleTokenVerifier::new("cid".into(), "csec".into());
+        let v = GoogleTokenVerifier::new("cid".into());
         assert_eq!(v.client_id(), "cid");
         assert!(v.extra_client_ids.is_empty());
         assert!(v.test_claims.is_none());
@@ -417,7 +340,7 @@ mod tests {
 
     #[test]
     fn test_verifier_with_extra_client_ids() {
-        let v = GoogleTokenVerifier::new("cid".into(), "csec".into())
+        let v = GoogleTokenVerifier::new("cid".into())
             .with_extra_client_ids(vec!["device-id".into(), "other-id".into()]);
         assert_eq!(v.client_id(), "cid");
         assert_eq!(v.extra_client_ids, vec!["device-id", "other-id"]);
@@ -446,7 +369,7 @@ mod tests {
             .await;
 
         // primary client_id は "web-client-id" だが、extra に device_client_id を含む
-        let verifier = GoogleTokenVerifier::new("web-client-id".into(), "secret".into())
+        let verifier = GoogleTokenVerifier::new("web-client-id".into())
             .with_extra_client_ids(vec![device_client_id.into()]);
         let result = verifier.verify(&token).await;
         assert!(result.is_ok());
@@ -473,7 +396,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let verifier = GoogleTokenVerifier::new(client_id.into(), "secret".into());
+        let verifier = GoogleTokenVerifier::new(client_id.into());
         let result = verifier.verify(&token).await;
         assert!(result.is_ok());
         let c = result.unwrap();
@@ -484,7 +407,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_verify_invalid_token() {
-        let verifier = GoogleTokenVerifier::new("cid".into(), "csec".into());
+        let verifier = GoogleTokenVerifier::new("cid".into());
         let result = verifier.verify("not-a-jwt").await;
         assert!(matches!(result, Err(VerifyError::InvalidToken)));
     }
@@ -534,7 +457,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let verifier = GoogleTokenVerifier::new(INTERNAL_AUD.to_string(), String::new());
+        let verifier = GoogleTokenVerifier::new(INTERNAL_AUD.to_string());
         let result = verifier.verify_internal_oidc(&token).await;
         assert!(result.is_ok());
 
@@ -565,7 +488,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let verifier = GoogleTokenVerifier::new(INTERNAL_AUD.to_string(), String::new());
+        let verifier = GoogleTokenVerifier::new(INTERNAL_AUD.to_string());
         assert!(verifier.verify_internal_oidc(&token).await.is_err());
 
         std::env::remove_var("GOOGLE_JWKS_URL");
@@ -590,7 +513,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let verifier = GoogleTokenVerifier::new(client_id.into(), "secret".into());
+        let verifier = GoogleTokenVerifier::new(client_id.into());
         let result = verifier.verify(&token).await;
         assert!(matches!(result, Err(VerifyError::EmailNotVerified)));
 
@@ -616,7 +539,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let verifier = GoogleTokenVerifier::new(client_id.into(), "secret".into());
+        let verifier = GoogleTokenVerifier::new(client_id.into());
         let result = verifier.verify(&token).await;
         assert!(matches!(result, Err(VerifyError::KeyNotFound)));
 
@@ -642,7 +565,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let verifier = GoogleTokenVerifier::new(client_id.into(), "secret".into());
+        let verifier = GoogleTokenVerifier::new(client_id.into());
         let result = verifier.verify(&token).await;
         assert!(matches!(
             result,
@@ -674,7 +597,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let verifier = GoogleTokenVerifier::new(client_id.into(), "secret".into());
+        let verifier = GoogleTokenVerifier::new(client_id.into());
         // First call — cache miss, fetches JWKS
         let r1 = verifier.verify(&token).await;
         assert!(r1.is_ok());
@@ -705,7 +628,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let verifier = GoogleTokenVerifier::new(client_id.into(), "secret".into());
+        let verifier = GoogleTokenVerifier::new(client_id.into());
         let token1 = create_test_jwt(&test_claims(client_id), TEST_KID);
         let r1 = verifier.verify(&token1).await;
         assert!(r1.is_ok());
@@ -718,98 +641,12 @@ mod tests {
         std::env::remove_var("GOOGLE_JWKS_CACHE_TTL_SECS");
     }
 
-    // --- exchange_code with wiremock ---
-
-    #[tokio::test]
-    async fn test_exchange_code_success() {
-        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let server = MockServer::start().await;
-        std::env::set_var("GOOGLE_TOKEN_URL", format!("{}/token", server.uri()));
-        std::env::set_var("GOOGLE_JWKS_URL", format!("{}/jwks", server.uri()));
-
-        let client_id = "test-client-id";
-        let key = test_key();
-        let (n, e) = (&key.n, &key.e);
-        let claims = test_claims(client_id);
-        let id_token = create_test_jwt(&claims, TEST_KID);
-
-        Mock::given(method("POST"))
-            .and(path("/token"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id_token": id_token})))
-            .mount(&server)
-            .await;
-
-        Mock::given(method("GET"))
-            .and(path("/jwks"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(build_jwks_response(&n, &e)))
-            .mount(&server)
-            .await;
-
-        let verifier = GoogleTokenVerifier::new(client_id.into(), "secret".into());
-        let result = verifier.exchange_code("auth-code", "http://redirect").await;
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap().email, "test@example.com");
-
-        std::env::remove_var("GOOGLE_TOKEN_URL");
-        std::env::remove_var("GOOGLE_JWKS_URL");
-    }
-
-    #[tokio::test]
-    async fn test_exchange_code_token_endpoint_error() {
-        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let server = MockServer::start().await;
-        std::env::set_var("GOOGLE_TOKEN_URL", format!("{}/token", server.uri()));
-
-        Mock::given(method("POST"))
-            .and(path("/token"))
-            .respond_with(ResponseTemplate::new(400).set_body_string("bad request"))
-            .mount(&server)
-            .await;
-
-        let verifier = GoogleTokenVerifier::new("cid".into(), "csec".into());
-        let result = verifier.exchange_code("bad-code", "http://redirect").await;
-        assert!(matches!(result, Err(VerifyError::TokenExchangeFailed)));
-
-        std::env::remove_var("GOOGLE_TOKEN_URL");
-    }
-
-    #[tokio::test]
-    async fn test_exchange_code_invalid_json_response() {
-        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let server = MockServer::start().await;
-        std::env::set_var("GOOGLE_TOKEN_URL", format!("{}/token", server.uri()));
-
-        Mock::given(method("POST"))
-            .and(path("/token"))
-            .respond_with(ResponseTemplate::new(200).set_body_string("not json"))
-            .mount(&server)
-            .await;
-
-        let verifier = GoogleTokenVerifier::new("cid".into(), "csec".into());
-        let result = verifier.exchange_code("code", "http://redirect").await;
-        assert!(matches!(result, Err(VerifyError::TokenExchangeFailed)));
-
-        std::env::remove_var("GOOGLE_TOKEN_URL");
-    }
-
-    #[tokio::test]
-    async fn test_exchange_code_connection_error() {
-        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        std::env::set_var("GOOGLE_TOKEN_URL", "http://127.0.0.1:1/token");
-
-        let verifier = GoogleTokenVerifier::new("cid".into(), "csec".into());
-        let result = verifier.exchange_code("code", "http://redirect").await;
-        assert!(matches!(result, Err(VerifyError::TokenExchangeFailed)));
-
-        std::env::remove_var("GOOGLE_TOKEN_URL");
-    }
-
     #[tokio::test]
     async fn test_jwks_fetch_failed() {
         let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("GOOGLE_JWKS_URL", "http://127.0.0.1:1/jwks");
 
-        let verifier = GoogleTokenVerifier::new("cid".into(), "csec".into());
+        let verifier = GoogleTokenVerifier::new("cid".into());
         let claims = test_claims("cid");
         let token = create_test_jwt(&claims, TEST_KID);
         let result = verifier.verify(&token).await;
@@ -833,10 +670,6 @@ mod tests {
         assert_eq!(
             VerifyError::KeyNotFound.to_string(),
             "key not found in JWKS"
-        );
-        assert_eq!(
-            VerifyError::TokenExchangeFailed.to_string(),
-            "failed to exchange authorization code"
         );
     }
 }

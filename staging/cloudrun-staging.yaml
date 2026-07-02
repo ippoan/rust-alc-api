@@ -71,18 +71,14 @@ spec:
             - name: RUST_LOG
               value: "info"
             # Secrets — secretKeyRef で Secret Manager から注入
-            # JWT_SECRET は #479 PR-3 で撤去 (JWT の発行・検証は auth-worker に
-            # 完全移管、rust は HS256 鍵を一切持たない)
+            # JWT_SECRET / GOOGLE_CLIENT_SECRET は #479 PR-3 で撤去 (JWT 発行と
+            # OAuth code 交換は auth-worker に完全移管、rust は ID token の
+            # JWKS 検証だけを行う)
             - name: GOOGLE_CLIENT_ID
               valueFrom:
                 secretKeyRef:
                   key: latest
                   name: GOOGLE_CLIENT_ID
-            - name: GOOGLE_CLIENT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  key: latest
-                  name: GOOGLE_CLIENT_SECRET
             - name: R2_ACCESS_KEY
               valueFrom:
                 secretKeyRef:

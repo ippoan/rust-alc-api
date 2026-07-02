@@ -64,12 +64,10 @@ async fn main() -> anyhow::Result<()> {
         .parse()
         .expect("PORT must be a number");
 
-    // Google OAuth 設定 (JWT_SECRET は #479 PR-3 で撤去 — JWT の発行・検証は
-    // auth-worker に完全移管され、rust 側は HS256 鍵を一切持たない)
+    // Google ID token 検証設定 (JWT_SECRET / GOOGLE_CLIENT_SECRET は #479 PR-3 で撤去 —
+    // JWT 発行と OAuth code 交換は auth-worker に完全移管され、rust 側は
+    // ID token の JWKS 検証だけを行う)
     let google_client_id = std::env::var("GOOGLE_CLIENT_ID").expect("GOOGLE_CLIENT_ID must be set");
-
-    let google_client_secret =
-        std::env::var("GOOGLE_CLIENT_SECRET").expect("GOOGLE_CLIENT_SECRET must be set");
 
     let extra_client_ids: Vec<String> = std::env::var("GOOGLE_DEVICE_CLIENT_ID")
         .map(|s| {
@@ -79,8 +77,8 @@ async fn main() -> anyhow::Result<()> {
                 .collect()
         })
         .unwrap_or_default();
-    let google_verifier = GoogleTokenVerifier::new(google_client_id, google_client_secret)
-        .with_extra_client_ids(extra_client_ids);
+    let google_verifier =
+        GoogleTokenVerifier::new(google_client_id).with_extra_client_ids(extra_client_ids);
 
     let pool = PgPoolOptions::new()
         .max_connections(10)
