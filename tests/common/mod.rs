@@ -348,6 +348,7 @@ fn build_app_state(
         trouble_task_types,
         trouble_task_statuses,
         trouble_storage: Some(Arc::new(MockStorage::new("trouble-bucket"))),
+        device_pair_client: None,
         webhook: None,
     }
 }

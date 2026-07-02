@@ -1,10 +1,10 @@
 use axum::{
     extract::{Path, State},
-    http::{HeaderMap, StatusCode},
+    http::{header, HeaderMap, HeaderValue, StatusCode},
     routing::{delete, get, post, put},
     Extension, Json, Router,
 };
-use chrono::{Datelike, Timelike};
+use chrono::{DateTime, Datelike, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -14,6 +14,10 @@ use alc_core::repository::devices::{
     DeviceRow, DeviceSettingsRow, FcmDeviceRow, RegistrationRequestRow,
 };
 use alc_core::AppState;
+
+use crate::re_pair_policy::{
+    evaluate_re_pair_request, RePairContext, RePairDecision, RePairPolicy,
+};
 
 /// 公開ルート (認証不要) - 端末側から呼ばれる
 pub fn public_router() -> Router<AppState> {
@@ -36,6 +40,7 @@ pub fn public_router() -> Router<AppState> {
         .route("/devices/report-version", put(report_version))
         .route("/devices/report-watchdog", put(report_watchdog_state))
         .route("/devices/trigger-update-dev", post(trigger_update_dev))
+        .route("/devices/re-pair", post(re_pair))
 }
 
 /// テナント認証付きルート - 管理画面から呼ばれる
@@ -62,6 +67,7 @@ pub fn tenant_router() -> Router<AppState> {
         .route("/devices/{id}/test-fcm", post(test_fcm))
         .route("/devices/test-fcm-all", post(test_fcm_all))
         .route("/devices/trigger-update", post(trigger_update))
+        .route("/devices/{id}/authorize-repair", post(authorize_repair))
 }
 
 /// DB エラーをログ出力して 500 を返すヘルパー
@@ -1756,4 +1762,193 @@ async fn generate_unique_code(state: &AppState) -> Result<String, StatusCode> {
         }
         return Ok(code_str);
     }
+}
+
+// ============================================================
+// kiosk 端末 re-pair (再認証、Refs #495)
+//
+// 設計 SoT: docs/plan-device-repair.md。管理者が時限 window を開け
+// (authorize_repair、テナント認証)、端末がその window 内で
+// auth-worker から device credential を再取得する (re_pair、認証不要)。
+// ============================================================
+
+const RE_PAIR_WINDOW_SECS_DEFAULT: i64 = 900;
+const RE_PAIR_COOLDOWN_SECS_DEFAULT: i64 = 600;
+
+fn env_i64(key: &str, default: i64) -> i64 {
+    std::env::var(key)
+        .ok()
+        .and_then(|v| v.parse::<i64>().ok())
+        .unwrap_or(default)
+}
+
+fn env_bool(key: &str, default: bool) -> bool {
+    match std::env::var(key) {
+        Ok(v) => v == "true",
+        Err(_) => default,
+    }
+}
+
+fn re_pair_window_secs() -> i64 {
+    env_i64("RE_PAIR_WINDOW_SECS", RE_PAIR_WINDOW_SECS_DEFAULT)
+}
+
+fn re_pair_cooldown_secs() -> i64 {
+    env_i64("RE_PAIR_COOLDOWN_SECS", RE_PAIR_COOLDOWN_SECS_DEFAULT)
+}
+
+fn re_pair_require_admin() -> bool {
+    // デフォルト on (主防御)。明示的に "false" が来た時だけ off にする。
+    match std::env::var("RE_PAIR_REQUIRE_ADMIN") {
+        Ok(v) => v != "false",
+        Err(_) => true,
+    }
+}
+
+fn re_pair_require_token() -> bool {
+    env_bool("RE_PAIR_REQUIRE_TOKEN", false)
+}
+
+// --- 管理者: 時限 window を開ける ---
+
+#[derive(Debug, Deserialize, Default)]
+struct AuthorizeRepairBody {
+    #[serde(default)]
+    reset_binding: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct AuthorizeRepairResponse {
+    authorized_until: DateTime<Utc>,
+}
+
+async fn authorize_repair(
+    State(state): State<AppState>,
+    Extension(tenant): Extension<TenantId>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<AuthorizeRepairBody>,
+) -> Result<Json<AuthorizeRepairResponse>, StatusCode> {
+    let authorized_until = state
+        .devices
+        .authorize_repair(tenant.0, id, re_pair_window_secs(), body.reset_binding)
+        .await
+        .map_err(|e| {
+            tracing::error!("authorize_repair error: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    Ok(Json(AuthorizeRepairResponse { authorized_until }))
+}
+
+// --- 端末: device credential を再取得 (認証不要、window が事実上の認可) ---
+
+#[derive(Debug, Deserialize)]
+struct RePairBody {
+    device_id: Uuid,
+    #[serde(default)]
+    hardware_id: Option<String>,
+    #[serde(default)]
+    settings_token: Option<Uuid>,
+}
+
+// Debug は意図的に derive しない (device_secret を含むため誤 log を防ぐ)。
+// PairedCredential 側 (alc-core::device_pair_client) の redact 済み Debug と
+// 揃えたいところだが、devices.rs は coverage_100.toml の 100% gate 対象
+// (`type = "combined"`) で未使用コードが即 regression になるため、ここでは
+// 単に derive しないことで `{:?}` 誤用をコンパイルエラーで検知する。
+#[derive(Serialize)]
+struct RePairResponse {
+    auth_device_id: String,
+    device_secret: String,
+}
+
+async fn re_pair(
+    State(state): State<AppState>,
+    Json(body): Json<RePairBody>,
+) -> Result<(HeaderMap, Json<RePairResponse>), StatusCode> {
+    let mut no_store = HeaderMap::new();
+    no_store.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+
+    let row = state
+        .devices
+        .get_device_re_pair_state(body.device_id)
+        .await
+        .map_err(|e| {
+            tracing::error!("re_pair lookup error: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    let policy = RePairPolicy {
+        require_admin_window: re_pair_require_admin(),
+        require_settings_token: re_pair_require_token(),
+        cooldown_secs: re_pair_cooldown_secs(),
+    };
+    let ctx = RePairContext {
+        status: row.status.clone(),
+        authorized_until: row.re_pair_authorized_until,
+        last_re_pair_at: row.last_re_pair_at,
+        bound_hardware_id: row.hardware_id.clone(),
+        requested_hardware_id: body.hardware_id.clone(),
+        provided_settings_token: body.settings_token,
+        stored_settings_token: row.settings_token,
+    };
+
+    let bind_hardware_id = match evaluate_re_pair_request(&ctx, &policy, Utc::now()) {
+        RePairDecision::DenyNotFound => {
+            tracing::warn!("re_pair denied (not_found) device_id={}", body.device_id);
+            return Err(StatusCode::NOT_FOUND);
+        }
+        RePairDecision::DenyTooManyRequests => {
+            tracing::warn!("re_pair denied (cooldown) device_id={}", body.device_id);
+            return Err(StatusCode::TOO_MANY_REQUESTS);
+        }
+        RePairDecision::Allow { bind_hardware_id } => bind_hardware_id,
+    };
+
+    let Some(pair_client) = state.device_pair_client.as_ref() else {
+        tracing::error!("re_pair: device_pair_client not configured");
+        return Err(StatusCode::NOT_FOUND);
+    };
+
+    let device_id = body.device_id;
+    let tenant_id = row.tenant_id;
+    let label = format!("alc-app:{device_id}");
+    let credential = pair_client.mint(tenant_id, &label).await.map_err(|e| {
+        tracing::error!("re_pair: pair-internal call failed device_id={device_id} err={e:?}");
+        StatusCode::NOT_FOUND
+    })?;
+
+    let consumed = state
+        .devices
+        .record_re_pair_success(
+            tenant_id,
+            device_id,
+            row.re_pair_authorized_until,
+            bind_hardware_id.as_deref(),
+        )
+        .await
+        .map_err(|e| {
+            tracing::error!("re_pair: record success failed: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    if !consumed {
+        // 並行リクエストが先に window を消費 (or 別 authorize-repair が書き
+        // 換え) していた。mint 済み credential はこの応答では返さない
+        // (auth-worker 側 replace_label で最終的にどちらが有効かは PR2 scope)。
+        tracing::warn!("re_pair denied (race, window already consumed) device_id={device_id}");
+        return Err(StatusCode::NOT_FOUND);
+    }
+
+    tracing::info!("device re-pair granted device_id={device_id} tenant_id={tenant_id}");
+
+    Ok((
+        no_store,
+        Json(RePairResponse {
+            auth_device_id: credential.auth_device_id,
+            device_secret: credential.device_secret,
+        }),
+    ))
 }

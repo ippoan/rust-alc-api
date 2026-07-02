@@ -3814,3 +3814,464 @@ async fn test_fcm_dismiss_test_with_tokens_sent() {
     let body: Value = res.json().await.unwrap();
     assert_eq!(body["sent"], 1);
 }
+
+// ============================================================
+// kiosk 端末 re-pair (再認証、Refs #495)
+// ============================================================
+
+use chrono::{Duration as ChronoDuration, Utc};
+use rust_alc_api::db::repository::devices::RePairStateRow;
+
+fn re_pair_state_approved_with_window() -> RePairStateRow {
+    RePairStateRow {
+        tenant_id: Uuid::new_v4(),
+        status: "active".to_string(),
+        re_pair_authorized_until: Some(Utc::now() + ChronoDuration::minutes(5)),
+        last_re_pair_at: None,
+        hardware_id: None,
+        settings_token: None,
+    }
+}
+
+// --- POST /devices/{id}/authorize-repair (tenant) ---
+
+#[tokio::test]
+async fn test_authorize_repair_success() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+
+    let mock = Arc::new(MockDeviceRepository::default());
+    mock.return_data.store(true, Ordering::SeqCst);
+    let mut state = setup_mock_app_state();
+    state.devices = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let tenant_id = Uuid::new_v4();
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+    let client = reqwest::Client::new();
+    let device_id = Uuid::new_v4();
+
+    let res = client
+        .post(format!(
+            "{base_url}/api/devices/{device_id}/authorize-repair"
+        ))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    assert!(body["authorized_until"].is_string());
+}
+
+#[tokio::test]
+async fn test_authorize_repair_not_found() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+
+    let mock = Arc::new(MockDeviceRepository::default());
+    let mut state = setup_mock_app_state();
+    state.devices = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let tenant_id = Uuid::new_v4();
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+    let client = reqwest::Client::new();
+    let device_id = Uuid::new_v4();
+
+    let res = client
+        .post(format!(
+            "{base_url}/api/devices/{device_id}/authorize-repair"
+        ))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .json(&serde_json::json!({ "reset_binding": true }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 404);
+}
+
+#[tokio::test]
+async fn test_authorize_repair_db_error() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+
+    let mock = Arc::new(MockDeviceRepository::default());
+    mock.fail_next.store(true, Ordering::SeqCst);
+    let mut state = setup_mock_app_state();
+    state.devices = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let tenant_id = Uuid::new_v4();
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+    let client = reqwest::Client::new();
+    let device_id = Uuid::new_v4();
+
+    let res = client
+        .post(format!(
+            "{base_url}/api/devices/{device_id}/authorize-repair"
+        ))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 500);
+}
+
+// --- POST /devices/re-pair (public) ---
+
+#[tokio::test]
+async fn test_re_pair_device_not_found() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+
+    let mock = Arc::new(MockDeviceRepository::default());
+    let mut state = setup_mock_app_state();
+    state.devices = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/devices/re-pair"))
+        .json(&serde_json::json!({ "device_id": Uuid::new_v4() }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 404);
+}
+
+#[tokio::test]
+async fn test_re_pair_lookup_db_error() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+
+    let mock = Arc::new(MockDeviceRepository::default());
+    mock.fail_next.store(true, Ordering::SeqCst);
+    let mut state = setup_mock_app_state();
+    state.devices = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/devices/re-pair"))
+        .json(&serde_json::json!({ "device_id": Uuid::new_v4() }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 500);
+}
+
+#[tokio::test]
+async fn test_re_pair_status_not_approved() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+
+    let mut row = re_pair_state_approved_with_window();
+    row.status = "disabled".to_string();
+    let mock = Arc::new(MockDeviceRepository::default());
+    *mock.re_pair_state.lock().unwrap() = Some(row);
+    let mut state = setup_mock_app_state();
+    state.devices = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/devices/re-pair"))
+        .json(&serde_json::json!({ "device_id": Uuid::new_v4() }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 404);
+}
+
+#[tokio::test]
+async fn test_re_pair_no_window() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+
+    let mut row = re_pair_state_approved_with_window();
+    row.re_pair_authorized_until = None;
+    let mock = Arc::new(MockDeviceRepository::default());
+    *mock.re_pair_state.lock().unwrap() = Some(row);
+    let mut state = setup_mock_app_state();
+    state.devices = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/devices/re-pair"))
+        .json(&serde_json::json!({ "device_id": Uuid::new_v4() }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 404);
+}
+
+#[tokio::test]
+async fn test_re_pair_window_expired() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+
+    let mut row = re_pair_state_approved_with_window();
+    row.re_pair_authorized_until = Some(Utc::now() - ChronoDuration::seconds(1));
+    let mock = Arc::new(MockDeviceRepository::default());
+    *mock.re_pair_state.lock().unwrap() = Some(row);
+    let mut state = setup_mock_app_state();
+    state.devices = mock;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/devices/re-pair"))
+        .json(&serde_json::json!({ "device_id": Uuid::new_v4() }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 404);
+}
+
+#[tokio::test]
+async fn test_re_pair_cooldown_too_many_requests() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+
+    let mut row = re_pair_state_approved_with_window();
+    row.last_re_pair_at = Some(Utc::now());
+    let mock = Arc::new(MockDeviceRepository::default());
+    *mock.re_pair_state.lock().unwrap() = Some(row);
+    let mut state = setup_mock_app_state();
+    state.devices = mock;
+    state.device_pair_client = Some(Arc::new(
+        crate::mock_helpers::MockDevicePairClient::default(),
+    ));
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/devices/re-pair"))
+        .json(&serde_json::json!({ "device_id": Uuid::new_v4() }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 429);
+}
+
+#[tokio::test]
+async fn test_re_pair_hardware_id_mismatch() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+
+    let mut row = re_pair_state_approved_with_window();
+    row.hardware_id = Some("hw-bound".to_string());
+    let mock = Arc::new(MockDeviceRepository::default());
+    *mock.re_pair_state.lock().unwrap() = Some(row);
+    let mut state = setup_mock_app_state();
+    state.devices = mock;
+    state.device_pair_client = Some(Arc::new(
+        crate::mock_helpers::MockDevicePairClient::default(),
+    ));
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/devices/re-pair"))
+        .json(&serde_json::json!({ "device_id": Uuid::new_v4(), "hardware_id": "hw-other" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 404);
+}
+
+#[tokio::test]
+async fn test_re_pair_not_configured() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+
+    let row = re_pair_state_approved_with_window();
+    let mock = Arc::new(MockDeviceRepository::default());
+    *mock.re_pair_state.lock().unwrap() = Some(row);
+    let mut state = setup_mock_app_state();
+    state.devices = mock;
+    state.device_pair_client = None;
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/devices/re-pair"))
+        .json(&serde_json::json!({ "device_id": Uuid::new_v4() }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 404);
+}
+
+#[tokio::test]
+async fn test_re_pair_upstream_mint_failure() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+
+    let row = re_pair_state_approved_with_window();
+    let mock = Arc::new(MockDeviceRepository::default());
+    *mock.re_pair_state.lock().unwrap() = Some(row);
+    let pair_client = crate::mock_helpers::MockDevicePairClient::default();
+    pair_client.fail_next.store(true, Ordering::SeqCst);
+    let mut state = setup_mock_app_state();
+    state.devices = mock;
+    state.device_pair_client = Some(Arc::new(pair_client));
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/devices/re-pair"))
+        .json(&serde_json::json!({ "device_id": Uuid::new_v4() }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 404);
+}
+
+#[tokio::test]
+async fn test_re_pair_record_success_db_error() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+
+    let row = re_pair_state_approved_with_window();
+    let mock = Arc::new(MockDeviceRepository::default());
+    *mock.re_pair_state.lock().unwrap() = Some(row);
+    mock.fail_on_update.store(true, Ordering::SeqCst);
+    let mut state = setup_mock_app_state();
+    state.devices = mock;
+    state.device_pair_client = Some(Arc::new(
+        crate::mock_helpers::MockDevicePairClient::default(),
+    ));
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/devices/re-pair"))
+        .json(&serde_json::json!({ "device_id": Uuid::new_v4() }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 500);
+}
+
+#[tokio::test]
+async fn test_re_pair_success_binds_hardware_id_and_returns_credential() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+
+    let row = re_pair_state_approved_with_window();
+    let mock = Arc::new(MockDeviceRepository::default());
+    *mock.re_pair_state.lock().unwrap() = Some(row);
+    let mut state = setup_mock_app_state();
+    state.devices = mock;
+    state.device_pair_client = Some(Arc::new(
+        crate::mock_helpers::MockDevicePairClient::default(),
+    ));
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/devices/re-pair"))
+        .json(&serde_json::json!({ "device_id": Uuid::new_v4(), "hardware_id": "hw-new" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    assert_eq!(res.headers().get("cache-control").unwrap(), "no-store");
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(body["auth_device_id"], "mock-auth-device-id");
+    assert_eq!(body["device_secret"], "mock-device-secret");
+}
+
+#[tokio::test]
+async fn test_re_pair_skips_window_when_admin_not_required() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+    std::env::set_var("RE_PAIR_REQUIRE_ADMIN", "false");
+
+    let mut row = re_pair_state_approved_with_window();
+    row.re_pair_authorized_until = None;
+    let mock = Arc::new(MockDeviceRepository::default());
+    *mock.re_pair_state.lock().unwrap() = Some(row);
+    let mut state = setup_mock_app_state();
+    state.devices = mock;
+    state.device_pair_client = Some(Arc::new(
+        crate::mock_helpers::MockDevicePairClient::default(),
+    ));
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/devices/re-pair"))
+        .json(&serde_json::json!({ "device_id": Uuid::new_v4() }))
+        .send()
+        .await
+        .unwrap();
+
+    std::env::remove_var("RE_PAIR_REQUIRE_ADMIN");
+    assert_eq!(res.status(), 200);
+}
+
+#[tokio::test]
+async fn test_re_pair_requires_settings_token_when_configured() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+    std::env::set_var("RE_PAIR_REQUIRE_TOKEN", "true");
+
+    let mut row = re_pair_state_approved_with_window();
+    let stored_token = Uuid::new_v4();
+    row.settings_token = Some(stored_token);
+    let mock = Arc::new(MockDeviceRepository::default());
+    *mock.re_pair_state.lock().unwrap() = Some(row);
+    let mut state = setup_mock_app_state();
+    state.devices = mock;
+    state.device_pair_client = Some(Arc::new(
+        crate::mock_helpers::MockDevicePairClient::default(),
+    ));
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/devices/re-pair"))
+        .json(&serde_json::json!({
+            "device_id": Uuid::new_v4(),
+            "settings_token": Uuid::new_v4(),
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    std::env::remove_var("RE_PAIR_REQUIRE_TOKEN");
+    assert_eq!(res.status(), 404);
+}
+
+#[tokio::test]
+async fn test_re_pair_race_window_already_consumed() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+
+    let row = re_pair_state_approved_with_window();
+    let mock = Arc::new(MockDeviceRepository::default());
+    *mock.re_pair_state.lock().unwrap() = Some(row);
+    mock.re_pair_window_already_consumed
+        .store(true, Ordering::SeqCst);
+    let mut state = setup_mock_app_state();
+    state.devices = mock;
+    state.device_pair_client = Some(Arc::new(
+        crate::mock_helpers::MockDevicePairClient::default(),
+    ));
+    let base_url = crate::common::spawn_test_server(state).await;
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/devices/re-pair"))
+        .json(&serde_json::json!({ "device_id": Uuid::new_v4() }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 404);
+}

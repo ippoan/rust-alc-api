@@ -132,6 +132,7 @@ pub fn setup_mock_app_state() -> AppState {
         trouble_task_types: Arc::new(MockTroubleTaskTypesRepository::default()),
         trouble_task_statuses: Arc::new(MockTroubleTaskStatusesRepository::default()),
         trouble_storage: Some(Arc::new(MockStorage::new("trouble-bucket"))),
+        device_pair_client: None,
         webhook: None,
     }
 }

@@ -109,6 +109,19 @@ pub struct DeviceSettingsRow {
     pub settings_token: Option<Uuid>,
 }
 
+/// re-pair 判定用のデバイス状態 (認証不要エンドポイント、Refs #495)。
+/// `devices` テーブルへの直 SELECT は 063 で撤去済みのため
+/// `get_device_re_pair_state()` (SECURITY DEFINER) 経由で取得する。
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct RePairStateRow {
+    pub tenant_id: Uuid,
+    pub status: String,
+    pub re_pair_authorized_until: Option<chrono::DateTime<chrono::Utc>>,
+    pub last_re_pair_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub hardware_id: Option<String>,
+    pub settings_token: Option<Uuid>,
+}
+
 /// FCM デバイス情報
 #[derive(Debug, sqlx::FromRow)]
 pub struct FcmDeviceRow {
@@ -191,6 +204,25 @@ pub trait DeviceRepository: Send + Sync {
         phone_number: Option<&str>,
         device_name: &str,
     ) -> Result<(), sqlx::Error>;
+
+    /// re-pair: 端末向け状態取得 (認証不要、SECURITY DEFINER 関数経由。Refs #495)
+    async fn get_device_re_pair_state(
+        &self,
+        device_id: Uuid,
+    ) -> Result<Option<RePairStateRow>, sqlx::Error>;
+
+    /// re-pair: 成功記録 (window 消費 + カウンタ更新 + hardware_id bind、Refs #495)。
+    /// `expected_authorized_until` は判定時に読んだ `re_pair_authorized_until` を
+    /// そのまま渡す — compare-and-swap で一致した行だけを更新する (楽観ロック)。
+    /// 並行リクエストが先に window を消費 (or 別 authorize-repair で書き換え)
+    /// していれば 0 行更新となり `Ok(false)` を返す (= 呼び出し元は 404 にする)。
+    async fn record_re_pair_success(
+        &self,
+        tenant_id: Uuid,
+        device_id: Uuid,
+        expected_authorized_until: Option<chrono::DateTime<chrono::Utc>>,
+        bind_hardware_id: Option<&str>,
+    ) -> Result<bool, sqlx::Error>;
 
     /// デバイス設定取得 (認証不要、SECURITY DEFINER 関数経由)
     async fn get_device_settings(
@@ -363,6 +395,17 @@ pub trait DeviceRepository: Send + Sync {
         call_schedule: Option<&serde_json::Value>,
         always_on: Option<bool>,
     ) -> Result<bool, sqlx::Error>;
+
+    /// re-pair: 管理者が時限 window を開ける (tenant-scoped、Refs #495)。
+    /// status != 'active' (devices テーブルの稼働状態) / 存在しない場合は
+    /// None。`reset_binding` で TOFU hardware_id を同時に NULL clear する。
+    async fn authorize_repair(
+        &self,
+        tenant_id: Uuid,
+        id: Uuid,
+        window_secs: i64,
+        reset_binding: bool,
+    ) -> Result<Option<chrono::DateTime<chrono::Utc>>, sqlx::Error>;
 
     /// FCM トークン取得 (RLS 回避、pool 直接)
     async fn get_fcm_token_bypass_rls(

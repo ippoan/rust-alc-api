@@ -9,6 +9,7 @@ pub mod auth_lineworks;
 pub mod auth_middleware;
 
 pub mod constant_time;
+pub mod device_pair_client;
 pub mod fcm;
 pub mod middleware;
 pub mod models;
@@ -124,6 +125,10 @@ pub struct AppState {
     pub trouble_task_types: Arc<dyn TroubleTaskTypesRepository>,
     pub trouble_task_statuses: Arc<dyn TroubleTaskStatusesRepository>,
     pub trouble_storage: Option<Arc<dyn StorageBackend>>,
+    /// kiosk 端末 re-pair (再認証) 用、auth-worker `/device/pair-internal` 呼び出し
+    /// クライアント (Refs #495)。`AUTH_WORKER_URL` / `RE_PAIR_INTERNAL_SHARED_SECRET`
+    /// が未設定なら None (re-pair endpoint は 404 で "not configured" を表す)。
+    pub device_pair_client: Option<Arc<dyn device_pair_client::DevicePairClient>>,
 }
 
 impl AppState {
