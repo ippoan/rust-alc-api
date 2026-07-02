@@ -19,7 +19,7 @@ Google OAuth + LINE WORKS。Cloud Run にデプロイ。
 | 系統 | バイナリ | 役割 |
 |---|---|---|
 | **monolith** | `rust-alc-api` (`src/main.rs`) | 全 domain crate の router を `/api` 下に一括 nest。全 repo を 1 プロセスで提供 |
-| **gateway** | `gateway` (`crates/gateway`) | JWT 検証 + reverse proxy。public route 判定 (`routes.rs::is_public_route`) して各 per-domain API へ転送 |
+| **gateway** | `gateway` (`crates/gateway`) | 認証 + reverse proxy。ユーザー JWT の検証は auth-worker `/auth/introspect` に委譲 (#479 PR-2、gateway は JWT_SECRET を持たない)。public route 判定 (`routes.rs::is_public_route`) して各 per-domain API へ転送 |
 | **per-domain API** | `tenko-api` / `carins-api` / `dtako-api` / `trouble-api` | 各 domain crate の router だけを単独で立てる薄い main。`X-Tenant-ID` header 認証 (`require_tenant_header`) |
 | **CLI** | `migrate` (`src/bin/migrate.rs`) / `archive` (`src/bin/archive.rs`) | sqlx migration 実行 / アーカイブ Job |
 
@@ -66,7 +66,13 @@ monolith と per-domain API は同じ domain crate (`alc-tenko` 等) を共有 �
   Bearer JWT → identity ヘッダーに変換し従来テストを無改修で通す。
 - **gateway**: `crates/gateway/src/{main,routes,proxy,auth,config}.rs`。`is_public_route` に
   列挙された path (health / auth/* / tenko-call register / devices register / staging /
-  `/notify/line/webhook` / notify read / access-requests 等) は JWT skip でそのまま proxy。
+  `/notify/line/webhook` / notify read / access-requests 等) は認証 skip でそのまま proxy。
+  非 public path は **auth-worker `/auth/introspect` に検証委譲** (#479 PR-2):
+  `auth.rs::IntrospectClient` が Bearer token + request `Origin` を POST し
+  (`Authorization: <INTERNAL_SHARED_SECRET>` 生値認証)、`active:true` なら
+  `X-Tenant-ID`/`X-User-*` を注入。失敗/不達/Origin 欠落は未認証として素通し
+  (認可は backend 側)。env: `AUTH_WORKER_URL` + `INTERNAL_SHARED_SECRET`
+  (旧 `JWT_SECRET` は gateway から撤去済み)。
   **#434 lockdown**: trouble schedule fire は public 列挙から外し internal 化、LINE webhook の
   判定 path も `/notify/line-webhook` (誤) → `/notify/line/webhook` (実パス) に修正。
   `resolve_backend` は `/api/internal/*` を **dtako_url (fallback backend)** へ振る = internal

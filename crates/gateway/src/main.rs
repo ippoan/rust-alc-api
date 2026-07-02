@@ -51,10 +51,16 @@ async fn main() {
         tracing::info!("alc-camera-api: {camera_url}");
     }
 
+    let introspect = std::sync::Arc::new(crate::auth::IntrospectClient::new(
+        client.clone(),
+        &config.auth_worker_url,
+        config.introspect_shared_secret,
+    ));
+
     let proxy_state = ProxyState {
         client,
         backend_url: config.backend_url.clone(),
-        jwt_secret: config.jwt_secret,
+        introspect,
         tenko_url: config.tenko_url,
         carins_url: config.carins_url,
         dtako_url: config.dtako_url,

@@ -6,14 +6,18 @@ use axum::{
 };
 use reqwest::Client;
 
-use crate::auth::{extract_bearer_token, verify_jwt, AppClaims};
+use std::sync::Arc;
+
+use crate::auth::{extract_bearer_token, Identity, IntrospectClient};
 use crate::routes::is_public_route;
 
 #[derive(Clone)]
 pub struct ProxyState {
     pub client: Client,
     pub backend_url: String,
-    pub jwt_secret: String,
+    /// auth-worker `/auth/introspect` client (Refs #479 PR-2 — 旧 jwt_secret
+    /// によるローカル HS256 検証を置換)。
+    pub introspect: Arc<IntrospectClient>,
     pub tenko_url: Option<String>,
     pub carins_url: Option<String>,
     pub dtako_url: Option<String>,
@@ -70,11 +74,11 @@ pub async fn proxy_handler(
         .map(|pq| pq.as_str())
         .unwrap_or(path);
 
-    // JWT 検証 (public ルート以外)
-    let claims = if is_public_route(path) {
+    // 認証 (public ルート以外): auth-worker introspect に委譲 (Refs #479 PR-2)。
+    let identity = if is_public_route(path) {
         None
     } else {
-        try_verify_jwt(&parts.headers, &state.jwt_secret)
+        try_introspect(&parts.headers, &state).await
     };
 
     // backend URL 構築 (パスに応じて tenko-api or backend を選択)
@@ -99,9 +103,9 @@ pub async fn proxy_handler(
         }
     }
 
-    // JWT 検証成功時にヘッダー追加
-    if let Some(claims) = &claims {
-        builder = inject_auth_headers(builder, claims);
+    // introspect 成功時に検証済み identity をヘッダー注入
+    if let Some(identity) = &identity {
+        builder = inject_auth_headers(builder, identity);
     }
 
     // Body をストリーミング転送
@@ -141,23 +145,30 @@ pub async fn proxy_handler(
     (status, headers, body).into_response()
 }
 
-/// Authorization ヘッダーから JWT を検証する (失敗時は None)
-fn try_verify_jwt(headers: &HeaderMap, jwt_secret: &str) -> Option<AppClaims> {
+/// Authorization ヘッダーの Bearer token を auth-worker introspect で検証する
+/// (失敗時は None = 未認証としてそのまま proxy)。
+///
+/// `origin` は request の `Origin` ヘッダーをそのまま転送する (auth-worker の
+/// per-app テナント ACL 判定キー)。ブラウザからの cross-origin 呼び出しでは
+/// 常に付与される。`Origin` が無い non-browser クライアントは introspect が
+/// fail-closed になるため identity 注入なし (旧実装で JWT 不正時と同じ扱い)。
+async fn try_introspect(headers: &HeaderMap, state: &ProxyState) -> Option<Identity> {
     let auth_header = headers.get("authorization")?.to_str().ok()?;
     let token = extract_bearer_token(auth_header)?;
-    verify_jwt(token, jwt_secret).ok()
+    let origin = headers.get("origin").and_then(|v| v.to_str().ok())?;
+    state.introspect.introspect(token, origin).await
 }
 
-/// 認証情報をヘッダーとして注入
+/// 検証済み identity をヘッダーとして注入
 fn inject_auth_headers(
     builder: reqwest::RequestBuilder,
-    claims: &AppClaims,
+    identity: &Identity,
 ) -> reqwest::RequestBuilder {
     builder
-        .header("X-Tenant-ID", claims.tenant_id.to_string())
-        .header("X-User-ID", claims.sub.to_string())
-        .header("X-User-Email", &claims.email)
-        .header("X-User-Role", &claims.role)
+        .header("X-Tenant-ID", identity.tenant_id.to_string())
+        .header("X-User-ID", identity.user_id.to_string())
+        .header("X-User-Email", &identity.email)
+        .header("X-User-Role", &identity.role)
 }
 
 #[cfg(test)]
@@ -168,7 +179,11 @@ mod tests {
         ProxyState {
             client: Client::new(),
             backend_url: "http://backend:8081".to_string(),
-            jwt_secret: "secret".to_string(),
+            introspect: Arc::new(IntrospectClient::new(
+                Client::new(),
+                "http://auth-worker.invalid",
+                "test-secret".to_string(),
+            )),
             tenko_url: Some("http://tenko:8082".to_string()),
             carins_url: Some("http://carins:8083".to_string()),
             dtako_url: Some("http://dtako:8084".to_string()),
@@ -295,7 +310,11 @@ mod tests {
         let state = ProxyState {
             client: Client::new(),
             backend_url: "http://backend:8081".to_string(),
-            jwt_secret: "secret".to_string(),
+            introspect: Arc::new(IntrospectClient::new(
+                Client::new(),
+                "http://auth-worker.invalid",
+                "test-secret".to_string(),
+            )),
             tenko_url: None,
             carins_url: None,
             dtako_url: None,
@@ -316,51 +335,56 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_try_verify_jwt_no_header() {
+    #[tokio::test]
+    async fn test_try_introspect_no_auth_header() {
         let headers = HeaderMap::new();
-        assert!(try_verify_jwt(&headers, "secret").is_none());
+        assert!(try_introspect(&headers, &test_state()).await.is_none());
     }
 
-    #[test]
-    fn test_try_verify_jwt_invalid_token() {
+    #[tokio::test]
+    async fn test_try_introspect_missing_origin_skips() {
+        // Origin ヘッダーが無い場合は introspect を呼ばず未認証扱い
+        // (auth-worker 側が origin 欠落を fail-closed にするため呼ぶだけ無駄)。
         let mut headers = HeaderMap::new();
-        headers.insert(
-            "authorization",
-            "Bearer invalid.token.here".parse().unwrap(),
-        );
-        assert!(try_verify_jwt(&headers, "secret").is_none());
+        headers.insert("authorization", "Bearer some-token".parse().unwrap());
+        assert!(try_introspect(&headers, &test_state()).await.is_none());
     }
 
-    #[test]
-    fn test_try_verify_jwt_valid_token() {
-        use chrono::{Duration, Utc};
-        use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+    #[tokio::test]
+    async fn test_try_introspect_active_true_injects_identity() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
 
-        let secret = "test-secret-key-256-bits-long!!!";
-        let now = Utc::now();
-        let claims = AppClaims {
-            sub: uuid::Uuid::new_v4(),
-            email: "test@example.com".to_string(),
-            name: "Test".to_string(),
-            tenant_id: uuid::Uuid::new_v4(),
-            role: "admin".to_string(),
-            org_slug: None,
-            iat: now.timestamp(),
-            exp: (now + Duration::hours(1)).timestamp(),
-        };
-        let token = encode(
-            &Header::new(Algorithm::HS256),
-            &claims,
-            &EncodingKey::from_secret(secret.as_bytes()),
-        )
-        .unwrap();
+        let server = MockServer::start().await;
+        let tenant = uuid::Uuid::new_v4();
+        let sub = uuid::Uuid::new_v4();
+        Mock::given(method("POST"))
+            .and(path("/auth/introspect"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "active": true,
+                "tenant_id": tenant,
+                "sub": sub,
+                "email": "u@example.com",
+                "role": "admin"
+            })))
+            .mount(&server)
+            .await;
+
+        let mut state = test_state();
+        state.introspect = Arc::new(IntrospectClient::new(
+            Client::new(),
+            &server.uri(),
+            "s".to_string(),
+        ));
 
         let mut headers = HeaderMap::new();
-        headers.insert("authorization", format!("Bearer {token}").parse().unwrap());
+        headers.insert("authorization", "Bearer tok".parse().unwrap());
+        headers.insert("origin", "https://alc.ippoan.org".parse().unwrap());
 
-        let result = try_verify_jwt(&headers, secret);
-        assert!(result.is_some());
-        assert_eq!(result.unwrap().email, "test@example.com");
+        let identity = try_introspect(&headers, &state).await.expect("identity");
+        assert_eq!(identity.tenant_id, tenant);
+        assert_eq!(identity.user_id, sub);
+        assert_eq!(identity.email, "u@example.com");
+        assert_eq!(identity.role, "admin");
     }
 }
