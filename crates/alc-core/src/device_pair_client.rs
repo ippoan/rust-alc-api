@@ -2,8 +2,9 @@
 //! クライアント (Refs #495)。値 (`device_secret`) は rust 側で保持せず、応答を
 //! そのまま端末に転送する。
 //!
-//! ヘッダ名 / role 名は auth-worker 側 PR2 実装待ちの暫定値
-//! (`docs/plan-device-repair.md` の「未確定・後続 PR で決める事項」参照)。
+//! auth-worker 側の実装 (ippoan/auth-worker#345、`replace_label` 追加) に
+//! 合わせて header 名 (`X-Internal-Shared-Secret`)・レスポンスキー
+//! (`device_id`)・role (`device-kiosk`、既存 allowlist) を確定済み。
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -15,14 +16,14 @@ use uuid::Uuid;
 /// 事故防止。このリポジトリの「値を log に出さない」方針の防御的担保)。
 #[derive(Clone, PartialEq, Eq)]
 pub struct PairedCredential {
-    pub auth_device_id: String,
+    pub device_id: String,
     pub device_secret: String,
 }
 
 impl std::fmt::Debug for PairedCredential {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PairedCredential")
-            .field("auth_device_id", &self.auth_device_id)
+            .field("device_id", &self.device_id)
             .field("device_secret", &"***")
             .finish()
     }
@@ -48,16 +49,19 @@ struct PairInternalRequest<'a> {
     tenant_id: Uuid,
     label: &'a str,
     role: &'a str,
+    /// 同一 (tenant_id, label) の旧 credential を revoke してから mint する
+    /// (auth-worker#345)。re-pair は常に rotate したいので true 固定。
+    replace_label: bool,
 }
 
 #[derive(Deserialize)]
 struct PairInternalResponse {
-    auth_device_id: String,
+    device_id: String,
     device_secret: String,
 }
 
-/// role 名は暫定 (auth-worker 側の既存 role 一覧との衝突確認が後続 PR で必要)。
-const RE_PAIR_ROLE: &str = "device-alc-kiosk";
+/// alc-app キオスク端末向け既存 role (auth-worker `DEVICE_ROLE_KIOSK`)。
+const RE_PAIR_ROLE: &str = "device-kiosk";
 
 /// 実 HTTP 実装。`with_endpoint` はテスト用にエンドポイントを直指定する。
 pub struct HttpDevicePairClient {
@@ -110,11 +114,12 @@ impl DevicePairClient for HttpDevicePairClient {
         let resp = self
             .client
             .post(&self.pair_internal_url)
-            .header("X-Internal-Secret", &self.shared_secret)
+            .header("X-Internal-Shared-Secret", &self.shared_secret)
             .json(&PairInternalRequest {
                 tenant_id,
                 label,
                 role: RE_PAIR_ROLE,
+                replace_label: true,
             })
             .send()
             .await
@@ -133,7 +138,7 @@ impl DevicePairClient for HttpDevicePairClient {
             .map_err(|e| DevicePairClientError::Upstream(e.to_string()))?;
 
         Ok(PairedCredential {
-            auth_device_id: body.auth_device_id,
+            device_id: body.device_id,
             device_secret: body.device_secret,
         })
     }
@@ -250,9 +255,15 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/device/pair-internal"))
-            .and(header("X-Internal-Secret", "s3cr3t"))
+            .and(header("X-Internal-Shared-Secret", "s3cr3t"))
+            .and(wiremock::matchers::body_string_contains(
+                "\"replace_label\":true",
+            ))
+            .and(wiremock::matchers::body_string_contains(
+                "\"role\":\"device-kiosk\"",
+            ))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "auth_device_id": "dev-1",
+                "device_id": "dev-1",
                 "device_secret": "top-secret"
             })))
             .expect(1)
@@ -267,7 +278,7 @@ mod tests {
             .mint(Uuid::new_v4(), "alc-app:device-1")
             .await
             .unwrap();
-        assert_eq!(cred.auth_device_id, "dev-1");
+        assert_eq!(cred.device_id, "dev-1");
         assert_eq!(cred.device_secret, "top-secret");
     }
 

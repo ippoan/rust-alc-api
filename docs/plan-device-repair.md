@@ -167,22 +167,39 @@ unit test する):
 
 ### auth-worker 呼び出し (rust-alc-api → auth-worker、サーバー間)
 
+確定 (ippoan/auth-worker#345、既存 `/device/pair-internal` — rust-alc-api#434
+caller #5 の AlcoholChecker provisioning で先に実装済みだったもの — に
+`replace_label` を追加):
+
 ```
 POST {AUTH_WORKER_URL}/device/pair-internal
-Authorization: Bearer <INTERNAL_SHARED_SECRET> 相当のヘッダ (auth-worker#298/#341 の
-                          既存 internal 認証パターンに合わせる。ヘッダ名は
-                          auth-worker 側の実装 (#298) に追従)
+X-Internal-Shared-Secret: <shared secret 生値> (INTERNAL_SHARED_SECRET* multi-binding、
+                          auth-worker の resolveAllSharedSecrets と同じ検証)
 ```
 
 Request:
 
 ```jsonc
-{ "tenant_id": "...", "label": "alc-app:<device_id>", "role": "device-alc-kiosk" }
+{
+  "tenant_id": "...",
+  "label": "alc-app:<device_id>",
+  "role": "device-kiosk",
+  "replace_label": true
+}
 ```
 
-- `label` は device 単位で一意にし、auth-worker 側 PR2 の `replace_label`
-  (同 label の旧 credential を revoke してから新規 mint) を効かせて
-  credential rotate を実現する
+Response `201`:
+
+```jsonc
+{ "device_id": "...", "device_secret": "...", "tenant_id": "...", "role": "device-kiosk" }
+```
+
+- `role` は auth-worker の既存 role allowlist (`DEVICE_ROLE_KIOSK` =
+  `"device-kiosk"`、alc-app キオスク端末向け) をそのまま使う。新規 role は
+  切っていない
+- `label` は device 単位で一意にし、`replace_label: true` を渡すことで
+  auth-worker 側が同一 (tenant_id, label) の旧 credential を KV 二次索引
+  経由で revoke してから新規 mint する (credential rotate)
 - 呼び出し失敗 (auth-worker 側 5xx / timeout) は rust 側も `502` 相当だが、
   端末には他の失敗と区別させず **404** に丸める (info leak 防止方針を貫く)。
   詳細は log にのみ出す
@@ -237,10 +254,8 @@ issue #495 の Acceptance Criteria はそのまま本 doc のテスト方針で�
 
 ## 未確定・後続 PR で決める事項
 
-- auth-worker `/device/pair-internal` の実リクエスト/レスポンス schema
-  (PR2 側实装待ち、本 doc の記述は暫定)。確定次第 `crates/alc-devices` の
-  HTTP client 実装をそれに合わせる
-- `role: "device-alc-kiosk"` という role 名は仮称。auth-worker 側の既存
-  role 一覧 (`device-dtako-ingest` 等) と衝突しないか PR2 実装時に確認する
 - Cloudflare WAF rate rule の具体的なルール定義はインフラ設定側 (本 repo
   scope 外)
+- staging/prod への `AUTH_WORKER_URL` / `RE_PAIR_INTERNAL_SHARED_SECRET`
+  (auth-worker 側の `INTERNAL_SHARED_SECRET*` binding と同値) の実投入
+  (secrets-inventory 経由、インフラ作業)

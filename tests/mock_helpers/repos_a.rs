@@ -1726,7 +1726,7 @@ impl DeviceRepository for MockDeviceRepository {
 
 pub struct MockDevicePairClient {
     pub fail_next: AtomicBool,
-    pub auth_device_id: String,
+    pub device_id: String,
     pub device_secret: String,
 }
 
@@ -1734,7 +1734,7 @@ impl Default for MockDevicePairClient {
     fn default() -> Self {
         Self {
             fail_next: AtomicBool::new(false),
-            auth_device_id: "mock-auth-device-id".to_string(),
+            device_id: "mock-auth-device-id".to_string(),
             device_secret: "mock-device-secret".to_string(),
         }
     }
@@ -1758,7 +1758,7 @@ impl rust_alc_api::device_pair_client::DevicePairClient for MockDevicePairClient
             );
         }
         Ok(rust_alc_api::device_pair_client::PairedCredential {
-            auth_device_id: self.auth_device_id.clone(),
+            device_id: self.device_id.clone(),
             device_secret: self.device_secret.clone(),
         })
     }
