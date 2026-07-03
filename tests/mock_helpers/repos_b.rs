@@ -449,6 +449,9 @@ impl DtakoTicketsRepository for MockDtakoTicketsRepository {
 
 pub struct MockDtakoUploadRepository {
     pub fail_next: AtomicBool,
+    /// create_upload_history を tenant FK 違反 (dtako_upload_history_tenant_id_fkey) 相当の
+    /// エラーで失敗させる (staging 揮発 DB で tenant が消えたケースの再現)。
+    pub fail_tenant_fk: AtomicBool,
     pub fail_update_has_kudgivt: AtomicBool,
     pub upload_history: std::sync::Mutex<Option<UploadHistoryRecord>>,
     pub tenant_and_key: std::sync::Mutex<Option<UploadTenantAndKey>>,
@@ -465,6 +468,7 @@ impl Default for MockDtakoUploadRepository {
     fn default() -> Self {
         Self {
             fail_next: AtomicBool::new(false),
+            fail_tenant_fk: AtomicBool::new(false),
             fail_update_has_kudgivt: AtomicBool::new(false),
             upload_history: std::sync::Mutex::new(None),
             tenant_and_key: std::sync::Mutex::new(None),
@@ -487,6 +491,11 @@ impl DtakoUploadRepository for MockDtakoUploadRepository {
         _upload_id: Uuid,
         _filename: &str,
     ) -> Result<(), sqlx::Error> {
+        if self.fail_tenant_fk.swap(false, Ordering::SeqCst) {
+            return Err(sqlx::Error::Protocol(
+                "insert or update on table \"dtako_upload_history\" violates foreign key constraint \"dtako_upload_history_tenant_id_fkey\"".into(),
+            ));
+        }
         check_fail!(self);
         Ok(())
     }
