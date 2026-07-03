@@ -61,7 +61,7 @@ async fn upload_zip(
         .dtako_upload
         .create_upload_history(tenant_id, upload_id, &filename)
         .await
-        .map_err(internal_err)?;
+        .map_err(|e| tenant_fk_or_internal_err(e, tenant_id))?;
 
     // Process ZIP
     match process_zip(&state, tenant_id, upload_id, &filename, &zip_bytes).await {
@@ -833,6 +833,21 @@ pub fn internal_err(e: impl std::fmt::Display) -> (StatusCode, String) {
         StatusCode::INTERNAL_SERVER_ERROR,
         "internal server error".to_string(),
     )
+}
+
+/// `create_upload_history` の tenant FK 違反 (= `tenants` に tenant_id が存在しない) を
+/// actionable な 400 にする。scraper 経由の自動アップロードでは caller に
+/// 「internal server error」しか届かず原因が見えない事故があった (staging DB は揮発性で
+/// tenant が消えるため頻出、Refs ohishi-exp/dtako-scraper#22)。
+pub fn tenant_fk_or_internal_err(e: sqlx::Error, tenant_id: Uuid) -> (StatusCode, String) {
+    if e.to_string()
+        .contains("dtako_upload_history_tenant_id_fkey")
+    {
+        let msg = format!("tenant {tenant_id} が tenants に存在しません — staging 環境では DB が揮発性のため tenant 未登録の可能性があります (DTAKO_ACCOUNTS の tenant_id とアップロード先環境を確認)");
+        tracing::warn!("{msg}");
+        return (StatusCode::BAD_REQUEST, msg);
+    }
+    internal_err(e)
 }
 
 /// 年月から月初・月末を計算 (month==12 の年跨ぎ対応)

@@ -126,6 +126,43 @@ async fn test_dtako_upload_db_error() {
 }
 
 // =========================================================================
+// POST /api/upload — tenant FK violation (tenants に tenant_id が無い) → 400
+// staging 揮発 DB で tenant が消えたケース。500 "internal server error" に潰さず
+// actionable な文言を返す (Refs ohishi-exp/dtako-scraper#22)。
+// =========================================================================
+
+#[tokio::test]
+async fn test_dtako_upload_tenant_fk_violation_returns_400() {
+    let mut state = setup_mock_app_state();
+    let mock = Arc::new(MockDtakoUploadRepository::default());
+    mock.fail_tenant_fk.store(true, Ordering::SeqCst);
+    state.dtako_upload = mock;
+
+    let tenant_id = Uuid::new_v4();
+    let base_url = crate::common::spawn_test_server(state).await;
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+    let client = reqwest::Client::new();
+
+    let zip_bytes = crate::common::create_test_dtako_zip();
+    let part = reqwest::multipart::Part::bytes(zip_bytes).file_name("test.zip");
+    let form = reqwest::multipart::Form::new().part("file", part);
+
+    let res = client
+        .post(format!("{base_url}/api/upload"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .multipart(form)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 400);
+    let body = res.text().await.unwrap();
+    assert!(body.contains(&tenant_id.to_string()), "body: {body}");
+    assert!(body.contains("存在しません"), "body: {body}");
+    assert!(body.contains("DTAKO_ACCOUNTS"), "body: {body}");
+}
+
+// =========================================================================
 // POST /api/upload — no auth → 401
 // =========================================================================
 
