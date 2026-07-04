@@ -14,11 +14,12 @@ pub use alc_core::repository::{
     NotifyLineConfigRepository, NotifyRecipientRepository, SsoAdminRepository,
     TenantUsersRepository, TenkoCallRepository, TenkoRecordsRepository, TenkoSchedulesRepository,
     TenkoSessionRepository, TenkoWebhooksRepository, TimecardRepository,
-    TroubleCategoriesRepository, TroubleFilesRepository, TroubleNotificationPrefsRepository,
-    TroubleOfficesRepository, TroubleProgressStatusesRepository, TroubleSchedulesRepository,
-    TroubleTaskStatusesRepository, TroubleTaskTypesRepository, TroubleTasksFilter,
-    TroubleTasksRepository, TroubleTasksSortBy, TroubleTicketsRepository,
-    TroubleWorkflowRepository, VehicleSettingsDumpsRepository, WebhookRepository,
+    TroubleCategoriesRepository, TroubleFieldLayoutsRepository, TroubleFilesRepository,
+    TroubleNotificationPrefsRepository, TroubleOfficesRepository,
+    TroubleProgressStatusesRepository, TroubleSchedulesRepository, TroubleTaskStatusesRepository,
+    TroubleTaskTypesRepository, TroubleTasksFilter, TroubleTasksRepository, TroubleTasksSortBy,
+    TroubleTicketsRepository, TroubleWorkflowRepository, VehicleSettingsDumpsRepository,
+    WebhookRepository,
 };
 
 // Re-export TenantConn from alc-core
@@ -81,7 +82,9 @@ pub use alc_tenko::repo::{
     PgTenkoSessionRepository, PgTenkoWebhooksRepository,
 };
 pub use alc_trouble::repo::{
-    trouble_categories::PgTroubleCategoriesRepository, trouble_files::PgTroubleFilesRepository,
+    trouble_categories::PgTroubleCategoriesRepository,
+    trouble_field_layouts::PgTroubleFieldLayoutsRepository,
+    trouble_files::PgTroubleFilesRepository,
     trouble_notification_prefs::PgTroubleNotificationPrefsRepository,
     trouble_offices::PgTroubleOfficesRepository,
     trouble_progress_statuses::PgTroubleProgressStatusesRepository,

@@ -39,10 +39,11 @@ use repository::{
     NotifyLineConfigRepository, NotifyRecipientRepository, SsoAdminRepository,
     TenantUsersRepository, TenkoCallRepository, TenkoRecordsRepository, TenkoSchedulesRepository,
     TenkoSessionRepository, TenkoWebhooksRepository, TimecardRepository,
-    TroubleCategoriesRepository, TroubleFilesRepository, TroubleNotificationPrefsRepository,
-    TroubleOfficesRepository, TroubleProgressStatusesRepository, TroubleSchedulesRepository,
-    TroubleTaskStatusesRepository, TroubleTaskTypesRepository, TroubleTasksRepository,
-    TroubleTicketsRepository, TroubleWorkflowRepository, VehicleSettingsDumpsRepository,
+    TroubleCategoriesRepository, TroubleFieldLayoutsRepository, TroubleFilesRepository,
+    TroubleNotificationPrefsRepository, TroubleOfficesRepository,
+    TroubleProgressStatusesRepository, TroubleSchedulesRepository, TroubleTaskStatusesRepository,
+    TroubleTaskTypesRepository, TroubleTasksRepository, TroubleTicketsRepository,
+    TroubleWorkflowRepository, VehicleSettingsDumpsRepository,
 };
 use storage::StorageBackend;
 
@@ -124,6 +125,7 @@ pub struct AppState {
     pub trouble_tasks: Arc<dyn TroubleTasksRepository>,
     pub trouble_task_types: Arc<dyn TroubleTaskTypesRepository>,
     pub trouble_task_statuses: Arc<dyn TroubleTaskStatusesRepository>,
+    pub trouble_field_layouts: Arc<dyn TroubleFieldLayoutsRepository>,
     pub trouble_storage: Option<Arc<dyn StorageBackend>>,
     /// kiosk 端末 re-pair (再認証) 用、auth-worker `/device/pair-internal` 呼び出し
     /// クライアント (Refs #495)。`AUTH_WORKER_URL` / `INTERNAL_SHARED_SECRET`

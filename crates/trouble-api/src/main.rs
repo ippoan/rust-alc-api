@@ -16,7 +16,9 @@ use alc_core::repository::bot_admin::BotAdminRepository;
 use alc_misc::repo::PgBotAdminRepository;
 use alc_notify::clients::lineworks::LineworksBotClient;
 use alc_trouble::repo::{
-    trouble_categories::PgTroubleCategoriesRepository, trouble_files::PgTroubleFilesRepository,
+    trouble_categories::PgTroubleCategoriesRepository,
+    trouble_field_layouts::PgTroubleFieldLayoutsRepository,
+    trouble_files::PgTroubleFilesRepository,
     trouble_notification_prefs::PgTroubleNotificationPrefsRepository,
     trouble_offices::PgTroubleOfficesRepository,
     trouble_progress_statuses::PgTroubleProgressStatusesRepository,
@@ -79,6 +81,7 @@ async fn main() {
         trouble_tasks: Arc::new(PgTroubleTasksRepository::new(pool.clone())),
         trouble_task_types: Arc::new(PgTroubleTaskTypesRepository::new(pool.clone())),
         trouble_task_statuses: Arc::new(PgTroubleTaskStatusesRepository::new(pool.clone())),
+        trouble_field_layouts: Arc::new(PgTroubleFieldLayoutsRepository::new(pool.clone())),
         trouble_storage,
         webhook: None,
         cloud_tasks: None,
@@ -102,6 +105,7 @@ async fn main() {
         .merge(alc_trouble::tasks::tenant_router())
         .merge(alc_trouble::task_types::tenant_router())
         .merge(alc_trouble::task_statuses::tenant_router())
+        .merge(alc_trouble::field_layouts::tenant_router())
         .merge(alc_trouble::lineworks_members::tenant_router())
         .layer(Extension(bot_admin))
         .layer(Extension(lw_client))
