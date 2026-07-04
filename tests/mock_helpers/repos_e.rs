@@ -1006,6 +1006,7 @@ impl TroubleTasksRepository for MockTroubleTasksRepository {
             next_action_by: input.next_action_by.clone(),
             next_action_due: input.next_action_due,
             occurred_at: input.occurred_at,
+            print_page_break_before: false,
             created_by,
             created_at: Utc::now(),
             updated_at: Utc::now(),

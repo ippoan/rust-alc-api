@@ -98,6 +98,7 @@ impl TroubleTasksRepository for PgTroubleTasksRepository {
                 next_action_by = CASE WHEN $16::boolean THEN $17 ELSE next_action_by END,
                 next_action_due = CASE WHEN $18::boolean THEN $19 ELSE next_action_due END,
                 occurred_at = CASE WHEN $20::boolean THEN $21 ELSE occurred_at END,
+                print_page_break_before = COALESCE($22, print_page_break_before),
                 updated_at = now()
             WHERE id = $1 AND tenant_id = $2
             RETURNING *"#,
@@ -123,6 +124,7 @@ impl TroubleTasksRepository for PgTroubleTasksRepository {
         .bind(input.next_action_due.as_ref().and_then(|v| *v))
         .bind(input.occurred_at.is_some())
         .bind(input.occurred_at.as_ref().and_then(|v| *v))
+        .bind(input.print_page_break_before)
         .fetch_optional(&mut *tc.conn)
         .await
     }
