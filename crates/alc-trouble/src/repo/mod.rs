@@ -1,4 +1,5 @@
 pub mod trouble_categories;
+pub mod trouble_field_layouts;
 pub mod trouble_files;
 pub mod trouble_notification_prefs;
 pub mod trouble_offices;

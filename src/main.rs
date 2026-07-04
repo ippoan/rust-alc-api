@@ -17,7 +17,9 @@ use alc_notify::repo::{
     PgNotifyGroupRepository, PgNotifyLineConfigRepository, PgNotifyRecipientRepository,
 };
 use alc_trouble::repo::{
-    trouble_categories::PgTroubleCategoriesRepository, trouble_files::PgTroubleFilesRepository,
+    trouble_categories::PgTroubleCategoriesRepository,
+    trouble_field_layouts::PgTroubleFieldLayoutsRepository,
+    trouble_files::PgTroubleFilesRepository,
     trouble_notification_prefs::PgTroubleNotificationPrefsRepository,
     trouble_offices::PgTroubleOfficesRepository,
     trouble_progress_statuses::PgTroubleProgressStatusesRepository,
@@ -253,6 +255,7 @@ async fn main() -> anyhow::Result<()> {
     let trouble_tasks = Arc::new(PgTroubleTasksRepository::new(pool.clone()));
     let trouble_task_types = Arc::new(PgTroubleTaskTypesRepository::new(pool.clone()));
     let trouble_task_statuses = Arc::new(PgTroubleTaskStatusesRepository::new(pool.clone()));
+    let trouble_field_layouts = Arc::new(PgTroubleFieldLayoutsRepository::new(pool.clone()));
 
     // notify 用 R2 (optional)
     let notify_storage: Option<Arc<dyn StorageBackend>> =
@@ -357,6 +360,7 @@ async fn main() -> anyhow::Result<()> {
         trouble_tasks,
         trouble_task_types,
         trouble_task_statuses,
+        trouble_field_layouts,
         trouble_storage,
         device_pair_client: rust_alc_api::device_pair_client::HttpDevicePairClient::from_env()
             .map(|c| Arc::new(c) as Arc<dyn rust_alc_api::device_pair_client::DevicePairClient>),

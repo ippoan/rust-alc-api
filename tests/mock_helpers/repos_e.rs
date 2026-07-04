@@ -6,18 +6,18 @@ use uuid::Uuid;
 use rust_alc_api::db::models::{
     CreateTroubleCategory, CreateTroubleOffice, CreateTroubleProgressStatus, CreateTroubleSchedule,
     CreateTroubleTask, CreateTroubleTaskStatus, CreateTroubleTicket, CreateWorkflowState,
-    CreateWorkflowTransition, TroubleCategory, TroubleFile, TroubleNotificationPref, TroubleOffice,
-    TroubleProgressStatus, TroubleSchedule, TroubleStatusHistory, TroubleTask, TroubleTaskStatus,
-    TroubleTicket, TroubleTicketFilter, TroubleTicketsResponse, TroubleWorkflowState,
-    TroubleWorkflowTransition, UpdateTroubleTask, UpdateTroubleTaskStatus, UpdateTroubleTicket,
-    UpsertNotificationPref,
+    CreateWorkflowTransition, TroubleCategory, TroubleFieldLayout, TroubleFile,
+    TroubleNotificationPref, TroubleOffice, TroubleProgressStatus, TroubleSchedule,
+    TroubleStatusHistory, TroubleTask, TroubleTaskStatus, TroubleTicket, TroubleTicketFilter,
+    TroubleTicketsResponse, TroubleWorkflowState, TroubleWorkflowTransition, UpdateTroubleTask,
+    UpdateTroubleTaskStatus, UpdateTroubleTicket, UpsertNotificationPref,
 };
 use rust_alc_api::db::repository::{
-    TroubleCategoriesRepository, TroubleFilesRepository, TroubleNotificationPrefsRepository,
-    TroubleOfficesRepository, TroubleProgressStatusesRepository, TroubleSchedulesRepository,
-    TroubleTaskStatusesRepository, TroubleTaskTypesRepository, TroubleTasksFilter,
-    TroubleTasksRepository, TroubleTasksSortBy, TroubleTicketsRepository,
-    TroubleWorkflowRepository,
+    TroubleCategoriesRepository, TroubleFieldLayoutsRepository, TroubleFilesRepository,
+    TroubleNotificationPrefsRepository, TroubleOfficesRepository,
+    TroubleProgressStatusesRepository, TroubleSchedulesRepository, TroubleTaskStatusesRepository,
+    TroubleTaskTypesRepository, TroubleTasksFilter, TroubleTasksRepository, TroubleTasksSortBy,
+    TroubleTicketsRepository, TroubleWorkflowRepository,
 };
 
 macro_rules! check_fail {
@@ -75,9 +75,11 @@ fn mock_ticket(tenant_id: Uuid) -> TroubleTicket {
         confirmation_notice: "".to_string(),
         disciplinary_content: "".to_string(),
         disciplinary_action: "".to_string(),
+        disciplinary_committee: "".to_string(),
         road_service_cost: None,
         counterparty: "".to_string(),
         counterparty_insurance: "".to_string(),
+        counterparty_vehicle: "".to_string(),
         custom_fields: serde_json::json!({}),
         due_date: None,
         overdue_notified_at: None,
@@ -1150,5 +1152,41 @@ impl TroubleTaskStatusesRepository for MockTroubleTaskStatusesRepository {
             return Ok(false);
         }
         Ok(true)
+    }
+}
+
+// ============================================================
+// MockTroubleFieldLayoutsRepository
+// ============================================================
+
+pub struct MockTroubleFieldLayoutsRepository {
+    pub fail_next: AtomicBool,
+    pub layout: std::sync::Mutex<TroubleFieldLayout>,
+}
+
+impl Default for MockTroubleFieldLayoutsRepository {
+    fn default() -> Self {
+        Self {
+            fail_next: AtomicBool::new(false),
+            layout: std::sync::Mutex::new(TroubleFieldLayout { settings: vec![] }),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl TroubleFieldLayoutsRepository for MockTroubleFieldLayoutsRepository {
+    async fn get(&self, _tenant_id: Uuid) -> Result<TroubleFieldLayout, sqlx::Error> {
+        check_fail!(self);
+        Ok(self.layout.lock().unwrap().clone())
+    }
+
+    async fn upsert(
+        &self,
+        _tenant_id: Uuid,
+        layout: &TroubleFieldLayout,
+    ) -> Result<TroubleFieldLayout, sqlx::Error> {
+        check_fail!(self);
+        *self.layout.lock().unwrap() = layout.clone();
+        Ok(layout.clone())
     }
 }

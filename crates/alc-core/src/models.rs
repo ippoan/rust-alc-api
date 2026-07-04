@@ -1534,9 +1534,11 @@ pub struct TroubleTicket {
     pub confirmation_notice: String,
     pub disciplinary_content: String,
     pub disciplinary_action: String,
+    pub disciplinary_committee: String,
     pub road_service_cost: Option<String>,
     pub counterparty: String,
     pub counterparty_insurance: String,
+    pub counterparty_vehicle: String,
     pub custom_fields: serde_json::Value,
     pub due_date: Option<DateTime<Utc>>,
     pub overdue_notified_at: Option<DateTime<Utc>>,
@@ -1630,9 +1632,11 @@ pub struct UpdateTroubleTicket {
     pub confirmation_notice: Option<String>,
     pub disciplinary_content: Option<String>,
     pub disciplinary_action: Option<String>,
+    pub disciplinary_committee: Option<String>,
     pub road_service_cost: Option<f64>,
     pub counterparty: Option<String>,
     pub counterparty_insurance: Option<String>,
+    pub counterparty_vehicle: Option<String>,
     pub custom_fields: Option<serde_json::Value>,
     #[serde(
         default,
@@ -1663,6 +1667,27 @@ pub struct TroubleTicketsResponse {
     pub total: i64,
     pub page: i64,
     pub per_page: i64,
+}
+
+/// トラブルチケット入力フォームの1フィールド分の表示設定 (表示/非表示・幅・並び順・
+/// ラベル付け替え)。フィールドの type 等それ以外の静的メタデータはフロントエンド側が
+/// 持ち、ここではテナントが上書きした値だけを保持する。
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct TroubleFieldLayoutEntry {
+    pub key: String,
+    pub visible: bool,
+    pub width: String,
+    pub sort_order: i32,
+    /// テナントが付け替えた表示ラベル。未設定 (None) ならフロントエンドの
+    /// デフォルトラベルを使う。
+    pub label: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct TroubleFieldLayout {
+    pub settings: Vec<TroubleFieldLayoutEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow, TS)]

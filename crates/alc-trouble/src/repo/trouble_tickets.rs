@@ -65,9 +65,9 @@ impl TroubleTicketsRepository for PgTroubleTicketsRepository {
                 status_id, assigned_to,
                 progress_notes, allowance,
                 damage_amount::text, compensation_amount::text,
-                confirmation_notice, disciplinary_content, disciplinary_action,
+                confirmation_notice, disciplinary_content, disciplinary_action, disciplinary_committee,
                 road_service_cost::text,
-                counterparty, counterparty_insurance,
+                counterparty, counterparty_insurance, counterparty_vehicle,
                 custom_fields, due_date, overdue_notified_at,
                 created_by, created_at, updated_at, deleted_at
             "#,
@@ -169,9 +169,9 @@ impl TroubleTicketsRepository for PgTroubleTicketsRepository {
                 status_id, assigned_to,
                 progress_notes, allowance,
                 damage_amount::text, compensation_amount::text,
-                confirmation_notice, disciplinary_content, disciplinary_action,
+                confirmation_notice, disciplinary_content, disciplinary_action, disciplinary_committee,
                 road_service_cost::text,
-                counterparty, counterparty_insurance,
+                counterparty, counterparty_insurance, counterparty_vehicle,
                 custom_fields, due_date, overdue_notified_at,
                 created_by, created_at, updated_at, deleted_at
             FROM trouble_tickets
@@ -241,9 +241,9 @@ impl TroubleTicketsRepository for PgTroubleTicketsRepository {
                 status_id, assigned_to,
                 progress_notes, allowance,
                 damage_amount::text, compensation_amount::text,
-                confirmation_notice, disciplinary_content, disciplinary_action,
+                confirmation_notice, disciplinary_content, disciplinary_action, disciplinary_committee,
                 road_service_cost::text,
-                counterparty, counterparty_insurance,
+                counterparty, counterparty_insurance, counterparty_vehicle,
                 custom_fields, due_date, overdue_notified_at,
                 created_by, created_at, updated_at, deleted_at
             FROM trouble_tickets
@@ -284,12 +284,14 @@ impl TroubleTicketsRepository for PgTroubleTicketsRepository {
                 confirmation_notice = COALESCE($20, confirmation_notice),
                 disciplinary_content = COALESCE($21, disciplinary_content),
                 disciplinary_action = COALESCE($22, disciplinary_action),
-                road_service_cost = COALESCE($23, road_service_cost),
-                counterparty = COALESCE($24, counterparty),
-                counterparty_insurance = COALESCE($25, counterparty_insurance),
-                custom_fields = COALESCE($26, custom_fields),
-                due_date = COALESCE($27, due_date),
-                registration_number = CASE WHEN $28 THEN $29 ELSE registration_number END,
+                disciplinary_committee = COALESCE($23, disciplinary_committee),
+                road_service_cost = COALESCE($24, road_service_cost),
+                counterparty = COALESCE($25, counterparty),
+                counterparty_insurance = COALESCE($26, counterparty_insurance),
+                counterparty_vehicle = COALESCE($27, counterparty_vehicle),
+                custom_fields = COALESCE($28, custom_fields),
+                due_date = COALESCE($29, due_date),
+                registration_number = CASE WHEN $30 THEN $31 ELSE registration_number END,
                 updated_at = NOW()
             WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL
             RETURNING id, tenant_id, ticket_no, category, title,
@@ -301,9 +303,9 @@ impl TroubleTicketsRepository for PgTroubleTicketsRepository {
                 status_id, assigned_to,
                 progress_notes, allowance,
                 damage_amount::text, compensation_amount::text,
-                confirmation_notice, disciplinary_content, disciplinary_action,
+                confirmation_notice, disciplinary_content, disciplinary_action, disciplinary_committee,
                 road_service_cost::text,
-                counterparty, counterparty_insurance,
+                counterparty, counterparty_insurance, counterparty_vehicle,
                 custom_fields, due_date, overdue_notified_at,
                 created_by, created_at, updated_at, deleted_at"#,
         )
@@ -329,9 +331,11 @@ impl TroubleTicketsRepository for PgTroubleTicketsRepository {
         .bind(&input.confirmation_notice)
         .bind(&input.disciplinary_content)
         .bind(&input.disciplinary_action)
+        .bind(&input.disciplinary_committee)
         .bind(input.road_service_cost)
         .bind(&input.counterparty)
         .bind(&input.counterparty_insurance)
+        .bind(&input.counterparty_vehicle)
         .bind(&input.custom_fields)
         .bind(input.due_date)
         .bind(input.registration_number.is_some())
@@ -378,9 +382,9 @@ impl TroubleTicketsRepository for PgTroubleTicketsRepository {
                 status_id, assigned_to,
                 progress_notes, allowance,
                 damage_amount::text, compensation_amount::text,
-                confirmation_notice, disciplinary_content, disciplinary_action,
+                confirmation_notice, disciplinary_content, disciplinary_action, disciplinary_committee,
                 road_service_cost::text,
-                counterparty, counterparty_insurance,
+                counterparty, counterparty_insurance, counterparty_vehicle,
                 custom_fields, due_date, overdue_notified_at,
                 created_by, created_at, updated_at, deleted_at"#,
         )

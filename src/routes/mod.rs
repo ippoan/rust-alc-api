@@ -59,6 +59,7 @@ pub use alc_tenko::tenko_schedules;
 pub use alc_tenko::tenko_sessions;
 pub use alc_tenko::tenko_webhooks;
 pub use alc_trouble::categories as trouble_categories;
+pub use alc_trouble::field_layouts as trouble_field_layouts;
 pub use alc_trouble::files as trouble_files;
 pub use alc_trouble::lineworks_members as trouble_lineworks_members;
 pub use alc_trouble::notifications as trouble_notifications;
@@ -179,6 +180,7 @@ pub fn router(internal_oidc: InternalOidcTrust) -> Router<AppState> {
         .merge(trouble_tasks::tenant_router())
         .merge(trouble_task_types::tenant_router())
         .merge(trouble_task_statuses::tenant_router())
+        .merge(trouble_field_layouts::tenant_router())
         .merge(trouble_lineworks_members::tenant_router())
         .layer(axum_middleware::from_fn(require_tenant_header));
 

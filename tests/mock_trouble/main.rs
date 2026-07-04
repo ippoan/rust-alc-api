@@ -7,6 +7,8 @@ mod mock_helpers;
 
 #[path = "../mock_tests/mock_trouble_categories_test.rs"]
 mod mock_trouble_categories_test;
+#[path = "../mock_tests/mock_trouble_field_layouts_test.rs"]
+mod mock_trouble_field_layouts_test;
 #[path = "../mock_tests/mock_trouble_files_test.rs"]
 mod mock_trouble_files_test;
 #[path = "../mock_tests/mock_trouble_offices_test.rs"]
