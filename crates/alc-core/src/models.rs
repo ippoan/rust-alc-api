@@ -1881,6 +1881,8 @@ pub struct TroubleTask {
     pub next_action_by: Option<String>,
     pub next_action_due: Option<DateTime<Utc>>,
     pub occurred_at: Option<DateTime<Utc>>,
+    /// 印刷時、この行の直前で改ページするか (ユーザーが任意の位置に手動指定)。
+    pub print_page_break_before: bool,
     pub created_by: Option<Uuid>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -1967,6 +1969,8 @@ pub struct UpdateTroubleTask {
         deserialize_with = "crate::serde_helpers::empty_string_as_none_option_datetime"
     )]
     pub occurred_at: Option<Option<DateTime<Utc>>>,
+    #[serde(default)]
+    pub print_page_break_before: Option<bool>,
 }
 
 // ============================================================
