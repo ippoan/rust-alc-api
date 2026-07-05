@@ -130,8 +130,27 @@ Build backend (Bazel) job 139s の内訳: setup ~8s / **analysis 60s**
 - 検出された差異はフォーマットではなく**測定範囲**: combined 測定 (他 crate のテスト経由) で
   100% だった work_segments.rs の 5 行が、Bazel の per-target 測定で露呈 → crate 内テスト
   3 本追加で解消 (#518)。他 crate へ拡大する際も同種の「里帰りテスト追加」が必要になる見込み
-- 残: run 跨ぎの test result cache 確認 (crates/ 非接触 PR の bazel-test-poc 1 回目で
-  `(cached)` が出るか)、DB 依存 integration test の Bazel 化設計
+- **run 跨ぎの test result cache (2026-07-05 PR #519 で実測 → 原因確定 → warm 追加で解消見込み)**:
+  1 回目 invocation は `Executed 1 out of 1` + restore が `No disk cache found` で不発だった。
+  原因は Bazel のキャッシュ意味論ではなく **GH Actions cache の scope 分離**:
+  - setup-bazel の disk-cache tar は GH Actions cache 保存で、PR run の save は
+    `refs/pull/N/merge` scope に隔離され**別 PR から読めない** (save 自体は毎 run 成功していた)
+  - `bazel-test-poc` job は pull_request 限定 → 全 PR から読める **main scope に save される
+    機会がゼロ** = どの PR の 1 回目も恒常 miss する構造だった
+  - 対照: `Build backend` は main push の cache-warm-bazel が save するので PR から
+    `Cache hit for: ...disk-bazel-backend-tar-...` (488MB、1366 disk cache hit) で復元できている
+  - 対策: `cache-warm-bazel-test-poc` job (main push で `bazel test` を warm) を追加。
+    invocation flags を poc job と一致させるのが必須 (configuration 差 = action key 差)
+- 残: warm 導入後の PR 1 回目で `(cached)` が出るかの再確認、DB 依存 integration test の
+  Bazel 化設計
+
+### cache-warm build-only 化の実測 (PR #519、2026-07-05)
+
+`Cache Warm (test-shared)` が **60 分 → 1 分 54 秒** (run 28742594624)。postgres の無い
+warm job が DB 依存テストを `--ignore-run-fail` で実行し、PoolTimedOut (acquire timeout 30s)
+× 数十本を直列で浪費していたのを `-E 'none()' --no-tests=pass` (build-only) にした効果。
+同 run では tenko 分割 (Phase A) 後の warm 状態で Tests ~3 分・Builds ~3 分、
+PR CI 全体 4 分 44 秒 (run 28742465845) を確認。
 
 ## 施策 log
 

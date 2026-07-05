@@ -106,6 +106,29 @@ jobs:
       - name: Build (Bazel)
         run: bazel build -c fastbuild --strip=always ${{ matrix.targets }}
 
+  # bazel-test-poc (PR 限定 job) の run 跨ぎ test result cache 用 warm (Refs #515)。
+  # setup-bazel の disk-cache tar は GH Actions cache 保存で、PR run の save は
+  # refs/pull/N/merge scope に隔離され別 PR から読めない (2026-07-05 実測)。全 PR
+  # から読めるのは main scope の cache だけなので、main push でここが `bazel test`
+  # を 1 回走らせ、test action の結果込み disk cache を main scope に save する。
+  # 注意: invocation の flags は bazel-test-poc job と完全一致させること
+  # (configuration が違うと action key が変わり、PR 側で '(cached)' にならない)。
+  cache-warm-bazel-test-poc:
+    name: "Cache Warm (bazel-test-poc)"
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ippoan/setup-bazel@main
+        with:
+          disk-cache: "bazel-test-poc"
+          r2-endpoint: ${{ vars.BAZEL_R2_ENDPOINT }}
+          r2-bucket: ${{ vars.BAZEL_R2_BUCKET }}
+          r2-access-key-id: ${{ secrets.BAZEL_R2_ACCESS_KEY_ID }}
+          r2-secret-access-key: ${{ secrets.BAZEL_R2_SECRET_ACCESS_KEY }}
+      - name: Warm test result cache (Bazel)
+        run: bazel test //crates/alc-csv-parser:alc-csv-parser_test --test_summary=short
+
   cache-cleanup:
     name: Cache Cleanup
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
@@ -554,6 +577,9 @@ jobs:
   # テスト結果キャッシュ、`bazel coverage` (lcov) による coverage 100% gate の再現
   # 可否を検証する。独立 job (deploy chain の needs 外) = critical path に乗らない。
   # PoC が有効と判断されるまで他 crate へは広げない。
+  # run 跨ぎの test result cache は cache-warm-bazel-test-poc (main push warm) 経由
+  # でのみ hit する — PR run 自身の save は refs/pull/N/merge scope に隔離され、
+  # 別 PR から読めない (2026-07-05 実測、詳細は #515 のコメント)。
   bazel-test-poc:
     name: "Bazel test PoC (alc-csv-parser)"
     needs: [pr-limit]
@@ -575,7 +601,7 @@ jobs:
           echo "=== 2nd invocation (expect cached) ==="
           bazel test //crates/alc-csv-parser:alc-csv-parser_test --test_summary=short 2>&1 | tee /tmp/second_run.txt
           if grep -q "cached" /tmp/second_run.txt; then
-            echo "::notice::bazel test result cache HIT (同一サーバ内)。run 跨ぎの cache は次 push の 1 回目で '(cached)' が出るかで確認する"
+            echo "::notice::bazel test result cache HIT (同一サーバ内)。run 跨ぎは 1 回目の invocation で '(cached)' が出るか (= main warm からの restore) で確認する"
           else
             echo "::warning::2 回目の実行で cached にならなかった (要調査、#515 に記録)"
           fi
