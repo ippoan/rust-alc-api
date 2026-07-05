@@ -12,8 +12,9 @@ use crate::mock_helpers::MockTenkoSessionRepository;
 /// Default setup: session returned with identity_verified + pre_operation.
 async fn setup() -> (String, String, uuid::Uuid) {
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
     let tenant_id = uuid::Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let auth_header = format!("Bearer {jwt}");
     (base_url, auth_header, tenant_id)
@@ -21,10 +22,11 @@ async fn setup() -> (String, String, uuid::Uuid) {
 
 /// Setup with a custom MockTenkoSessionRepository.
 async fn setup_with_mock(mock: Arc<MockTenkoSessionRepository>) -> (String, String, uuid::Uuid) {
-    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
-    state.tenko_sessions = mock;
+    let state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
+    tenko_state.tenko_sessions = mock;
     let tenant_id = uuid::Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let auth_header = format!("Bearer {jwt}");
     (base_url, auth_header, tenant_id)
@@ -34,11 +36,12 @@ async fn setup_with_mock(mock: Arc<MockTenkoSessionRepository>) -> (String, Stri
 async fn setup_with_mock_and_user(
     mock: Arc<MockTenkoSessionRepository>,
 ) -> (String, String, uuid::Uuid, uuid::Uuid) {
-    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
-    state.tenko_sessions = mock;
+    let state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
+    tenko_state.tenko_sessions = mock;
     let tenant_id = uuid::Uuid::new_v4();
     let user_id = uuid::Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
     let jwt =
         crate::common::create_test_jwt_for_user(user_id, tenant_id, "test@example.com", "admin");
     let auth_header = format!("Bearer {jwt}");
@@ -49,10 +52,11 @@ async fn setup_with_mock_and_user(
 async fn setup_failing() -> (String, String) {
     let mock = Arc::new(MockTenkoSessionRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
-    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
-    state.tenko_sessions = mock;
+    let state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
+    tenko_state.tenko_sessions = mock;
     let tenant_id = uuid::Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let auth_header = format!("Bearer {jwt}");
     (base_url, auth_header)
@@ -1645,11 +1649,12 @@ async fn test_resume_session_not_found() {
 async fn test_resume_session_db_error() {
     let mock = Arc::new(MockTenkoSessionRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
-    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
-    state.tenko_sessions = mock;
+    let state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
+    tenko_state.tenko_sessions = mock;
     let tenant_id = uuid::Uuid::new_v4();
     let user_id = uuid::Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
     let jwt =
         crate::common::create_test_jwt_for_user(user_id, tenant_id, "test@example.com", "admin");
     let auth_header = format!("Bearer {jwt}");
@@ -1882,10 +1887,11 @@ async fn setup_with_update_failing(status: &str, tenko_type: &str) -> (String, S
     mock.fail_on_update.store(true, Ordering::SeqCst);
     *mock.session_status.lock().unwrap() = status.to_string();
     *mock.session_tenko_type.lock().unwrap() = tenko_type.to_string();
-    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
-    state.tenko_sessions = mock;
+    let state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
+    tenko_state.tenko_sessions = mock;
     let tenant_id = uuid::Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let auth_header = format!("Bearer {jwt}");
     (base_url, auth_header)
@@ -1896,11 +1902,12 @@ async fn setup_with_update_failing_user(status: &str, tenko_type: &str) -> (Stri
     mock.fail_on_update.store(true, Ordering::SeqCst);
     *mock.session_status.lock().unwrap() = status.to_string();
     *mock.session_tenko_type.lock().unwrap() = tenko_type.to_string();
-    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
-    state.tenko_sessions = mock;
+    let state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
+    tenko_state.tenko_sessions = mock;
     let tenant_id = uuid::Uuid::new_v4();
     let user_id = uuid::Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
     let jwt =
         crate::common::create_test_jwt_for_user(user_id, tenant_id, "test@example.com", "admin");
     let auth_header = format!("Bearer {jwt}");
@@ -1919,10 +1926,11 @@ async fn test_start_session_create_session_db_error() {
     let employee_id = Uuid::new_v4();
     *mock.session_employee_id.lock().unwrap() = employee_id;
     *mock.schedule_employee_id.lock().unwrap() = employee_id;
-    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
-    state.tenko_sessions = mock;
+    let state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
+    tenko_state.tenko_sessions = mock;
     let tenant_id = uuid::Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let auth_header = format!("Bearer {jwt}");
 
@@ -1945,10 +1953,11 @@ async fn test_start_session_no_schedule_create_db_error() {
     // Without schedule_id: create_session is the first write call
     let mock = Arc::new(MockTenkoSessionRepository::default());
     mock.fail_on_update.store(true, Ordering::SeqCst);
-    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
-    state.tenko_sessions = mock;
+    let state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
+    tenko_state.tenko_sessions = mock;
     let tenant_id = uuid::Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let auth_header = format!("Bearer {jwt}");
 
@@ -2805,12 +2814,13 @@ async fn test_submit_alcohol_normal_pre_operation() {
 /// Helper: setup with webhook=Some(MockWebhookService) + custom mock repo.
 async fn setup_with_webhook(mock: Arc<MockTenkoSessionRepository>) -> (String, String, uuid::Uuid) {
     let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
-    state.tenko_sessions = mock;
+    let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
+    tenko_state.tenko_sessions = mock;
     state.webhook = Some(Arc::new(
         crate::mock_helpers::webhook::MockWebhookService::default(),
     ));
     let tenant_id = uuid::Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let auth_header = format!("Bearer {jwt}");
     (base_url, auth_header, tenant_id)

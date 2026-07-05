@@ -29,7 +29,7 @@ async fn test_require_jwt_invalid_token_returns_401() {
     let mock = Arc::new(MockAuthRepository::default());
     let mut state = setup_mock_app_state();
     state.auth = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     // 不正な Bearer token を保護 endpoint (auth::protected_router) に送る
@@ -58,7 +58,7 @@ async fn test_me_success() {
     let mock = Arc::new(MockAuthRepository::default());
     let mut state = setup_mock_app_state();
     state.auth = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
@@ -88,7 +88,7 @@ async fn test_me_unauthorized() {
     let mock = Arc::new(MockAuthRepository::default());
     let mut state = setup_mock_app_state();
     state.auth = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -113,7 +113,7 @@ async fn test_logout_success() {
     let mock = Arc::new(MockAuthRepository::default());
     let mut state = setup_mock_app_state();
     state.auth = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
@@ -139,7 +139,7 @@ async fn test_logout_unauthorized() {
     let mock = Arc::new(MockAuthRepository::default());
     let mut state = setup_mock_app_state();
     state.auth = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -165,7 +165,7 @@ async fn test_logout_db_error() {
     mock.fail_next.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.auth = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
@@ -201,7 +201,7 @@ async fn test_my_orgs_success() {
 
     let mut state = setup_mock_app_state();
     state.auth = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
@@ -235,7 +235,7 @@ async fn test_my_orgs_empty() {
     let mock = Arc::new(MockAuthRepository::default());
     let mut state = setup_mock_app_state();
     state.auth = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
@@ -266,7 +266,7 @@ async fn test_my_orgs_db_error() {
     mock.fail_next.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.auth = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
@@ -292,7 +292,7 @@ async fn test_my_orgs_unauthorized() {
     let mock = Arc::new(MockAuthRepository::default());
     let mut state = setup_mock_app_state();
     state.auth = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client

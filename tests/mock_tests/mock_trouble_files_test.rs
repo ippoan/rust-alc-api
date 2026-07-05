@@ -13,7 +13,7 @@ async fn setup() -> (String, String) {
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let auth = format!("Bearer {jwt}");
     (base, auth)
 }
@@ -26,7 +26,7 @@ async fn setup_failing_files() -> (String, String) {
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     state.trouble_files = mock;
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let auth = format!("Bearer {jwt}");
     (base, auth)
 }
@@ -40,7 +40,7 @@ async fn setup_with_storage() -> (String, String) {
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     state.trouble_tickets = tickets_mock;
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let auth = format!("Bearer {jwt}");
     (base, auth)
 }
@@ -107,7 +107,7 @@ async fn delete_file_not_found() {
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     state.trouble_files = mock;
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let auth = format!("Bearer {jwt}");
 
     let file_id = Uuid::new_v4();
@@ -227,7 +227,7 @@ async fn upload_file_no_storage() {
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     state.trouble_tickets = tickets_mock;
     state.trouble_storage = None;
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let auth = format!("Bearer {jwt}");
 
     let ticket_id = Uuid::new_v4();
@@ -255,7 +255,7 @@ async fn download_file_no_storage() {
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     state.trouble_storage = None;
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let auth = format!("Bearer {jwt}");
 
     let file_id = Uuid::new_v4();
@@ -290,7 +290,7 @@ async fn download_file_success() {
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     state.trouble_files = files_mock;
     state.trouble_storage = Some(storage);
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let auth = format!("Bearer {jwt}");
 
     let file_id = Uuid::new_v4();
@@ -332,7 +332,7 @@ async fn download_file_no_storage_but_file_exists() {
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     state.trouble_files = files_mock;
     state.trouble_storage = None;
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let auth = format!("Bearer {jwt}");
 
     let file_id = Uuid::new_v4();
@@ -365,7 +365,7 @@ async fn upload_file_db_error_after_upload() {
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     state.trouble_tickets = tickets_mock;
     state.trouble_files = files_mock;
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let auth = format!("Bearer {jwt}");
 
     let ticket_id = Uuid::new_v4();
@@ -446,7 +446,7 @@ async fn restore_file_not_found() {
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     state.trouble_files = mock;
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let auth = format!("Bearer {jwt}");
 
     let file_id = Uuid::new_v4();
@@ -492,7 +492,7 @@ async fn download_file_storage_error() {
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     state.trouble_files = files_mock;
     state.trouble_storage = Some(storage);
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let auth = format!("Bearer {jwt}");
 
     let file_id = Uuid::new_v4();
@@ -526,7 +526,7 @@ async fn upload_file_storage_error() {
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     state.trouble_tickets = tickets_mock;
     state.trouble_storage = Some(storage);
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let auth = format!("Bearer {jwt}");
 
     let ticket_id = Uuid::new_v4();

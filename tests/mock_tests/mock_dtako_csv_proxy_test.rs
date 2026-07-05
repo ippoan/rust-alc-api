@@ -57,7 +57,7 @@ async fn test_csv_proxy_kudguri() {
     )
     .await;
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let res = client
         .get(format!("{base_url}/api/operations/1001/csv/kudguri"))
@@ -91,7 +91,7 @@ async fn test_csv_proxy_kudgivt_alias() {
     )
     .await;
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let res = client
         .get(format!("{base_url}/api/operations/2001/csv/kudgivt"))
@@ -109,7 +109,7 @@ async fn test_csv_proxy_events_alias() {
     let storage = state.dtako_storage.as_ref().unwrap();
     upload_csv_to_mock_storage(&**storage, &tenant_id, "2002", "KUDGIVT.csv", "x\n1\n").await;
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let res = reqwest::Client::new()
         .get(format!("{base_url}/api/operations/2002/csv/events"))
         .header("Authorization", test_auth_header())
@@ -128,7 +128,7 @@ async fn test_csv_proxy_ferry_aliases() {
     upload_csv_to_mock_storage(&**storage, &tenant_id, "3002", "KUDGFRY.csv", "f1\nfv1\n").await;
     upload_csv_to_mock_storage(&**storage, &tenant_id, "3003", "KUDGFRY.csv", "f1\nfv1\n").await;
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let auth = test_auth_header();
 
@@ -151,7 +151,7 @@ async fn test_csv_proxy_tolls_aliases() {
     upload_csv_to_mock_storage(&**storage, &tenant_id, "4001", "KUDGSIR.csv", "t1\ntv1\n").await;
     upload_csv_to_mock_storage(&**storage, &tenant_id, "4002", "KUDGSIR.csv", "t1\ntv1\n").await;
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let auth = test_auth_header();
 
@@ -188,7 +188,7 @@ async fn test_csv_proxy_speed_aliases() {
     )
     .await;
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let auth = test_auth_header();
 
@@ -228,7 +228,7 @@ async fn test_csv_proxy_with_r2_prefix() {
 
     state.dtako_csv_proxy = mock_repo;
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let res = reqwest::Client::new()
         .get(format!("{base_url}/api/operations/anything/csv/kudguri"))
         .header("Authorization", test_auth_header())
@@ -252,7 +252,7 @@ async fn test_csv_proxy_empty_csv() {
     let storage = state.dtako_storage.as_ref().unwrap();
     upload_csv_to_mock_storage(&**storage, &tenant_id, "6001", "KUDGURI.csv", "h1,h2\n").await;
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let res = reqwest::Client::new()
         .get(format!("{base_url}/api/operations/6001/csv/kudguri"))
         .header("Authorization", test_auth_header())
@@ -273,7 +273,7 @@ async fn test_csv_proxy_multirow_csv() {
     let csv = "name,age,city\nAlice,30,Tokyo\nBob,25,Osaka\nCharlie,35,Nagoya\n";
     upload_csv_to_mock_storage(&**storage, &tenant_id, "6002", "KUDGURI.csv", csv).await;
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let res = reqwest::Client::new()
         .get(format!("{base_url}/api/operations/6002/csv/kudguri"))
         .header("Authorization", test_auth_header())
@@ -295,7 +295,7 @@ async fn test_csv_proxy_empty_body() {
     let storage = state.dtako_storage.as_ref().unwrap();
     upload_csv_to_mock_storage(&**storage, &tenant_id, "6003", "KUDGURI.csv", "").await;
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let res = reqwest::Client::new()
         .get(format!("{base_url}/api/operations/6003/csv/kudguri"))
         .header("Authorization", test_auth_header())
@@ -316,7 +316,7 @@ async fn test_csv_proxy_empty_body() {
 #[tokio::test]
 async fn test_csv_proxy_invalid_type_returns_400() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let res = reqwest::Client::new()
         .get(format!("{base_url}/api/operations/1001/csv/invalid_type"))
@@ -331,7 +331,7 @@ async fn test_csv_proxy_invalid_type_returns_400() {
 async fn test_csv_proxy_file_not_found_returns_404() {
     let state = setup_mock_app_state();
     // MockStorage にファイルを配置しない → download で NotFound
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let res = reqwest::Client::new()
         .get(format!("{base_url}/api/operations/9999/csv/kudguri"))
@@ -345,7 +345,7 @@ async fn test_csv_proxy_file_not_found_returns_404() {
 #[tokio::test]
 async fn test_csv_proxy_no_auth_returns_401() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let res = reqwest::Client::new()
         .get(format!("{base_url}/api/operations/1001/csv/kudguri"))
@@ -363,7 +363,7 @@ async fn test_csv_proxy_db_error_returns_500() {
     let mut state = setup_mock_app_state();
     state.dtako_csv_proxy = mock_repo;
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let res = reqwest::Client::new()
         .get(format!("{base_url}/api/operations/1001/csv/kudguri"))
@@ -379,7 +379,7 @@ async fn test_csv_proxy_no_dtako_storage_returns_500() {
     let mut state = setup_mock_app_state();
     state.dtako_storage = None;
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let res = reqwest::Client::new()
         .get(format!("{base_url}/api/operations/1001/csv/kudguri"))
@@ -402,7 +402,7 @@ async fn test_csv_proxy_case_insensitive() {
     upload_csv_to_mock_storage(&**storage, &tenant_id, "7001", "KUDGURI.csv", "x\n1\n").await;
     upload_csv_to_mock_storage(&**storage, &tenant_id, "7002", "KUDGURI.csv", "x\n1\n").await;
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let auth = test_auth_header();
 

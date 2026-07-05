@@ -7,7 +7,7 @@ use crate::mock_helpers::app_state::setup_mock_app_state;
 #[tokio::test]
 async fn test_health_check_returns_ok() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client

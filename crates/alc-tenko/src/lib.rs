@@ -1,7 +1,11 @@
 pub mod daily_health;
+pub mod driver_info;
 pub mod equipment_failures;
 pub mod health_baselines;
+pub mod models;
+pub mod overdue;
 pub mod repo;
+pub mod repository;
 pub mod tenko_call;
 pub mod tenko_records;
 pub mod tenko_schedules;
@@ -10,15 +14,16 @@ pub mod tenko_webhooks;
 
 use std::sync::Arc;
 
-use alc_core::repository::{
-    DailyHealthRepository, EquipmentFailuresRepository, HealthBaselinesRepository,
-    TenkoCallRepository, TenkoRecordsRepository, TenkoSchedulesRepository, TenkoSessionRepository,
-    TenkoWebhooksRepository,
+use crate::repository::{
+    DailyHealthRepository, DriverInfoRepository, EquipmentFailuresRepository,
+    HealthBaselinesRepository, TenkoCallRepository, TenkoRecordsRepository,
+    TenkoSchedulesRepository, TenkoSessionRepository, TenkoWebhooksRepository,
 };
 use alc_core::webhook::WebhookService;
 
-/// tenko-api 用の最小 State。
-/// モノリスでは `FromRef<AppState>` 経由で自動変換される。
+/// tenko ドメインの State。tenko-api はこれをそのまま使い、
+/// モノリスは tenko route 群を `.with_state(TenkoState { .. })` でマウントする
+/// (旧 `FromRef<AppState>` 変換は AppState から tenko field を撤去した際に廃止、Refs #513)。
 #[derive(Clone)]
 pub struct TenkoState {
     pub tenko_call: Arc<dyn TenkoCallRepository>,
@@ -29,21 +34,6 @@ pub struct TenkoState {
     pub daily_health: Arc<dyn DailyHealthRepository>,
     pub health_baselines: Arc<dyn HealthBaselinesRepository>,
     pub equipment_failures: Arc<dyn EquipmentFailuresRepository>,
+    pub driver_info: Arc<dyn DriverInfoRepository>,
     pub webhook: Option<Arc<dyn WebhookService>>,
-}
-
-impl axum::extract::FromRef<alc_core::AppState> for TenkoState {
-    fn from_ref(state: &alc_core::AppState) -> Self {
-        Self {
-            tenko_call: state.tenko_call.clone(),
-            tenko_records: state.tenko_records.clone(),
-            tenko_schedules: state.tenko_schedules.clone(),
-            tenko_sessions: state.tenko_sessions.clone(),
-            tenko_webhooks: state.tenko_webhooks.clone(),
-            daily_health: state.daily_health.clone(),
-            health_baselines: state.health_baselines.clone(),
-            equipment_failures: state.equipment_failures.clone(),
-            webhook: state.webhook.clone(),
-        }
-    }
 }

@@ -3,7 +3,6 @@ pub mod api_tokens;
 pub mod bot_admin;
 pub mod carrying_items;
 pub mod communication_items;
-pub mod driver_info;
 pub mod employees;
 pub mod guidance_records;
 pub mod health;

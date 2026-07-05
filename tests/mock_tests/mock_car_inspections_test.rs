@@ -197,7 +197,7 @@ async fn spawn_with_mock(mock: Arc<dyn CarInspectionRepository>) -> (String, Str
 
     let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
     state.car_inspections = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     (base_url, jwt)
 }

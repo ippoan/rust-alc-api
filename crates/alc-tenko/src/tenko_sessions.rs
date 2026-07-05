@@ -11,13 +11,15 @@ use uuid::Uuid;
 
 use crate::TenkoState;
 use alc_core::auth_middleware::{AuthUser, TenantId};
-use alc_core::models::{
+use alc_core::models::SubmitCarryingItemChecks;
+
+use crate::models::{
     CancelTenkoSession, InterruptSession, MedicalDiffs, ResumeSession, SafetyJudgment,
-    SelfDeclaration, StartTenkoSession, SubmitAlcoholResult, SubmitCarryingItemChecks,
-    SubmitDailyInspection, SubmitMedicalData, SubmitOperationReport, SubmitSelfDeclaration,
-    TenkoDashboard, TenkoRecord, TenkoSession, TenkoSessionFilter, TenkoSessionsResponse,
+    SelfDeclaration, StartTenkoSession, SubmitAlcoholResult, SubmitDailyInspection,
+    SubmitMedicalData, SubmitOperationReport, SubmitSelfDeclaration, TenkoDashboard, TenkoRecord,
+    TenkoSession, TenkoSessionFilter, TenkoSessionsResponse,
 };
-use alc_core::repository::TenkoSessionRepository;
+use crate::repository::TenkoSessionRepository;
 
 /// JWT 必須ルート (管理者)
 /// テナント対応ルート (JWT or X-Tenant-ID)

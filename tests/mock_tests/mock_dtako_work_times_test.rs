@@ -24,7 +24,7 @@ async fn mock_list_work_times_success_empty() {
     let (state, _mock_wt) = setup().await;
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -50,7 +50,7 @@ async fn mock_list_work_times_with_query_params() {
     let (state, _mock_wt) = setup().await;
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let driver_id = uuid::Uuid::new_v4();
@@ -79,7 +79,7 @@ async fn mock_list_work_times_per_page_max() {
     let (state, _mock_wt) = setup().await;
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -103,7 +103,7 @@ async fn mock_list_work_times_page_min() {
     let (state, _mock_wt) = setup().await;
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -125,7 +125,7 @@ async fn mock_list_work_times_page_min() {
 #[tokio::test]
 async fn mock_list_work_times_no_auth() {
     let (state, _mock_wt) = setup().await;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -144,7 +144,7 @@ async fn mock_list_work_times_no_auth() {
 async fn mock_list_work_times_x_tenant_id() {
     let (state, _mock_wt) = setup().await;
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -167,7 +167,7 @@ async fn mock_list_work_times_count_db_error() {
     let (state, mock_wt) = setup().await;
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     // fail_next will trigger on the first repo call (count)
@@ -200,7 +200,7 @@ async fn mock_list_work_times_list_db_error() {
     let mut state_clone = state;
     state_clone.dtako_work_times = fail_on_list_mock.clone();
 
-    let base_url = crate::common::spawn_test_server(state_clone).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state_clone).await;
     let client = reqwest::Client::new();
 
     fail_on_list_mock.fail_list.store(true, Ordering::SeqCst);

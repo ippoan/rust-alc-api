@@ -47,7 +47,7 @@ fn make_driver(tenant_id: Uuid, name: &str, driver_cd: Option<&str>) -> PdfDrive
 #[tokio::test]
 async fn test_pdf_no_auth() {
     let (state, _report_repo, _pdf_repo) = setup_with_shared_repos().await;
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -66,7 +66,7 @@ async fn test_pdf_no_auth() {
 async fn test_pdf_missing_params() {
     let (state, _report_repo, _pdf_repo) = setup_with_shared_repos().await;
     let tenant_id = Uuid::new_v4();
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let auth = auth_header(tenant_id);
 
@@ -107,7 +107,7 @@ async fn test_pdf_no_drivers_returns_404() {
     let (state, _report_repo, _pdf_repo) = setup_with_shared_repos().await;
     // pdf_repo has empty drivers by default
     let tenant_id = Uuid::new_v4();
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let auth = auth_header(tenant_id);
 
@@ -136,7 +136,7 @@ async fn test_pdf_with_driver_id_not_found() {
         .lock()
         .unwrap()
         .push(make_driver(tenant_id, "Some Driver", Some("DR01")));
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let auth = auth_header(tenant_id);
 
@@ -163,7 +163,7 @@ async fn test_pdf_single_driver_empty_report() {
     let driver = make_driver(tenant_id, "Test Driver", Some("DRV001"));
     let driver_id = driver.id;
     pdf_repo.drivers.lock().unwrap().push(driver);
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let auth = auth_header(tenant_id);
 
@@ -212,7 +212,7 @@ async fn test_pdf_all_drivers_empty_report() {
         .lock()
         .unwrap()
         .push(make_driver(tenant_id, "Driver B", Some("B002")));
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let auth = auth_header(tenant_id);
 
@@ -243,7 +243,7 @@ async fn test_pdf_empty_name_driver_skipped() {
     let driver = make_driver(tenant_id, "", Some("EMPTY"));
     let driver_id = driver.id;
     pdf_repo.drivers.lock().unwrap().push(driver);
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let auth = auth_header(tenant_id);
 
@@ -278,7 +278,7 @@ async fn test_pdf_db_error_on_build_report() {
     let driver = make_driver(tenant_id, "Error Driver", Some("ERR01"));
     let driver_id = driver.id;
     pdf_repo.drivers.lock().unwrap().push(driver);
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let auth = auth_header(tenant_id);
 
@@ -303,7 +303,7 @@ async fn test_pdf_db_error_on_build_report() {
 #[tokio::test]
 async fn test_pdf_stream_no_auth() {
     let (state, _report_repo, _pdf_repo) = setup_with_shared_repos().await;
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -324,7 +324,7 @@ async fn test_pdf_stream_no_auth() {
 async fn test_pdf_stream_missing_params() {
     let (state, _report_repo, _pdf_repo) = setup_with_shared_repos().await;
     let tenant_id = Uuid::new_v4();
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let auth = auth_header(tenant_id);
 
@@ -346,7 +346,7 @@ async fn test_pdf_stream_no_drivers() {
     let (state, _report_repo, _pdf_repo) = setup_with_shared_repos().await;
     // pdf_repo has empty drivers by default
     let tenant_id = Uuid::new_v4();
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let auth = auth_header(tenant_id);
 
@@ -390,7 +390,7 @@ async fn test_pdf_stream_with_drivers() {
         .lock()
         .unwrap()
         .push(make_driver(tenant_id, "Stream Driver", Some("STR01")));
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let auth = auth_header(tenant_id);
 
@@ -434,7 +434,7 @@ async fn test_pdf_stream_build_report_error_skips_driver() {
         .lock()
         .unwrap()
         .push(make_driver(tenant_id, "Fail Driver", Some("FAIL01")));
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let auth = auth_header(tenant_id);
 
@@ -483,7 +483,7 @@ async fn test_pdf_stream_multiple_drivers() {
         .lock()
         .unwrap()
         .push(make_driver(tenant_id, "", Some("D003"))); // empty name, should be filtered
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let auth = auth_header(tenant_id);
 
@@ -514,7 +514,7 @@ async fn test_pdf_stream_multiple_drivers() {
 async fn test_pdf_list_drivers_db_error() {
     let (state, _report_repo, pdf_repo) = setup_with_shared_repos().await;
     let tenant_id = Uuid::new_v4();
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let auth = auth_header(tenant_id);
 
@@ -537,7 +537,7 @@ async fn test_pdf_list_drivers_db_error() {
 async fn test_pdf_stream_list_drivers_db_error() {
     let (state, _report_repo, pdf_repo) = setup_with_shared_repos().await;
     let tenant_id = Uuid::new_v4();
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let auth = auth_header(tenant_id);
 

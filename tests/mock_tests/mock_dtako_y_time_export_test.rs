@@ -54,7 +54,7 @@ async fn returns_404_when_driver_cd_unknown() {
     let state = setup_mock_app_state();
     // driver_cd lookup は default (Mutex<None>) のまま → not found
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let res = client
         .get(format!(
@@ -71,7 +71,7 @@ async fn returns_404_when_driver_cd_unknown() {
 async fn returns_400_when_from_after_to() {
     let state = setup_mock_app_state();
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let res = client
         .get(format!(
@@ -91,7 +91,7 @@ async fn returns_500_when_lookup_driver_db_error() {
     mock.fail_next.store(true, Ordering::SeqCst);
     state.dtako_y_time_export = mock;
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let res = client
         .get(format!(
@@ -121,7 +121,7 @@ async fn returns_500_when_list_operations_db_error() {
     //     mock 拡張が必要。Phase 1 の MVP では `lookup_driver_db_error` で十分カバーされている
     //     ので、本ケースは skip 扱い。
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let res = client
         .get(format!(
@@ -152,7 +152,7 @@ async fn happy_path_returns_rows_with_warnings_for_missing_csv() {
         }]);
     state.dtako_y_time_export = Arc::new(mock);
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let res = client
         .get(format!(
@@ -203,7 +203,7 @@ async fn happy_path_with_kudgivt_yields_one_row() {
         }]);
     state.dtako_y_time_export = Arc::new(mock);
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let res = client
         .get(format!(

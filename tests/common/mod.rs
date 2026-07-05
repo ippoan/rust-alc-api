@@ -224,9 +224,7 @@ fn build_app_state(
     let carins_files = Arc::new(PgCarinsFilesRepository::new(pool.clone()));
     let carrying_items = Arc::new(PgCarryingItemsRepository::new(pool.clone()));
     let communication_items = Arc::new(PgCommunicationItemsRepository::new(pool.clone()));
-    let daily_health = Arc::new(PgDailyHealthRepository::new(pool.clone()));
     let devices = Arc::new(PgDeviceRepository::new(pool.clone()));
-    let driver_info = Arc::new(PgDriverInfoRepository::new(pool.clone()));
     let dtako_csv_proxy = Arc::new(PgDtakoCsvProxyRepository::new(pool.clone()));
     let dtako_daily_hours = Arc::new(PgDtakoDailyHoursRepository::new(pool.clone()));
     let dtako_logs = Arc::new(PgDtakoLogsRepository::new(pool.clone()));
@@ -245,20 +243,13 @@ fn build_app_state(
     let dtako_y_time_export = Arc::new(PgDtakoYTimeExportRepository::new(pool.clone()));
     let vehicle_settings_dumps = Arc::new(PgVehicleSettingsDumpsRepository::new(pool.clone()));
     let employees = Arc::new(PgEmployeeRepository::new(pool.clone()));
-    let equipment_failures = Arc::new(PgEquipmentFailuresRepository::new(pool.clone()));
     let guidance_records = Arc::new(PgGuidanceRecordsRepository::new(pool.clone()));
-    let health_baselines = Arc::new(PgHealthBaselinesRepository::new(pool.clone()));
     let items = Arc::new(PgItemsRepository::new(pool.clone()));
     let item_files = Arc::new(PgItemFilesRepository::new(pool.clone()));
     let measurements = Arc::new(PgMeasurementsRepository::new(pool.clone()));
     let nfc_tags = Arc::new(PgNfcTagRepository::new(pool.clone()));
     let sso_admin = Arc::new(PgSsoAdminRepository::new(pool.clone()));
     let tenant_users = Arc::new(PgTenantUsersRepository::new(pool.clone()));
-    let tenko_call = Arc::new(PgTenkoCallRepository::new(pool.clone()));
-    let tenko_records = Arc::new(PgTenkoRecordsRepository::new(pool.clone()));
-    let tenko_schedules = Arc::new(PgTenkoSchedulesRepository::new(pool.clone()));
-    let tenko_sessions = Arc::new(PgTenkoSessionRepository::new(pool.clone()));
-    let tenko_webhooks = Arc::new(PgTenkoWebhooksRepository::new(pool.clone()));
     let timecard = Arc::new(PgTimecardRepository::new(pool.clone()));
     let notify_recipients = Arc::new(PgNotifyRecipientRepository::new(pool.clone()));
     let notify_groups = Arc::new(PgNotifyGroupRepository::new(pool.clone()));
@@ -290,9 +281,7 @@ fn build_app_state(
         carins_files,
         carrying_items,
         communication_items,
-        daily_health,
         devices,
-        driver_info,
         dtako_csv_proxy,
         dtako_daily_hours,
         dtako_logs,
@@ -309,20 +298,13 @@ fn build_app_state(
         dtako_y_time_export,
         vehicle_settings_dumps,
         employees,
-        equipment_failures,
         guidance_records,
-        health_baselines,
         items,
         item_files,
         measurements,
         nfc_tags,
         sso_admin,
         tenant_users,
-        tenko_call,
-        tenko_records,
-        tenko_schedules,
-        tenko_sessions,
-        tenko_webhooks,
         timecard,
         storage,
         carins_storage: None,
@@ -606,7 +588,35 @@ fn internal_oidc_trust_for_tests() -> rust_alc_api::middleware::auth::InternalOi
 }
 
 /// テスト用 axum サーバーを起動し、base URL を返す
+/// pool ベースの Pg TenkoState を合成する (integration test 用、Refs #513)
+pub fn pg_tenko_state(state: &AppState) -> alc_tenko::TenkoState {
+    let pool = state
+        .pool
+        .clone()
+        .expect("spawn_test_server: state.pool is None — mock state は spawn_test_server_with_tenko を使うこと");
+    alc_tenko::TenkoState {
+        tenko_call: Arc::new(PgTenkoCallRepository::new(pool.clone())),
+        tenko_records: Arc::new(PgTenkoRecordsRepository::new(pool.clone())),
+        tenko_schedules: Arc::new(PgTenkoSchedulesRepository::new(pool.clone())),
+        tenko_sessions: Arc::new(PgTenkoSessionRepository::new(pool.clone())),
+        tenko_webhooks: Arc::new(PgTenkoWebhooksRepository::new(pool.clone())),
+        daily_health: Arc::new(PgDailyHealthRepository::new(pool.clone())),
+        health_baselines: Arc::new(PgHealthBaselinesRepository::new(pool.clone())),
+        equipment_failures: Arc::new(PgEquipmentFailuresRepository::new(pool.clone())),
+        driver_info: Arc::new(PgDriverInfoRepository::new(pool)),
+        webhook: state.webhook.clone(),
+    }
+}
+
 pub async fn spawn_test_server(state: AppState) -> String {
+    let tenko_state = pg_tenko_state(&state);
+    spawn_test_server_with_tenko(state, tenko_state).await
+}
+
+pub async fn spawn_test_server_with_tenko(
+    state: AppState,
+    tenko_state: alc_tenko::TenkoState,
+) -> String {
     use axum::{Extension, Router};
     use rust_alc_api::auth::google::GoogleTokenVerifier;
     use tower_http::cors::{Any, CorsLayer};
@@ -633,7 +643,7 @@ pub async fn spawn_test_server(state: AppState) -> String {
     let app = Router::new()
         .nest(
             "/api",
-            rust_alc_api::routes::router(internal_oidc_trust_for_tests()),
+            rust_alc_api::routes::router(internal_oidc_trust_for_tests(), tenko_state),
         )
         // テスト用 proxy emulation (Refs #434)。#434 で rust-alc-api は JWT 検証を
         // 撤去し、注入された identity ヘッダー (X-Tenant-ID / X-User-*) を信頼する

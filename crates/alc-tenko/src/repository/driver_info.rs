@@ -2,10 +2,9 @@ use async_trait::async_trait;
 use serde::Serialize;
 use uuid::Uuid;
 
-use crate::models::{
-    CarryingItem, DtakoDailyWorkHours, Employee, EmployeeHealthBaseline, EquipmentFailure,
-    TenkoRecord,
-};
+use alc_core::models::{CarryingItem, DtakoDailyWorkHours, Employee};
+
+use crate::models::{EmployeeHealthBaseline, EquipmentFailure, TenkoRecord};
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
 pub struct InstructionSummary {

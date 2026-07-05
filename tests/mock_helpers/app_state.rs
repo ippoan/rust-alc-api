@@ -73,9 +73,7 @@ pub fn setup_mock_app_state() -> AppState {
         carins_files: Arc::new(MockCarinsFilesRepository::default()),
         carrying_items: Arc::new(MockCarryingItemsRepository::default()),
         communication_items: Arc::new(MockCommunicationItemsRepository::default()),
-        daily_health: Arc::new(MockDailyHealthRepository::default()),
         devices: Arc::new(MockDeviceRepository::default()),
-        driver_info: Arc::new(MockDriverInfoRepository::default()),
         dtako_csv_proxy: Arc::new(MockDtakoCsvProxyRepository::default()),
         dtako_daily_hours: Arc::new(MockDtakoDailyHoursRepository::default()),
         dtako_logs: Arc::new(MockDtakoLogsRepository::default()),
@@ -92,20 +90,13 @@ pub fn setup_mock_app_state() -> AppState {
         dtako_y_time_export: Arc::new(MockDtakoYTimeExportRepository::default()),
         vehicle_settings_dumps: Arc::new(MockVehicleSettingsDumpsRepository::default()),
         employees: Arc::new(MockEmployeeRepository::default()),
-        equipment_failures: Arc::new(MockEquipmentFailuresRepository::default()),
         guidance_records: Arc::new(MockGuidanceRecordsRepository::default()),
-        health_baselines: Arc::new(MockHealthBaselinesRepository::default()),
         items: Arc::new(MockItemsRepository::default()),
         item_files: Arc::new(MockItemFilesRepository::default()),
         measurements: Arc::new(MockMeasurementsRepository::default()),
         nfc_tags: Arc::new(MockNfcTagRepository::default()),
         sso_admin: Arc::new(MockSsoAdminRepository::default()),
         tenant_users: Arc::new(MockTenantUsersRepository::default()),
-        tenko_call: Arc::new(MockTenkoCallRepository::default()),
-        tenko_records: Arc::new(MockTenkoRecordsRepository::default()),
-        tenko_schedules: Arc::new(MockTenkoSchedulesRepository::default()),
-        tenko_sessions: Arc::new(MockTenkoSessionRepository::default()),
-        tenko_webhooks: Arc::new(MockTenkoWebhooksRepository::default()),
         timecard: Arc::new(MockTimecardRepository::default()),
         storage,
         carins_storage: None,
@@ -136,4 +127,26 @@ pub fn setup_mock_app_state() -> AppState {
         device_pair_client: None,
         webhook: None,
     }
+}
+
+/// tenko ドメインの mock TenkoState (Refs #513)。tenko 系 mock test は
+/// 差し替えたい field を上書きしてから `spawn_test_server_with_tenko` に渡す。
+pub fn setup_mock_tenko_state() -> alc_tenko::TenkoState {
+    alc_tenko::TenkoState {
+        tenko_call: Arc::new(MockTenkoCallRepository::default()),
+        tenko_records: Arc::new(MockTenkoRecordsRepository::default()),
+        tenko_schedules: Arc::new(MockTenkoSchedulesRepository::default()),
+        tenko_sessions: Arc::new(MockTenkoSessionRepository::default()),
+        tenko_webhooks: Arc::new(MockTenkoWebhooksRepository::default()),
+        daily_health: Arc::new(MockDailyHealthRepository::default()),
+        health_baselines: Arc::new(MockHealthBaselinesRepository::default()),
+        equipment_failures: Arc::new(MockEquipmentFailuresRepository::default()),
+        driver_info: Arc::new(MockDriverInfoRepository::default()),
+        webhook: None,
+    }
+}
+
+/// mock 用 spawn wrapper: デフォルトの mock TenkoState を合成して起動する。
+pub async fn spawn_mock_server(state: AppState) -> String {
+    crate::common::spawn_test_server_with_tenko(state, setup_mock_tenko_state()).await
 }

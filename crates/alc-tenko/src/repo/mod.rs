@@ -1,6 +1,8 @@
 pub mod daily_health;
+pub mod driver_info;
 pub mod equipment_failures;
 pub mod health_baselines;
+pub mod overdue;
 pub mod tenko_call;
 pub mod tenko_records;
 pub mod tenko_schedules;
@@ -8,8 +10,10 @@ pub mod tenko_sessions;
 pub mod tenko_webhooks;
 
 pub use daily_health::PgDailyHealthRepository;
+pub use driver_info::PgDriverInfoRepository;
 pub use equipment_failures::PgEquipmentFailuresRepository;
 pub use health_baselines::PgHealthBaselinesRepository;
+pub use overdue::PgTenkoOverdueRepository;
 pub use tenko_call::PgTenkoCallRepository;
 pub use tenko_records::PgTenkoRecordsRepository;
 pub use tenko_schedules::PgTenkoSchedulesRepository;

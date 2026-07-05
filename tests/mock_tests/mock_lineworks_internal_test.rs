@@ -39,7 +39,7 @@ async fn test_get_bot_secret_success() {
         std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
         let mut state = setup_mock_app_state();
         let _mock = install_mock(&mut state, Some(sample_bot_cfg()));
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let jwt = crate::common::create_test_internal_jwt();
         let res = reqwest::Client::new()
@@ -64,7 +64,7 @@ async fn test_get_bot_secret_not_found() {
         std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
         let mut state = setup_mock_app_state();
         let _mock = install_mock(&mut state, None);
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let jwt = crate::common::create_test_internal_jwt();
         let res = reqwest::Client::new()
@@ -89,7 +89,7 @@ async fn test_get_bot_secret_no_secret_configured() {
             let mut cfg = sample_bot_cfg();
             cfg.bot_secret_encrypted = None;
             let _mock = install_mock(&mut state, Some(cfg));
-            let base_url = crate::common::spawn_test_server(state).await;
+            let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
             let jwt = crate::common::create_test_internal_jwt();
             let res = reqwest::Client::new()
@@ -111,7 +111,7 @@ async fn test_get_bot_secret_unauthorized_without_jwt() {
         std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
         let mut state = setup_mock_app_state();
         let _mock = install_mock(&mut state, Some(sample_bot_cfg()));
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let res = reqwest::Client::new()
             .get(format!("{base_url}/api/internal/lineworks/bot-secret/x"))
@@ -130,7 +130,7 @@ async fn test_get_bot_secret_user_jwt_rejected() {
         std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
         let mut state = setup_mock_app_state();
         let _mock = install_mock(&mut state, Some(sample_bot_cfg()));
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let user_jwt = crate::common::create_test_jwt(Uuid::new_v4(), "admin");
         let res = reqwest::Client::new()
@@ -152,7 +152,7 @@ async fn test_get_bot_secret_db_error() {
         let mut state = setup_mock_app_state();
         let mock = install_mock(&mut state, Some(sample_bot_cfg()));
         mock.fail_next.store(true, Ordering::SeqCst);
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let jwt = crate::common::create_test_internal_jwt();
         let res = reqwest::Client::new()
@@ -187,7 +187,7 @@ async fn test_event_joined_calls_upsert() {
         std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
         let mut state = setup_mock_app_state();
         let mock = install_mock(&mut state, Some(sample_bot_cfg()));
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let jwt = crate::common::create_test_internal_jwt();
         let res = post_event(
@@ -216,7 +216,7 @@ async fn test_event_left_calls_mark_left() {
         std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
         let mut state = setup_mock_app_state();
         let mock = install_mock(&mut state, Some(sample_bot_cfg()));
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let jwt = crate::common::create_test_internal_jwt();
         let res = post_event(
@@ -243,7 +243,7 @@ async fn test_event_unknown_type_ignored() {
         std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
         let mut state = setup_mock_app_state();
         let mock = install_mock(&mut state, Some(sample_bot_cfg()));
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let jwt = crate::common::create_test_internal_jwt();
         let res = post_event(
@@ -272,7 +272,7 @@ async fn test_event_no_channel_id_skipped() {
             std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
             let mut state = setup_mock_app_state();
             let mock = install_mock(&mut state, Some(sample_bot_cfg()));
-            let base_url = crate::common::spawn_test_server(state).await;
+            let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
             let jwt = crate::common::create_test_internal_jwt();
             let res = post_event(
@@ -298,7 +298,7 @@ async fn test_event_bot_not_found() {
         std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
         let mut state = setup_mock_app_state();
         let _mock = install_mock(&mut state, None);
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let jwt = crate::common::create_test_internal_jwt();
         let res = post_event(
@@ -323,7 +323,7 @@ async fn test_event_unauthorized() {
         std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
         let mut state = setup_mock_app_state();
         let _mock = install_mock(&mut state, Some(sample_bot_cfg()));
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let res = reqwest::Client::new()
             .post(format!("{base_url}/api/internal/lineworks/event"))
@@ -348,7 +348,7 @@ async fn test_event_lookup_db_error() {
         let mut state = setup_mock_app_state();
         let mock = install_mock(&mut state, Some(sample_bot_cfg()));
         mock.fail_next.store(true, Ordering::SeqCst);
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let jwt = crate::common::create_test_internal_jwt();
         let res = post_event(

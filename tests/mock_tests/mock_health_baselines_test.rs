@@ -12,20 +12,22 @@ use rust_alc_api::db::models::EmployeeHealthBaseline;
 
 async fn setup() -> (String, String) {
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
     let auth = format!("Bearer {jwt}");
     (base, auth)
 }
 
 /// spawn server with a custom health_baselines mock
 async fn setup_with_mock(mock: Arc<MockHealthBaselinesRepository>) -> (String, String) {
-    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
-    state.health_baselines = mock;
-    let base = crate::common::spawn_test_server(state).await;
+    tenko_state.health_baselines = mock;
+    let base = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
     let auth = format!("Bearer {jwt}");
     (base, auth)
 }
@@ -35,11 +37,12 @@ async fn setup_failing() -> (String, String) {
     let mock = Arc::new(MockHealthBaselinesRepository::default());
     mock.fail_next
         .store(true, std::sync::atomic::Ordering::SeqCst);
-    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
-    state.health_baselines = mock;
-    let base = crate::common::spawn_test_server(state).await;
+    tenko_state.health_baselines = mock;
+    let base = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
     let auth = format!("Bearer {jwt}");
     (base, auth)
 }
@@ -449,8 +452,9 @@ async fn delete_baseline_no_auth_returns_401() {
 #[tokio::test]
 async fn list_baselines_with_tenant_header() {
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
     let tenant_id = Uuid::new_v4();
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
 
     let res = client()
         .get(format!("{base}/api/tenko/health-baselines"))

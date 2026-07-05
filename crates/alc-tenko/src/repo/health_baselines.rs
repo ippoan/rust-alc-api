@@ -2,11 +2,11 @@ use async_trait::async_trait;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use alc_core::models::{CreateHealthBaseline, EmployeeHealthBaseline, UpdateHealthBaseline};
+use crate::models::{CreateHealthBaseline, EmployeeHealthBaseline, UpdateHealthBaseline};
 
 use alc_core::tenant::TenantConn;
 
-pub use alc_core::repository::health_baselines::*;
+pub use crate::repository::health_baselines::*;
 
 pub struct PgHealthBaselinesRepository {
     pool: PgPool,

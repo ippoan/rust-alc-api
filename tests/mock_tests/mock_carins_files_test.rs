@@ -49,7 +49,7 @@ fn make_file_row(uuid: &str, s3_key: Option<&str>, blob: Option<&str>) -> FileRo
 #[tokio::test]
 async fn test_list_files_success_empty() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -71,7 +71,7 @@ async fn test_list_files_success_empty() {
 #[tokio::test]
 async fn test_list_files_with_type_filter() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -98,7 +98,7 @@ async fn test_list_files_db_error() {
     let mut state = setup_mock_app_state();
     state.carins_files = mock_repo;
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -118,7 +118,7 @@ async fn test_list_files_db_error() {
 #[tokio::test]
 async fn test_create_file_success() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     use base64::{engine::general_purpose::STANDARD, Engine};
@@ -150,7 +150,7 @@ async fn test_create_file_success() {
 #[tokio::test]
 async fn test_create_file_invalid_base64() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -180,7 +180,7 @@ async fn test_create_file_db_error() {
     let mut state = setup_mock_app_state();
     state.carins_files = mock_repo;
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     use base64::{engine::general_purpose::STANDARD, Engine};
@@ -213,7 +213,7 @@ async fn test_create_file_storage_error() {
     let mut state = setup_mock_app_state();
     state.storage = mock_storage;
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     use base64::{engine::general_purpose::STANDARD, Engine};
@@ -241,7 +241,7 @@ async fn test_create_file_storage_error() {
 #[tokio::test]
 async fn test_list_recent_success() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -268,7 +268,7 @@ async fn test_list_recent_db_error() {
     let mut state = setup_mock_app_state();
     state.carins_files = mock_repo;
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -288,7 +288,7 @@ async fn test_list_recent_db_error() {
 #[tokio::test]
 async fn test_list_not_attached_success() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -315,7 +315,7 @@ async fn test_list_not_attached_db_error() {
     let mut state = setup_mock_app_state();
     state.carins_files = mock_repo;
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -341,7 +341,7 @@ async fn test_get_file_found() {
     let mut state = setup_mock_app_state();
     state.carins_files = mock_repo;
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -364,7 +364,7 @@ async fn test_get_file_found() {
 #[tokio::test]
 async fn test_get_file_not_found() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -389,7 +389,7 @@ async fn test_get_file_db_error() {
     let mut state = setup_mock_app_state();
     state.carins_files = mock_repo;
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -424,7 +424,7 @@ async fn test_download_file_s3_key_carins_storage() {
     state.carins_files = mock_repo;
     state.carins_storage = Some(carins_storage);
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -474,7 +474,7 @@ async fn test_download_file_s3_key_fallback_storage() {
     state.storage = main_storage;
     // carins_storage remains None, so fallback to state.storage
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -506,7 +506,7 @@ async fn test_download_file_blob() {
     let mut state = setup_mock_app_state();
     state.carins_files = mock_repo;
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -528,7 +528,7 @@ async fn test_download_file_blob() {
 #[tokio::test]
 async fn test_download_file_not_found() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -553,7 +553,7 @@ async fn test_download_file_no_s3_key_no_blob() {
     let mut state = setup_mock_app_state();
     state.carins_files = mock_repo;
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -578,7 +578,7 @@ async fn test_download_file_db_error() {
     let mut state = setup_mock_app_state();
     state.carins_files = mock_repo;
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -607,7 +607,7 @@ async fn test_download_file_storage_error() {
     let mut state = setup_mock_app_state();
     state.carins_files = mock_repo;
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -632,7 +632,7 @@ async fn test_delete_file_success() {
     let mut state = setup_mock_app_state();
     state.carins_files = mock_repo;
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -653,7 +653,7 @@ async fn test_delete_file_success() {
 async fn test_delete_file_not_found() {
     // default return_affected is false
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -678,7 +678,7 @@ async fn test_delete_file_db_error() {
     let mut state = setup_mock_app_state();
     state.carins_files = mock_repo;
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -703,7 +703,7 @@ async fn test_restore_file_success() {
     let mut state = setup_mock_app_state();
     state.carins_files = mock_repo;
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -723,7 +723,7 @@ async fn test_restore_file_success() {
 #[tokio::test]
 async fn test_restore_file_not_found() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -748,7 +748,7 @@ async fn test_restore_file_db_error() {
     let mut state = setup_mock_app_state();
     state.carins_files = mock_repo;
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -768,7 +768,7 @@ async fn test_restore_file_db_error() {
 #[tokio::test]
 async fn test_create_file_json_auto_parse() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     use base64::{engine::general_purpose::STANDARD, Engine};
@@ -812,7 +812,7 @@ async fn test_create_file_json_auto_parse_with_pending_pdf() {
     let mut state = setup_mock_app_state();
     state.car_inspections = mock_car_inspections;
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     use base64::{engine::general_purpose::STANDARD, Engine};
@@ -849,7 +849,7 @@ async fn test_create_file_json_auto_parse_with_pending_pdf() {
 #[tokio::test]
 async fn test_create_file_json_parse_error() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     use base64::{engine::general_purpose::STANDARD, Engine};
@@ -878,7 +878,7 @@ async fn test_create_file_json_parse_error() {
 #[tokio::test]
 async fn test_create_file_pdf_parse_error() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     use base64::{engine::general_purpose::STANDARD, Engine};
@@ -907,7 +907,7 @@ async fn test_create_file_pdf_parse_error() {
 #[tokio::test]
 async fn test_no_auth_returns_401() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client

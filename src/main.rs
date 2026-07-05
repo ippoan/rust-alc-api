@@ -293,6 +293,30 @@ async fn main() -> anyhow::Result<()> {
             ) as Arc<dyn StorageBackend>
         });
 
+    let webhook_service: Option<Arc<dyn rust_alc_api::webhook::WebhookService>> = {
+        let wh_repo: Arc<dyn rust_alc_api::db::repository::WebhookRepository> = Arc::new(
+            rust_alc_api::db::repository::PgWebhookRepository::new(pool.clone()),
+        );
+        let wh_http: Arc<dyn rust_alc_api::webhook::WebhookHttpClient> =
+            Arc::new(rust_alc_api::webhook::ReqwestWebhookClient);
+        Some(Arc::new(rust_alc_api::webhook::PgWebhookService::new(
+            wh_repo, wh_http,
+        )))
+    };
+
+    let tenko_state = alc_tenko::TenkoState {
+        tenko_call,
+        tenko_records,
+        tenko_schedules,
+        tenko_sessions,
+        tenko_webhooks,
+        daily_health,
+        health_baselines,
+        equipment_failures,
+        driver_info,
+        webhook: webhook_service.clone(),
+    };
+
     let state = AppState {
         pool: Some(pool.clone()),
         api_tokens,
@@ -302,9 +326,7 @@ async fn main() -> anyhow::Result<()> {
         carins_files,
         carrying_items,
         communication_items,
-        daily_health,
         devices,
-        driver_info,
         dtako_csv_proxy,
         dtako_daily_hours,
         dtako_logs,
@@ -321,20 +343,13 @@ async fn main() -> anyhow::Result<()> {
         dtako_y_time_export,
         vehicle_settings_dumps,
         employees,
-        equipment_failures,
         guidance_records,
-        health_baselines,
         items,
         item_files,
         measurements,
         nfc_tags,
         sso_admin,
         tenant_users,
-        tenko_call,
-        tenko_records,
-        tenko_schedules,
-        tenko_sessions,
-        tenko_webhooks,
         timecard,
         storage,
         carins_storage,
@@ -364,30 +379,28 @@ async fn main() -> anyhow::Result<()> {
         trouble_storage,
         device_pair_client: rust_alc_api::device_pair_client::HttpDevicePairClient::from_env()
             .map(|c| Arc::new(c) as Arc<dyn rust_alc_api::device_pair_client::DevicePairClient>),
-        webhook: {
-            let wh_repo: Arc<dyn rust_alc_api::db::repository::WebhookRepository> = Arc::new(
-                rust_alc_api::db::repository::PgWebhookRepository::new(pool.clone()),
-            );
-            let wh_http: Arc<dyn rust_alc_api::webhook::WebhookHttpClient> =
-                Arc::new(rust_alc_api::webhook::ReqwestWebhookClient);
-            Some(Arc::new(rust_alc_api::webhook::PgWebhookService::new(
-                wh_repo.clone(),
-                wh_http.clone(),
-            )))
-        },
+        webhook: webhook_service,
     };
 
     // 点呼予定超過チェック バックグラウンドタスク
-    let overdue_repo: Arc<dyn rust_alc_api::db::repository::WebhookRepository> =
-        Arc::new(rust_alc_api::db::repository::PgWebhookRepository::new(pool));
+    let overdue_repo: Arc<dyn rust_alc_api::db::repository::WebhookRepository> = Arc::new(
+        rust_alc_api::db::repository::PgWebhookRepository::new(pool.clone()),
+    );
+    let overdue_tenko: Arc<dyn alc_tenko::overdue::TenkoOverdueRepository> = Arc::new(
+        rust_alc_api::db::repository::PgTenkoOverdueRepository::new(pool),
+    );
     let overdue_http: Arc<dyn rust_alc_api::webhook::WebhookHttpClient> =
         Arc::new(rust_alc_api::webhook::ReqwestWebhookClient);
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
         loop {
             interval.tick().await;
-            if let Err(e) =
-                rust_alc_api::webhook::check_overdue_schedules(&*overdue_repo, &*overdue_http).await
+            if let Err(e) = rust_alc_api::webhook::check_overdue_schedules(
+                &*overdue_repo,
+                &*overdue_tenko,
+                &*overdue_http,
+            )
+            .await
             {
                 tracing::error!("Overdue check failed: {e}");
             }
@@ -452,10 +465,11 @@ async fn main() -> anyhow::Result<()> {
             "INTERNAL_SHARED_SECRET not set; /api/dtako/tickets internal routes are disabled"
         );
     }
-    let api_router = rust_alc_api::routes::router(rust_alc_api::routes::internal_oidc_trust())
-        .merge(rust_alc_api::routes::internal_shared_secret_router(
-            internal_secret,
-        ));
+    let api_router =
+        rust_alc_api::routes::router(rust_alc_api::routes::internal_oidc_trust(), tenko_state)
+            .merge(rust_alc_api::routes::internal_shared_secret_router(
+                internal_secret,
+            ));
 
     let app = Router::new()
         .nest("/api", api_router)

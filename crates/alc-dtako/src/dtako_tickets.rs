@@ -139,7 +139,6 @@ async fn close_ticket(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 
     #[test]
     fn close_token_length_validation() {

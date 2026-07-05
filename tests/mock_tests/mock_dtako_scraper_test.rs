@@ -22,7 +22,7 @@ async fn test_get_scrape_history_success_empty() {
     let mock = Arc::new(MockDtakoScraperRepository::default());
     let mut state = setup_mock_app_state();
     state.dtako_scraper = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let admin_jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -61,7 +61,7 @@ async fn test_get_scrape_history_with_data() {
     mock.history_data.lock().unwrap().push(item);
     let mut state = setup_mock_app_state();
     state.dtako_scraper = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let admin_jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -94,7 +94,7 @@ async fn test_get_scrape_history_with_query_params() {
     let mock = Arc::new(MockDtakoScraperRepository::default());
     let mut state = setup_mock_app_state();
     state.dtako_scraper = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let admin_jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -122,7 +122,7 @@ async fn test_get_scrape_history_db_error() {
     mock.fail_next.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.dtako_scraper = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let admin_jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -149,7 +149,7 @@ async fn test_get_scrape_history_unauthorized() {
     let mock = Arc::new(MockDtakoScraperRepository::default());
     let mut state = setup_mock_app_state();
     state.dtako_scraper = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
 
@@ -176,7 +176,7 @@ async fn test_save_scrape_history_success() {
     let mock_ref = mock.clone();
     let mut state = setup_mock_app_state();
     state.dtako_scraper = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let admin_jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -216,7 +216,7 @@ async fn test_save_scrape_history_without_message() {
     let mock_ref = mock.clone();
     let mut state = setup_mock_app_state();
     state.dtako_scraper = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let admin_jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -253,7 +253,7 @@ async fn test_save_scrape_history_db_error() {
     mock.fail_next.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.dtako_scraper = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let admin_jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -286,7 +286,7 @@ async fn test_save_scrape_history_invalid_body() {
     let mock = Arc::new(MockDtakoScraperRepository::default());
     let mut state = setup_mock_app_state();
     state.dtako_scraper = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let admin_jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -320,7 +320,7 @@ async fn test_save_scrape_history_unauthorized() {
     let mock = Arc::new(MockDtakoScraperRepository::default());
     let mut state = setup_mock_app_state();
     state.dtako_scraper = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
 

@@ -12,20 +12,22 @@ use rust_alc_api::db::models::EquipmentFailure;
 
 async fn setup() -> (String, String) {
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
     let auth = format!("Bearer {jwt}");
     (base, auth)
 }
 
 /// spawn server with a custom equipment_failures mock
 async fn setup_with_mock(mock: Arc<MockEquipmentFailuresRepository>) -> (String, String) {
-    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
-    state.equipment_failures = mock;
-    let base = crate::common::spawn_test_server(state).await;
+    tenko_state.equipment_failures = mock;
+    let base = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
     let auth = format!("Bearer {jwt}");
     (base, auth)
 }
@@ -52,11 +54,12 @@ async fn setup_failing() -> (String, String) {
     let mock = Arc::new(MockEquipmentFailuresRepository::default());
     mock.fail_next
         .store(true, std::sync::atomic::Ordering::SeqCst);
-    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
-    state.equipment_failures = mock;
-    let base = crate::common::spawn_test_server(state).await;
+    tenko_state.equipment_failures = mock;
+    let base = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
     let auth = format!("Bearer {jwt}");
     (base, auth)
 }

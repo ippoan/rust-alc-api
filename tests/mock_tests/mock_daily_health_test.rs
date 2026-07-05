@@ -13,7 +13,9 @@ use crate::mock_helpers::MockDailyHealthRepository;
 #[tokio::test]
 async fn test_daily_health_status_success_empty() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state.clone()).await;
+    let tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
+    let base_url =
+        crate::common::spawn_test_server_with_tenko(state.clone(), tenko_state.clone()).await;
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
@@ -48,7 +50,9 @@ async fn test_daily_health_status_success_empty() {
 #[tokio::test]
 async fn test_daily_health_status_with_date_param() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state.clone()).await;
+    let tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
+    let base_url =
+        crate::common::spawn_test_server_with_tenko(state.clone(), tenko_state.clone()).await;
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
@@ -75,7 +79,8 @@ async fn test_daily_health_status_with_date_param() {
 #[tokio::test]
 async fn test_daily_health_status_no_auth() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
+    let base_url = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -94,7 +99,9 @@ async fn test_daily_health_status_no_auth() {
 #[tokio::test]
 async fn test_daily_health_status_tenant_header() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state.clone()).await;
+    let tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
+    let base_url =
+        crate::common::spawn_test_server_with_tenko(state.clone(), tenko_state.clone()).await;
     let tenant_id = Uuid::new_v4();
     let client = reqwest::Client::new();
 
@@ -117,14 +124,16 @@ async fn test_daily_health_status_tenant_header() {
 
 #[tokio::test]
 async fn test_daily_health_status_db_error() {
-    let mut state = setup_mock_app_state();
+    let state = setup_mock_app_state();
+    let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
 
     // Replace daily_health with a mock that will fail on next call
     let mock = Arc::new(MockDailyHealthRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
-    state.daily_health = mock;
+    tenko_state.daily_health = mock;
 
-    let base_url = crate::common::spawn_test_server(state.clone()).await;
+    let base_url =
+        crate::common::spawn_test_server_with_tenko(state.clone(), tenko_state.clone()).await;
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
@@ -148,7 +157,8 @@ async fn test_daily_health_status_with_safety_judgment() {
     use rust_alc_api::db::repository::daily_health::DailyHealthRow;
     use serde_json::json;
 
-    let mut state = setup_mock_app_state();
+    let state = setup_mock_app_state();
+    let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
 
     // Build mock data with safety_judgment pass, fail, and a checked record without judgment
     let rows = vec![
@@ -233,9 +243,10 @@ async fn test_daily_health_status_with_safety_judgment() {
         fail_next: std::sync::atomic::AtomicBool::new(false),
         data: std::sync::Mutex::new(rows),
     });
-    state.daily_health = mock;
+    tenko_state.daily_health = mock;
 
-    let base_url = crate::common::spawn_test_server(state.clone()).await;
+    let base_url =
+        crate::common::spawn_test_server_with_tenko(state.clone(), tenko_state.clone()).await;
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
@@ -265,7 +276,9 @@ async fn test_daily_health_status_with_safety_judgment() {
 #[tokio::test]
 async fn test_daily_health_status_invalid_date() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state.clone()).await;
+    let tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
+    let base_url =
+        crate::common::spawn_test_server_with_tenko(state.clone(), tenko_state.clone()).await;
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();

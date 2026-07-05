@@ -28,7 +28,7 @@ fn auth_header(tenant_id: Uuid) -> String {
 async fn test_list_daily_hours_success() {
     let (state, _repo) = setup_with_shared_repo().await;
     let tenant_id = Uuid::new_v4();
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let auth = auth_header(tenant_id);
 
@@ -99,7 +99,7 @@ async fn test_list_daily_hours_success() {
 #[tokio::test]
 async fn test_list_daily_hours_no_auth() {
     let (state, _repo) = setup_with_shared_repo().await;
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -114,7 +114,7 @@ async fn test_list_daily_hours_no_auth() {
 async fn test_list_daily_hours_db_error_count() {
     let (state, repo) = setup_with_shared_repo().await;
     let tenant_id = Uuid::new_v4();
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let auth = auth_header(tenant_id);
 
@@ -133,7 +133,7 @@ async fn test_list_daily_hours_db_error_count() {
 async fn test_list_daily_hours_db_error_list() {
     let (state, repo) = setup_with_shared_repo().await;
     let tenant_id = Uuid::new_v4();
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let auth = auth_header(tenant_id);
 
@@ -168,7 +168,7 @@ async fn test_list_daily_hours_db_error_list() {
 async fn test_get_daily_segments_success() {
     let (state, _repo) = setup_with_shared_repo().await;
     let tenant_id = Uuid::new_v4();
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let auth = auth_header(tenant_id);
     let driver_id = Uuid::new_v4();
@@ -189,7 +189,7 @@ async fn test_get_daily_segments_success() {
 #[tokio::test]
 async fn test_get_daily_segments_no_auth() {
     let (state, _repo) = setup_with_shared_repo().await;
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let driver_id = Uuid::new_v4();
 
@@ -207,7 +207,7 @@ async fn test_get_daily_segments_no_auth() {
 async fn test_get_daily_segments_db_error() {
     let (state, repo) = setup_with_shared_repo().await;
     let tenant_id = Uuid::new_v4();
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let auth = auth_header(tenant_id);
     let driver_id = Uuid::new_v4();
@@ -228,7 +228,7 @@ async fn test_get_daily_segments_db_error() {
 async fn test_get_daily_segments_invalid_date() {
     let (state, _repo) = setup_with_shared_repo().await;
     let tenant_id = Uuid::new_v4();
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let auth = auth_header(tenant_id);
     let driver_id = Uuid::new_v4();
@@ -253,7 +253,7 @@ async fn test_get_daily_segments_invalid_date() {
 async fn test_get_daily_segments_invalid_driver_id() {
     let (state, _repo) = setup_with_shared_repo().await;
     let tenant_id = Uuid::new_v4();
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let auth = auth_header(tenant_id);
 
@@ -280,7 +280,7 @@ async fn test_get_daily_segments_invalid_driver_id() {
 async fn test_list_daily_hours_with_tenant_header() {
     let (state, _repo) = setup_with_shared_repo().await;
     let tenant_id = Uuid::new_v4();
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -298,7 +298,7 @@ async fn test_list_daily_hours_with_tenant_header() {
 async fn test_get_segments_with_tenant_header() {
     let (state, _repo) = setup_with_shared_repo().await;
     let tenant_id = Uuid::new_v4();
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let driver_id = Uuid::new_v4();
 

@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use alc_core::tenant::TenantConn;
 
-pub use alc_core::repository::daily_health::*;
+pub use crate::repository::daily_health::*;
 
 pub struct PgDailyHealthRepository {
     pool: PgPool,

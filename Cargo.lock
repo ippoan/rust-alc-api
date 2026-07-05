@@ -278,6 +278,7 @@ name = "alc-tenko"
 version = "0.1.0"
 dependencies = [
  "alc-core",
+ "anyhow",
  "async-trait",
  "axum",
  "chrono",
