@@ -145,8 +145,13 @@ Build backend (Bazel) job 139s の内訳: setup ~8s / **analysis 60s**
     main scope に save、run 28743114702)。warm は `bazel test` のみなので poc job の
     `bazel coverage` action は含まれない (coverage ~30s は PR 側で毎回実行、判定点の
     test result cache には影響しない)
-- 残: warm 導入後の PR 1 回目で `(cached)` が出るかの再確認、DB 依存 integration test の
-  Bazel 化設計
+- **run 跨ぎ hit 成立を PR #521 で実証**: 1 回目の invocation から `(cached) PASSED` /
+  `Executed 0 out of 1` (298 disk cache hit、コンパイル実行ゼロ)。job 3分30秒 → **1分44秒**
+  (残りは loading/analysis 固定費 61s + coverage 29s)
+- 実証を受けて poc を**全 crate の unit test に拡大** (`bazel test //... --build_tests_only`、
+  warm も同一 invocation)。lcov gate / coverage gate の SoT は引き続き cargo llvm-cov 側
+- 残: DB 依存 integration test の Bazel 化設計 (postgres service との接続を bazel test
+  サンドボックスからどう張るか)
 
 ### cache-warm build-only 化の実測 (PR #519、2026-07-05)
 
