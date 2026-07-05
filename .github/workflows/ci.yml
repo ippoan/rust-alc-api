@@ -127,13 +127,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: monolith, target: "//:unit_tests", coverage: "^//$" }
-          - { name: mock-carins, target: "//:mock_carins", coverage: "//crates/alc-carins" }
+          # instrumentation_filter は label 文字列 (例 //:unit_tests) への regex match。
+          # root package は "^//:" (旧 "^//$" はどの label にも一致せず空 lcov になった)。
+          # 各 shard の filter には「そのテストが exercise する他 crate」も含める
+          # (coverage_100.toml の mock/combined type は shard 横断の union で 100% になる)。
+          - { name: monolith, target: "//:unit_tests", coverage: "^//:" }
+          - { name: mock-carins, target: "//:mock_carins", coverage: "//crates/alc-carins,//crates/alc-core" }
           - { name: mock-devices, target: "//:mock_devices", coverage: "//crates/alc-devices,//crates/alc-core" }
-          - { name: mock-dtako, target: "//:mock_dtako", coverage: "//crates/alc-dtako" }
-          - { name: mock-misc, target: "//:mock_misc", coverage: "//crates/alc-misc,//crates/alc-core,^//$" }
-          - { name: mock-tenko, target: "//:mock_tenko", coverage: "//crates/alc-tenko" }
-          - { name: mock-trouble, target: "//:mock_trouble", coverage: "//crates/alc-trouble" }
+          - { name: mock-dtako, target: "//:mock_dtako", coverage: "//crates/alc-dtako,//crates/alc-compare,//crates/alc-pdf,//crates/alc-core" }
+          - { name: mock-misc, target: "//:mock_misc", coverage: "//crates/alc-misc,//crates/alc-core,//crates/alc-tenko,^//:" }
+          - { name: mock-tenko, target: "//:mock_tenko", coverage: "//crates/alc-tenko,//crates/alc-core" }
+          - { name: mock-trouble, target: "//:mock_trouble", coverage: "//crates/alc-trouble,//crates/alc-core" }
           - { name: auth, target: "//crates/alc-auth:alc-auth_test" }
           - { name: auth-jwt, target: "//crates/alc-auth-jwt:alc-auth-jwt_test", coverage: "//crates/alc-auth-jwt" }
           - { name: camera, target: "//crates/alc-camera:alc-camera_test" }
@@ -192,7 +196,7 @@ jobs:
       matrix:
         include:
           - { name: db-trouble, target: "//:trouble_test", coverage: "//crates/alc-trouble" }
-          - { name: db-archive, target: "//:archive_repo_test", coverage: "^//$" }
+          - { name: db-archive, target: "//:archive_repo_test", coverage: "^//:" }
     services:
       postgres:
         image: postgres:16
@@ -695,13 +699,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: monolith, target: "//:unit_tests", coverage: "^//$" }
-          - { name: mock-carins, target: "//:mock_carins", coverage: "//crates/alc-carins" }
+          # instrumentation_filter は label 文字列 (例 //:unit_tests) への regex match。
+          # root package は "^//:" (旧 "^//$" はどの label にも一致せず空 lcov になった)。
+          # 各 shard の filter には「そのテストが exercise する他 crate」も含める
+          # (coverage_100.toml の mock/combined type は shard 横断の union で 100% になる)。
+          - { name: monolith, target: "//:unit_tests", coverage: "^//:" }
+          - { name: mock-carins, target: "//:mock_carins", coverage: "//crates/alc-carins,//crates/alc-core" }
           - { name: mock-devices, target: "//:mock_devices", coverage: "//crates/alc-devices,//crates/alc-core" }
-          - { name: mock-dtako, target: "//:mock_dtako", coverage: "//crates/alc-dtako" }
-          - { name: mock-misc, target: "//:mock_misc", coverage: "//crates/alc-misc,//crates/alc-core,^//$" }
-          - { name: mock-tenko, target: "//:mock_tenko", coverage: "//crates/alc-tenko" }
-          - { name: mock-trouble, target: "//:mock_trouble", coverage: "//crates/alc-trouble" }
+          - { name: mock-dtako, target: "//:mock_dtako", coverage: "//crates/alc-dtako,//crates/alc-compare,//crates/alc-pdf,//crates/alc-core" }
+          - { name: mock-misc, target: "//:mock_misc", coverage: "//crates/alc-misc,//crates/alc-core,//crates/alc-tenko,^//:" }
+          - { name: mock-tenko, target: "//:mock_tenko", coverage: "//crates/alc-tenko,//crates/alc-core" }
+          - { name: mock-trouble, target: "//:mock_trouble", coverage: "//crates/alc-trouble,//crates/alc-core" }
           - { name: auth, target: "//crates/alc-auth:alc-auth_test" }
           - { name: auth-jwt, target: "//crates/alc-auth-jwt:alc-auth-jwt_test", coverage: "//crates/alc-auth-jwt" }
           - { name: camera, target: "//crates/alc-camera:alc-camera_test" }
@@ -791,7 +799,7 @@ jobs:
       matrix:
         include:
           - { name: db-trouble, target: "//:trouble_test", coverage: "//crates/alc-trouble" }
-          - { name: db-archive, target: "//:archive_repo_test", coverage: "^//$" }
+          - { name: db-archive, target: "//:archive_repo_test", coverage: "^//:" }
     services:
       postgres:
         image: postgres:16
@@ -861,7 +869,7 @@ jobs:
       - name: merge lcov + coverage_100.toml 全域突合 (warn モード)
         run: |
           shopt -s globstar nullglob
-          files=(/tmp/lcov/**/*.dat /tmp/lcov/**/lcov.dat)
+          files=(/tmp/lcov/**/*.dat)
           echo "merged inputs: ${#files[@]}"
           [ "${#files[@]}" -gt 0 ] || { echo "::warning::lcov artifact が 0 件 (shard 失敗?)"; exit 0; }
           cat "${files[@]}" > /tmp/merged.dat
