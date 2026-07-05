@@ -128,6 +128,12 @@ jobs:
       matrix:
         include:
           - { name: monolith, target: "//:unit_tests" }
+          - { name: mock-carins, target: "//:mock_carins" }
+          - { name: mock-devices, target: "//:mock_devices" }
+          - { name: mock-dtako, target: "//:mock_dtako" }
+          - { name: mock-misc, target: "//:mock_misc" }
+          - { name: mock-tenko, target: "//:mock_tenko" }
+          - { name: mock-trouble, target: "//:mock_trouble" }
           - { name: auth, target: "//crates/alc-auth:alc-auth_test" }
           - { name: auth-jwt, target: "//crates/alc-auth-jwt:alc-auth-jwt_test" }
           - { name: camera, target: "//crates/alc-camera:alc-camera_test" }
@@ -632,6 +638,12 @@ jobs:
       matrix:
         include:
           - { name: monolith, target: "//:unit_tests" }
+          - { name: mock-carins, target: "//:mock_carins" }
+          - { name: mock-devices, target: "//:mock_devices" }
+          - { name: mock-dtako, target: "//:mock_dtako" }
+          - { name: mock-misc, target: "//:mock_misc" }
+          - { name: mock-tenko, target: "//:mock_tenko" }
+          - { name: mock-trouble, target: "//:mock_trouble" }
           - { name: auth, target: "//crates/alc-auth:alc-auth_test" }
           - { name: auth-jwt, target: "//crates/alc-auth-jwt:alc-auth-jwt_test" }
           - { name: camera, target: "//crates/alc-camera:alc-camera_test" }

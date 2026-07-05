@@ -161,8 +161,17 @@ Build backend (Bazel) job 139s の内訳: setup ~8s / **analysis 60s**
   トレードオフ: PR あたり +16 job (Free 20 枠では Tests の queue 悪化 → Team 化推奨) と
   cache 容量 (17 key、GH 10GB 上限)。matrix の追加漏れ/warm-poc 同期は
   `scripts/check_bazel_test_matrix.sh` (csv-parser shard 内) が loud fail
-- 残: DB 依存 integration test の Bazel 化設計 (postgres service との接続を bazel test
-  サンドボックスからどう張るか)
+- **shard 分割の実測 (PR #527 = alc-core を触る最悪ケース)**: 17 shard 全 green、
+  wall **~2.5 分に bounded** (最重 notify 151s、大半 80-90s)。単一 job の cold 5 分から
+  設計どおり
+- **bazel gate 移行 PR1**: mock 統合テスト 6 binary (`tests/mock_<domain>/main.rs`、DB 不要)
+  を rust_test target 化して shard matrix に追加 (17 → 23 shard)。cargo Tests matrix は
+  当面 gate として並走 (PR4 で退役予定)。注意: mock shard は monolith lib 閉包を含むため
+  disk cache が各 ~500MB 級 — GH cache 10GB 上限との兼ね合いで eviction が観測されたら
+  shard 統合で対処する
+- 残: DB 依存 integration test の Bazel 化 (PR2、shard job に postgres service +
+  `--test_env=TEST_DATABASE_URL`)、coverage gate の lcov 全域化 (PR3)、
+  cargo Tests matrix 退役 + required checks 差し替え (PR4)
 
 ### cache-warm build-only 化の実測 (PR #519、2026-07-05)
 

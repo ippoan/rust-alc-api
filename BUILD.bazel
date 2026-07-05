@@ -66,3 +66,102 @@ rust_test(
     deps = all_crate_deps(normal_dev = True),
     proc_macro_deps = all_crate_deps(proc_macro_dev = True),
 )
+
+# --- mock 統合テスト (DB 不要、Refs #515 bazel gate 移行 PR1) ---
+#
+# tests/mock_<domain>/main.rs が #[path] で tests/common + tests/mock_helpers +
+# tests/mock_tests を束ねる dir-style integration test。mock repository で
+# AppState/TenkoState/TroubleState を組み、実 HTTP サーバーを spawn する。
+# postgres には接続しない (pool: None) ので bazel sandbox でそのまま走る。
+# 新しい mock shard を足したら ci.yml の bazel test matrix (warm/poc) にも
+# 追記すること (check_bazel_test_matrix.sh が同期漏れを loud fail する)。
+
+_MOCK_TEST_SRCS = glob([
+    "tests/common/**/*.rs",
+    "tests/mock_helpers/**/*.rs",
+    "tests/mock_tests/**/*.rs",
+])
+
+rust_test(
+    name = "mock_carins",
+    srcs = ["tests/mock_carins/main.rs"] + _MOCK_TEST_SRCS,
+    crate_root = "tests/mock_carins/main.rs",
+    deps = [":rust_alc_api_lib"] + all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ) + _WORKSPACE_CRATES,
+    proc_macro_deps = all_crate_deps(
+        proc_macro = True,
+        proc_macro_dev = True,
+    ),
+)
+
+rust_test(
+    name = "mock_devices",
+    srcs = ["tests/mock_devices/main.rs"] + _MOCK_TEST_SRCS,
+    crate_root = "tests/mock_devices/main.rs",
+    deps = [":rust_alc_api_lib"] + all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ) + _WORKSPACE_CRATES,
+    proc_macro_deps = all_crate_deps(
+        proc_macro = True,
+        proc_macro_dev = True,
+    ),
+)
+
+rust_test(
+    name = "mock_dtako",
+    srcs = ["tests/mock_dtako/main.rs"] + _MOCK_TEST_SRCS,
+    crate_root = "tests/mock_dtako/main.rs",
+    deps = [":rust_alc_api_lib"] + all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ) + _WORKSPACE_CRATES,
+    proc_macro_deps = all_crate_deps(
+        proc_macro = True,
+        proc_macro_dev = True,
+    ),
+)
+
+rust_test(
+    name = "mock_misc",
+    srcs = ["tests/mock_misc/main.rs"] + _MOCK_TEST_SRCS,
+    crate_root = "tests/mock_misc/main.rs",
+    deps = [":rust_alc_api_lib"] + all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ) + _WORKSPACE_CRATES,
+    proc_macro_deps = all_crate_deps(
+        proc_macro = True,
+        proc_macro_dev = True,
+    ),
+)
+
+rust_test(
+    name = "mock_tenko",
+    srcs = ["tests/mock_tenko/main.rs"] + _MOCK_TEST_SRCS,
+    crate_root = "tests/mock_tenko/main.rs",
+    deps = [":rust_alc_api_lib"] + all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ) + _WORKSPACE_CRATES,
+    proc_macro_deps = all_crate_deps(
+        proc_macro = True,
+        proc_macro_dev = True,
+    ),
+)
+
+rust_test(
+    name = "mock_trouble",
+    srcs = ["tests/mock_trouble/main.rs"] + _MOCK_TEST_SRCS,
+    crate_root = "tests/mock_trouble/main.rs",
+    deps = [":rust_alc_api_lib"] + all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ) + _WORKSPACE_CRATES,
+    proc_macro_deps = all_crate_deps(
+        proc_macro = True,
+        proc_macro_dev = True,
+    ),
+)
