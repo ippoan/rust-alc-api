@@ -175,8 +175,17 @@ Build backend (Bazel) job 139s の内訳: setup ~8s / **analysis 60s**
   発見: tests/ の他 6 binary (devices_test / employees_test / measurements_test /
   devices_re_pair_test / trouble_task_statuses_test / trouble_tasks_cross_ticket_test)
   は **cargo CI でも走っていない** (test-matrix の `--test` 列挙に無い) — 要別途判断
-- 残: coverage gate の lcov 全域化 (PR3)、cargo Tests matrix 退役 + required checks
-  差し替え (PR4)、dormant な DB テスト 6 binary の扱い
+- **PR3a pilot (mock-trouble)**: mock target 経由の route ファイル lcov は per-target
+  でも 100% (files.rs 160/160 / workflow.rs 126/126、里帰り不要)。計装ビルド初回 +2 分弱、
+  warm/PR-scope cache で以降 hit。Pg repo 実装 (repo/trouble_*.rs) は db shard の寄与が
+  無いと 0% = **per-file gate は shard 別 lcov の merge が必須**と確定。スクリプトの
+  comment-out 誤検出は tomllib 化で修正 (#532)
+- **PR3b**: coverage field を matrix に追加 (21 shard が対象、無登録 crate の 4 shard は
+  対象外)。各 shard が lcov を artifact 化し `bazel-coverage-gate` job が merge して
+  coverage_100.toml **全域**を warn モードで突合。warm も coverage を焼く (PR 側 cache hit)。
+  差分ゼロを確認したら fail 化
+- 残: PR3b の warn → fail 化、cargo Tests matrix 退役 + required checks 差し替え (PR4)、
+  dormant な DB テスト 6 binary の扱い (#530)
 
 ### cache-warm build-only 化の実測 (PR #519、2026-07-05)
 
