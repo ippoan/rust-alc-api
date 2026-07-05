@@ -141,6 +141,10 @@ Build backend (Bazel) job 139s の内訳: setup ~8s / **analysis 60s**
     `Cache hit for: ...disk-bazel-backend-tar-...` (488MB、1366 disk cache hit) で復元できている
   - 対策: `cache-warm-bazel-test-poc` job (main push で `bazel test` を warm) を追加。
     invocation flags を poc job と一致させるのが必須 (configuration 差 = action key 差)
+  - PR #520 merge 後の main push で初回 warm 完了 (test PASSED → disk cache 60MB を
+    main scope に save、run 28743114702)。warm は `bazel test` のみなので poc job の
+    `bazel coverage` action は含まれない (coverage ~30s は PR 側で毎回実行、判定点の
+    test result cache には影響しない)
 - 残: warm 導入後の PR 1 回目で `(cached)` が出るかの再確認、DB 依存 integration test の
   Bazel 化設計
 
