@@ -2,9 +2,9 @@
 # ippoan/cf-billing-monitor#16)。
 #
 # cache は上限 30GB + budget $2 の従量運用で、使用量が eviction race と課金に
-# 直結する。毎朝 gh cache list で集計し、cf-billing-monitor の
-# POST /gh-cache-report に送ってメール化する (CF Email Routing 発、06:00 JST の
-# billing レポートと同じ受信箱に届く)。
+# 直結する。毎朝 05:00 JST に gh cache list で集計し、cf-billing-monitor の
+# POST /gh-cache-report に送ってメール化する (CF Email Routing 発、
+# billing レポート (06:00 JST) と同じ受信箱に届く)。
 #
 # - 収集: GITHUB_TOKEN の actions:read だけで動く (新規 token 不要)
 # - 認証: GH_CACHE_REPORT_SECRET (GitHub org secret。CF Secrets Store 側の
@@ -13,7 +13,7 @@ name: Cache Size Report
 
 on:
   schedule:
-    - cron: '15 21 * * *' # 06:15 JST (billing メール 06:00 の直後)
+    - cron: '0 20 * * *' # 05:00 JST
   workflow_dispatch:
 
 permissions:
