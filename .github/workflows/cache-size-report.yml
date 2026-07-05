@@ -1,0 +1,104 @@
+# GitHub Actions cache 使用量の日次メールレポート (Refs #515,
+# ippoan/cf-billing-monitor#16)。
+#
+# cache は上限 30GB + budget $2 の従量運用で、使用量が eviction race と課金に
+# 直結する。毎朝 gh cache list で集計し、cf-billing-monitor の
+# POST /gh-cache-report に送ってメール化する (CF Email Routing 発、06:00 JST の
+# billing レポートと同じ受信箱に届く)。
+#
+# - 収集: GITHUB_TOKEN の actions:read だけで動く (新規 token 不要)
+# - 認証: GH_CACHE_REPORT_SECRET (GitHub org secret。CF Secrets Store 側の
+#   同名 binding と同値、secret-inject で投入済み)
+name: Cache Size Report
+
+on:
+  schedule:
+    - cron: '15 21 * * *' # 06:15 JST (billing メール 06:00 の直後)
+  workflow_dispatch:
+
+permissions:
+  actions: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Collect and aggregate cache sizes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          # repo の cache size limit (GB)。Settings → Actions → Caches の設定値と
+          # 手動で同期する (API では読めないため)。
+          CACHE_LIMIT_GB: '30'
+        run: |
+          gh cache list -R "$REPO" --limit 1000 \
+            --json key,ref,sizeInBytes,lastAccessedAt > /tmp/caches.json
+          python3 - <<'PY'
+          import json, os, datetime
+
+          entries = json.load(open("/tmp/caches.json"))
+          total = sum(e["sizeInBytes"] for e in entries)
+
+          def gb(n):
+              return f"{n / 1024**3:.2f}GB"
+
+          # ref 別 (main vs PR/その他)
+          main_e = [e for e in entries if e["ref"] == "refs/heads/main"]
+          other_e = [e for e in entries if e["ref"] != "refs/heads/main"]
+
+          # base グループ別 (末尾 hash セグメントを除いた prefix。cache-cleanup と同じ規則)
+          groups = {}
+          for e in entries:
+              base = "-".join(e["key"].rsplit("-", 1)[:-1]) or e["key"]
+              g = groups.setdefault(base, {"bytes": 0, "count": 0})
+              g["bytes"] += e["sizeInBytes"]
+              g["count"] += 1
+          top_groups = sorted(groups.items(), key=lambda kv: kv[1]["bytes"], reverse=True)[:15]
+
+          top_entries = sorted(entries, key=lambda e: e["sizeInBytes"], reverse=True)[:10]
+
+          lines = []
+          lines.append(f"合計: {gb(total)} / {len(entries)} entries (limit {os.environ['CACHE_LIMIT_GB']}GB)")
+          lines.append(f"  main: {gb(sum(e['sizeInBytes'] for e in main_e))} ({len(main_e)})"
+                       f" / PR 等: {gb(sum(e['sizeInBytes'] for e in other_e))} ({len(other_e)})")
+          lines.append("")
+          lines.append("■ グループ別 上位15 (key の末尾 hash を除いた base)")
+          for base, g in top_groups:
+              lines.append(f"  {gb(g['bytes']):>9}  x{g['count']:<3} {base}")
+          lines.append("")
+          lines.append("■ 単体 上位10")
+          for e in top_entries:
+              ref = e["ref"].replace("refs/heads/", "").replace("refs/pull/", "PR ")
+              lines.append(f"  {gb(e['sizeInBytes']):>9}  [{ref}] {e['key']}")
+
+          jst = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9)))
+          payload = {
+              "repo": os.environ["REPO"],
+              "date": jst.strftime("%Y-%m-%d"),
+              "totalBytes": total,
+              "entryCount": len(entries),
+              "limitGb": float(os.environ["CACHE_LIMIT_GB"]),
+              "summaryText": "\n".join(lines),
+          }
+          json.dump(payload, open("/tmp/payload.json", "w"), ensure_ascii=False)
+          print("\n".join(lines))
+          PY
+
+      - name: Send report to cf-billing-monitor
+        env:
+          REPORT_SECRET: ${{ secrets.GH_CACHE_REPORT_SECRET }}
+        run: |
+          if [ -z "$REPORT_SECRET" ]; then
+            echo "::error::GH_CACHE_REPORT_SECRET が空です (org secret の repo visibility を確認)"
+            exit 1
+          fi
+          code=$(curl -sS -o /tmp/resp.txt -w "%{http_code}" -X POST \
+            -H "X-Report-Secret: $REPORT_SECRET" \
+            -H "Content-Type: application/json" \
+            --data-binary @/tmp/payload.json \
+            "https://cf-billing-monitor.m-tama-ramu.workers.dev/gh-cache-report")
+          cat /tmp/resp.txt; echo
+          if [ "$code" != "200" ]; then
+            echo "::error::gh-cache-report POST failed (HTTP $code)"
+            exit 1
+          fi
