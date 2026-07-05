@@ -1,6 +1,6 @@
 ---
 name: rust-alc-api-map
-generated-from: rust-alc-api:d7313fba7dbd3fd0daf5f0b296d9f7466bcf1c26
+generated-from: rust-alc-api:af2c361d88281e672dfe95d5049843d2cf3b5e60
 paths: [crates/, src/, migrations/]
 description: rust-alc-api (アルコールチェッカー基盤の Rust/Axum Cargo workspace — 13 domain crate + gateway/tenko/carins/dtako/trouble の複数バイナリ、PostgreSQL+RLS、Cloud Run) の構造ナビゲーション。どの crate に何のルートがあるか / monolith(rust-alc-api) と per-domain API + gateway の二系統 / RLS・migration・deploy/release 分離の gotcha を 1 枚にまとめる。トリガー:「rust-alc-api」「alc-api」「alc-notify」「alc-tenko」「alc-trouble」「alc-carins」「alc-dtako」「gateway」「tenko-api」「carins-api」「dtako-api」「trouble-api」「RLS テナント」「sqlx migration」「ts-rs」「Release Wave」「Bazel」等。
 ---
@@ -124,9 +124,9 @@ monolith と per-domain API は同じ domain crate (`alc-tenko` 等) を共有 �
   pre-commit (`.githooks`) + CI `snapshot-check` job が drift/stale-sha を検出。`SKIP_CLIPPY=1` で commit 時 clippy skip 可。
 - **ts-rs**: 各 crate が `#[ts(export)]` で TS 型を生成 (`cargo test export_bindings`)。フロント
   (nuxt-*) が型同期する。型変更時は export_bindings を回す。生成元は alc-core / alc-misc /
-  alc-carins の 3 crate のみ (alc-auth は ts-rs 依存だけあって derive 未使用)。CI での
-  `ts-bindings-${sha}` artifact は **test-matrix(lib) shard が生成** する (check job ではない、
-  Refs #482 / 下記 CI 節)。
+  alc-carins の 3 crate のみ (alc-auth の未使用だった ts-rs 依存は削除済み)。CI での
+  `ts-bindings-${sha}` artifact は **test-lib job が生成** する (check job ではない。lib shard は
+  #507 で test-matrix から DB なしの test-lib job に分離。Refs #482 / 下記 CI 節)。
 - **長時間 compute と Cloud Run**: `tokio::spawn` で background compute → fire-and-forget broadcast は
   やらない (Cloud Run は応答後に CPU を絞る)。`RealtimeBus` / `RedactBroadcaster` で対処。CLAUDE.md 該当節参照。
 
