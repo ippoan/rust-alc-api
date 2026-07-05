@@ -80,6 +80,59 @@ Build backend (Bazel) job 139s の内訳: setup ~8s / **analysis 60s**
 - targets 数 (23369) は crate_universe が 1 crate に複数 target を生成するため。
   依存 crate 数にほぼ比例するので依存削減がそのままターゲット削減になる
 
+## 確定した事実 (2026-07-05 調査、Refs #513 / #515)
+
+### runner queue 遅延の真因 = org が GitHub Free plan (同時 20 job)
+
+- run 28698773673 の実測: pr-limit 完了 (gate open) 後、即時に走れたのは 6-7 job のみ。
+  残りは 27〜73s かけて滴下開始 (Tests mock-devices は 66s 待ち = critical path 直撃)
+- gate open 時点で **同一ブランチの 2 分前 push の CI (~17 job) がまだ走行中**で、
+  org 全体の需要は ~35 job。billing 画面で **ippoan org は GitHub Free ($0) = 上限 20 並列**
+  を確認 → 需要 35 > 枠 20 が滴下の説明として整合
+- 対策: org Team 化 ($4/user/月) で 60 並列。cancel-in-progress は「同一ブランチ連続 push」
+  のみ救済 + deploy レース考慮が要るため優先度下げ (経緯は #513 の議論)
+- 注: public repo のため標準 runner の分数は無料。job 統合による「課金削減」効果は無い
+
+### Bazel analysis ~55s/job は「lockfile 全体の固定費」でターゲット閉包に非比例
+
+同 run の 3 job 実測 (loading + analysis):
+
+| job | 閉包 | loading (repo rule) | analysis | 合計 |
+|---|---|---|---|---|
+| backend | 603 pkgs / 23,369 targets | ~34s | ~24s | ~58s |
+| tenko | 373 pkgs / 14,221 targets | ~33s | ~23s | ~56s |
+| gateway | 288 pkgs / 10,174 targets | ~32s | ~21s | ~53s |
+
+- 前半 ~33s は `Loading: 0 packages loaded` のまま = **crate_universe が Cargo.lock 全体
+  (572 crate) を処理する固定費**。どのターゲットでも満額
+- 閉包を半分にしても −5s → **「build を細かく分割して analysis を減らす」は成立しない**
+- 削る手段は CPU 増 (larger runner、ただし public repo でも有料) / 依存削減 /
+  Bazel サーバ常駐 (self-hosted、public repo では不可) / Skycache (OSS 未公開) のみ
+
+### alc-core ドメイン分割 Phase A (#513 / PR #514、merge 済み)
+
+- alc-core (10,495 行、18 crate が依存) の `AppState` が全 ~60 repository を束ねる
+  god-object で、**domain 機能 PR が全 21 crate + 全 test shard を再コンパイル**していた
+  (実例: feat/trouble-field-layout = trouble 専用機能なのに backend 443 actions 再ビルド)
+- 使用行列の実測で「層分割は無効 (全 crate が全層参照)、ドメイン分割が正解」と確定
+- Phase A で tenko の trait 9 本 + models 392 行 + driver_info + overdue を alc-tenko へ移設。
+  再流入は `scripts/check_domain_split.sh` (check job) が loud fail
+- **merge 直後の 1-2 run は cache 焼き直しでむしろ遅い (正常)**。warm 後の効果
+  (tenko 系 PR で他 shard がキャッシュヒット化) は実測して本 doc に追記すること
+- 後続: Phase B trouble (11 repo + 17 struct) → dtako / notify / carins
+
+### Bazel test 化 PoC (#515 / PR #517 #518、merge 済み)
+
+- `bazel-test-poc` job (独立 job、merge gate 外) で alc-csv-parser 1 crate を検証:
+  - bazel test 動作 ✅ / **テスト結果キャッシュ** ✅ (同一サーバ 2 回目 `(cached) PASSED in 0.0s`)
+  - **lcov gate (`scripts/check_coverage_100_lcov.sh`) は llvm-cov --text と判定意味論が一致** ✅
+    (4 ファイル中 3 つは行数まで一致 — gate 移行の最大の壁は突破可能と確定)
+- 検出された差異はフォーマットではなく**測定範囲**: combined 測定 (他 crate のテスト経由) で
+  100% だった work_segments.rs の 5 行が、Bazel の per-target 測定で露呈 → crate 内テスト
+  3 本追加で解消 (#518)。他 crate へ拡大する際も同種の「里帰りテスト追加」が必要になる見込み
+- 残: run 跨ぎの test result cache 確認 (crates/ 非接触 PR の bazel-test-poc 1 回目で
+  `(cached)` が出るか)、DB 依存 integration test の Bazel 化設計
+
 ## 施策 log
 
 ### #482: check job の TS bindings 生成を test-matrix(lib) に統合 (PR #483)

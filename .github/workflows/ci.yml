@@ -49,11 +49,14 @@ jobs:
           # だけ save」設計 (Refs #426)。
           # cmd は --workspace --all-targets で全 test binary を 1 cargo invocation で
           # build (cargo の jobs server が内部並列)。--no-report で coverage report
-          # 生成抑制、--ignore-run-fail で DB 必要 test が一部 fail しても許容。
+          # 生成抑制。
           # 注意: cargo-llvm-cov 0.8.4 の --no-run は cargo test の --no-run と意味が
-          # 異なる (report subcommand の旧名で profraw 必須)。build only にしたければ
-          # --no-run を使わず、test 実行 + --ignore-run-fail のパターンを使う。
-          - { name: "test-shared", key: "test-shared", cmd: "cargo llvm-cov nextest --no-report --ignore-run-fail --workspace --all-targets" }
+          # 異なる (report subcommand の旧名で profraw 必須)。build only は
+          # `-E 'none()' --no-tests=pass` で「全 binary を build して 0 本実行」に
+          # する (旧 --ignore-run-fail 方式は postgres service が無いため DB 系
+          # テスト 1 本ごとに接続 timeout 30s を直列に浪費し、warm job が 60 分級に
+          # なっていた。cache に要るのは build 成果物だけで実行は不要)。
+          - { name: "test-shared", key: "test-shared", cmd: "cargo llvm-cov nextest --no-report --workspace --all-targets -E 'none()' --no-tests=pass" }
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.92.0
