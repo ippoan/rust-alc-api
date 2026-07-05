@@ -557,11 +557,14 @@ async fn create_ticket_with_initial_state() {
 #[tokio::test]
 async fn create_ticket_with_webhook() {
     let webhook_mock = Arc::new(crate::mock_helpers::webhook::MockWebhookService::default());
-    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
-    state.webhook = Some(webhook_mock.clone());
-    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    // trouble handler は TroubleState.webhook を見る (Refs #513 Phase B)
+    let mut trouble_state = crate::mock_helpers::app_state::setup_mock_trouble_state();
+    trouble_state.webhook = Some(webhook_mock.clone());
+    let base =
+        crate::mock_helpers::app_state::spawn_mock_server_with_trouble(state, trouble_state).await;
     let auth = format!("Bearer {jwt}");
 
     let res = client()
@@ -593,12 +596,13 @@ async fn transition_ticket_with_webhook() {
         .store(true, std::sync::atomic::Ordering::SeqCst);
     let webhook_mock = Arc::new(crate::mock_helpers::webhook::MockWebhookService::default());
 
-    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let mut trouble_state = crate::mock_helpers::app_state::setup_mock_trouble_state();
     trouble_state.trouble_tickets = tickets_mock;
-    state.webhook = Some(webhook_mock.clone());
+    // trouble handler は TroubleState.webhook を見る (Refs #513 Phase B)
+    trouble_state.webhook = Some(webhook_mock.clone());
     let base =
         crate::mock_helpers::app_state::spawn_mock_server_with_trouble(state, trouble_state).await;
     let auth = format!("Bearer {jwt}");
