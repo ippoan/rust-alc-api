@@ -1,5 +1,8 @@
 name: CI
 
+# CI パフォーマンス (job 時間の実測ベースライン・改善履歴・実測済み失敗パターン) は
+# docs/ci-performance.md に記録している。CI 高速化の施策を追加/revert する前に必読、
+# 実施後は同 doc に実測を追記すること。
 on:
   push:
     branches: [main]
@@ -464,6 +467,7 @@ jobs:
       #     60s の正体はダウンロードではなく repo rule 実行 + loading/analysis の
       #     CPU 処理で、cache では削れない
       # (4) restore/save 試行のオーバーヘッドで job が 139s → 201s に悪化
+      # 実測の詳細と他の施策履歴: docs/ci-performance.md
       - uses: ippoan/setup-bazel@main
         with:
           disk-cache: "bazel-${{ matrix.name }}"
