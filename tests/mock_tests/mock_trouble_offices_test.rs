@@ -20,11 +20,13 @@ async fn setup_failing() -> (String, String) {
     let mock = Arc::new(MockTroubleOfficesRepository::default());
     mock.fail_next
         .store(true, std::sync::atomic::Ordering::SeqCst);
-    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
-    state.trouble_offices = mock;
-    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let mut trouble_state = crate::mock_helpers::app_state::setup_mock_trouble_state();
+    trouble_state.trouble_offices = mock;
+    let base =
+        crate::mock_helpers::app_state::spawn_mock_server_with_trouble(state, trouble_state).await;
     let auth = format!("Bearer {jwt}");
     (base, auth)
 }
@@ -138,11 +140,13 @@ async fn delete_office_not_found() {
     let mock = Arc::new(MockTroubleOfficesRepository::default());
     mock.delete_returns_false
         .store(true, std::sync::atomic::Ordering::SeqCst);
-    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
-    state.trouble_offices = mock;
-    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let mut trouble_state = crate::mock_helpers::app_state::setup_mock_trouble_state();
+    trouble_state.trouble_offices = mock;
+    let base =
+        crate::mock_helpers::app_state::spawn_mock_server_with_trouble(state, trouble_state).await;
     let auth = format!("Bearer {jwt}");
 
     let id = Uuid::new_v4();
@@ -160,11 +164,13 @@ async fn delete_office_db_error() {
     let mock = Arc::new(MockTroubleOfficesRepository::default());
     mock.fail_next
         .store(true, std::sync::atomic::Ordering::SeqCst);
-    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
-    state.trouble_offices = mock;
-    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let mut trouble_state = crate::mock_helpers::app_state::setup_mock_trouble_state();
+    trouble_state.trouble_offices = mock;
+    let base =
+        crate::mock_helpers::app_state::spawn_mock_server_with_trouble(state, trouble_state).await;
     let auth = format!("Bearer {jwt}");
 
     let id = Uuid::new_v4();
@@ -196,11 +202,13 @@ async fn update_office_sort_order_success() {
         });
     }
 
-    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
-    state.trouble_offices = offices_mock;
-    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let mut trouble_state = crate::mock_helpers::app_state::setup_mock_trouble_state();
+    trouble_state.trouble_offices = offices_mock;
+    let base =
+        crate::mock_helpers::app_state::spawn_mock_server_with_trouble(state, trouble_state).await;
     let auth = format!("Bearer {jwt}");
 
     let res = client()

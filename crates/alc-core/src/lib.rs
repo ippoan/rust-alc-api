@@ -35,11 +35,7 @@ use repository::{
     GuidanceRecordsRepository, ItemFilesRepository, ItemsRepository, LineworksChannelsRepository,
     MeasurementsRepository, NfcTagRepository, NotifyDeliveryRepository, NotifyDocumentRepository,
     NotifyGroupRepository, NotifyLineConfigRepository, NotifyRecipientRepository,
-    SsoAdminRepository, TenantUsersRepository, TimecardRepository, TroubleCategoriesRepository,
-    TroubleFieldLayoutsRepository, TroubleFilesRepository, TroubleNotificationPrefsRepository,
-    TroubleOfficesRepository, TroubleProgressStatusesRepository, TroubleSchedulesRepository,
-    TroubleTaskStatusesRepository, TroubleTaskTypesRepository, TroubleTasksRepository,
-    TroubleTicketsRepository, TroubleWorkflowRepository, VehicleSettingsDumpsRepository,
+    SsoAdminRepository, TenantUsersRepository, TimecardRepository, VehicleSettingsDumpsRepository,
 };
 use storage::StorageBackend;
 
@@ -101,19 +97,6 @@ pub struct AppState {
     /// にも使える。env vars 未設定なら None で no-op (POST /jobs 系は 503 返却で
     /// 検知すること、silent に compute しないため)。
     pub realtime_bus: Option<Arc<realtime_bus::RealtimeBus>>,
-    pub trouble_tickets: Arc<dyn TroubleTicketsRepository>,
-    pub trouble_files: Arc<dyn TroubleFilesRepository>,
-    pub trouble_workflow: Arc<dyn TroubleWorkflowRepository>,
-    pub trouble_categories: Arc<dyn TroubleCategoriesRepository>,
-    pub trouble_offices: Arc<dyn TroubleOfficesRepository>,
-    pub trouble_progress_statuses: Arc<dyn TroubleProgressStatusesRepository>,
-    pub trouble_notification_prefs: Arc<dyn TroubleNotificationPrefsRepository>,
-    pub trouble_schedules: Arc<dyn TroubleSchedulesRepository>,
-    pub trouble_tasks: Arc<dyn TroubleTasksRepository>,
-    pub trouble_task_types: Arc<dyn TroubleTaskTypesRepository>,
-    pub trouble_task_statuses: Arc<dyn TroubleTaskStatusesRepository>,
-    pub trouble_field_layouts: Arc<dyn TroubleFieldLayoutsRepository>,
-    pub trouble_storage: Option<Arc<dyn StorageBackend>>,
     /// kiosk 端末 re-pair (再認証) 用、auth-worker `/device/pair-internal` 呼び出し
     /// クライアント (Refs #495)。`AUTH_WORKER_URL` / `INTERNAL_SHARED_SECRET`
     /// が未設定なら None (re-pair endpoint は 404 で "not configured" を表す)。

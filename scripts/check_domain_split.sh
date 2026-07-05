@@ -58,10 +58,20 @@ guard_model_structs tenko "crates/alc-tenko/src/models.rs" \
 guard_appstate_fields tenko "alc_tenko::TenkoState" \
   'tenko_call|tenko_records|tenko_schedules|tenko_sessions|tenko_webhooks|daily_health|health_baselines|equipment_failures|driver_info'
 
-# --- (Phase B 以降はここに追記: trouble / dtako / notify / carins) ---
+# --- trouble (Phase B) ---
+guard_repository_modules trouble "crates/alc-trouble/src/repository/" \
+  trouble_tickets trouble_files trouble_workflow trouble_categories trouble_offices \
+  trouble_progress_statuses trouble_notification_prefs trouble_schedules trouble_tasks \
+  trouble_task_types trouble_task_statuses trouble_field_layouts
+guard_model_structs trouble "crates/alc-trouble/src/models.rs" \
+  'Trouble|CreateTrouble|UpdateTrouble|CreateWorkflowState|CreateWorkflowTransition|TransitionRequest|CreateCustomFieldDef|UpsertNotificationPref'
+guard_appstate_fields trouble "alc_trouble::TroubleState" \
+  'trouble_tickets|trouble_files|trouble_workflow|trouble_categories|trouble_offices|trouble_progress_statuses|trouble_notification_prefs|trouble_schedules|trouble_tasks|trouble_task_types|trouble_task_statuses|trouble_field_layouts|trouble_storage'
+
+# --- (Phase C 以降はここに追記: dtako / notify / carins) ---
 
 if [ "$fail" != 0 ]; then
   echo "::error::domain split guard failed — ドメインコードは alc-core ではなく各ドメイン crate に追加してください (設計: issue #513)"
   exit 1
 fi
-echo "domain split guard OK (tenko)"
+echo "domain split guard OK (tenko, trouble)"

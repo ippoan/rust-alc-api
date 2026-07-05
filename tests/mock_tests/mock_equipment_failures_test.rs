@@ -15,7 +15,9 @@ async fn setup() -> (String, String) {
     let tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
-    let base = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+    let base =
+        crate::mock_helpers::app_state::spawn_mock_server_with_tenko(state, tenko_state.clone())
+            .await;
     let auth = format!("Bearer {jwt}");
     (base, auth)
 }
@@ -27,7 +29,9 @@ async fn setup_with_mock(mock: Arc<MockEquipmentFailuresRepository>) -> (String,
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     tenko_state.equipment_failures = mock;
-    let base = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+    let base =
+        crate::mock_helpers::app_state::spawn_mock_server_with_tenko(state, tenko_state.clone())
+            .await;
     let auth = format!("Bearer {jwt}");
     (base, auth)
 }
@@ -59,7 +63,9 @@ async fn setup_failing() -> (String, String) {
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     tenko_state.equipment_failures = mock;
-    let base = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+    let base =
+        crate::mock_helpers::app_state::spawn_mock_server_with_tenko(state, tenko_state.clone())
+            .await;
     let auth = format!("Bearer {jwt}");
     (base, auth)
 }

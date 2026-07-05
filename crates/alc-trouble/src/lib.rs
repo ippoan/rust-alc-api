@@ -3,11 +3,13 @@ pub mod cloud_tasks;
 pub mod field_layouts;
 pub mod files;
 pub mod lineworks_members;
+pub mod models;
 pub mod notifications;
 pub mod notifier;
 pub mod offices;
 pub mod progress_statuses;
 pub mod repo;
+pub mod repository;
 pub mod schedules;
 pub mod task_statuses;
 pub mod task_types;
@@ -38,9 +40,11 @@ pub const DEFAULT_TASK_TYPES: &[&str] = &[
 
 use std::sync::Arc;
 
-use alc_core::repository::{
-    EmployeeRepository, TroubleCategoriesRepository, TroubleFieldLayoutsRepository,
-    TroubleFilesRepository, TroubleNotificationPrefsRepository, TroubleOfficesRepository,
+use alc_core::repository::EmployeeRepository;
+
+use crate::repository::{
+    TroubleCategoriesRepository, TroubleFieldLayoutsRepository, TroubleFilesRepository,
+    TroubleNotificationPrefsRepository, TroubleOfficesRepository,
     TroubleProgressStatusesRepository, TroubleSchedulesRepository, TroubleTaskStatusesRepository,
     TroubleTaskTypesRepository, TroubleTasksRepository, TroubleTicketsRepository,
     TroubleWorkflowRepository,
@@ -72,28 +76,4 @@ pub struct TroubleState {
     pub cloud_tasks: Option<Arc<dyn CloudTasksClient>>,
     pub notifier: Option<Arc<dyn TroubleNotifier>>,
     pub employees: Option<Arc<dyn EmployeeRepository>>,
-}
-
-impl axum::extract::FromRef<alc_core::AppState> for TroubleState {
-    fn from_ref(state: &alc_core::AppState) -> Self {
-        Self {
-            trouble_tickets: state.trouble_tickets.clone(),
-            trouble_files: state.trouble_files.clone(),
-            trouble_workflow: state.trouble_workflow.clone(),
-            trouble_categories: state.trouble_categories.clone(),
-            trouble_offices: state.trouble_offices.clone(),
-            trouble_progress_statuses: state.trouble_progress_statuses.clone(),
-            trouble_notification_prefs: state.trouble_notification_prefs.clone(),
-            trouble_schedules: state.trouble_schedules.clone(),
-            trouble_tasks: state.trouble_tasks.clone(),
-            trouble_task_types: state.trouble_task_types.clone(),
-            trouble_task_statuses: state.trouble_task_statuses.clone(),
-            trouble_field_layouts: state.trouble_field_layouts.clone(),
-            trouble_storage: state.trouble_storage.clone(),
-            webhook: state.webhook.clone(),
-            cloud_tasks: None,
-            notifier: None,
-            employees: Some(state.employees.clone()),
-        }
-    }
 }

@@ -93,6 +93,7 @@ pub fn internal_oidc_trust() -> InternalOidcTrust {
 pub fn router(
     internal_oidc: InternalOidcTrust,
     tenko_state: alc_tenko::TenkoState,
+    trouble_state: alc_trouble::TroubleState,
 ) -> Router<AppState> {
     // 管理者ルート — 注入 identity (X-User-*) を信頼 (Refs #434)。
     // 前段 proxy / gateway が introspect 検証済みの identity を注入する前提。
@@ -112,7 +113,7 @@ pub fn router(
         .merge(notify_lineworks_channels::internal_router())
         .merge(notify_viewer::internal_router())
         .merge(notify_line_webhook::internal_router())
-        .merge(trouble_schedules::internal_fire_router())
+        .merge(trouble_schedules::internal_fire_router().with_state(trouble_state.clone()))
         .merge(auth::internal_router())
         .layer(axum_middleware::from_fn(require_internal_jwt))
         // OIDC 検証設定 (Refs #479 — HS256 dual-accept 撤去で OIDC 一本化)。
@@ -163,19 +164,6 @@ pub fn router(
         .merge(notify_email_documents::tenant_router())
         .merge(notify_test_endpoints::tenant_router())
         .merge(notify_line_config::tenant_router())
-        .merge(trouble_tickets::tenant_router())
-        .merge(trouble_files::tenant_router())
-        .merge(trouble_workflow::tenant_router())
-        .merge(trouble_categories::tenant_router())
-        .merge(trouble_offices::tenant_router())
-        .merge(trouble_progress_statuses::tenant_router())
-        .merge(trouble_notifications::tenant_router())
-        .merge(trouble_schedules::tenant_router())
-        .merge(trouble_tasks::tenant_router())
-        .merge(trouble_task_types::tenant_router())
-        .merge(trouble_task_statuses::tenant_router())
-        .merge(trouble_field_layouts::tenant_router())
-        .merge(trouble_lineworks_members::tenant_router())
         .layer(axum_middleware::from_fn(require_tenant_header));
 
     // 公開ルート (認証不要)。旧ログイン経路 (auth::public_router = Google /
@@ -210,6 +198,25 @@ pub fn router(
         .with_state(tenko_state.clone());
     let tenko_public: Router<AppState> = tenko_call::public_router().with_state(tenko_state);
 
+    // trouble ドメイン (Refs #513 Phase B) — AppState から分離した TroubleState で
+    // マウントする。tenant 系ルートには monolith 本体と同じ require_tenant_header を張る。
+    let trouble_tenant: Router<AppState> = Router::new()
+        .merge(trouble_tickets::tenant_router())
+        .merge(trouble_files::tenant_router())
+        .merge(trouble_workflow::tenant_router())
+        .merge(trouble_categories::tenant_router())
+        .merge(trouble_offices::tenant_router())
+        .merge(trouble_progress_statuses::tenant_router())
+        .merge(trouble_notifications::tenant_router())
+        .merge(trouble_schedules::tenant_router())
+        .merge(trouble_tasks::tenant_router())
+        .merge(trouble_task_types::tenant_router())
+        .merge(trouble_task_statuses::tenant_router())
+        .merge(trouble_field_layouts::tenant_router())
+        .merge(trouble_lineworks_members::tenant_router())
+        .layer(axum_middleware::from_fn(require_tenant_header))
+        .with_state(trouble_state);
+
     Router::new()
         .merge(public_routes)
         .merge(tenko_public)
@@ -217,6 +224,7 @@ pub fn router(
         .merge(internal_protected)
         .merge(tenant_protected)
         .merge(tenko_tenant)
+        .merge(trouble_tenant)
 }
 
 /// email-receiver Worker から `POST /api/dtako/tickets` を受ける internal ingest

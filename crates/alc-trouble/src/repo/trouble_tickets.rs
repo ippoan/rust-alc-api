@@ -2,13 +2,13 @@ use async_trait::async_trait;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use alc_core::models::{
+use crate::models::{
     CreateTroubleTicket, TroubleTicket, TroubleTicketFilter, TroubleTicketsResponse,
     UpdateTroubleTicket,
 };
 use alc_core::tenant::TenantConn;
 
-pub use alc_core::repository::trouble_tickets::*;
+pub use crate::repository::trouble_tickets::*;
 
 pub struct PgTroubleTicketsRepository {
     pool: PgPool,

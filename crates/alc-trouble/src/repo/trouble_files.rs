@@ -2,10 +2,10 @@ use async_trait::async_trait;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use alc_core::models::TroubleFile;
+use crate::models::TroubleFile;
 use alc_core::tenant::TenantConn;
 
-pub use alc_core::repository::trouble_files::*;
+pub use crate::repository::trouble_files::*;
 
 pub struct PgTroubleFilesRepository {
     pool: PgPool,

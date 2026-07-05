@@ -3,10 +3,10 @@ use sqlx::types::Json;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use alc_core::models::{TroubleFieldLayout, TroubleFieldLayoutEntry};
+use crate::models::{TroubleFieldLayout, TroubleFieldLayoutEntry};
 use alc_core::tenant::TenantConn;
 
-pub use alc_core::repository::trouble_field_layouts::*;
+pub use crate::repository::trouble_field_layouts::*;
 
 pub struct PgTroubleFieldLayoutsRepository {
     pool: PgPool,

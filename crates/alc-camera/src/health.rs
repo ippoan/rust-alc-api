@@ -1,21 +1,48 @@
-//! ヘルスログ記録 + 連続失敗判定 → alc-trouble 自動起票 usecase (Refs #345)。
+//! ヘルスログ記録 + 連続失敗判定 → 障害自動起票 usecase (Refs #345)。
 //!
 //! Cloud Run の CPU throttling 対策として `tokio::spawn` の background 化はせず、
 //! health-log POST のリクエスト内で同期的に判定・起票する (1 query 数件で軽量)。
+//!
+//! 起票先は camera 所有の port [`DownTicketSink`] に抽象化しており、alc-trouble の
+//! 型には一切依存しない (Refs #513 Phase B)。trouble への配線 (adapter) は binary
+//! (alc-camera-api) 側が持つ。
 
+use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use alc_core::models::CreateTroubleTicket;
 use alc_core::repository::cameras::{CameraHealthLog, CreateCameraHealthLog};
-use alc_core::repository::{CamerasRepository, TroubleTicketsRepository};
+use alc_core::repository::CamerasRepository;
 
-/// camera の障害自動起票で使う trouble category。
-const CAMERA_TROUBLE_CATEGORY: &str = "その他";
+/// camera 障害起票のペイロード (camera 所有、trouble の型に依存しない)。
+/// trouble 側のフィールド (category / custom_fields マーカー等) への写像は
+/// adapter (binary 側) の責務。
+#[derive(Debug, Clone)]
+pub struct CameraDownTicket {
+    pub title: String,
+    pub description: String,
+    /// 現状はカメラ IP を入れる (trouble の location に写像される)。
+    pub location: String,
+    pub occurred_at: DateTime<Utc>,
+    /// 自動起票の出所識別用 (adapter が custom_fields マーカーに写像する)。
+    pub camera_id: Uuid,
+}
+
+/// camera 所有の起票 port。実装 (adapter) は binary 側で trouble に配線する。
+#[async_trait]
+pub trait DownTicketSink: Send + Sync {
+    /// 起票して発行された ticket id を返す。
+    async fn open_down_ticket(
+        &self,
+        tenant_id: Uuid,
+        ticket: CameraDownTicket,
+    ) -> Result<Uuid, sqlx::Error>;
+}
 
 /// ヘルスログを 1 件記録し、必要なら障害の自動起票 / 復旧リンク解除を行う。
 ///
 /// - `alive == false` が連続 `down_threshold` 回続き、かつ未解決の自動 ticket が
-///   無ければ alc-trouble に起票して `cameras.active_down_ticket_id` にリンクする。
+///   無ければ起票して `cameras.active_down_ticket_id` にリンクする。
 /// - `alive == true` (復旧) でリンクがあればリンクをクリアする (ticket は自動
 ///   クローズせず手動クローズに委ねる)。
 ///
@@ -23,7 +50,7 @@ const CAMERA_TROUBLE_CATEGORY: &str = "その他";
 /// (監視ログの欠損を避けるため、副作用の失敗は warning に留める)。
 pub async fn record_health_and_maybe_ticket(
     cameras: &dyn CamerasRepository,
-    tickets: &dyn TroubleTicketsRepository,
+    tickets: &dyn DownTicketSink,
     tenant_id: Uuid,
     camera_id: Uuid,
     input: &CreateCameraHealthLog,
@@ -72,15 +99,15 @@ pub async fn record_health_and_maybe_ticket(
     }
 
     let ticket_input = build_camera_down_ticket(&camera.name, &camera.ip, camera_id, &log);
-    match tickets.create(tenant_id, &ticket_input, None, None).await {
-        Ok(ticket) => {
+    match tickets.open_down_ticket(tenant_id, ticket_input).await {
+        Ok(ticket_id) => {
             if let Err(e) = cameras
-                .set_active_down_ticket(tenant_id, camera_id, Some(ticket.id))
+                .set_active_down_ticket(tenant_id, camera_id, Some(ticket_id))
                 .await
             {
                 tracing::warn!(
                     camera_id = %camera_id,
-                    ticket_id = %ticket.id,
+                    ticket_id = %ticket_id,
                     error = %e,
                     "auto-ticketed camera down but failed to link active_down_ticket"
                 );
@@ -88,7 +115,7 @@ pub async fn record_health_and_maybe_ticket(
             tracing::info!(
                 camera_id = %camera_id,
                 tenant_id = %tenant_id,
-                ticket_id = %ticket.id,
+                ticket_id = %ticket_id,
                 "camera down auto-ticketed"
             );
         }
@@ -105,13 +132,13 @@ pub async fn record_health_and_maybe_ticket(
     Ok(log)
 }
 
-/// 自動起票する trouble ticket のペイロードを組み立てる (純粋関数、テスト容易)。
+/// 自動起票するペイロードを組み立てる (純粋関数、テスト容易)。
 pub fn build_camera_down_ticket(
     camera_name: &str,
     camera_ip: &str,
     camera_id: Uuid,
     log: &CameraHealthLog,
-) -> CreateTroubleTicket {
+) -> CameraDownTicket {
     let title = format!("監視カメラ異常: {camera_name}");
     let description = format!(
         "監視カメラ「{name}」({ip}) が連続して応答しません。\n直近エラー: {err}",
@@ -119,32 +146,12 @@ pub fn build_camera_down_ticket(
         ip = camera_ip,
         err = log.error.as_deref().unwrap_or("(なし)"),
     );
-    CreateTroubleTicket {
-        category: CAMERA_TROUBLE_CATEGORY.to_string(),
-        title: Some(title),
-        occurred_at: Some(log.checked_at),
-        occurred_date: None,
-        company_name: None,
-        office_name: None,
-        department: None,
-        person_name: None,
-        person_id: None,
-        person_is_external: None,
-        registration_number: None,
-        location: Some(camera_ip.to_string()),
-        description: Some(description),
-        assigned_to: None,
-        damage_amount: None,
-        compensation_amount: None,
-        road_service_cost: None,
-        counterparty: None,
-        counterparty_insurance: None,
-        // 自動起票である事を識別するマーカー (UI の出所表示 / 集計用)。
-        custom_fields: Some(serde_json::json!({
-            "source": "camera_auto",
-            "camera_id": camera_id,
-        })),
-        due_date: None,
+    CameraDownTicket {
+        title,
+        description,
+        location: camera_ip.to_string(),
+        occurred_at: log.checked_at,
+        camera_id,
     }
 }
 
@@ -166,23 +173,21 @@ mod tests {
     }
 
     #[test]
-    fn build_ticket_sets_camera_auto_marker_and_title() {
+    fn build_ticket_sets_title_and_location() {
         let cid = Uuid::new_v4();
         let log = log_fixture(false, Some("timeout"));
         let t = build_camera_down_ticket("正門", "192.168.1.10", cid, &log);
-        assert_eq!(t.category, "その他");
-        assert_eq!(t.title.as_deref(), Some("監視カメラ異常: 正門"));
-        assert_eq!(t.location.as_deref(), Some("192.168.1.10"));
-        assert!(t.description.as_deref().unwrap().contains("timeout"));
-        let cf = t.custom_fields.unwrap();
-        assert_eq!(cf["source"], "camera_auto");
-        assert_eq!(cf["camera_id"], serde_json::json!(cid));
+        assert_eq!(t.title, "監視カメラ異常: 正門");
+        assert_eq!(t.location, "192.168.1.10");
+        assert!(t.description.contains("timeout"));
+        assert_eq!(t.camera_id, cid);
+        assert_eq!(t.occurred_at, log.checked_at);
     }
 
     #[test]
     fn build_ticket_handles_missing_error() {
         let log = log_fixture(false, None);
         let t = build_camera_down_ticket("裏口", "10.0.0.2", Uuid::new_v4(), &log);
-        assert!(t.description.as_deref().unwrap().contains("(なし)"));
+        assert!(t.description.contains("(なし)"));
     }
 }

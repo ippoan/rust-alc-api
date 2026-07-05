@@ -128,7 +128,7 @@ async fn create_health_log(
     }
     crate::health::record_health_and_maybe_ticket(
         state.cameras.as_ref(),
-        state.trouble_tickets.as_ref(),
+        state.down_ticket_sink.as_ref(),
         tenant_id,
         id,
         &body,

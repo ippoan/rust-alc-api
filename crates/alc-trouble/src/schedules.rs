@@ -6,9 +6,9 @@ use axum::{
 };
 use uuid::Uuid;
 
+use crate::models::{CreateTroubleSchedule, TroubleSchedule};
 use crate::TroubleState;
 use alc_core::auth_middleware::TenantId;
-use alc_core::models::{CreateTroubleSchedule, TroubleSchedule};
 
 pub fn tenant_router<S>() -> Router<S>
 where

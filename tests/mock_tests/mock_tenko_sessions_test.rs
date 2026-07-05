@@ -14,7 +14,9 @@ async fn setup() -> (String, String, uuid::Uuid) {
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
     let tenant_id = uuid::Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+    let base_url =
+        crate::mock_helpers::app_state::spawn_mock_server_with_tenko(state, tenko_state.clone())
+            .await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let auth_header = format!("Bearer {jwt}");
     (base_url, auth_header, tenant_id)
@@ -26,7 +28,9 @@ async fn setup_with_mock(mock: Arc<MockTenkoSessionRepository>) -> (String, Stri
     let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
     tenko_state.tenko_sessions = mock;
     let tenant_id = uuid::Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+    let base_url =
+        crate::mock_helpers::app_state::spawn_mock_server_with_tenko(state, tenko_state.clone())
+            .await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let auth_header = format!("Bearer {jwt}");
     (base_url, auth_header, tenant_id)
@@ -41,7 +45,9 @@ async fn setup_with_mock_and_user(
     tenko_state.tenko_sessions = mock;
     let tenant_id = uuid::Uuid::new_v4();
     let user_id = uuid::Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+    let base_url =
+        crate::mock_helpers::app_state::spawn_mock_server_with_tenko(state, tenko_state.clone())
+            .await;
     let jwt =
         crate::common::create_test_jwt_for_user(user_id, tenant_id, "test@example.com", "admin");
     let auth_header = format!("Bearer {jwt}");
@@ -56,7 +62,9 @@ async fn setup_failing() -> (String, String) {
     let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
     tenko_state.tenko_sessions = mock;
     let tenant_id = uuid::Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+    let base_url =
+        crate::mock_helpers::app_state::spawn_mock_server_with_tenko(state, tenko_state.clone())
+            .await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let auth_header = format!("Bearer {jwt}");
     (base_url, auth_header)
@@ -1654,7 +1662,9 @@ async fn test_resume_session_db_error() {
     tenko_state.tenko_sessions = mock;
     let tenant_id = uuid::Uuid::new_v4();
     let user_id = uuid::Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+    let base_url =
+        crate::mock_helpers::app_state::spawn_mock_server_with_tenko(state, tenko_state.clone())
+            .await;
     let jwt =
         crate::common::create_test_jwt_for_user(user_id, tenant_id, "test@example.com", "admin");
     let auth_header = format!("Bearer {jwt}");
@@ -1891,7 +1901,9 @@ async fn setup_with_update_failing(status: &str, tenko_type: &str) -> (String, S
     let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
     tenko_state.tenko_sessions = mock;
     let tenant_id = uuid::Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+    let base_url =
+        crate::mock_helpers::app_state::spawn_mock_server_with_tenko(state, tenko_state.clone())
+            .await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let auth_header = format!("Bearer {jwt}");
     (base_url, auth_header)
@@ -1907,7 +1919,9 @@ async fn setup_with_update_failing_user(status: &str, tenko_type: &str) -> (Stri
     tenko_state.tenko_sessions = mock;
     let tenant_id = uuid::Uuid::new_v4();
     let user_id = uuid::Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+    let base_url =
+        crate::mock_helpers::app_state::spawn_mock_server_with_tenko(state, tenko_state.clone())
+            .await;
     let jwt =
         crate::common::create_test_jwt_for_user(user_id, tenant_id, "test@example.com", "admin");
     let auth_header = format!("Bearer {jwt}");
@@ -1930,7 +1944,9 @@ async fn test_start_session_create_session_db_error() {
     let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
     tenko_state.tenko_sessions = mock;
     let tenant_id = uuid::Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+    let base_url =
+        crate::mock_helpers::app_state::spawn_mock_server_with_tenko(state, tenko_state.clone())
+            .await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let auth_header = format!("Bearer {jwt}");
 
@@ -1957,7 +1973,9 @@ async fn test_start_session_no_schedule_create_db_error() {
     let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
     tenko_state.tenko_sessions = mock;
     let tenant_id = uuid::Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+    let base_url =
+        crate::mock_helpers::app_state::spawn_mock_server_with_tenko(state, tenko_state.clone())
+            .await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let auth_header = format!("Bearer {jwt}");
 
@@ -2820,7 +2838,9 @@ async fn setup_with_webhook(mock: Arc<MockTenkoSessionRepository>) -> (String, S
         crate::mock_helpers::webhook::MockWebhookService::default(),
     ));
     let tenant_id = uuid::Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+    let base_url =
+        crate::mock_helpers::app_state::spawn_mock_server_with_tenko(state, tenko_state.clone())
+            .await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let auth_header = format!("Bearer {jwt}");
     (base_url, auth_header, tenant_id)

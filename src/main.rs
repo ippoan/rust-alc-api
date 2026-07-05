@@ -317,6 +317,27 @@ async fn main() -> anyhow::Result<()> {
         webhook: webhook_service.clone(),
     };
 
+    // trouble ドメイン (Refs #513 Phase B) — AppState から分離した TroubleState。
+    let trouble_state = alc_trouble::TroubleState {
+        trouble_tickets,
+        trouble_files,
+        trouble_workflow,
+        trouble_categories,
+        trouble_offices,
+        trouble_progress_statuses,
+        trouble_notification_prefs,
+        trouble_schedules,
+        trouble_tasks,
+        trouble_task_types,
+        trouble_task_statuses,
+        trouble_field_layouts,
+        trouble_storage,
+        webhook: webhook_service.clone(),
+        cloud_tasks: None,
+        notifier: None,
+        employees: Some(employees.clone()),
+    };
+
     let state = AppState {
         pool: Some(pool.clone()),
         api_tokens,
@@ -364,19 +385,6 @@ async fn main() -> anyhow::Result<()> {
         notify_storage,
         redact_broadcaster: alc_core::redact_broadcast::RedactBroadcaster::from_env().map(Arc::new),
         realtime_bus: alc_core::realtime_bus::RealtimeBus::from_env().map(Arc::new),
-        trouble_tickets,
-        trouble_files,
-        trouble_workflow,
-        trouble_categories,
-        trouble_offices,
-        trouble_progress_statuses,
-        trouble_notification_prefs,
-        trouble_schedules,
-        trouble_tasks,
-        trouble_task_types,
-        trouble_task_statuses,
-        trouble_field_layouts,
-        trouble_storage,
         device_pair_client: rust_alc_api::device_pair_client::HttpDevicePairClient::from_env()
             .map(|c| Arc::new(c) as Arc<dyn rust_alc_api::device_pair_client::DevicePairClient>),
         webhook: webhook_service,
@@ -465,11 +473,14 @@ async fn main() -> anyhow::Result<()> {
             "INTERNAL_SHARED_SECRET not set; /api/dtako/tickets internal routes are disabled"
         );
     }
-    let api_router =
-        rust_alc_api::routes::router(rust_alc_api::routes::internal_oidc_trust(), tenko_state)
-            .merge(rust_alc_api::routes::internal_shared_secret_router(
-                internal_secret,
-            ));
+    let api_router = rust_alc_api::routes::router(
+        rust_alc_api::routes::internal_oidc_trust(),
+        tenko_state,
+        trouble_state,
+    )
+    .merge(rust_alc_api::routes::internal_shared_secret_router(
+        internal_secret,
+    ));
 
     let app = Router::new()
         .nest("/api", api_router)

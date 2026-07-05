@@ -6,9 +6,9 @@ use axum::{
 };
 use uuid::Uuid;
 
+use crate::models::{CreateTroubleTaskStatus, TroubleTaskStatus, UpdateTroubleTaskStatus};
 use crate::TroubleState;
 use alc_core::auth_middleware::TenantId;
-use alc_core::models::{CreateTroubleTaskStatus, TroubleTaskStatus, UpdateTroubleTaskStatus};
 
 /// Default seed used when a tenant has no task statuses yet
 /// (mirrors migrations/098). Also used for GET fallback seeding.

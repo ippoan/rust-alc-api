@@ -22,11 +22,13 @@ async fn setup_failing_files() -> (String, String) {
     let mock = Arc::new(MockTroubleFilesRepository::default());
     mock.fail_next
         .store(true, std::sync::atomic::Ordering::SeqCst);
-    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
-    state.trouble_files = mock;
-    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let mut trouble_state = crate::mock_helpers::app_state::setup_mock_trouble_state();
+    trouble_state.trouble_files = mock;
+    let base =
+        crate::mock_helpers::app_state::spawn_mock_server_with_trouble(state, trouble_state).await;
     let auth = format!("Bearer {jwt}");
     (base, auth)
 }
@@ -36,11 +38,13 @@ async fn setup_with_storage() -> (String, String) {
     tickets_mock
         .return_some
         .store(true, std::sync::atomic::Ordering::SeqCst);
-    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
-    state.trouble_tickets = tickets_mock;
-    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let mut trouble_state = crate::mock_helpers::app_state::setup_mock_trouble_state();
+    trouble_state.trouble_tickets = tickets_mock;
+    let base =
+        crate::mock_helpers::app_state::spawn_mock_server_with_trouble(state, trouble_state).await;
     let auth = format!("Bearer {jwt}");
     (base, auth)
 }
@@ -103,11 +107,13 @@ async fn delete_file_not_found() {
     let mock = Arc::new(MockTroubleFilesRepository::default());
     mock.delete_returns_false
         .store(true, std::sync::atomic::Ordering::SeqCst);
-    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
-    state.trouble_files = mock;
-    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let mut trouble_state = crate::mock_helpers::app_state::setup_mock_trouble_state();
+    trouble_state.trouble_files = mock;
+    let base =
+        crate::mock_helpers::app_state::spawn_mock_server_with_trouble(state, trouble_state).await;
     let auth = format!("Bearer {jwt}");
 
     let file_id = Uuid::new_v4();
@@ -222,12 +228,14 @@ async fn upload_file_no_storage() {
     tickets_mock
         .return_some
         .store(true, std::sync::atomic::Ordering::SeqCst);
-    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
-    state.trouble_tickets = tickets_mock;
-    state.trouble_storage = None;
-    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let mut trouble_state = crate::mock_helpers::app_state::setup_mock_trouble_state();
+    trouble_state.trouble_tickets = tickets_mock;
+    trouble_state.trouble_storage = None;
+    let base =
+        crate::mock_helpers::app_state::spawn_mock_server_with_trouble(state, trouble_state).await;
     let auth = format!("Bearer {jwt}");
 
     let ticket_id = Uuid::new_v4();
@@ -251,11 +259,13 @@ async fn upload_file_no_storage() {
 #[tokio::test]
 async fn download_file_no_storage() {
     // trouble_storage is None, but get() returns None first => 404
-    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
-    state.trouble_storage = None;
-    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let mut trouble_state = crate::mock_helpers::app_state::setup_mock_trouble_state();
+    trouble_state.trouble_storage = None;
+    let base =
+        crate::mock_helpers::app_state::spawn_mock_server_with_trouble(state, trouble_state).await;
     let auth = format!("Bearer {jwt}");
 
     let file_id = Uuid::new_v4();
@@ -285,12 +295,14 @@ async fn download_file_success() {
         .store(true, std::sync::atomic::Ordering::SeqCst);
     *files_mock.storage_key.lock().unwrap() = storage_key.to_string();
 
-    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
-    state.trouble_files = files_mock;
-    state.trouble_storage = Some(storage);
-    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let mut trouble_state = crate::mock_helpers::app_state::setup_mock_trouble_state();
+    trouble_state.trouble_files = files_mock;
+    trouble_state.trouble_storage = Some(storage);
+    let base =
+        crate::mock_helpers::app_state::spawn_mock_server_with_trouble(state, trouble_state).await;
     let auth = format!("Bearer {jwt}");
 
     let file_id = Uuid::new_v4();
@@ -327,12 +339,14 @@ async fn download_file_no_storage_but_file_exists() {
     files_mock
         .return_some
         .store(true, std::sync::atomic::Ordering::SeqCst);
-    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
-    state.trouble_files = files_mock;
-    state.trouble_storage = None;
-    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let mut trouble_state = crate::mock_helpers::app_state::setup_mock_trouble_state();
+    trouble_state.trouble_files = files_mock;
+    trouble_state.trouble_storage = None;
+    let base =
+        crate::mock_helpers::app_state::spawn_mock_server_with_trouble(state, trouble_state).await;
     let auth = format!("Bearer {jwt}");
 
     let file_id = Uuid::new_v4();
@@ -360,12 +374,14 @@ async fn upload_file_db_error_after_upload() {
         .fail_next
         .store(true, std::sync::atomic::Ordering::SeqCst);
 
-    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
-    state.trouble_tickets = tickets_mock;
-    state.trouble_files = files_mock;
-    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let mut trouble_state = crate::mock_helpers::app_state::setup_mock_trouble_state();
+    trouble_state.trouble_tickets = tickets_mock;
+    trouble_state.trouble_files = files_mock;
+    let base =
+        crate::mock_helpers::app_state::spawn_mock_server_with_trouble(state, trouble_state).await;
     let auth = format!("Bearer {jwt}");
 
     let ticket_id = Uuid::new_v4();
@@ -442,11 +458,13 @@ async fn restore_file_not_found() {
     let mock = Arc::new(MockTroubleFilesRepository::default());
     mock.delete_returns_false
         .store(true, std::sync::atomic::Ordering::SeqCst);
-    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
-    state.trouble_files = mock;
-    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let mut trouble_state = crate::mock_helpers::app_state::setup_mock_trouble_state();
+    trouble_state.trouble_files = mock;
+    let base =
+        crate::mock_helpers::app_state::spawn_mock_server_with_trouble(state, trouble_state).await;
     let auth = format!("Bearer {jwt}");
 
     let file_id = Uuid::new_v4();
@@ -487,12 +505,14 @@ async fn download_file_storage_error() {
         .store(true, std::sync::atomic::Ordering::SeqCst);
     *files_mock.storage_key.lock().unwrap() = "nonexistent-key".to_string();
 
-    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
-    state.trouble_files = files_mock;
-    state.trouble_storage = Some(storage);
-    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let mut trouble_state = crate::mock_helpers::app_state::setup_mock_trouble_state();
+    trouble_state.trouble_files = files_mock;
+    trouble_state.trouble_storage = Some(storage);
+    let base =
+        crate::mock_helpers::app_state::spawn_mock_server_with_trouble(state, trouble_state).await;
     let auth = format!("Bearer {jwt}");
 
     let file_id = Uuid::new_v4();
@@ -521,12 +541,14 @@ async fn upload_file_storage_error() {
         .fail_upload
         .store(true, std::sync::atomic::Ordering::SeqCst);
 
-    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
-    state.trouble_tickets = tickets_mock;
-    state.trouble_storage = Some(storage);
-    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let mut trouble_state = crate::mock_helpers::app_state::setup_mock_trouble_state();
+    trouble_state.trouble_tickets = tickets_mock;
+    trouble_state.trouble_storage = Some(storage);
+    let base =
+        crate::mock_helpers::app_state::spawn_mock_server_with_trouble(state, trouble_state).await;
     let auth = format!("Bearer {jwt}");
 
     let ticket_id = Uuid::new_v4();
