@@ -1,6 +1,6 @@
 ---
 name: rust-alc-api-map
-generated-from: rust-alc-api:af2c361d88281e672dfe95d5049843d2cf3b5e60
+generated-from: rust-alc-api:d2959cafbde5c46145dd467eeb65df055bf4e9c7
 paths: [crates/, src/, migrations/]
 description: rust-alc-api (アルコールチェッカー基盤の Rust/Axum Cargo workspace — 13 domain crate + gateway/tenko/carins/dtako/trouble の複数バイナリ、PostgreSQL+RLS、Cloud Run) の構造ナビゲーション。どの crate に何のルートがあるか / monolith(rust-alc-api) と per-domain API + gateway の二系統 / RLS・migration・deploy/release 分離の gotcha を 1 枚にまとめる。トリガー:「rust-alc-api」「alc-api」「alc-notify」「alc-tenko」「alc-trouble」「alc-carins」「alc-dtako」「gateway」「tenko-api」「carins-api」「dtako-api」「trouble-api」「RLS テナント」「sqlx migration」「ts-rs」「Release Wave」「Bazel」等。
 ---
@@ -29,10 +29,10 @@ monolith と per-domain API は同じ domain crate (`alc-tenko` 等) を共有 �
 
 | crate | 役割 / 主要ルート群 |
 |---|---|
-| `alc-core` | 共通基盤: models / repository trait / `auth_middleware` / `realtime_bus` / `redact_broadcast`。ts-rs 型 export 元 |
+| `alc-core` | 共通基盤: **共有** models / **共有** repository trait / `auth_middleware` / `tenant` / `webhook` (generic 配信) / `realtime_bus` / `redact_broadcast`。ts-rs 型 export 元。**tenko ドメインの models/trait は alc-tenko へ分割済み** (Refs #513、再流入は `scripts/check_domain_split.sh` が CI で loud fail) |
 | `alc-auth` | **認証 JWT の発行・検証は auth-worker に完全移管 (#479 PR-3)**。rust に残るのは `internal.rs` の DB プリミティブと me / logout / my_orgs のみ。旧 login/OAuth handler 群 (public_router = Google / LINE / LINE WORKS OAuth / WOFF / password login / refresh / switch-org) は撤去済み。`routes/mod.rs` で `auth` として re-export。`internal.rs` (`internal_router`) は **認証 DB プリミティブを `/api/internal/auth/*` で公開** (sso-config 読み / user upsert-line(works) / **upsert-google** (旧 `/api/auth/google` の tenant 解決 = 招待 → email_domain → STAGING_MODE 自動テナント作成 → 403 を移植) / recipient / refresh-token 保存、`require_internal_jwt` 配下)。token は発行せず user + tenant slug を返すのみで、JWT 組み立ては auth-worker が行う (Refs #434 / #479)。`alc-auth-jwt` leaf crate は `INTERNAL_AUD` 定数のみ残存 |
-| `alc-misc` | health (`/health` + `/health/secret-fingerprint?name=&expected=` = 任意 env の sha256[0..8] と `expected` 突合、`{match: bool}` のみ返し oracle 防止。cross-store drift を CI で自動検出、Refs ippoan/rust-alc-api#424 / ippoan/ci-workflows#131。health_canary = JWT_SECRET drift 検知は #479 PR-3 の JWT_SECRET 全撤去に伴い削除) / measurements / employees / items / api_tokens / sso_admin / tenant_users / timecard / access_requests / staging / upload / bot_admin / driver_info / members / communication_items / carrying_items / guidance_records |
-| `alc-tenko` | 点呼: tenko_call / tenko_records / tenko_schedules / tenko_sessions / tenko_webhooks / daily_health / equipment_failures / health_baselines |
+| `alc-misc` | health (`/health` + `/health/secret-fingerprint?name=&expected=` = 任意 env の sha256[0..8] と `expected` 突合、`{match: bool}` のみ返し oracle 防止。cross-store drift を CI で自動検出、Refs ippoan/rust-alc-api#424 / ippoan/ci-workflows#131。health_canary = JWT_SECRET drift 検知は #479 PR-3 の JWT_SECRET 全撤去に伴い削除) / measurements / employees / items / api_tokens / sso_admin / tenant_users / timecard / access_requests / staging / upload / bot_admin / members / communication_items / carrying_items / guidance_records |
+| `alc-tenko` | 点呼: tenko_call / tenko_records / tenko_schedules / tenko_sessions / tenko_webhooks / daily_health / equipment_failures / health_baselines / driver_info (alc-misc から移設)。**専用の `models` / `repository` (trait) / `TenkoState` / `overdue` (check_overdue_schedules + TenkoOverdueRepository) を自前で持つ** (alc-core から分割、Refs #513)。route は `tenant_router<S>()` generic で monolith / tenko-api 両対応 |
 | `alc-carins` | 車検証(carins): car_inspections / car_inspection_files / carins_files / nfc_tags |
 | `alc-dtako` | デジタコ: dtako_* (csv_proxy / daily_hours / drivers / logs / operations / restraint_report(_pdf) / scraper / tickets / upload / vehicles / work_times / y_time_export / event_classifications) / vehicle_settings_dumps。`dtako_tickets` は email-receiver Worker から SD カードエラー通知メールを起票し F-VOS3020 設定 ZIP DL → QR で close する pipeline (Refs ippoan/email-receiver#1)。tenant_router (JWT) + internal_router (`INTERNAL_SHARED_SECRET` + `X-Tenant-ID`) + public_close_router (`close_token` のみ) の 3 経路。`upload` (`dtako_upload.rs`) の `POST /api/upload` は tenant FK 違反 (`dtako_upload_history_tenant_id_fkey` = tenants に tenant_id が無い、staging 揮発 DB で頻出) を 500 に潰さず actionable な 400 で返す (Refs ohishi-exp/dtako-scraper#22)。`scraper` (`dtako_scraper.rs`) は **rust から dtako-scraper への直接中継 (`SCRAPER_URL` 経由の SSE relay) を撤去済み** (Cloud Run は gVisor sandbox で Cloudflare Tunnel/VPC 到達不可のため)。front Worker (`ohishi-exp/nuxt-dtako-admin`) が DO 経由で dtako-scraper に直接 WebSocket 接続し、rust 側は結果受領後の `POST /api/scraper/history` (履歴 insert) と `GET /api/scraper/history` のみを持つ薄い保存専用エンドポイントに縮小 (Refs ohishi-exp/dtako-scraper#17, ohishi-exp/nuxt-dtako-admin#63) |
 | `alc-trouble` | トラブル管理: tickets / files / workflow / categories / offices / progress_statuses / schedules / tasks / task_types / task_statuses / notifications / notifier / cloud_tasks / lineworks_members / **field_layouts** (新規、tenant 単位でチケット入力フォームの表示/非表示・幅・並び順・カスタムラベルを保持する `trouble_field_layouts` テーブル、`GET`/`PUT /api/trouble/field-layout`、settings は JSONB 1 カラムの upsert)。`trouble_tickets` には `counterparty_vehicle`(相手方車両) / `disciplinary_committee`(賞罰委員会) カラムを追加済み (migration 124/125)。**schedule fire は #434 lockdown で internal 化**: `schedules::internal_fire_router` (`/api/internal/trouble/schedules/{id}/fire`, `require_internal_jwt`) を monolith の internal_protected に集約。旧 bare public `fire_router` は撤去 (現状 `cloud_tasks: None` で未配線)。trouble-api サブサービスは fire を mount しない (gateway が `/api/internal/*` を backend へ振るため) |
@@ -45,8 +45,10 @@ monolith と per-domain API は同じ domain crate (`alc-tenko` 等) を共有 �
 ## entrypoint / router
 
 - **monolith**: `src/main.rs` — DATABASE_URL で `PgPool`、Storage backend (`STORAGE_BACKEND` = r2/gcs、
-  carins/dtako/notify/trouble は別バケット+別 R2 キー)、巨大な `AppState` に全 Pg*Repository を組み立て、
-  `.nest("/api", rust_alc_api::routes::router(internal_oidc_trust()))`。背景 task: 60s ごと `check_overdue_schedules`。
+  carins/dtako/notify/trouble は別バケット+別 R2 キー)、`AppState` (共有 repo 群) と `TenkoState`
+  (tenko 系 9 repo、Refs #513) を組み立て、`.nest("/api", rust_alc_api::routes::router(internal_oidc_trust(), tenko_state))`。
+  tenko route 群は router 内で `.with_state(TenkoState)` マウント (FromRef 変換は廃止)。背景 task: 60s ごと
+  `alc_tenko::overdue::check_overdue_schedules` (WebhookRepository + TenkoOverdueRepository + http の 3 引数)。
 - **router 本体**: `src/routes/mod.rs` — 各 domain crate のルートを re-export し `router()` で結線。
   middleware: `require_tenant_header` (tenant/admin 共通、注入 identity 信頼) / `require_internal_jwt`
   (auth-worker→internal ingest、aud=alc-api-internal。**#479 で HS256 dual-accept を撤去し
