@@ -20,12 +20,12 @@ import sys
 
 lcov_file, prefix = sys.argv[1], sys.argv[2]
 
-# --- coverage_100.toml から対象ファイルを取る ---
-registered = []
-with open("coverage_100.toml", encoding="utf-8") as fh:
-    for m in re.finditer(r'path\s*=\s*"([^"]+)"', fh.read()):
-        if m.group(1).startswith(prefix):
-            registered.append(m.group(1))
+# --- coverage_100.toml から対象ファイルを取る (tomllib: comment-out 行を拾わない) ---
+import tomllib
+
+with open("coverage_100.toml", "rb") as fh:
+    toml = tomllib.load(fh)
+registered = [f["path"] for f in toml.get("files", []) if f["path"].startswith(prefix)]
 
 if not registered:
     print(f"::error::coverage_100.toml に prefix '{prefix}' の登録ファイルがありません")
