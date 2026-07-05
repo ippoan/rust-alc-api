@@ -753,7 +753,7 @@ jobs:
           LCOV="$(bazel info output_path)/_coverage/_coverage_report.dat"
           cp "$LCOV" /tmp/lcov.dat
           bash scripts/check_coverage_100_lcov.sh /tmp/lcov.dat crates/alc-trouble \
-            || echo "::warning::PR3a pilot: lcov gate (crates/alc-trouble) に差分あり — 里帰りテスト対象として #515 に記録
+            || echo "::warning::PR3a pilot: lcov gate (crates/alc-trouble) に差分あり — 里帰りテスト対象として #515 に記録"
 
       - name: bazel coverage (lcov 出力)
         if: matrix.name == 'csv-parser'
