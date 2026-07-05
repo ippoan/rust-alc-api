@@ -41,22 +41,14 @@ jobs:
       matrix:
         target:
           # check job 用 (test と build profile が違うため別 cache に分離)。
-          # TS bindings 生成は test-matrix(lib) に統合済み (Refs #482) なので
+          # TS bindings 生成は test-lib (Tests (lib)) が担う (Refs #482) ので
           # ここは clippy のみ warm する。
           - { name: "check", key: "check", cmd: "cargo clippy --workspace -- -D warnings" }
-          # test-matrix 7 並列 (lib + mock-*) が共有する 1 つの cache。
-          # rust-flickr#28-#32 の実験で確定した「shared-key 統合 + main warm 1 job
-          # だけ save」設計 (Refs #426)。
-          # cmd は --workspace --all-targets で全 test binary を 1 cargo invocation で
-          # build (cargo の jobs server が内部並列)。--no-report で coverage report
-          # 生成抑制。
-          # 注意: cargo-llvm-cov 0.8.4 の --no-run は cargo test の --no-run と意味が
-          # 異なる (report subcommand の旧名で profraw 必須)。build only は
-          # `-E 'none()' --no-tests=pass` で「全 binary を build して 0 本実行」に
-          # する (旧 --ignore-run-fail 方式は postgres service が無いため DB 系
-          # テスト 1 本ごとに接続 timeout 30s を直列に浪費し、warm job が 60 分級に
-          # なっていた。cache に要るのは build 成果物だけで実行は不要)。
-          - { name: "test-shared", key: "test-shared", cmd: "cargo llvm-cov nextest --no-report --workspace --all-targets -E 'none()' --no-tests=pass" }
+          # Tests (lib) = TS bindings 生産 job が共有する cache。cargo Tests matrix
+          # (mock 統合テスト + Coverage Check) は bazel gate へ移行して退役 (#515 PR4)。
+          # warm も lib target の非計装 build だけに縮小 (旧 --all-targets + llvm-cov
+          # 計装比で cache サイズ・warm 時間とも大幅減)。
+          - { name: "test-shared", key: "test-shared", cmd: "cargo nextest run --lib --workspace --no-run" }
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.92.0
@@ -70,8 +62,7 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-llvm-cov@0.8.4,cargo-nextest
-      # mold: test-matrix / test-lib と同じリンカで warm する (fingerprint 影響
-      # なしだが、--all-targets の全 test binary リンクが速くなる)
+      # mold: test-lib と同じリンカで warm する (fingerprint 影響なし)
       - uses: rui314/setup-mold@v1
       - name: Build (${{ matrix.target.name }})
         env:
@@ -163,7 +154,7 @@ jobs:
           r2-bucket: ${{ vars.BAZEL_R2_BUCKET }}
           r2-access-key-id: ${{ secrets.BAZEL_R2_ACCESS_KEY_ID }}
           r2-secret-access-key: ${{ secrets.BAZEL_R2_SECRET_ACCESS_KEY }}
-      # alc-notify::redact が libpdfium.so を dlopen する (test-matrix と同一 step、
+      # alc-notify::redact が libpdfium.so を dlopen する (test-lib と同一 step、
       # processwrapper-sandbox はシステムパスに到達できるので /usr/lib で足りる)
       - name: Install PDFium (for redact tests)
         if: matrix.pdfium == true
@@ -285,6 +276,41 @@ jobs:
           fi
           echo "::endgroup::"
 
+          echo "::group::Cleaning stale setup-bazel disk tars (keep newest per shard)"
+          # BUILD/.bazelrc 変更で hash が変わると旧 key の tar (~5GB) がゴミとして残り、
+          # 10GB 上限の LRU eviction を誘発する (実害 2026-07-05: csv-parser の新 tar が
+          # save 6 分後に evict されフル再ビルド)。warm 直後のこの job で shard base
+          # (hash を除いた key prefix) ごとに最新 1 個だけ残して削除する。
+          # PR scope の cache は対象外 (ref==refs/heads/main のみ、PR 側は
+          # cache-cleanup.yml が PR close 時に削除する)。
+          gh cache list -R ${{ github.repository }} --limit 400 \
+            --json id,key,ref,sizeInBytes,lastAccessedAt \
+            --jq '.[] | select((.key | startswith("setup-bazel-")) and (.key | contains("-tar-")) and .ref == "refs/heads/main")' \
+            > /tmp/bazel-tar-entries.jsonl || true
+          python3 - < /tmp/bazel-tar-entries.jsonl <<'PY'
+          import json, sys
+          entries = [json.loads(line) for line in sys.stdin if line.strip()]
+          groups = {}
+          for e in entries:
+              base = e['key'].rsplit('-tar-', 1)[0]
+              groups.setdefault(base, []).append(e)
+          to_delete = []
+          for base, items in groups.items():
+              items.sort(key=lambda x: x['lastAccessedAt'], reverse=True)
+              to_delete.extend(items[1:])
+          with open('/tmp/bazel-tar-ids.txt', 'w') as f:
+              for d in to_delete:
+                  print(f"Deleting {d['sizeInBytes']//1048576}MB {d['key']}")
+                  f.write(str(d['id']) + '\n')
+          print(f"Total: {len(to_delete)} stale bazel tar entries")
+          PY
+          if [ -s /tmp/bazel-tar-ids.txt ]; then
+            while read -r id; do
+              gh cache delete "$id" -R ${{ github.repository }} 2>/dev/null || true
+            done < /tmp/bazel-tar-ids.txt
+          fi
+          echo "::endgroup::"
+
   check:
     name: Format & Lint
     needs: [pr-limit]
@@ -309,7 +335,7 @@ jobs:
           SCCACHE_GHA_ENABLED: "true"
           RUSTC_WRAPPER: "sccache"
       # TS bindings 生成 (cargo test export_bindings --workspace) はここから削除し
-      # test-matrix(lib) に統合した (Refs #482)。ts-rs の export_bindings_* は
+      # test-lib に統合した (Refs #482)。ts-rs の export_bindings_* は
       # 各 crate の lib target 内 #[test] なので、lib shard の
       # `cargo llvm-cov nextest --lib --workspace` が同じ .ts を生成する
       # (coverage 計装は出力内容に影響しない、diff 検証済み)。check job で
@@ -324,97 +350,6 @@ jobs:
     if: "always() && !(github.ref == 'refs/heads/main' && github.event_name == 'push') && (needs.pr-limit.result == 'success' || needs.pr-limit.result == 'skipped')"
     uses: ippoan/ci-workflows/.github/workflows/rust-dep-check.yml@main
 
-  test-matrix:
-    name: Tests (${{ matrix.group.name }})
-    needs: [pr-limit]
-    if: "always() && !(github.ref == 'refs/heads/main' && github.event_name == 'push') && (needs.pr-limit.result == 'success' || needs.pr-limit.result == 'skipped')"
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        group:
-          # lib (unit) は DB 不要なのに postgres service 起動 (~20s) を払っていた
-          # ため、service なしの test-lib job に分離した (Refs #506 実測)。
-          - { name: "mock-tenko", cmd: "--test mock_tenko" }
-          - { name: "mock-dtako", cmd: "--test mock_dtako" }
-          - { name: "mock-devices", cmd: "--test mock_devices" }
-          - { name: "mock-carins", cmd: "--test mock_carins" }
-          - { name: "mock-trouble", cmd: "--test mock_trouble --test trouble_test" }
-          - { name: "mock-misc", cmd: "--test mock_misc --test archive_repo_test" }
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_PASSWORD: test
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-    env:
-      TEST_DATABASE_URL: "postgresql://postgres:test@localhost:5432/postgres?options=-c search_path=alc_api"
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.92.0
-        with:
-          components: llvm-tools-preview
-      - uses: mozilla-actions/sccache-action@v0.0.9
-      - uses: swatinem/rust-cache@v2
-        with:
-          # rust-flickr#28-#32 で確定した「shared-key 統合 + 非対称 save-if」設計 (Refs #426)。
-          # cache-warm の test-shared 1 job だけが save し、本 test-matrix の並列 7 job は
-          # read-only restore に徹する。これで並列 save 競合 (actions/cache 先勝ちで
-          # 中途半端な target/ に上書きされる問題) を完全に回避する。
-          shared-key: test-shared
-          save-if: 'false'
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-llvm-cov@0.8.4,cargo-nextest
-
-      # mold: システム ld を mold に差し替える (rui314/setup-mold は mold 作者の
-      # action)。RUSTFLAGS を変えないので rust-cache / sccache のフィンガープリント
-      # に影響せず、warm cache との互換を保ったままリンクだけ速くなる (build 段
-      # 28s の大半がリンクだった、Refs #506 実測: sccache 100% hit でも 28s)。
-      - uses: rui314/setup-mold@v1
-
-      # alc-notify::redact が pdfium-render 経由で libpdfium.so を dlopen するので、
-      # テスト実行ホスト (ubuntu-latest) にも prebuilt PDFium を配置する。
-      # bblanchon/pdfium-binaries chromium/7825 (linux-x64.tgz, ~3.5 MB) を /usr/lib/ に展開。
-      - name: Install PDFium (for redact tests)
-        run: |
-          curl -fsSL "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/7825/pdfium-linux-x64.tgz" \
-            | sudo tar -xz -C /tmp
-          sudo cp /tmp/lib/libpdfium.so /usr/lib/libpdfium.so
-          sudo ldconfig
-
-      - name: Init DB
-        run: psql "postgresql://postgres:test@localhost:5432/postgres" -f scripts/init_local_db.sql
-
-      - name: Run tests with coverage
-        env:
-          SCCACHE_GHA_ENABLED: "true"
-          RUSTC_WRAPPER: "sccache"
-        run: |
-          cargo llvm-cov nextest --no-report ${{ matrix.group.cmd }}
-          PKGS=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name' | sed 's/^/-p /' | tr '\n' ' ')
-          cargo llvm-cov report $PKGS --text > /tmp/llvm-cov-output.txt
-          echo "=== Coverage Summary ==="
-          tail -5 /tmp/llvm-cov-output.txt
-
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: coverage-${{ matrix.group.name }}
-          path: /tmp/llvm-cov-output.txt
-          retention-days: 1
-
-  # lib (unit) テスト専用 job。test-matrix と違い postgres service を持たない —
-  # lib テストは DB 不要 (make test 相当) なのに matrix 共通定義で service 起動
-  # (~20s、job 開始→checkout 間の大半) を毎回払っていた (Refs #506 実測)。
-  # cache / tool / PDFium のセットアップは test-matrix と同一に保つこと
-  # (shared-key test-shared の warm cache を共有するため)。
   test-lib:
     name: Tests (lib)
     needs: [pr-limit]
@@ -432,9 +367,9 @@ jobs:
           save-if: 'false'
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-llvm-cov@0.8.4,cargo-nextest
+          tool: cargo-nextest
 
-      # mold: test-matrix と同じ理由 (リンク短縮、fingerprint 影響なし)
+      # mold: リンク短縮 (fingerprint 影響なし)
       - uses: rui314/setup-mold@v1
 
       # alc-notify::redact (lib テスト) が libpdfium.so を dlopen するため必要
@@ -445,27 +380,18 @@ jobs:
           sudo cp /tmp/lib/libpdfium.so /usr/lib/libpdfium.so
           sudo ldconfig
 
-      - name: Run tests with coverage
+      # coverage は bazel 側 (Bazel coverage gate) が SoT (#515 PR4)。この job の
+      # 役割は lib テスト実行 = ts-rs export_bindings_* を走らせて .ts を生成する
+      # ことに縮小した (計装なしの素の nextest なので旧 llvm-cov 実行より速い)。
+      - name: Run lib tests (TS bindings 生成)
         env:
           SCCACHE_GHA_ENABLED: "true"
           RUSTC_WRAPPER: "sccache"
-        run: |
-          cargo llvm-cov nextest --no-report --lib --workspace
-          PKGS=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name' | sed 's/^/-p /' | tr '\n' ' ')
-          cargo llvm-cov report $PKGS --text > /tmp/llvm-cov-output.txt
-          echo "=== Coverage Summary ==="
-          tail -5 /tmp/llvm-cov-output.txt
-
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: coverage-lib
-          path: /tmp/llvm-cov-output.txt
-          retention-days: 1
+        run: cargo nextest run --lib --workspace
 
       # ts-rs の export_bindings_* テスト (lib target 内 #[test]) が上の lib 実行で
       # .ts を生成するので、ここで artifact 化する (check job から移設、Refs #482。
-      # lib shard の test-matrix → test-lib 分離に伴い本 job へ移動)。
+      # 旧 test-matrix からの分離を経て本 job に定着)。
       # scripts/export-ts-bindings.sh がこの artifact 名で download する契約は不変。
       # 将来 nextest filter 等で export テストが走らなくなった場合に無音で空
       # artifact にならないよう if-no-files-found: error で loud fail させる。
@@ -475,46 +401,6 @@ jobs:
           path: crates/*/bindings/**/*.ts
           retention-days: 90
           if-no-files-found: error
-
-  coverage-check:
-    name: Coverage Check
-    needs: [test-matrix, test-lib]
-    if: "always() && needs.test-matrix.result == 'success' && needs.test-lib.result == 'success'"
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: coverage-*
-          path: /tmp/coverage-parts
-      - name: Merge coverage and check
-        run: |
-          python3 scripts/merge_coverage.py /tmp/coverage-parts/*/llvm-cov-output.txt > /tmp/llvm-cov-output.txt
-          echo "=== Merged Coverage Summary ==="
-          # Count totals from merged output
-          python3 -c "
-          import re, sys
-          total_lines = 0; total_miss = 0
-          current = None
-          with open('/tmp/llvm-cov-output.txt') as f:
-              for line in f:
-                  if re.match(r'^/.*\.rs:$', line.strip()):
-                      current = True
-                  elif current and re.match(r'^\s*\d+\|\s*0\|', line):
-                      total_lines += 1; total_miss += 1
-                  elif current and re.match(r'^\s*\d+\|\s*[1-9]', line):
-                      total_lines += 1
-          covered = total_lines - total_miss
-          pct = covered / total_lines * 100 if total_lines else 0
-          print(f'Lines: {total_lines}, Covered: {covered}, Missed: {total_miss}, Coverage: {pct:.1f}%')
-          "
-          bash scripts/check_coverage_100.sh --combined --use-cache /tmp/llvm-cov-output.txt
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: llvm-cov-text
-          path: /tmp/llvm-cov-output.txt
-          retention-days: 30
 
   # Bazel build → artifact upload (shared by parallel docker jobs)
   build-image:
@@ -688,7 +574,10 @@ jobs:
   bazel-test-poc:
     name: "Bazel test (${{ matrix.name }})"
     needs: [pr-limit]
-    if: "always() && github.event_name == 'pull_request' && (needs.pr-limit.result == 'success' || needs.pr-limit.result == 'skipped')"
+    # v* tag push でも走る: cargo Tests matrix 退役後、本番 deploy (deploy.yml) の
+    # test gate は bazel 側が担う (Refs #515 PR4)。tag run は main scope の warm
+    # cache を restore できる。
+    if: "always() && (github.event_name == 'pull_request' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))) && (needs.pr-limit.result == 'success' || needs.pr-limit.result == 'skipped')"
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -731,7 +620,7 @@ jobs:
           r2-access-key-id: ${{ secrets.BAZEL_R2_ACCESS_KEY_ID }}
           r2-secret-access-key: ${{ secrets.BAZEL_R2_SECRET_ACCESS_KEY }}
 
-      # alc-notify::redact が libpdfium.so を dlopen する (test-matrix と同一 step、
+      # alc-notify::redact が libpdfium.so を dlopen する (test-lib と同一 step、
       # processwrapper-sandbox はシステムパスに到達できるので /usr/lib で足りる)
       - name: Install PDFium (for redact tests)
         if: matrix.pdfium == true
@@ -785,7 +674,8 @@ jobs:
   bazel-test-db:
     name: "Bazel test (${{ matrix.name }})"
     needs: [pr-limit]
-    if: "always() && github.event_name == 'pull_request' && (needs.pr-limit.result == 'success' || needs.pr-limit.result == 'skipped')"
+    # v* tag push でも走る (bazel-test-poc と同じ理由、Refs #515 PR4)
+    if: "always() && (github.event_name == 'pull_request' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))) && (needs.pr-limit.result == 'success' || needs.pr-limit.result == 'skipped')"
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -849,7 +739,7 @@ jobs:
   bazel-coverage-gate:
     name: "Bazel coverage gate"
     needs: [bazel-test-poc, bazel-test-db]
-    if: "always() && github.event_name == 'pull_request'"
+    if: "always() && (github.event_name == 'pull_request' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')))"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -867,11 +757,26 @@ jobs:
           cat "${files[@]}" > /tmp/merged.dat
           bash scripts/check_coverage_100_lcov.sh /tmp/merged.dat
 
+  # 全 bazel test shard の集約 (Refs #515 PR4)。branch protection の required check は
+  # shard 個別 ("Bazel test (xxx)" ×25) ではなくこの job + "Bazel coverage gate" の
+  # 2 つに張る — shard を増減しても repo 設定の変更が不要になる。
+  bazel-tests-ok:
+    name: "Bazel tests OK"
+    needs: [bazel-test-poc, bazel-test-db]
+    if: "always() && (github.event_name == 'pull_request' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')))"
+    runs-on: ubuntu-latest
+    steps:
+      - name: 全 shard の成否を検証
+        run: |
+          [ "${{ needs.bazel-test-poc.result }}" = "success" ] || { echo "::error::bazel-test-poc: ${{ needs.bazel-test-poc.result }}"; exit 1; }
+          [ "${{ needs.bazel-test-db.result }}" = "success" ] || { echo "::error::bazel-test-db: ${{ needs.bazel-test-db.result }}"; exit 1; }
+          echo "all bazel test shards green"
+
   # staging の postgres sidecar image。旧 deploy.yml の staging-db job からの
   # 移設 (Refs #482)。build-image と並列に走らせることで、deploy workflow 側の
   # 直列 hop (staging-db → deploy-services) を消す。staging/ 配下は変更頻度が
   # 低く docker layer cache で数十秒で終わるため、deploy の critical path
-  # (build-image + coverage-check 待ち) には乗らない。
+  # (build-image + bazel gate 待ち) には乗らない。
   staging-db:
     name: Build staging-db
     needs: [pr-limit]
@@ -920,8 +825,10 @@ jobs:
 
   docker-latest:
     name: Tag latest
-    if: "always() && github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.check.result == 'success' && needs.coverage-check.result == 'success'"
-    needs: [check, coverage-check]
+    # NOTE: main push では check も bazel gate も走らない (coverage-check 時代から
+    # 恒常 skip = 挙動不変)。coverage-check 退役に伴う参照差し替えのみ。
+    if: "always() && github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.check.result == 'success' && needs.bazel-coverage-gate.result == 'success'"
+    needs: [check, bazel-coverage-gate]
     runs-on: ubuntu-latest
     permissions:
       packages: write
@@ -947,13 +854,14 @@ jobs:
 
   deploy:
     name: Deploy
-    needs: [build-image, staging-db, coverage-check]
+    needs: [build-image, staging-db, bazel-tests-ok, bazel-coverage-gate]
     if: >-
       always() &&
       (github.event_name == 'pull_request' || (startsWith(github.ref, 'refs/tags/v') && github.event_name == 'push')) &&
       (needs.build-image.result == 'success' || needs.build-image.result == 'skipped') &&
       (needs.staging-db.result == 'success' || needs.staging-db.result == 'skipped') &&
-      needs.coverage-check.result == 'success'
+      needs.bazel-tests-ok.result == 'success' &&
+      needs.bazel-coverage-gate.result == 'success'
     uses: ./.github/workflows/deploy.yml
     permissions:
       contents: read
@@ -1153,12 +1061,13 @@ jobs:
     # 防ぐ (Refs #405、#391 で 2 回実害)。drift-check 失敗時も merge を止めて
     # cross-store drift を可視化する (Refs #424)。トレードオフとして staging
     # 障害時は全 PR が merge 不能になる。
-    needs: [check, coverage-check, build-image, deploy, drift-check-staging]
+    needs: [check, bazel-tests-ok, bazel-coverage-gate, build-image, deploy, drift-check-staging]
     if: >-
       always() &&
       github.event_name == 'pull_request' &&
       needs.check.result == 'success' &&
-      needs.coverage-check.result == 'success' &&
+      needs.bazel-tests-ok.result == 'success' &&
+      needs.bazel-coverage-gate.result == 'success' &&
       needs.build-image.result == 'success' &&
       needs.deploy.result == 'success' &&
       needs.drift-check-staging.result == 'success'

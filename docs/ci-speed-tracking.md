@@ -197,8 +197,30 @@ Build backend (Bazel) job 139s の内訳: setup ~8s / **analysis 60s**
     行数まで cargo llvm-cov gate と一致 — merge 方式の意味論は確定
   - dormant DB テスト 6 binary (#530) に coverage を依存している file は無し
     (gate 移行のブロッカーではない)
-- 残: PR #534 で warn 差分ゼロ確認 → fail 化、cargo Tests matrix 退役 + required
-  checks 差し替え (PR4)、dormant な DB テスト 6 binary の扱い (#530)
+- **filter 配線の修正 3 連 (PR #534/#535/#536) で全域 63/63 一致 → fail 化 (PR #537)**。
+  過程で確定した gotcha 2 件:
+  - **instrumentation_filter を ci.yml に書いてはいけない** — setup-bazel の tar key は
+    MODULE/BUILD/.bazelrc の hash のみで ci.yml を含まず、filter 変更が key に反映されず
+    warm が「Disk cache hit, skipping save」で新計装 action を保存できない。filter は
+    .bazelrc の `coverage:cov-<shard>` config に置く (ci.yml は `--config=` のみ)
+  - **cargo-llvm-cov は `--cfg=coverage` を自動注入する** — `#[cfg_attr(not(coverage),
+    ignore)]` の里帰りテスト (alc-compare 21 本) は bazel coverage では走らず deep branch
+    が DA=0 になる。`.bazelrc` の `coverage --@rules_rust//rust/settings:extra_rustc_flag=
+    --cfg=coverage` で揃えた
+- **GH Actions cache 10GB 上限の LRU eviction (2026-07-05 実測)**: coverage 化で tar が
+  肥大 (mock 系 346→670MB) し、新 key 25 本 ~9.5GB + 旧 key ~5GB + build 用 ~3GB +
+  cargo ~2GB で常時超過。csv-parser の新 tar が **save 6 分後に evict** されフル再ビルドに。
+  対策: PR4 で (a) cargo Tests 退役 + warm 縮小、(b) cache-cleanup に「shard base ごと
+  最新 1 個だけ残して旧 hash tar を削除」を追加。**構造解は Phase C** — mock テストを
+  「ドメイン単独 router を spawn する」形にすると mock 閉包 = tar が縮む (670MB →
+  ~200-350MB 見込み)。shard 統合 (7→1) 案は wall time とのトレードオフで保留 (user 判断)
+- **PR4 (cargo Tests matrix 退役)**: test-matrix (mock 6 group) / Coverage Check を削除、
+  test-lib は TS bindings 生産 job として非計装 nextest に縮小、warm test-shared も
+  lib-only build に縮小。`Bazel tests OK` 集約 job を新設 (required checks は shard 個別
+  ではなくこの job + `Bazel coverage gate` の 2 つに張る)。bazel test/gate の if を
+  v* tag push にも拡張 (本番 deploy の test gate を cargo から引き継ぐ)
+- 残: dormant な DB テスト 6 binary の扱い (#530)、Phase C (notify → dtako → carins
+  分割 + mock ハーネスの per-domain 化 = tar 縮小の構造解)
 
 ### cache-warm build-only 化の実測 (PR #519、2026-07-05)
 
