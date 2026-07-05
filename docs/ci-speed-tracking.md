@@ -150,6 +150,17 @@ Build backend (Bazel) job 139s の内訳: setup ~8s / **analysis 60s**
   (残りは loading/analysis 固定費 61s + coverage 29s)
 - 実証を受けて poc を**全 crate の unit test に拡大** (`bazel test //... --build_tests_only`、
   warm も同一 invocation)。lcov gate / coverage gate の SoT は引き続き cargo llvm-cov 側
+- 拡大時に洗い出した bazel 環境差 2 件 (どちらも修正済み): (1) dev-dependencies を持つ
+  crate (alc-misc / alc-notify) の rust_test に `all_crate_deps(normal_dev)` 配線が必要、
+  (2) alc-notify redact テストの libpdfium.so dlopen — cargo Tests と同じ Install PDFium
+  step を bazel job にも配置 (#525)。修正後 17/17 PASSED、warm 定常の単一 job は 2m52s
+- **crate 単位 shard 分割** (17 shard、`bazel-test-<crate>` の専用 disk cache key):
+  重複ビルドが浪費するのは CPU であって wall time ではなく、wall time は最重 shard で
+  bounded になる (alc-core 変更時: 単一 job 4-5 分 → 並列 ~2-3 分、最重は monolith
+  shard の最深チェーン)。leaf shard の定常は analysis 60s + restore ≈ 1.5-2 分。
+  トレードオフ: PR あたり +16 job (Free 20 枠では Tests の queue 悪化 → Team 化推奨) と
+  cache 容量 (17 key、GH 10GB 上限)。matrix の追加漏れ/warm-poc 同期は
+  `scripts/check_bazel_test_matrix.sh` (csv-parser shard 内) が loud fail
 - 残: DB 依存 integration test の Bazel 化設計 (postgres service との接続を bazel test
   サンドボックスからどう張るか)
 

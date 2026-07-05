@@ -112,17 +112,43 @@ jobs:
   # から読めるのは main scope の cache だけなので、main push でここが `bazel test`
   # を 1 回走らせ、test action の結果込み disk cache を main scope に save する。
   # run 跨ぎ hit の成立は PR #521 で実証済み (1 回目 invocation で '(cached)')。
-  # 注意: invocation の flags は bazel-test-poc job と完全一致させること
+  # shard 分割 (crate 単位) の理由: wall time は最重 shard で bounded になり、
+  # alc-core 変更時の単一 job 4-5 分を shard 並列 ~2-3 分に抑える。shard ごとに
+  # 専用 disk cache key (同一 key 共有は save reserve 競合で全滅する、#506 実測)。
+  # 注意 (1): matrix は bazel-test-poc job と 1:1 で同期させること — 同期漏れは
+  # scripts/check_bazel_test_matrix.sh (csv-parser shard 内) が loud fail させる。
+  # 注意 (2): invocation の flags は bazel-test-poc job と完全一致させること
   # (configuration が違うと action key が変わり、PR 側で '(cached)' にならない)。
   cache-warm-bazel-test-poc:
-    name: "Cache Warm (bazel-test-poc)"
+    name: "Cache Warm (bazel-test-${{ matrix.name }})"
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: monolith, target: "//:unit_tests" }
+          - { name: auth, target: "//crates/alc-auth:alc-auth_test" }
+          - { name: auth-jwt, target: "//crates/alc-auth-jwt:alc-auth-jwt_test" }
+          - { name: camera, target: "//crates/alc-camera:alc-camera_test" }
+          - { name: carins, target: "//crates/alc-carins:alc-carins_test" }
+          - { name: compare, target: "//crates/alc-compare:alc-compare_test" }
+          - { name: core, target: "//crates/alc-core:alc-core_test" }
+          - { name: csv-parser, target: "//crates/alc-csv-parser:alc-csv-parser_test" }
+          - { name: devices, target: "//crates/alc-devices:alc-devices_test" }
+          - { name: dtako, target: "//crates/alc-dtako:alc-dtako_test" }
+          - { name: misc, target: "//crates/alc-misc:alc-misc_test" }
+          - { name: notify, target: "//crates/alc-notify:alc-notify_test", pdfium: true }
+          - { name: pdf, target: "//crates/alc-pdf:alc-pdf_test" }
+          - { name: storage, target: "//crates/alc-storage:alc-storage_test" }
+          - { name: tenko, target: "//crates/alc-tenko:alc-tenko_test" }
+          - { name: trouble, target: "//crates/alc-trouble:alc-trouble_test" }
+          - { name: gateway, target: "//crates/gateway:gateway_test" }
     steps:
       - uses: actions/checkout@v4
       - uses: ippoan/setup-bazel@main
         with:
-          disk-cache: "bazel-test-poc"
+          disk-cache: "bazel-test-${{ matrix.name }}"
           r2-endpoint: ${{ vars.BAZEL_R2_ENDPOINT }}
           r2-bucket: ${{ vars.BAZEL_R2_BUCKET }}
           r2-access-key-id: ${{ secrets.BAZEL_R2_ACCESS_KEY_ID }}
@@ -130,13 +156,14 @@ jobs:
       # alc-notify::redact が libpdfium.so を dlopen する (test-matrix と同一 step、
       # processwrapper-sandbox はシステムパスに到達できるので /usr/lib で足りる)
       - name: Install PDFium (for redact tests)
+        if: matrix.pdfium == true
         run: |
           curl -fsSL "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/7825/pdfium-linux-x64.tgz" \
             | sudo tar -xz -C /tmp
           sudo cp /tmp/lib/libpdfium.so /usr/lib/libpdfium.so
           sudo ldconfig
       - name: Warm test result cache (Bazel)
-        run: bazel test //... --build_tests_only --keep_going --test_output=errors --test_summary=short
+        run: bazel test ${{ matrix.target }} --test_output=errors --test_summary=short
 
   cache-cleanup:
     name: Cache Cleanup
@@ -583,25 +610,49 @@ jobs:
           cache-to: "type=gha,mode=max,scope=${{ matrix.name }}-staging"
 
   # Bazel test 化 PoC (Refs #515): 全 crate の unit test (`<crate>_test` + root
-  # `//:unit_tests`) を `bazel test` で実行し、run 跨ぎ test result cache の効果を
-  # 実測する。alc-csv-parser 1 crate での分水嶺検証 (result cache / lcov gate) は
-  # PR #517-#521 で全て突破済み → 全 unit test に拡大 (2026-07-05)。
+  # `//:unit_tests`) を crate 単位の shard で `bazel test` する。分水嶺検証
+  # (result cache / lcov gate / run 跨ぎ hit / sandbox 環境差) は PR #517-#525 で
+  # 全て突破済み。
   # 独立 job (deploy chain の needs 外) = critical path に乗らず、merge gate でも
   # ない。coverage gate (coverage_100.toml) の SoT は引き続き cargo llvm-cov 側で、
-  # ここの lcov gate は alc-csv-parser 限定の並走検証。
+  # ここの lcov gate は alc-csv-parser 限定の並走検証 (csv-parser shard のみ)。
   # run 跨ぎの test result cache は cache-warm-bazel-test-poc (main push warm) 経由
   # でのみ hit する — PR run 自身の save は refs/pull/N/merge scope に隔離され、
   # 別 PR から読めない (2026-07-05 実測、詳細は #515 のコメント)。
+  # shard 分割の狙い: wall time を最重 shard で bounded にする (alc-core 変更時の
+  # 単一 job 4-5 分 → 並列 ~2-3 分)。matrix / flags は warm 側と 1:1 同期必須
+  # (check_bazel_test_matrix.sh が csv-parser shard で検証)。
   bazel-test-poc:
-    name: "Bazel test PoC (all unit tests)"
+    name: "Bazel test (${{ matrix.name }})"
     needs: [pr-limit]
     if: "always() && github.event_name == 'pull_request' && (needs.pr-limit.result == 'success' || needs.pr-limit.result == 'skipped')"
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: monolith, target: "//:unit_tests" }
+          - { name: auth, target: "//crates/alc-auth:alc-auth_test" }
+          - { name: auth-jwt, target: "//crates/alc-auth-jwt:alc-auth-jwt_test" }
+          - { name: camera, target: "//crates/alc-camera:alc-camera_test" }
+          - { name: carins, target: "//crates/alc-carins:alc-carins_test" }
+          - { name: compare, target: "//crates/alc-compare:alc-compare_test" }
+          - { name: core, target: "//crates/alc-core:alc-core_test" }
+          - { name: csv-parser, target: "//crates/alc-csv-parser:alc-csv-parser_test" }
+          - { name: devices, target: "//crates/alc-devices:alc-devices_test" }
+          - { name: dtako, target: "//crates/alc-dtako:alc-dtako_test" }
+          - { name: misc, target: "//crates/alc-misc:alc-misc_test" }
+          - { name: notify, target: "//crates/alc-notify:alc-notify_test", pdfium: true }
+          - { name: pdf, target: "//crates/alc-pdf:alc-pdf_test" }
+          - { name: storage, target: "//crates/alc-storage:alc-storage_test" }
+          - { name: tenko, target: "//crates/alc-tenko:alc-tenko_test" }
+          - { name: trouble, target: "//crates/alc-trouble:alc-trouble_test" }
+          - { name: gateway, target: "//crates/gateway:gateway_test" }
     steps:
       - uses: actions/checkout@v4
       - uses: ippoan/setup-bazel@main
         with:
-          disk-cache: "bazel-test-poc"
+          disk-cache: "bazel-test-${{ matrix.name }}"
           r2-endpoint: ${{ vars.BAZEL_R2_ENDPOINT }}
           r2-bucket: ${{ vars.BAZEL_R2_BUCKET }}
           r2-access-key-id: ${{ secrets.BAZEL_R2_ACCESS_KEY_ID }}
@@ -610,21 +661,27 @@ jobs:
       # alc-notify::redact が libpdfium.so を dlopen する (test-matrix と同一 step、
       # processwrapper-sandbox はシステムパスに到達できるので /usr/lib で足りる)
       - name: Install PDFium (for redact tests)
+        if: matrix.pdfium == true
         run: |
           curl -fsSL "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/7825/pdfium-linux-x64.tgz" \
             | sudo tar -xz -C /tmp
           sudo cp /tmp/lib/libpdfium.so /usr/lib/libpdfium.so
           sudo ldconfig
 
-      - name: bazel test (全 unit test、result cache は main warm から)
+      - name: bazel test (result cache は main warm から)
         run: |
           set -o pipefail
-          bazel test //... --build_tests_only --keep_going --test_output=errors --test_summary=short 2>&1 | tee /tmp/test_run.txt
-          CACHED=$(grep -c "(cached)" /tmp/test_run.txt || true)
-          TOTAL=$(grep -cE "^//.* PASSED" /tmp/test_run.txt || true)
-          echo "::notice::test result cache: ${CACHED}/${TOTAL} targets が (cached) — ソース/BUILD を触った PR や warm 未反映の初回は少なくて正常"
+          bazel test ${{ matrix.target }} --test_output=errors --test_summary=short 2>&1 | tee /tmp/test_run.txt
+          if grep -q "(cached)" /tmp/test_run.txt; then
+            echo "::notice::${{ matrix.target }} は (cached) — main warm から restore"
+          fi
+
+      - name: matrix 網羅性チェック (rust_test target の追加漏れ検出)
+        if: matrix.name == 'csv-parser'
+        run: bash scripts/check_bazel_test_matrix.sh
 
       - name: bazel coverage (lcov 出力)
+        if: matrix.name == 'csv-parser'
         run: |
           bazel coverage //crates/alc-csv-parser:alc-csv-parser_test \
             --combined_report=lcov \
@@ -635,6 +692,7 @@ jobs:
           head -30 /tmp/lcov.dat
 
       - name: coverage 100% gate の lcov 再現 (coverage_100.toml 突合)
+        if: matrix.name == 'csv-parser'
         run: bash scripts/check_coverage_100_lcov.sh /tmp/lcov.dat crates/alc-csv-parser
 
   # staging の postgres sidecar image。旧 deploy.yml の staging-db job からの
