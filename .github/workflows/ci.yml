@@ -171,6 +171,15 @@ jobs:
       - name: Warm test result cache (Bazel)
         run: bazel test ${{ matrix.target }} --test_output=errors --test_summary=short
 
+      # PR3a pilot (Refs #515): coverage の計装ビルドも warm して PR 側を cache hit に
+      # する戦略の実測。mock-trouble 1 shard のみ。flags は poc 側と完全一致必須。
+      - name: Warm coverage build (Bazel, PR3a pilot)
+        if: matrix.name == 'mock-trouble'
+        run: |
+          bazel coverage ${{ matrix.target }} \
+            --combined_report=lcov \
+            --instrumentation_filter=//crates/alc-trouble
+
   # DB integration テスト用 warm (Refs #515 PR2)。postgres service + TEST_DATABASE_URL
   # を持つ点以外は cache-warm-bazel-test-poc と同じ。matrix / flags は bazel-test-db と
   # 1:1 同期 (check_bazel_test_matrix.sh が poc/db の union で検証)。
@@ -732,6 +741,19 @@ jobs:
       - name: matrix 網羅性チェック (rust_test target の追加漏れ検出)
         if: matrix.name == 'csv-parser'
         run: bash scripts/check_bazel_test_matrix.sh
+
+      # PR3a pilot (Refs #515): mock target 経由の route ファイル coverage を lcov で
+      # 取れるか + 計装ビルドのコスト実測。gate は warn モード (fail させない)。
+      - name: bazel coverage (PR3a pilot, warn モード)
+        if: matrix.name == 'mock-trouble'
+        run: |
+          bazel coverage ${{ matrix.target }} \
+            --combined_report=lcov \
+            --instrumentation_filter=//crates/alc-trouble
+          LCOV="$(bazel info output_path)/_coverage/_coverage_report.dat"
+          cp "$LCOV" /tmp/lcov.dat
+          bash scripts/check_coverage_100_lcov.sh /tmp/lcov.dat crates/alc-trouble \
+            || echo "::warning::PR3a pilot: lcov gate (crates/alc-trouble) に差分あり — 里帰りテスト対象として #515 に記録
 
       - name: bazel coverage (lcov 出力)
         if: matrix.name == 'csv-parser'
