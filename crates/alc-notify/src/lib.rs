@@ -5,6 +5,7 @@ pub mod distribute;
 pub mod documents;
 pub mod email_documents;
 pub mod extract;
+pub mod fcm;
 pub mod groups;
 pub mod ingest;
 pub mod line_config;

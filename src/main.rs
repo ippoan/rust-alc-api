@@ -28,7 +28,6 @@ use alc_trouble::repo::{
     trouble_task_types::PgTroubleTaskTypesRepository, trouble_tasks::PgTroubleTasksRepository,
     trouble_tickets::PgTroubleTicketsRepository, trouble_workflow::PgTroubleWorkflowRepository,
 };
-use rust_alc_api::auth::google::GoogleTokenVerifier;
 use rust_alc_api::db::repository::{
     PgApiTokensRepository, PgAuthRepository, PgBotAdminRepository, PgCarInspectionRepository,
     PgCarinsFilesRepository, PgCarryingItemsRepository, PgCommunicationItemsRepository,
@@ -66,21 +65,11 @@ async fn main() -> anyhow::Result<()> {
         .parse()
         .expect("PORT must be a number");
 
-    // Google ID token 検証設定 (JWT_SECRET / GOOGLE_CLIENT_SECRET は #479 PR-3 で撤去 —
-    // JWT 発行と OAuth code 交換は auth-worker に完全移管され、rust 側は
-    // ID token の JWKS 検証だけを行う)
-    let google_client_id = std::env::var("GOOGLE_CLIENT_ID").expect("GOOGLE_CLIENT_ID must be set");
-
-    let extra_client_ids: Vec<String> = std::env::var("GOOGLE_DEVICE_CLIENT_ID")
-        .map(|s| {
-            s.split(',')
-                .map(|id| id.trim().to_string())
-                .filter(|id| !id.is_empty())
-                .collect()
-        })
-        .unwrap_or_default();
-    let google_verifier =
-        GoogleTokenVerifier::new(google_client_id).with_extra_client_ids(extra_client_ids);
+    // NOTE: 旧ログイン用 Google verifier (GOOGLE_CLIENT_ID / GOOGLE_DEVICE_CLIENT_ID) は
+    // 撤去 — ログインは auth-worker に完全移管済み (#479 PR-3) で、この verifier を
+    // Extension で取り出す handler は存在しなかった (dead layer)。rust 側に残る
+    // Google JWKS 検証は internal OIDC (aud=alc-api-internal、routes::router 内で構築)
+    // のみ。
 
     let pool = PgPoolOptions::new()
         .max_connections(10)
@@ -484,7 +473,6 @@ async fn main() -> anyhow::Result<()> {
 
     let app = Router::new()
         .nest("/api", api_router)
-        .layer(Extension(google_verifier))
         .layer(Extension(bot_admin_ext))
         .layer(Extension(lw_client))
         .layer(axum::extract::DefaultBodyLimit::max(20 * 1024 * 1024)) // 20MB
