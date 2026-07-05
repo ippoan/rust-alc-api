@@ -49,7 +49,6 @@ alc-trouble = { path = "crates/alc-trouble" }
 alc-storage = { path = "crates/alc-storage" }
 alc-csv-parser = { path = "crates/alc-csv-parser" }
 alc-compare = { path = "crates/alc-compare" }
-alc-pdf = { path = "crates/alc-pdf" }
 anyhow = "1"
 async-trait = "0.1"
 axum = { version = "0.8", features = ["multipart"] }
