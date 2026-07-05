@@ -2,3 +2,47 @@
 build --incompatible_strict_action_env
 build --action_env=PATH
 build --jobs=auto
+
+# --- coverage: shard 別 instrumentation_filter (Refs #515) ---
+#
+# filter を ci.yml ではなくここに置く理由: setup-bazel の disk-cache tar key は
+# MODULE/BUILD/.bazelrc の hash のみで ci.yml を含まない。filter を ci.yml に
+# 書くと、filter 変更時に cache key が変わらず main warm が「Disk cache hit,
+# skipping save」で新計装 action を保存できない (GH Actions cache は同一 key へ
+# 上書き不可) = 全 PR が毎回 coverage 再ビルドを払い続ける (2026-07-05 実測)。
+# ここに置けば filter 変更 = key 変更となり warm が新 key で save できる。
+#
+# 規約:
+# - config 名は "cov-<shard名>" (ci.yml の matrix coverage field と 1:1。
+#   check_bazel_test_matrix.sh が対応を検証する)
+# - instrumentation_filter は label 文字列 (例 //:unit_tests) への regex match。
+#   root package は "^//:"。各 shard は「そのテストが exercise する crate」を
+#   全て列挙する (coverage_100.toml の mock/combined type は shard 横断の
+#   lcov max-merge union で 100% になる)
+coverage --combined_report=lcov
+# cargo-llvm-cov は --cfg=coverage を自動注入する。これに合わせないと
+# `#[cfg_attr(not(coverage), ignore)]` の里帰りテスト (alc-compare の 21 本) が
+# bazel coverage では ignore されたまま走らず、対応する deep branch 行が
+# DA=0 になる (2026-07-05 実測: compare/lib.rs 313 行 miss の根本原因)。
+coverage --@rules_rust//rust/settings:extra_rustc_flag=--cfg=coverage
+coverage:cov-monolith --instrumentation_filter=^//:
+coverage:cov-mock-carins --instrumentation_filter=//crates/alc-carins,//crates/alc-core
+coverage:cov-mock-devices --instrumentation_filter=//crates/alc-devices,//crates/alc-core
+coverage:cov-mock-dtako --instrumentation_filter=//crates/alc-dtako,//crates/alc-compare,//crates/alc-pdf,//crates/alc-core
+coverage:cov-mock-misc --instrumentation_filter=//crates/alc-misc,//crates/alc-core,//crates/alc-tenko,^//:
+coverage:cov-mock-tenko --instrumentation_filter=//crates/alc-tenko,//crates/alc-core
+coverage:cov-mock-trouble --instrumentation_filter=//crates/alc-trouble,//crates/alc-core
+coverage:cov-auth-jwt --instrumentation_filter=//crates/alc-auth-jwt
+coverage:cov-carins --instrumentation_filter=//crates/alc-carins
+coverage:cov-compare --instrumentation_filter=//crates/alc-compare
+coverage:cov-core --instrumentation_filter=//crates/alc-core
+coverage:cov-csv-parser --instrumentation_filter=//crates/alc-csv-parser
+coverage:cov-devices --instrumentation_filter=//crates/alc-devices
+coverage:cov-dtako --instrumentation_filter=//crates/alc-dtako,//crates/alc-compare
+coverage:cov-misc --instrumentation_filter=//crates/alc-misc
+coverage:cov-notify --instrumentation_filter=//crates/alc-notify
+coverage:cov-pdf --instrumentation_filter=//crates/alc-pdf
+coverage:cov-tenko --instrumentation_filter=//crates/alc-tenko
+coverage:cov-trouble --instrumentation_filter=//crates/alc-trouble
+coverage:cov-db-trouble --instrumentation_filter=//crates/alc-trouble
+coverage:cov-db-archive --instrumentation_filter=^//:
