@@ -169,9 +169,14 @@ Build backend (Bazel) job 139s の内訳: setup ~8s / **analysis 60s**
   当面 gate として並走 (PR4 で退役予定)。注意: mock shard は monolith lib 閉包を含むため
   disk cache が各 ~500MB 級 — GH cache 10GB 上限との兼ね合いで eviction が観測されたら
   shard 統合で対処する
-- 残: DB 依存 integration test の Bazel 化 (PR2、shard job に postgres service +
-  `--test_env=TEST_DATABASE_URL`)、coverage gate の lcov 全域化 (PR3)、
-  cargo Tests matrix 退役 + required checks 差し替え (PR4)
+- **PR2**: CI が実際に走らせている DB integration 2 binary (`trouble_test` /
+  `archive_repo_test`) を bazel 化 (25 shard)。postgres service + `--test_env=
+  TEST_DATABASE_URL` + init_local_db.sql を持つ別 job (`bazel-test-db` とその warm)。
+  発見: tests/ の他 6 binary (devices_test / employees_test / measurements_test /
+  devices_re_pair_test / trouble_task_statuses_test / trouble_tasks_cross_ticket_test)
+  は **cargo CI でも走っていない** (test-matrix の `--test` 列挙に無い) — 要別途判断
+- 残: coverage gate の lcov 全域化 (PR3)、cargo Tests matrix 退役 + required checks
+  差し替え (PR4)、dormant な DB テスト 6 binary の扱い
 
 ### cache-warm build-only 化の実測 (PR #519、2026-07-05)
 
