@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use sqlx::PgPool;
 
-pub use alc_core::repository::tenko_call::*;
+pub use crate::repository::tenko_call::*;
 
 pub struct PgTenkoCallRepository {
     pool: PgPool,

@@ -11,9 +11,9 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use alc_core::auth_middleware::require_tenant_header;
 use alc_tenko::repo::{
-    PgDailyHealthRepository, PgEquipmentFailuresRepository, PgHealthBaselinesRepository,
-    PgTenkoCallRepository, PgTenkoRecordsRepository, PgTenkoSchedulesRepository,
-    PgTenkoSessionRepository, PgTenkoWebhooksRepository,
+    PgDailyHealthRepository, PgDriverInfoRepository, PgEquipmentFailuresRepository,
+    PgHealthBaselinesRepository, PgTenkoCallRepository, PgTenkoRecordsRepository,
+    PgTenkoSchedulesRepository, PgTenkoSessionRepository, PgTenkoWebhooksRepository,
 };
 use alc_tenko::TenkoState;
 
@@ -48,6 +48,7 @@ async fn main() {
         daily_health: Arc::new(PgDailyHealthRepository::new(pool.clone())),
         health_baselines: Arc::new(PgHealthBaselinesRepository::new(pool.clone())),
         equipment_failures: Arc::new(PgEquipmentFailuresRepository::new(pool.clone())),
+        driver_info: Arc::new(PgDriverInfoRepository::new(pool.clone())),
         webhook: None,
     };
 
@@ -60,6 +61,7 @@ async fn main() {
         .merge(alc_tenko::tenko_webhooks::tenant_router())
         .merge(alc_tenko::tenko_call::tenant_router())
         .merge(alc_tenko::daily_health::tenant_router())
+        .merge(alc_tenko::driver_info::tenant_router())
         .layer(axum_middleware::from_fn(require_tenant_header));
 
     let public_routes = Router::new().merge(alc_tenko::tenko_call::public_router());

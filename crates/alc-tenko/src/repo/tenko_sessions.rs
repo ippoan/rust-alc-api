@@ -2,14 +2,14 @@ use async_trait::async_trait;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use alc_core::models::{
+use crate::models::{
     EmployeeHealthBaseline, TenkoDashboard, TenkoRecord, TenkoSchedule, TenkoSession,
     TenkoSessionFilter,
 };
 
 use alc_core::tenant::TenantConn;
 
-pub use alc_core::repository::tenko_sessions::*;
+pub use crate::repository::tenko_sessions::*;
 
 pub struct PgTenkoSessionRepository {
     pool: PgPool,

@@ -143,6 +143,10 @@ path = "crates/alc-tenko/src/daily_health.rs"
 type = "mock"
 
 [[files]]
+path = "crates/alc-tenko/src/overdue.rs"
+type = "unit"
+
+[[files]]
 path = "crates/alc-tenko/src/equipment_failures.rs"
 type = "mock"
 
@@ -185,7 +189,7 @@ path = "crates/alc-misc/src/communication_items.rs"
 type = "mock"
 
 [[files]]
-path = "crates/alc-misc/src/driver_info.rs"
+path = "crates/alc-tenko/src/driver_info.rs"
 type = "mock"
 
 [[files]]

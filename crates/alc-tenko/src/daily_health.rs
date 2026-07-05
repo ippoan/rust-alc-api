@@ -7,9 +7,9 @@ use axum::{
 use chrono::{NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::repository::daily_health::DailyHealthRow;
 use crate::TenkoState;
 use alc_core::auth_middleware::TenantId;
-use alc_core::repository::daily_health::DailyHealthRow;
 
 pub fn tenant_router<S>() -> Router<S>
 where

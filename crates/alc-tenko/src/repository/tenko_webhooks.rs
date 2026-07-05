@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use uuid::Uuid;
 
-use crate::models::{CreateWebhookConfig, WebhookConfig, WebhookDelivery};
+use alc_core::models::{CreateWebhookConfig, WebhookConfig, WebhookDelivery};
 
 #[async_trait]
 pub trait TenkoWebhooksRepository: Send + Sync {

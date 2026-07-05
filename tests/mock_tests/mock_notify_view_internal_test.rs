@@ -47,7 +47,7 @@ async fn test_internal_view_success() {
         std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
         let mut state = setup_mock_app_state();
         let _mock = install_mock(&mut state);
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let token = Uuid::new_v4();
         let jwt = crate::common::create_test_internal_jwt();
@@ -78,7 +78,7 @@ async fn test_internal_view_not_found() {
         let mut state = setup_mock_app_state();
         let mock = install_mock(&mut state);
         *mock.view_override.lock().unwrap() = Some(None);
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let token = Uuid::new_v4();
         let jwt = crate::common::create_test_internal_jwt();
@@ -101,7 +101,7 @@ async fn test_internal_view_expired() {
         let mut state = setup_mock_app_state();
         let mock = install_mock(&mut state);
         *mock.view_override.lock().unwrap() = Some(Some(sample_view(-1)));
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let token = Uuid::new_v4();
         let jwt = crate::common::create_test_internal_jwt();
@@ -124,7 +124,7 @@ async fn test_internal_view_db_error() {
         let mut state = setup_mock_app_state();
         let mock = install_mock(&mut state);
         mock.fail_next.store(true, Ordering::SeqCst);
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let token = Uuid::new_v4();
         let jwt = crate::common::create_test_internal_jwt();
@@ -146,7 +146,7 @@ async fn test_internal_view_requires_internal_jwt() {
         std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
         let mut state = setup_mock_app_state();
         let _mock = install_mock(&mut state);
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let token = Uuid::new_v4();
         let res = reqwest::Client::new()
@@ -170,7 +170,7 @@ async fn test_internal_mark_read_success() {
         std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
         let mut state = setup_mock_app_state();
         let _mock = install_mock(&mut state);
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let token = Uuid::new_v4();
         let jwt = crate::common::create_test_internal_jwt();
@@ -193,7 +193,7 @@ async fn test_internal_mark_read_not_found() {
         let mut state = setup_mock_app_state();
         let mock = install_mock(&mut state);
         mock.mark_read_none.store(true, Ordering::SeqCst);
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let token = Uuid::new_v4();
         let jwt = crate::common::create_test_internal_jwt();
@@ -216,7 +216,7 @@ async fn test_internal_mark_read_db_error() {
         let mut state = setup_mock_app_state();
         let mock = install_mock(&mut state);
         mock.fail_next.store(true, Ordering::SeqCst);
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let token = Uuid::new_v4();
         let jwt = crate::common::create_test_internal_jwt();

@@ -13,7 +13,7 @@ use crate::mock_helpers::MockDtakoVehiclesRepository;
 #[tokio::test]
 async fn test_list_vehicles_success() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state.clone()).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state.clone()).await;
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
@@ -38,7 +38,7 @@ async fn test_list_vehicles_success() {
 #[tokio::test]
 async fn test_list_vehicles_no_auth() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -57,7 +57,7 @@ async fn test_list_vehicles_no_auth() {
 #[tokio::test]
 async fn test_list_vehicles_tenant_header() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state.clone()).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state.clone()).await;
     let tenant_id = Uuid::new_v4();
     let client = reqwest::Client::new();
 
@@ -86,7 +86,7 @@ async fn test_list_vehicles_db_error() {
     mock.fail_next.store(true, Ordering::SeqCst);
     state.dtako_vehicles = mock;
 
-    let base_url = crate::common::spawn_test_server(state.clone()).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state.clone()).await;
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();

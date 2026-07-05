@@ -14,7 +14,7 @@ use crate::mock_helpers::MockTenantUsersRepository;
 async fn setup_admin() -> (String, String) {
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt_for_user(
         Uuid::new_v4(),
         tenant_id,
@@ -27,7 +27,7 @@ async fn setup_admin() -> (String, String) {
 async fn setup_viewer() -> (String, String) {
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "viewer");
     (base_url, format!("Bearer {jwt}"))
 }
@@ -39,7 +39,7 @@ async fn setup_failing_admin() -> (String, String) {
     let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
     state.tenant_users = mock;
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt_for_user(
         Uuid::new_v4(),
         tenant_id,
@@ -56,7 +56,7 @@ async fn setup_admin_not_found() -> (String, String) {
     let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
     state.tenant_users = mock;
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt_for_user(
         Uuid::new_v4(),
         tenant_id,
@@ -120,7 +120,7 @@ async fn test_list_members_merges_users_and_invitations() {
     let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
     state.tenant_users = mock;
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt_for_user(
         Uuid::new_v4(),
         tenant_id,
@@ -164,7 +164,7 @@ async fn test_list_members_forbidden_for_viewer() {
 #[tokio::test]
 async fn test_list_members_unauthorized() {
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let res = client
         .get(format!("{base_url}/api/members"))
@@ -253,7 +253,7 @@ async fn test_invite_member_forbidden_for_viewer() {
 #[tokio::test]
 async fn test_invite_member_unauthorized() {
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let res = client
         .post(format!("{base_url}/api/members"))
@@ -341,7 +341,7 @@ async fn test_update_role_forbidden_for_viewer() {
 #[tokio::test]
 async fn test_update_role_unauthorized() {
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let res = client
         .patch(format!("{base_url}/api/members/foo@example.com"))
@@ -426,7 +426,7 @@ async fn test_delete_member_forbidden_for_viewer() {
 #[tokio::test]
 async fn test_delete_member_unauthorized() {
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let res = client
         .delete(format!("{base_url}/api/members/foo@example.com"))

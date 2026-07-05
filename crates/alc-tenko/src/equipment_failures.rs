@@ -7,12 +7,12 @@ use axum::{
 };
 use uuid::Uuid;
 
-use crate::TenkoState;
-use alc_core::auth_middleware::TenantId;
-use alc_core::models::{
+use crate::models::{
     CreateEquipmentFailure, EquipmentFailure, EquipmentFailureFilter, EquipmentFailuresResponse,
     UpdateEquipmentFailure,
 };
+use crate::TenkoState;
+use alc_core::auth_middleware::TenantId;
 
 /// テナント対応ルート (JWT or X-Tenant-ID)
 pub fn tenant_router<S>() -> Router<S>

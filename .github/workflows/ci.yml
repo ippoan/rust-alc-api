@@ -176,6 +176,9 @@ jobs:
           shared-key: check
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo fmt --check --all
+      # ドメイン分割ガード (Refs #513): ドメイン専用 code が alc-core に再流入したら
+      # loud fail する。数秒で終わる grep ベース検査。
+      - run: bash scripts/check_domain_split.sh
       - run: cargo clippy --workspace -- -D warnings
         env:
           SCCACHE_GHA_ENABLED: "true"

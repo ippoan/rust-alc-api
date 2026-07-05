@@ -18,7 +18,7 @@ async fn test_create_measurement_success() {
 
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -57,7 +57,7 @@ async fn test_create_measurement_db_error() {
     state.measurements = mock;
 
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -89,7 +89,7 @@ async fn test_create_measurement_invalid_result_type() {
 
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -121,7 +121,7 @@ async fn test_create_measurement_invalid_json() {
 
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -148,7 +148,7 @@ async fn test_start_measurement_success() {
 
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -185,7 +185,7 @@ async fn test_start_measurement_db_error() {
     state.measurements = mock;
 
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -215,7 +215,7 @@ async fn test_list_measurements_success() {
 
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -250,7 +250,7 @@ async fn test_list_measurements_db_error() {
     state.measurements = mock;
 
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -275,7 +275,7 @@ async fn test_get_measurement_not_found() {
 
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -306,7 +306,7 @@ async fn test_get_measurement_found() {
     state.measurements = mock;
 
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -339,7 +339,7 @@ async fn test_get_measurement_db_error() {
     state.measurements = mock;
 
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -370,7 +370,7 @@ async fn test_update_measurement_success() {
     state.measurements = mock;
 
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -410,7 +410,7 @@ async fn test_update_measurement_without_status_success() {
     state.measurements = mock;
 
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -445,7 +445,7 @@ async fn test_update_measurement_not_found() {
     // return_some defaults to false → update returns None → 404
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -481,7 +481,7 @@ async fn test_update_measurement_db_error() {
     state.measurements = mock;
 
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -512,7 +512,7 @@ async fn test_update_measurement_invalid_result_type() {
 
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -543,7 +543,7 @@ async fn test_update_measurement_invalid_status() {
 
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -574,7 +574,7 @@ async fn test_update_measurement_invalid_json() {
 
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -614,7 +614,7 @@ async fn test_get_face_photo_success() {
     state.storage = mock_storage;
 
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -649,7 +649,7 @@ async fn test_get_face_photo_no_url() {
     state.measurements = mock_repo;
 
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -676,7 +676,7 @@ async fn test_get_face_photo_measurement_not_found() {
     // return_some defaults to false → get returns None → 404
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -707,7 +707,7 @@ async fn test_get_face_photo_db_error() {
     state.measurements = mock_repo;
 
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -745,7 +745,7 @@ async fn test_get_video_success() {
     state.storage = mock_storage;
 
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -780,7 +780,7 @@ async fn test_get_video_no_url() {
     state.measurements = mock_repo;
 
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -807,7 +807,7 @@ async fn test_get_video_measurement_not_found() {
     // return_some defaults to false → get returns None → 404
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -838,7 +838,7 @@ async fn test_get_video_db_error() {
     state.measurements = mock_repo;
 
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -863,7 +863,7 @@ async fn test_measurements_no_auth() {
     std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
 
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     // GET /api/measurements without auth
@@ -950,7 +950,7 @@ async fn test_get_face_photo_storage_download_error() {
     state.storage = mock_storage;
 
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -986,7 +986,7 @@ async fn test_get_video_storage_download_error() {
     state.storage = mock_storage;
 
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -1021,7 +1021,7 @@ async fn test_get_face_photo_extract_key_fails() {
     state.measurements = mock_repo;
 
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -1054,7 +1054,7 @@ async fn test_get_video_extract_key_fails() {
     state.measurements = mock_repo;
 
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -1080,7 +1080,7 @@ async fn test_measurements_with_tenant_header() {
 
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     // GET /api/measurements with X-Tenant-ID (no JWT)

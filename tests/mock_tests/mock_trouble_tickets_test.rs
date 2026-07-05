@@ -12,7 +12,7 @@ async fn setup() -> (String, String) {
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let auth = format!("Bearer {jwt}");
     (base, auth)
 }
@@ -25,7 +25,7 @@ async fn setup_failing_tickets() -> (String, String) {
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     state.trouble_tickets = mock;
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let auth = format!("Bearer {jwt}");
     (base, auth)
 }
@@ -179,7 +179,7 @@ async fn update_ticket_db_error() {
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     state.trouble_tickets = mock;
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let auth = format!("Bearer {jwt}");
 
     let id = Uuid::new_v4();
@@ -221,7 +221,7 @@ async fn delete_ticket_db_error() {
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     state.trouble_tickets = mock;
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let auth = format!("Bearer {jwt}");
 
     let id = Uuid::new_v4();
@@ -337,7 +337,7 @@ async fn transition_ticket_success() {
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     state.trouble_tickets = tickets_mock;
     state.trouble_workflow = workflow_mock;
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let auth = format!("Bearer {jwt}");
 
     let id = Uuid::new_v4();
@@ -375,7 +375,7 @@ async fn transition_ticket_not_allowed() {
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     state.trouble_tickets = tickets_mock;
     state.trouble_workflow = workflow_mock;
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let auth = format!("Bearer {jwt}");
 
     let id = Uuid::new_v4();
@@ -405,7 +405,7 @@ async fn delete_ticket_returns_false_not_found() {
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     state.trouble_tickets = mock;
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let auth = format!("Bearer {jwt}");
 
     let id = Uuid::new_v4();
@@ -431,7 +431,7 @@ async fn update_ticket_success() {
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     state.trouble_tickets = mock;
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let auth = format!("Bearer {jwt}");
 
     let id = Uuid::new_v4();
@@ -456,7 +456,7 @@ async fn update_ticket_with_counterparty_vehicle_and_disciplinary_committee() {
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     state.trouble_tickets = mock;
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let auth = format!("Bearer {jwt}");
 
     let id = Uuid::new_v4();
@@ -486,7 +486,7 @@ async fn get_ticket_success() {
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     state.trouble_tickets = mock;
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let auth = format!("Bearer {jwt}");
 
     let id = Uuid::new_v4();
@@ -514,7 +514,7 @@ async fn create_ticket_with_initial_state() {
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     state.trouble_workflow = workflow_mock;
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let auth = format!("Bearer {jwt}");
 
     let res = client()
@@ -541,7 +541,7 @@ async fn create_ticket_with_webhook() {
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     state.webhook = Some(webhook_mock.clone());
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let auth = format!("Bearer {jwt}");
 
     let res = client()
@@ -578,7 +578,7 @@ async fn transition_ticket_with_webhook() {
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     state.trouble_tickets = tickets_mock;
     state.webhook = Some(webhook_mock.clone());
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let auth = format!("Bearer {jwt}");
 
     let id = Uuid::new_v4();
@@ -612,7 +612,7 @@ async fn export_csv_with_data() {
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     state.trouble_tickets = mock;
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let auth = format!("Bearer {jwt}");
 
     let res = client()
@@ -672,7 +672,7 @@ async fn update_ticket_with_assigned_to() {
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     state.trouble_tickets = mock;
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let auth = format!("Bearer {jwt}");
 
     let id = Uuid::new_v4();
@@ -699,7 +699,7 @@ async fn create_ticket_workflow_error() {
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     state.trouble_workflow = workflow_mock;
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let auth = format!("Bearer {jwt}");
 
     let res = client()

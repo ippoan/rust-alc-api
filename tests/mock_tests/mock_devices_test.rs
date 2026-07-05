@@ -20,7 +20,7 @@ async fn test_register_request_success() {
     let mock = Arc::new(MockDeviceRepository::default());
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -45,7 +45,7 @@ async fn test_register_request_code_collision_retry() {
         .store(true, std::sync::atomic::Ordering::Relaxed);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -67,7 +67,7 @@ async fn test_register_request_no_device_name() {
     let mock = Arc::new(MockDeviceRepository::default());
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -88,7 +88,7 @@ async fn test_register_request_db_error() {
     mock.fail_next.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -113,7 +113,7 @@ async fn test_registration_status_found() {
     mock.return_data.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -135,7 +135,7 @@ async fn test_registration_status_not_found() {
     // return_data=false -> None -> 404
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -155,7 +155,7 @@ async fn test_registration_status_db_error() {
     mock.fail_next.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -179,7 +179,7 @@ async fn test_claim_url_flow_success() {
     mock.return_data.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -209,7 +209,7 @@ async fn test_claim_not_found() {
     // return_data=false -> None -> error
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -234,7 +234,7 @@ async fn test_claim_db_error() {
     mock.fail_next.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -263,7 +263,7 @@ async fn test_device_settings_found() {
     mock.return_data.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let device_id = Uuid::new_v4();
     let client = reqwest::Client::new();
@@ -287,7 +287,7 @@ async fn test_device_settings_not_found() {
     let mock = Arc::new(MockDeviceRepository::default());
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let device_id = Uuid::new_v4();
     let client = reqwest::Client::new();
@@ -314,7 +314,7 @@ async fn test_device_settings_token_match() {
     mock.return_settings_token.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let device_id = Uuid::new_v4();
     let client = reqwest::Client::new();
@@ -341,7 +341,7 @@ async fn test_device_settings_token_mismatch() {
     mock.return_settings_token.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let device_id = Uuid::new_v4();
     let client = reqwest::Client::new();
@@ -365,7 +365,7 @@ async fn test_device_settings_token_sent_but_not_issued() {
     // return_settings_token は立てない = row.settings_token は None
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let device_id = Uuid::new_v4();
     let client = reqwest::Client::new();
@@ -389,7 +389,7 @@ async fn test_device_settings_token_issued_header_missing() {
     mock.return_settings_token.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let device_id = Uuid::new_v4();
     let client = reqwest::Client::new();
@@ -412,7 +412,7 @@ async fn test_registration_status_settings_token_only_when_approved() {
     mock.return_settings_token.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock.clone();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     // pending: settings_token は出ない
@@ -452,7 +452,7 @@ async fn test_register_fcm_token_success() {
     mock.return_data.store(true, Ordering::SeqCst); // lookup_device_tenant returns Some
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -476,7 +476,7 @@ async fn test_register_fcm_token_device_not_found() {
     // return_data=false -> lookup_device_tenant returns None -> 404
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -504,7 +504,7 @@ async fn test_report_version_success() {
     mock.return_data.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -530,7 +530,7 @@ async fn test_report_version_device_not_found() {
     let mock = Arc::new(MockDeviceRepository::default());
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -559,7 +559,7 @@ async fn test_report_watchdog_success() {
     mock.return_data.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -582,7 +582,7 @@ async fn test_report_watchdog_device_not_found() {
     let mock = Arc::new(MockDeviceRepository::default());
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -610,7 +610,7 @@ async fn test_update_last_login_success() {
     mock.return_data.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -641,7 +641,7 @@ async fn test_fcm_notify_call_no_fcm() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     // fcm = None
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -667,7 +667,7 @@ async fn test_fcm_notify_call_secret_unset_fail_closed() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -689,7 +689,7 @@ async fn test_fcm_notify_call_empty_rooms() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -719,7 +719,7 @@ async fn test_fcm_notify_call_with_devices() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -747,7 +747,7 @@ async fn test_fcm_notify_call_with_internal_secret_check() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
 
@@ -786,7 +786,7 @@ async fn test_fcm_dismiss_test_no_fcm() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     // fcm = None
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -808,7 +808,7 @@ async fn test_fcm_dismiss_test_device_not_found() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -830,7 +830,7 @@ async fn test_fcm_dismiss_test_success() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -856,7 +856,7 @@ async fn test_fcm_all_exclude_no_fcm() {
     let mock = Arc::new(MockDeviceRepository::default());
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -881,7 +881,7 @@ async fn test_list_devices_empty() {
     let mock = Arc::new(MockDeviceRepository::default());
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -906,7 +906,7 @@ async fn test_list_devices_no_auth() {
     let mock = Arc::new(MockDeviceRepository::default());
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -926,7 +926,7 @@ async fn test_list_devices_db_error() {
     mock.fail_next.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -950,7 +950,7 @@ async fn test_list_pending_empty() {
     let mock = Arc::new(MockDeviceRepository::default());
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -976,7 +976,7 @@ async fn test_create_url_token_success() {
     let mock = Arc::new(MockDeviceRepository::default());
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -1006,7 +1006,7 @@ async fn test_create_url_token_no_auth() {
     let mock = Arc::new(MockDeviceRepository::default());
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -1027,7 +1027,7 @@ async fn test_create_permanent_qr_success() {
     let mock = Arc::new(MockDeviceRepository::default());
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -1056,7 +1056,7 @@ async fn test_create_device_owner_token_success() {
     let mock = Arc::new(MockDeviceRepository::default());
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -1086,7 +1086,7 @@ async fn test_approve_device_success() {
     mock.return_data.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -1115,7 +1115,7 @@ async fn test_approve_device_not_found() {
     // return_data=false -> find_approve_request returns None -> 404
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -1142,7 +1142,7 @@ async fn test_approve_by_code_success() {
     mock.return_data.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -1167,7 +1167,7 @@ async fn test_approve_by_code_not_found() {
     let mock = Arc::new(MockDeviceRepository::default());
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -1192,7 +1192,7 @@ async fn test_reject_device_success() {
     mock.return_data.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -1216,7 +1216,7 @@ async fn test_reject_device_not_found() {
     let mock = Arc::new(MockDeviceRepository::default());
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -1242,7 +1242,7 @@ async fn test_disable_device_success() {
     mock.return_data.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -1268,7 +1268,7 @@ async fn test_enable_device_success() {
     mock.return_data.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -1294,7 +1294,7 @@ async fn test_delete_device_success() {
     mock.return_data.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -1318,7 +1318,7 @@ async fn test_delete_device_not_found() {
     let mock = Arc::new(MockDeviceRepository::default());
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -1345,7 +1345,7 @@ async fn test_update_call_settings_success() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -1374,7 +1374,7 @@ async fn test_update_call_settings_not_found() {
     let mock = Arc::new(MockDeviceRepository::default());
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -1404,7 +1404,7 @@ async fn test_fcm_single_device_success() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -1431,7 +1431,7 @@ async fn test_fcm_single_device_no_fcm() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     // fcm = None
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -1457,7 +1457,7 @@ async fn test_fcm_single_device_not_found() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -1483,7 +1483,7 @@ async fn test_fcm_single_device_failing_sender() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::FailingFcmSender));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -1513,7 +1513,7 @@ async fn test_fcm_all_success() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -1542,7 +1542,7 @@ async fn test_fcm_all_no_fcm() {
     let mock = Arc::new(MockDeviceRepository::default());
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -1568,7 +1568,7 @@ async fn test_trigger_update_success() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -1600,7 +1600,7 @@ async fn test_trigger_update_already_updated() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -1634,7 +1634,7 @@ async fn test_trigger_update_dev_no_secret() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -1657,7 +1657,7 @@ async fn test_trigger_update_dev_wrong_secret() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -1682,7 +1682,7 @@ async fn test_trigger_update_dev_success() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -1710,7 +1710,7 @@ async fn test_list_devices_with_x_tenant_id() {
     let mock = Arc::new(MockDeviceRepository::default());
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -1735,7 +1735,7 @@ async fn test_list_devices_with_device_rows() {
     mock.return_device_rows.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -1769,7 +1769,7 @@ async fn test_list_pending_with_rows() {
     mock.return_pending_rows.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -1803,7 +1803,7 @@ async fn test_registration_status_expired() {
     mock.return_expired.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -1830,7 +1830,7 @@ async fn test_registration_status_approved() {
     mock.return_approved_status.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -1857,7 +1857,7 @@ async fn test_registration_status_pending_no_expires() {
     mock.return_no_expires.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -1884,7 +1884,7 @@ async fn test_claim_qr_permanent_success() {
     mock.return_qr_permanent.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -1918,7 +1918,7 @@ async fn test_claim_used_status() {
     mock.return_used_status.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -1948,7 +1948,7 @@ async fn test_claim_unknown_flow_type() {
     mock.return_unknown_flow.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -1977,7 +1977,7 @@ async fn test_list_pending_db_error() {
     mock.fail_next.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -2001,7 +2001,7 @@ async fn test_create_url_token_db_error() {
     mock.fail_next.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -2026,7 +2026,7 @@ async fn test_create_device_owner_token_db_error() {
     mock.fail_next.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -2053,7 +2053,7 @@ async fn test_create_permanent_qr_db_error() {
     mock.fail_next.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -2080,7 +2080,7 @@ async fn test_approve_device_db_error_lookup() {
     mock.fail_next.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -2106,7 +2106,7 @@ async fn test_approve_by_code_db_error() {
     mock.fail_next.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -2130,7 +2130,7 @@ async fn test_reject_device_db_error() {
     mock.fail_next.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -2154,7 +2154,7 @@ async fn test_disable_device_not_found() {
     let mock = Arc::new(MockDeviceRepository::default());
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -2179,7 +2179,7 @@ async fn test_disable_device_db_error() {
     mock.fail_next.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -2203,7 +2203,7 @@ async fn test_enable_device_not_found() {
     let mock = Arc::new(MockDeviceRepository::default());
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -2228,7 +2228,7 @@ async fn test_enable_device_db_error() {
     mock.fail_next.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -2253,7 +2253,7 @@ async fn test_delete_device_db_error() {
     mock.fail_next.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -2278,7 +2278,7 @@ async fn test_update_call_settings_db_error() {
     mock.fail_next.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -2310,7 +2310,7 @@ async fn test_update_call_settings_always_on_no_token() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -2344,7 +2344,7 @@ async fn test_update_call_settings_always_on_no_fcm_provider() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     // fcm = None, so always_on FCM branch is skipped
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -2378,7 +2378,7 @@ async fn test_update_call_settings_no_always_on() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -2409,7 +2409,7 @@ async fn test_update_call_settings_fcm_send_failure() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::FailingFcmSender));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -2443,7 +2443,7 @@ async fn test_device_settings_db_error() {
     mock.fail_next.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let device_id = Uuid::new_v4();
     let client = reqwest::Client::new();
@@ -2468,7 +2468,7 @@ async fn test_register_fcm_token_db_error_lookup() {
     mock.fail_next.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -2496,7 +2496,7 @@ async fn test_update_last_login_not_found() {
     // return_data=false -> lookup returns None -> 404
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -2522,7 +2522,7 @@ async fn test_update_last_login_db_error() {
     mock.fail_next.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -2552,7 +2552,7 @@ async fn test_report_version_db_error() {
     mock.fail_next.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -2581,7 +2581,7 @@ async fn test_report_watchdog_db_error() {
     mock.fail_next.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -2612,7 +2612,7 @@ async fn test_fcm_notify_call_disabled_device_skipped() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -2644,7 +2644,7 @@ async fn test_fcm_notify_call_schedule_disabled_skipped() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -2676,7 +2676,7 @@ async fn test_fcm_notify_call_schedule_with_days_sent() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -2706,7 +2706,7 @@ async fn test_fcm_notify_call_fcm_error() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::FailingFcmSender));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -2737,7 +2737,7 @@ async fn test_fcm_notify_call_db_error() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -2765,7 +2765,7 @@ async fn test_fcm_notify_call_with_exclude() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     // Exclude the nil UUID device
@@ -2799,7 +2799,7 @@ async fn test_fcm_dismiss_test_db_error() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -2825,7 +2825,7 @@ async fn test_fcm_all_exclude_with_devices() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -2853,7 +2853,7 @@ async fn test_fcm_all_exclude_with_exclude_matching() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -2881,7 +2881,7 @@ async fn test_fcm_all_exclude_fcm_error() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::FailingFcmSender));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -2910,7 +2910,7 @@ async fn test_fcm_all_exclude_db_error() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -2937,7 +2937,7 @@ async fn test_fcm_single_device_null_token() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -2967,7 +2967,7 @@ async fn test_fcm_single_device_db_error() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -2997,7 +2997,7 @@ async fn test_fcm_all_failing_sender() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::FailingFcmSender));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -3032,7 +3032,7 @@ async fn test_fcm_all_db_error() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -3060,7 +3060,7 @@ async fn test_trigger_update_no_fcm() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     // fcm = None
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -3090,7 +3090,7 @@ async fn test_trigger_update_with_device_ids_filter() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -3128,7 +3128,7 @@ async fn test_trigger_update_fcm_error() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::FailingFcmSender));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -3164,7 +3164,7 @@ async fn test_trigger_update_db_error() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -3195,7 +3195,7 @@ async fn test_trigger_update_no_version_code() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -3228,7 +3228,7 @@ async fn test_trigger_update_with_version_name_only() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -3260,7 +3260,7 @@ async fn test_trigger_update_dev_only() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -3295,7 +3295,7 @@ async fn test_trigger_update_dev_with_tenants() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -3329,7 +3329,7 @@ async fn test_trigger_update_dev_download_url_passthrough() {
     state.devices = mock;
     let fcm_mock = Arc::new(crate::common::MockFcmSender::new());
     state.fcm = Some(fcm_mock.clone());
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let url =
         "https://github.com/ippoan/AlcoholChecker/releases/download/dev-pr2-10/app-release.apk";
@@ -3369,7 +3369,7 @@ async fn test_trigger_update_without_download_url() {
     state.devices = mock;
     let fcm_mock = Arc::new(crate::common::MockFcmSender::new());
     state.fcm = Some(fcm_mock.clone());
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -3403,7 +3403,7 @@ async fn test_trigger_update_dev_db_error() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -3432,7 +3432,7 @@ async fn test_trigger_update_dev_no_fcm() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     // fcm = None -> send_update_fcm returns 503 but trigger_update_dev catches it with if let Ok
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -3462,7 +3462,7 @@ async fn test_claim_qr_permanent_no_device_name() {
     mock.return_qr_permanent.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -3493,7 +3493,7 @@ async fn test_claim_device_owner_flow() {
     // Default flow_type is "url", which covers url|device_owner match arm
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -3525,7 +3525,7 @@ async fn test_fcm_notify_call_correct_secret() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -3553,7 +3553,7 @@ async fn test_approve_device_create_db_error() {
     mock.fail_on_approve.store(true, Ordering::SeqCst); // approve_device fails
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -3584,7 +3584,7 @@ async fn test_approve_by_code_create_db_error() {
     mock.fail_on_approve.store(true, Ordering::SeqCst); // approve_by_code fails
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -3613,7 +3613,7 @@ async fn test_report_watchdog_update_db_error() {
     mock.fail_on_update.store(true, Ordering::SeqCst); // update_watchdog_state fails
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -3642,7 +3642,7 @@ async fn test_register_fcm_token_update_db_error() {
     mock.fail_on_update.store(true, Ordering::SeqCst); // update_fcm_token fails
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -3671,7 +3671,7 @@ async fn test_update_last_login_update_db_error() {
     mock.fail_on_update.store(true, Ordering::SeqCst); // update_last_login fails
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -3702,7 +3702,7 @@ async fn test_report_version_update_db_error() {
     mock.fail_on_update.store(true, Ordering::SeqCst); // report_version fails
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -3735,7 +3735,7 @@ async fn test_fcm_notify_call_schedule_days_mismatch_skipped() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -3767,7 +3767,7 @@ async fn test_fcm_notify_call_schedule_overnight_sent() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -3801,7 +3801,7 @@ async fn test_fcm_dismiss_test_with_tokens_sent() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -3844,7 +3844,7 @@ async fn test_authorize_repair_success() {
     mock.return_data.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -3873,7 +3873,7 @@ async fn test_authorize_repair_not_found() {
     let mock = Arc::new(MockDeviceRepository::default());
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -3901,7 +3901,7 @@ async fn test_authorize_repair_db_error() {
     mock.fail_next.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -3930,7 +3930,7 @@ async fn test_re_pair_device_not_found() {
     let mock = Arc::new(MockDeviceRepository::default());
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -3951,7 +3951,7 @@ async fn test_re_pair_lookup_db_error() {
     mock.fail_next.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -3974,7 +3974,7 @@ async fn test_re_pair_status_not_approved() {
     *mock.re_pair_state.lock().unwrap() = Some(row);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -3997,7 +3997,7 @@ async fn test_re_pair_no_window() {
     *mock.re_pair_state.lock().unwrap() = Some(row);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -4020,7 +4020,7 @@ async fn test_re_pair_window_expired() {
     *mock.re_pair_state.lock().unwrap() = Some(row);
     let mut state = setup_mock_app_state();
     state.devices = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -4046,7 +4046,7 @@ async fn test_re_pair_cooldown_too_many_requests() {
     state.device_pair_client = Some(Arc::new(
         crate::mock_helpers::MockDevicePairClient::default(),
     ));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -4072,7 +4072,7 @@ async fn test_re_pair_hardware_id_mismatch() {
     state.device_pair_client = Some(Arc::new(
         crate::mock_helpers::MockDevicePairClient::default(),
     ));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -4095,7 +4095,7 @@ async fn test_re_pair_not_configured() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.device_pair_client = None;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -4120,7 +4120,7 @@ async fn test_re_pair_upstream_mint_failure() {
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.device_pair_client = Some(Arc::new(pair_client));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -4146,7 +4146,7 @@ async fn test_re_pair_record_success_db_error() {
     state.device_pair_client = Some(Arc::new(
         crate::mock_helpers::MockDevicePairClient::default(),
     ));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -4171,7 +4171,7 @@ async fn test_re_pair_success_binds_hardware_id_and_returns_credential() {
     state.device_pair_client = Some(Arc::new(
         crate::mock_helpers::MockDevicePairClient::default(),
     ));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -4202,7 +4202,7 @@ async fn test_re_pair_skips_window_when_admin_not_required() {
     state.device_pair_client = Some(Arc::new(
         crate::mock_helpers::MockDevicePairClient::default(),
     ));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -4232,7 +4232,7 @@ async fn test_re_pair_requires_settings_token_when_configured() {
     state.device_pair_client = Some(Arc::new(
         crate::mock_helpers::MockDevicePairClient::default(),
     ));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -4264,7 +4264,7 @@ async fn test_re_pair_race_window_already_consumed() {
     state.device_pair_client = Some(Arc::new(
         crate::mock_helpers::MockDevicePairClient::default(),
     ));
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let client = reqwest::Client::new();
     let res = client

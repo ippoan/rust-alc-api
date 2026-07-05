@@ -10,7 +10,7 @@ use crate::common::mock_storage::MockStorage;
 async fn setup() -> (String, String, Uuid) {
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let auth_header = format!("Bearer {jwt}");
     (base_url, auth_header, tenant_id)
@@ -26,7 +26,7 @@ async fn setup_failing_storage() -> (String, String) {
     state.storage = mock_storage;
 
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let auth_header = format!("Bearer {jwt}");
     (base_url, auth_header)
@@ -418,7 +418,7 @@ async fn test_upload_blow_video_invalid_multipart() {
 async fn test_upload_face_photo_with_tenant_header() {
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let part = reqwest::multipart::Part::bytes(vec![0xFF, 0xD8, 0xFF, 0xE0])

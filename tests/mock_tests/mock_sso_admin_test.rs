@@ -8,7 +8,7 @@ use crate::mock_helpers::MockSsoAdminRepository;
 async fn setup() -> (String, String) {
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = uuid::Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let auth_header = format!("Bearer {jwt}");
     (base_url, auth_header)
@@ -21,7 +21,7 @@ async fn setup_failing() -> (String, String) {
     let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
     state.sso_admin = mock;
     let tenant_id = uuid::Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let auth_header = format!("Bearer {jwt}");
     (base_url, auth_header)
@@ -34,7 +34,7 @@ async fn setup_delete_zero() -> (String, String) {
     let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
     state.sso_admin = mock;
     let tenant_id = uuid::Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let auth_header = format!("Bearer {jwt}");
     (base_url, auth_header)
@@ -65,7 +65,7 @@ async fn test_list_configs_success() {
 async fn test_list_configs_forbidden_for_viewer() {
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = uuid::Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "viewer");
     let auth_header = format!("Bearer {jwt}");
     let client = reqwest::Client::new();
@@ -82,7 +82,7 @@ async fn test_list_configs_forbidden_for_viewer() {
 #[tokio::test]
 async fn test_list_configs_no_auth() {
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -222,7 +222,7 @@ async fn test_upsert_config_with_woff_id() {
 async fn test_upsert_config_forbidden_for_viewer() {
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = uuid::Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "viewer");
     let auth_header = format!("Bearer {jwt}");
     let client = reqwest::Client::new();
@@ -244,7 +244,7 @@ async fn test_upsert_config_forbidden_for_viewer() {
 #[tokio::test]
 async fn test_upsert_config_no_auth() {
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -289,7 +289,7 @@ async fn test_upsert_config_with_secret_db_error() {
     let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
     state.sso_admin = mock;
     let tenant_id = uuid::Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let auth_header = format!("Bearer {jwt}");
     let client = reqwest::Client::new();
@@ -359,7 +359,7 @@ async fn test_delete_config_success() {
 async fn test_delete_config_forbidden_for_viewer() {
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = uuid::Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "viewer");
     let auth_header = format!("Bearer {jwt}");
     let client = reqwest::Client::new();
@@ -377,7 +377,7 @@ async fn test_delete_config_forbidden_for_viewer() {
 #[tokio::test]
 async fn test_delete_config_no_auth() {
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -472,7 +472,7 @@ async fn test_export_configs_success() {
 
     let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
     state.sso_admin = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let dev_jwt = crate::common::create_test_jwt_for_user(
         uuid::Uuid::new_v4(),
@@ -511,7 +511,7 @@ async fn test_export_configs_forbidden_for_non_developer() {
 
     let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
     state.sso_admin = Arc::new(MockSsoAdminRepository::default());
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = uuid::Uuid::new_v4();
     let attacker_jwt = crate::common::create_test_jwt_for_user(
@@ -543,7 +543,7 @@ async fn test_export_configs_tenant_not_found() {
     // return_tenant_for_export はデフォルト None → handler 側で 404
     let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
     state.sso_admin = Arc::new(MockSsoAdminRepository::default());
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = uuid::Uuid::new_v4();
     let dev_jwt = crate::common::create_test_jwt_for_user(
@@ -576,7 +576,7 @@ async fn test_export_configs_tenant_db_error() {
     mock.fail_tenant_for_export.store(true, Ordering::SeqCst);
     let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
     state.sso_admin = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let tenant_id = uuid::Uuid::new_v4();
     let dev_jwt = crate::common::create_test_jwt_for_user(
@@ -618,7 +618,7 @@ async fn test_export_configs_configs_db_error() {
     mock.fail_configs_for_export.store(true, Ordering::SeqCst);
     let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
     state.sso_admin = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     let dev_jwt = crate::common::create_test_jwt_for_user(
         uuid::Uuid::new_v4(),

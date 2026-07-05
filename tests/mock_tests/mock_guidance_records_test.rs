@@ -64,7 +64,7 @@ fn make_attachment(record_id: Uuid, storage_url: &str) -> GuidanceRecordAttachme
 async fn setup() -> (String, String, Uuid) {
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let auth = format!("Bearer {jwt}");
     (base_url, auth, tenant_id)
@@ -75,7 +75,7 @@ async fn setup_with_mock(mock: Arc<MockGuidanceRecordsRepository>) -> (String, S
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     state.guidance_records = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let auth = format!("Bearer {jwt}");
     (base_url, auth, tenant_id)
 }
@@ -89,7 +89,7 @@ async fn setup_with_mock_and_storage(
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     state.guidance_records = mock;
     state.storage = storage;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let auth = format!("Bearer {jwt}");
     (base_url, auth, tenant_id)
 }

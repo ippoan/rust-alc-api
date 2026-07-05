@@ -23,7 +23,7 @@ async fn test_list_configs_success() {
         let mock = Arc::new(MockBotAdminRepository::default());
         let mut state = setup_mock_app_state();
         state.bot_admin = mock;
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let tenant_id = Uuid::new_v4();
         let admin_jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -51,7 +51,7 @@ async fn test_list_configs_forbidden_for_viewer() {
         let mock = Arc::new(MockBotAdminRepository::default());
         let mut state = setup_mock_app_state();
         state.bot_admin = mock;
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let tenant_id = Uuid::new_v4();
         let viewer_jwt = crate::common::create_test_jwt(tenant_id, "viewer");
@@ -78,7 +78,7 @@ async fn test_list_configs_db_error() {
         mock.fail_next.store(true, Ordering::SeqCst);
         let mut state = setup_mock_app_state();
         state.bot_admin = mock;
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let tenant_id = Uuid::new_v4();
         let admin_jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -108,7 +108,7 @@ async fn test_create_config_success() {
         let mock = Arc::new(MockBotAdminRepository::default());
         let mut state = setup_mock_app_state();
         state.bot_admin = mock;
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let tenant_id = Uuid::new_v4();
         let admin_jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -150,7 +150,7 @@ async fn test_create_config_with_explicit_provider_and_disabled() {
         let mock = Arc::new(MockBotAdminRepository::default());
         let mut state = setup_mock_app_state();
         state.bot_admin = mock;
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let tenant_id = Uuid::new_v4();
         let admin_jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -187,7 +187,7 @@ async fn test_create_config_forbidden_for_viewer() {
         let mock = Arc::new(MockBotAdminRepository::default());
         let mut state = setup_mock_app_state();
         state.bot_admin = mock;
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let tenant_id = Uuid::new_v4();
         let viewer_jwt = crate::common::create_test_jwt(tenant_id, "viewer");
@@ -220,7 +220,7 @@ async fn test_create_config_db_error() {
         mock.fail_next.store(true, Ordering::SeqCst);
         let mut state = setup_mock_app_state();
         state.bot_admin = mock;
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let tenant_id = Uuid::new_v4();
         let admin_jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -256,7 +256,7 @@ async fn test_update_config_success() {
         let mock = Arc::new(MockBotAdminRepository::default());
         let mut state = setup_mock_app_state();
         state.bot_admin = mock;
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let tenant_id = Uuid::new_v4();
         let admin_jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -295,7 +295,7 @@ async fn test_update_config_with_secrets() {
         let mock = Arc::new(MockBotAdminRepository::default());
         let mut state = setup_mock_app_state();
         state.bot_admin = mock;
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let tenant_id = Uuid::new_v4();
         let admin_jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -333,7 +333,7 @@ async fn test_create_config_with_bot_secret() {
             let mock = Arc::new(MockBotAdminRepository::default());
             let mut state = setup_mock_app_state();
             state.bot_admin = mock;
-            let base_url = crate::common::spawn_test_server(state).await;
+            let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
             let tenant_id = Uuid::new_v4();
             let admin_jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -369,7 +369,7 @@ async fn test_update_config_with_bot_secret() {
             let mock = Arc::new(MockBotAdminRepository::default());
             let mut state = setup_mock_app_state();
             state.bot_admin = mock;
-            let base_url = crate::common::spawn_test_server(state).await;
+            let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
             let tenant_id = Uuid::new_v4();
             let admin_jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -405,7 +405,7 @@ async fn test_update_config_with_empty_bot_secret_skipped() {
         let mock = Arc::new(MockBotAdminRepository::default());
         let mut state = setup_mock_app_state();
         state.bot_admin = mock;
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let tenant_id = Uuid::new_v4();
         let admin_jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -445,7 +445,7 @@ async fn test_create_config_with_bot_secret_update_fails() {
                 .store(true, Ordering::SeqCst);
             let mut state = setup_mock_app_state();
             state.bot_admin = mock;
-            let base_url = crate::common::spawn_test_server(state).await;
+            let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
             let tenant_id = Uuid::new_v4();
             let admin_jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -482,7 +482,7 @@ async fn test_update_bot_secret_db_error() {
         mock.fail_next.store(true, Ordering::SeqCst);
         let mut state = setup_mock_app_state();
         state.bot_admin = mock;
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let tenant_id = Uuid::new_v4();
         let admin_jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -519,7 +519,7 @@ async fn test_update_config_with_empty_secrets() {
             let mock = Arc::new(MockBotAdminRepository::default());
             let mut state = setup_mock_app_state();
             state.bot_admin = mock;
-            let base_url = crate::common::spawn_test_server(state).await;
+            let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
             let tenant_id = Uuid::new_v4();
             let admin_jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -556,7 +556,7 @@ async fn test_update_config_invalid_uuid() {
         let mock = Arc::new(MockBotAdminRepository::default());
         let mut state = setup_mock_app_state();
         state.bot_admin = mock;
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let tenant_id = Uuid::new_v4();
         let admin_jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -589,7 +589,7 @@ async fn test_update_config_forbidden_for_viewer() {
         let mock = Arc::new(MockBotAdminRepository::default());
         let mut state = setup_mock_app_state();
         state.bot_admin = mock;
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let tenant_id = Uuid::new_v4();
         let viewer_jwt = crate::common::create_test_jwt(tenant_id, "viewer");
@@ -623,7 +623,7 @@ async fn test_update_config_db_error() {
         mock.fail_next.store(true, Ordering::SeqCst);
         let mut state = setup_mock_app_state();
         state.bot_admin = mock;
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let tenant_id = Uuid::new_v4();
         let admin_jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -662,7 +662,7 @@ async fn test_upsert_no_encryption_key() {
         let mock = Arc::new(MockBotAdminRepository::default());
         let mut state = setup_mock_app_state();
         state.bot_admin = mock;
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let tenant_id = Uuid::new_v4();
         let admin_jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -698,7 +698,7 @@ async fn test_delete_config_success() {
         let mock = Arc::new(MockBotAdminRepository::default());
         let mut state = setup_mock_app_state();
         state.bot_admin = mock;
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let tenant_id = Uuid::new_v4();
         let admin_jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -727,7 +727,7 @@ async fn test_delete_config_invalid_uuid() {
         let mock = Arc::new(MockBotAdminRepository::default());
         let mut state = setup_mock_app_state();
         state.bot_admin = mock;
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let tenant_id = Uuid::new_v4();
         let admin_jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -756,7 +756,7 @@ async fn test_delete_config_forbidden_for_viewer() {
         let mock = Arc::new(MockBotAdminRepository::default());
         let mut state = setup_mock_app_state();
         state.bot_admin = mock;
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let tenant_id = Uuid::new_v4();
         let viewer_jwt = crate::common::create_test_jwt(tenant_id, "viewer");
@@ -786,7 +786,7 @@ async fn test_delete_config_db_error() {
         mock.fail_next.store(true, Ordering::SeqCst);
         let mut state = setup_mock_app_state();
         state.bot_admin = mock;
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let tenant_id = Uuid::new_v4();
         let admin_jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -876,7 +876,7 @@ async fn test_get_config_secrets_success() {
 
             let mut state = setup_mock_app_state();
             state.bot_admin = mock;
-            let base_url = crate::common::spawn_test_server(state).await;
+            let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
             let tenant_id = Uuid::new_v4();
             let admin_jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -931,7 +931,7 @@ async fn test_get_config_secrets_with_bot_secret() {
 
         let mut state = setup_mock_app_state();
         state.bot_admin = mock;
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let tenant_id = Uuid::new_v4();
         let admin_jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -979,7 +979,7 @@ async fn test_get_config_secrets_bot_secret_decrypt_error() {
 
         let mut state = setup_mock_app_state();
         state.bot_admin = mock;
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let tenant_id = Uuid::new_v4();
         let admin_jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -1009,7 +1009,7 @@ async fn test_get_config_secrets_forbidden_viewer() {
         let mock = Arc::new(MockBotAdminRepository::default());
         let mut state = setup_mock_app_state();
         state.bot_admin = mock;
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let tenant_id = Uuid::new_v4();
         let viewer_jwt = crate::common::create_test_jwt(tenant_id, "viewer");
@@ -1039,7 +1039,7 @@ async fn test_get_config_secrets_not_found() {
         // return_config_with_secrets is None by default -> 404
         let mut state = setup_mock_app_state();
         state.bot_admin = mock;
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let tenant_id = Uuid::new_v4();
         let admin_jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -1069,7 +1069,7 @@ async fn test_get_config_secrets_db_error() {
         mock.fail_next.store(true, Ordering::SeqCst);
         let mut state = setup_mock_app_state();
         state.bot_admin = mock;
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let tenant_id = Uuid::new_v4();
         let admin_jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -1114,7 +1114,7 @@ async fn test_get_config_secrets_decrypt_error() {
 
         let mut state = setup_mock_app_state();
         state.bot_admin = mock;
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let tenant_id = Uuid::new_v4();
         let admin_jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -1161,7 +1161,7 @@ async fn test_get_config_secrets_short_ciphertext() {
 
         let mut state = setup_mock_app_state();
         state.bot_admin = mock;
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let tenant_id = Uuid::new_v4();
         let admin_jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -1209,7 +1209,7 @@ async fn test_get_config_secrets_private_key_decrypt_error() {
 
             let mut state = setup_mock_app_state();
             state.bot_admin = mock;
-            let base_url = crate::common::spawn_test_server(state).await;
+            let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
             let tenant_id = Uuid::new_v4();
             let admin_jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -1242,7 +1242,7 @@ async fn test_get_config_secrets_missing_env_var() {
         let mock = Arc::new(MockBotAdminRepository::default());
         let mut state = setup_mock_app_state();
         state.bot_admin = mock;
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let tenant_id = Uuid::new_v4();
         let admin_jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -1326,7 +1326,7 @@ async fn test_export_configs_success() {
 
         let mut state = setup_mock_app_state();
         state.bot_admin = mock;
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let dev_jwt = crate::common::create_test_jwt_for_user(
             Uuid::new_v4(),
@@ -1372,7 +1372,7 @@ async fn test_export_configs_forbidden_for_non_developer() {
         let mock = Arc::new(MockBotAdminRepository::default());
         let mut state = setup_mock_app_state();
         state.bot_admin = mock;
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let tenant_id = Uuid::new_v4();
         let attacker_jwt = crate::common::create_test_jwt_for_user(
@@ -1408,7 +1408,7 @@ async fn test_export_configs_tenant_not_found() {
         // return_tenant_for_export はデフォルト None → handler 側で NOT_FOUND
         let mut state = setup_mock_app_state();
         state.bot_admin = mock;
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let tenant_id = Uuid::new_v4();
         let dev_jwt = crate::common::create_test_jwt_for_user(
@@ -1444,7 +1444,7 @@ async fn test_export_configs_tenant_db_error() {
         mock.fail_tenant_for_export.store(true, Ordering::SeqCst);
         let mut state = setup_mock_app_state();
         state.bot_admin = mock;
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let tenant_id = Uuid::new_v4();
         let dev_jwt = crate::common::create_test_jwt_for_user(
@@ -1490,7 +1490,7 @@ async fn test_export_configs_configs_db_error() {
         mock.fail_configs_for_export.store(true, Ordering::SeqCst);
         let mut state = setup_mock_app_state();
         state.bot_admin = mock;
-        let base_url = crate::common::spawn_test_server(state).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
         let dev_jwt = crate::common::create_test_jwt_for_user(
             Uuid::new_v4(),

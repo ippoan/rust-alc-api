@@ -6,7 +6,7 @@ use alc_core::models::{CreateWebhookConfig, WebhookConfig, WebhookDelivery};
 
 use alc_core::tenant::TenantConn;
 
-pub use alc_core::repository::tenko_webhooks::*;
+pub use crate::repository::tenko_webhooks::*;
 
 pub struct PgTenkoWebhooksRepository {
     pool: PgPool,

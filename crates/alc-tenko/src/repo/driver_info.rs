@@ -2,14 +2,13 @@ use async_trait::async_trait;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use alc_core::models::{
-    CarryingItem, DtakoDailyWorkHours, Employee, EmployeeHealthBaseline, EquipmentFailure,
-    TenkoRecord,
-};
+use alc_core::models::{CarryingItem, DtakoDailyWorkHours, Employee};
+
+use crate::models::{EmployeeHealthBaseline, EquipmentFailure, TenkoRecord};
 
 use alc_core::tenant::TenantConn;
 
-pub use alc_core::repository::driver_info::*;
+pub use crate::repository::driver_info::*;
 
 pub struct PgDriverInfoRepository {
     pool: PgPool,

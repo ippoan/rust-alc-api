@@ -25,7 +25,6 @@ pub use alc_misc::api_tokens;
 pub use alc_misc::bot_admin;
 pub use alc_misc::carrying_items;
 pub use alc_misc::communication_items;
-pub use alc_misc::driver_info;
 pub use alc_misc::employees;
 pub use alc_misc::guidance_records;
 pub use alc_misc::health;
@@ -51,6 +50,7 @@ pub use alc_notify::recipients as notify_recipients;
 pub use alc_notify::test_endpoints as notify_test_endpoints;
 pub use alc_notify::viewer as notify_viewer;
 pub use alc_tenko::daily_health;
+pub use alc_tenko::driver_info;
 pub use alc_tenko::equipment_failures;
 pub use alc_tenko::health_baselines;
 pub use alc_tenko::tenko_call;
@@ -90,7 +90,10 @@ pub fn internal_oidc_trust() -> InternalOidcTrust {
     }
 }
 
-pub fn router(internal_oidc: InternalOidcTrust) -> Router<AppState> {
+pub fn router(
+    internal_oidc: InternalOidcTrust,
+    tenko_state: alc_tenko::TenkoState,
+) -> Router<AppState> {
     // 管理者ルート — 注入 identity (X-User-*) を信頼 (Refs #434)。
     // 前段 proxy / gateway が introspect 検証済みの identity を注入する前提。
     // role 判定は各ハンドラが AuthUser から行う。
@@ -126,13 +129,6 @@ pub fn router(internal_oidc: InternalOidcTrust) -> Router<AppState> {
         .merge(measurements::router())
         .merge(measurements::tenant_router())
         .merge(upload::tenant_router())
-        .merge(tenko_schedules::tenant_router())
-        .merge(tenko_sessions::tenant_router())
-        .merge(tenko_records::tenant_router())
-        .merge(health_baselines::tenant_router())
-        .merge(equipment_failures::tenant_router())
-        .merge(tenko_webhooks::tenant_router())
-        .merge(tenko_call::tenant_router())
         .merge(timecard::tenant_router())
         .merge(devices::tenant_router())
         .merge(car_inspections::tenant_router())
@@ -141,8 +137,6 @@ pub fn router(internal_oidc: InternalOidcTrust) -> Router<AppState> {
         .merge(nfc_tags::tenant_router())
         .merge(carrying_items::tenant_router())
         .merge(communication_items::tenant_router())
-        .merge(daily_health::tenant_router())
-        .merge(driver_info::tenant_router())
         .merge(guidance_records::tenant_router())
         .merge(items::tenant_router())
         .merge(dtako_csv_proxy::tenant_router())
@@ -189,7 +183,6 @@ pub fn router(internal_oidc: InternalOidcTrust) -> Router<AppState> {
     // 完全移管したため撤去 (Refs #479 PR-3)。
     let public_routes = Router::new()
         .merge(health::router())
-        .merge(tenko_call::public_router())
         .merge(devices::public_router())
         .merge(staging::router())
         .merge(notify_ingest::public_router())
@@ -201,11 +194,29 @@ pub fn router(internal_oidc: InternalOidcTrust) -> Router<AppState> {
     // #434 lockdown: trouble schedule fire は internal_protected へ移動
     // (`/api/internal/trouble/schedules/{id}/fire`)。bare public 経路は廃止。
 
+    // tenko ドメイン (Refs #513) — AppState から分離した TenkoState でマウントする。
+    // tenant 系ルートには monolith 本体と同じ require_tenant_header を張る。
+    let tenko_tenant: Router<AppState> = Router::new()
+        .merge(tenko_schedules::tenant_router())
+        .merge(tenko_sessions::tenant_router())
+        .merge(tenko_records::tenant_router())
+        .merge(health_baselines::tenant_router())
+        .merge(equipment_failures::tenant_router())
+        .merge(tenko_webhooks::tenant_router())
+        .merge(tenko_call::tenant_router())
+        .merge(daily_health::tenant_router())
+        .merge(driver_info::tenant_router())
+        .layer(axum_middleware::from_fn(require_tenant_header))
+        .with_state(tenko_state.clone());
+    let tenko_public: Router<AppState> = tenko_call::public_router().with_state(tenko_state);
+
     Router::new()
         .merge(public_routes)
+        .merge(tenko_public)
         .merge(jwt_protected)
         .merge(internal_protected)
         .merge(tenant_protected)
+        .merge(tenko_tenant)
 }
 
 /// email-receiver Worker から `POST /api/dtako/tickets` を受ける internal ingest

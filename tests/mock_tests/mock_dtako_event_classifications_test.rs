@@ -9,7 +9,7 @@ use crate::mock_helpers::MockDtakoEventClassificationsRepository;
 use chrono::Utc;
 use rust_alc_api::db::models::DtakoEventClassification;
 
-use crate::common::{create_test_jwt, spawn_test_server};
+use crate::common::create_test_jwt;
 
 /// helper: build mock AppState with a shared mock repo reference
 async fn setup_with_mock() -> (String, String, Arc<MockDtakoEventClassificationsRepository>) {
@@ -19,7 +19,7 @@ async fn setup_with_mock() -> (String, String, Arc<MockDtakoEventClassifications
 
     let tenant_id = Uuid::new_v4();
     let jwt = create_test_jwt(tenant_id, "admin");
-    let base_url = spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     (base_url, format!("Bearer {jwt}"), mock_repo)
 }
 
@@ -215,7 +215,7 @@ async fn test_update_classification_success() {
     state.dtako_event_classifications = mock_repo.clone();
 
     let jwt = create_test_jwt(tenant_id, "admin");
-    let base_url = spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let auth = format!("Bearer {jwt}");
     let client = reqwest::Client::new();
 

@@ -11,7 +11,7 @@ async fn setup() -> (String, String) {
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let auth = format!("Bearer {jwt}");
     (base, auth)
 }
@@ -24,7 +24,7 @@ async fn setup_failing() -> (String, String) {
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     state.trouble_offices = mock;
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let auth = format!("Bearer {jwt}");
     (base, auth)
 }
@@ -142,7 +142,7 @@ async fn delete_office_not_found() {
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     state.trouble_offices = mock;
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let auth = format!("Bearer {jwt}");
 
     let id = Uuid::new_v4();
@@ -164,7 +164,7 @@ async fn delete_office_db_error() {
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     state.trouble_offices = mock;
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let auth = format!("Bearer {jwt}");
 
     let id = Uuid::new_v4();
@@ -200,7 +200,7 @@ async fn update_office_sort_order_success() {
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     state.trouble_offices = offices_mock;
-    let base = crate::common::spawn_test_server(state).await;
+    let base = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let auth = format!("Bearer {jwt}");
 
     let res = client()

@@ -14,17 +14,19 @@ use crate::mock_helpers::MockTenkoWebhooksRepository;
 
 async fn setup() -> (String, String) {
     let state = setup_mock_app_state();
+    let tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     (base_url, format!("Bearer {jwt}"))
 }
 
 async fn setup_with_mock(mock: Arc<MockTenkoWebhooksRepository>) -> (String, String) {
-    let mut state = setup_mock_app_state();
-    state.tenko_webhooks = mock;
+    let state = setup_mock_app_state();
+    let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
+    tenko_state.tenko_webhooks = mock;
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     (base_url, format!("Bearer {jwt}"))
 }
@@ -184,7 +186,8 @@ async fn test_upsert_webhook_invalid_event_type() {
 #[tokio::test]
 async fn test_upsert_webhook_no_auth() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
+    let base_url = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -199,7 +202,8 @@ async fn test_upsert_webhook_no_auth() {
 #[tokio::test]
 async fn test_upsert_webhook_with_x_tenant_id() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
+    let base_url = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
     let tenant_id = Uuid::new_v4();
     let client = reqwest::Client::new();
 
@@ -253,7 +257,8 @@ async fn test_list_webhooks_success() {
 #[tokio::test]
 async fn test_list_webhooks_no_auth() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
+    let base_url = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -267,7 +272,8 @@ async fn test_list_webhooks_no_auth() {
 #[tokio::test]
 async fn test_list_webhooks_with_x_tenant_id() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
+    let base_url = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
     let tenant_id = Uuid::new_v4();
     let client = reqwest::Client::new();
 
@@ -338,7 +344,8 @@ async fn test_get_webhook_not_found() {
 #[tokio::test]
 async fn test_get_webhook_no_auth() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
+    let base_url = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
     let client = reqwest::Client::new();
 
     let id = Uuid::new_v4();
@@ -406,7 +413,8 @@ async fn test_delete_webhook_not_found() {
 #[tokio::test]
 async fn test_delete_webhook_no_auth() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
+    let base_url = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
     let client = reqwest::Client::new();
 
     let id = Uuid::new_v4();
@@ -459,7 +467,8 @@ async fn test_list_deliveries_success() {
 #[tokio::test]
 async fn test_list_deliveries_no_auth() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
+    let base_url = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
     let client = reqwest::Client::new();
 
     let id = Uuid::new_v4();
@@ -474,7 +483,8 @@ async fn test_list_deliveries_no_auth() {
 #[tokio::test]
 async fn test_list_deliveries_with_x_tenant_id() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
+    let base_url = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
     let tenant_id = Uuid::new_v4();
     let client = reqwest::Client::new();
 

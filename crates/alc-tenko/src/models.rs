@@ -1,0 +1,398 @@
+//! tenko ドメインの models (alc-core から移設、Refs #513)。
+
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use sqlx::FromRow;
+use uuid::Uuid;
+
+// --- Tenko Schedule (点呼実施予定) ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct TenkoSchedule {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub employee_id: Uuid,
+    pub tenko_type: String,
+    pub responsible_manager_name: String,
+    pub scheduled_at: DateTime<Utc>,
+    pub instruction: Option<String>,
+    pub consumed: bool,
+    pub consumed_by_session_id: Option<Uuid>,
+    pub overdue_notified_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateTenkoSchedule {
+    pub employee_id: Uuid,
+    pub tenko_type: String,
+    pub responsible_manager_name: String,
+    pub scheduled_at: DateTime<Utc>,
+    pub instruction: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BatchCreateTenkoSchedules {
+    pub schedules: Vec<CreateTenkoSchedule>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateTenkoSchedule {
+    pub responsible_manager_name: Option<String>,
+    pub scheduled_at: Option<DateTime<Utc>>,
+    pub instruction: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TenkoScheduleFilter {
+    pub employee_id: Option<Uuid>,
+    pub tenko_type: Option<String>,
+    pub consumed: Option<bool>,
+    pub date_from: Option<DateTime<Utc>>,
+    pub date_to: Option<DateTime<Utc>>,
+    pub page: Option<i64>,
+    pub per_page: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TenkoSchedulesResponse {
+    pub schedules: Vec<TenkoSchedule>,
+    pub total: i64,
+    pub page: i64,
+    pub per_page: i64,
+}
+
+// --- Tenko Session (点呼セッション) ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct TenkoSession {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub employee_id: Uuid,
+    pub schedule_id: Option<Uuid>,
+    pub tenko_type: String,
+    pub status: String,
+    pub identity_verified_at: Option<DateTime<Utc>>,
+    pub identity_face_photo_url: Option<String>,
+    pub measurement_id: Option<Uuid>,
+    pub alcohol_result: Option<String>,
+    pub alcohol_value: Option<f64>,
+    pub alcohol_tested_at: Option<DateTime<Utc>>,
+    pub alcohol_face_photo_url: Option<String>,
+    pub temperature: Option<f64>,
+    pub systolic: Option<i32>,
+    pub diastolic: Option<i32>,
+    pub pulse: Option<i32>,
+    pub medical_measured_at: Option<DateTime<Utc>>,
+    pub medical_manual_input: Option<bool>,
+    pub instruction_confirmed_at: Option<DateTime<Utc>>,
+    pub report_vehicle_road_status: Option<String>,
+    pub report_driver_alternation: Option<String>,
+    pub report_no_report: Option<bool>,
+    pub report_vehicle_road_audio_url: Option<String>,
+    pub report_driver_alternation_audio_url: Option<String>,
+    pub report_submitted_at: Option<DateTime<Utc>>,
+    pub location: Option<String>,
+    pub responsible_manager_name: Option<String>,
+    pub cancel_reason: Option<String>,
+    pub interrupted_at: Option<DateTime<Utc>>,
+    pub resumed_at: Option<DateTime<Utc>>,
+    pub resume_reason: Option<String>,
+    pub resumed_by_user_id: Option<Uuid>,
+    // Phase 2
+    pub self_declaration: Option<serde_json::Value>,
+    pub safety_judgment: Option<serde_json::Value>,
+    pub daily_inspection: Option<serde_json::Value>,
+    pub carrying_items_checked: Option<serde_json::Value>,
+    pub started_at: Option<DateTime<Utc>>,
+    pub completed_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct StartTenkoSession {
+    pub schedule_id: Option<Uuid>,  // remote mode では None
+    pub tenko_type: Option<String>, // schedule なしの場合に使用 (default: "pre_operation")
+    pub employee_id: Uuid,
+    pub identity_face_photo_url: Option<String>,
+    pub location: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SubmitAlcoholResult {
+    pub measurement_id: Option<Uuid>,
+    pub alcohol_result: String,
+    pub alcohol_value: f64,
+    pub alcohol_face_photo_url: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SubmitMedicalData {
+    pub temperature: Option<f64>,
+    pub systolic: Option<i32>,
+    pub diastolic: Option<i32>,
+    pub pulse: Option<i32>,
+    pub medical_measured_at: Option<DateTime<Utc>>,
+    pub medical_manual_input: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SubmitOperationReport {
+    pub vehicle_road_status: String,
+    pub driver_alternation: String,
+    pub vehicle_road_audio_url: Option<String>,
+    pub driver_alternation_audio_url: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CancelTenkoSession {
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TenkoSessionFilter {
+    pub employee_id: Option<Uuid>,
+    pub status: Option<String>,
+    pub tenko_type: Option<String>,
+    pub date_from: Option<DateTime<Utc>>,
+    pub date_to: Option<DateTime<Utc>>,
+    pub page: Option<i64>,
+    pub per_page: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TenkoSessionsResponse {
+    pub sessions: Vec<TenkoSession>,
+    pub total: i64,
+    pub page: i64,
+    pub per_page: i64,
+}
+
+// --- Tenko Record (点呼記録 — 不変) ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct TenkoRecord {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub session_id: Uuid,
+    pub employee_id: Uuid,
+    pub tenko_type: String,
+    pub status: String,
+    pub record_data: serde_json::Value,
+    pub employee_name: String,
+    pub responsible_manager_name: String,
+    pub tenko_method: String,
+    pub location: Option<String>,
+    pub alcohol_result: Option<String>,
+    pub alcohol_value: Option<f64>,
+    pub alcohol_has_face_photo: bool,
+    pub temperature: Option<f64>,
+    pub systolic: Option<i32>,
+    pub diastolic: Option<i32>,
+    pub pulse: Option<i32>,
+    pub instruction: Option<String>,
+    pub instruction_confirmed_at: Option<DateTime<Utc>>,
+    pub report_vehicle_road_status: Option<String>,
+    pub report_driver_alternation: Option<String>,
+    pub report_no_report: Option<bool>,
+    pub report_vehicle_road_audio_url: Option<String>,
+    pub report_driver_alternation_audio_url: Option<String>,
+    pub started_at: Option<DateTime<Utc>>,
+    pub completed_at: Option<DateTime<Utc>>,
+    pub recorded_at: DateTime<Utc>,
+    pub record_hash: String,
+    // Phase 2
+    pub self_declaration: Option<serde_json::Value>,
+    pub safety_judgment: Option<serde_json::Value>,
+    pub daily_inspection: Option<serde_json::Value>,
+    pub interrupted_at: Option<DateTime<Utc>>,
+    pub resumed_at: Option<DateTime<Utc>>,
+    pub resume_reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TenkoRecordFilter {
+    pub employee_id: Option<Uuid>,
+    pub tenko_type: Option<String>,
+    pub status: Option<String>,
+    pub date_from: Option<DateTime<Utc>>,
+    pub date_to: Option<DateTime<Utc>>,
+    pub page: Option<i64>,
+    pub per_page: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TenkoRecordsResponse {
+    pub records: Vec<TenkoRecord>,
+    pub total: i64,
+    pub page: i64,
+    pub per_page: i64,
+}
+
+// --- Tenko Dashboard ---
+
+#[derive(Debug, Serialize)]
+pub struct TenkoDashboard {
+    pub pending_schedules: i64,
+    pub active_sessions: i64,
+    pub interrupted_sessions: i64,
+    pub completed_today: i64,
+    pub cancelled_today: i64,
+    pub overdue_schedules: Vec<TenkoSchedule>,
+}
+
+// --- Phase 2: Health Baselines (要件7) ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct EmployeeHealthBaseline {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub employee_id: Uuid,
+    pub baseline_systolic: i32,
+    pub baseline_diastolic: i32,
+    pub baseline_temperature: f64,
+    pub systolic_tolerance: i32,
+    pub diastolic_tolerance: i32,
+    pub temperature_tolerance: f64,
+    pub measurement_validity_minutes: i32,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateHealthBaseline {
+    pub employee_id: Uuid,
+    pub baseline_systolic: Option<i32>,
+    pub baseline_diastolic: Option<i32>,
+    pub baseline_temperature: Option<f64>,
+    pub systolic_tolerance: Option<i32>,
+    pub diastolic_tolerance: Option<i32>,
+    pub temperature_tolerance: Option<f64>,
+    pub measurement_validity_minutes: Option<i32>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateHealthBaseline {
+    pub baseline_systolic: Option<i32>,
+    pub baseline_diastolic: Option<i32>,
+    pub baseline_temperature: Option<f64>,
+    pub systolic_tolerance: Option<i32>,
+    pub diastolic_tolerance: Option<i32>,
+    pub temperature_tolerance: Option<f64>,
+    pub measurement_validity_minutes: Option<i32>,
+}
+
+// --- Phase 2: Self-Declaration (要件8) ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SelfDeclaration {
+    pub illness: bool,
+    pub fatigue: bool,
+    pub sleep_deprivation: bool,
+    pub declared_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SubmitSelfDeclaration {
+    pub illness: bool,
+    pub fatigue: bool,
+    pub sleep_deprivation: bool,
+}
+
+// --- Phase 2: Safety Judgment (要件9) ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SafetyJudgment {
+    pub status: String,
+    pub failed_items: Vec<String>,
+    pub judged_at: DateTime<Utc>,
+    pub medical_diffs: Option<MedicalDiffs>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MedicalDiffs {
+    pub systolic_diff: Option<i32>,
+    pub diastolic_diff: Option<i32>,
+    pub temperature_diff: Option<f64>,
+}
+
+// --- Phase 2: Daily Inspection (要件11) ---
+
+#[derive(Debug, Deserialize)]
+pub struct SubmitDailyInspection {
+    pub brakes: String,
+    pub tires: String,
+    pub lights: String,
+    pub steering: String,
+    pub wipers: String,
+    pub mirrors: String,
+    pub horn: String,
+    pub seatbelts: String,
+}
+
+// --- Phase 2: Interrupt/Resume (要件10) ---
+
+#[derive(Debug, Deserialize)]
+pub struct InterruptSession {
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ResumeSession {
+    pub reason: String,
+}
+
+// --- Phase 2: Equipment Failures (要件17) ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct EquipmentFailure {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub failure_type: String,
+    pub description: String,
+    pub affected_device: Option<String>,
+    pub detected_at: DateTime<Utc>,
+    pub detected_by: Option<String>,
+    pub resolved_at: Option<DateTime<Utc>>,
+    pub resolution_notes: Option<String>,
+    pub session_id: Option<Uuid>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateEquipmentFailure {
+    pub failure_type: String,
+    pub description: String,
+    pub affected_device: Option<String>,
+    pub detected_at: Option<DateTime<Utc>>,
+    pub detected_by: Option<String>,
+    pub session_id: Option<Uuid>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateEquipmentFailure {
+    pub resolution_notes: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct EquipmentFailureFilter {
+    pub failure_type: Option<String>,
+    pub resolved: Option<bool>,
+    pub session_id: Option<Uuid>,
+    pub date_from: Option<DateTime<Utc>>,
+    pub date_to: Option<DateTime<Utc>>,
+    pub page: Option<i64>,
+    pub per_page: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct EquipmentFailuresResponse {
+    pub failures: Vec<EquipmentFailure>,
+    pub total: i64,
+    pub page: i64,
+    pub per_page: i64,
+}

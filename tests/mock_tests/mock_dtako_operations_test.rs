@@ -47,7 +47,7 @@ fn make_operation(unko_no: &str) -> DtakoOperation {
 #[tokio::test]
 async fn test_list_operations_success() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state.clone()).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state.clone()).await;
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
@@ -74,7 +74,7 @@ async fn test_list_operations_success() {
 #[tokio::test]
 async fn test_list_operations_no_auth() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -93,7 +93,7 @@ async fn test_list_operations_no_auth() {
 #[tokio::test]
 async fn test_list_operations_tenant_header() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state.clone()).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state.clone()).await;
     let tenant_id = Uuid::new_v4();
     let client = reqwest::Client::new();
 
@@ -118,7 +118,7 @@ async fn test_list_operations_db_error() {
     mock.fail_next.store(true, Ordering::SeqCst);
     state.dtako_operations = mock;
 
-    let base_url = crate::common::spawn_test_server(state.clone()).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state.clone()).await;
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
@@ -140,7 +140,7 @@ async fn test_list_operations_db_error() {
 #[tokio::test]
 async fn test_calendar_dates_success_empty() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state.clone()).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state.clone()).await;
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
@@ -175,7 +175,7 @@ async fn test_calendar_dates_success_with_data() {
     ];
     state.dtako_operations = mock;
 
-    let base_url = crate::common::spawn_test_server(state.clone()).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state.clone()).await;
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
@@ -204,7 +204,7 @@ async fn test_calendar_dates_success_with_data() {
 #[tokio::test]
 async fn test_calendar_dates_december() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state.clone()).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state.clone()).await;
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
@@ -231,7 +231,7 @@ async fn test_calendar_dates_december() {
 #[tokio::test]
 async fn test_calendar_dates_invalid_month_zero() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state.clone()).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state.clone()).await;
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
@@ -255,7 +255,7 @@ async fn test_calendar_dates_invalid_month_zero() {
 #[tokio::test]
 async fn test_calendar_dates_invalid_month_13() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state.clone()).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state.clone()).await;
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
@@ -279,7 +279,7 @@ async fn test_calendar_dates_invalid_month_13() {
 #[tokio::test]
 async fn test_calendar_dates_no_auth() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -304,7 +304,7 @@ async fn test_calendar_dates_db_error() {
     mock.fail_next.store(true, Ordering::SeqCst);
     state.dtako_operations = mock;
 
-    let base_url = crate::common::spawn_test_server(state.clone()).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state.clone()).await;
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
@@ -332,7 +332,7 @@ async fn test_get_operation_success() {
     *mock.get_result.lock().unwrap() = vec![make_operation("1001")];
     state.dtako_operations = mock;
 
-    let base_url = crate::common::spawn_test_server(state.clone()).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state.clone()).await;
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
@@ -358,7 +358,7 @@ async fn test_get_operation_success() {
 #[tokio::test]
 async fn test_get_operation_not_found() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state.clone()).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state.clone()).await;
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
@@ -380,7 +380,7 @@ async fn test_get_operation_not_found() {
 #[tokio::test]
 async fn test_get_operation_no_auth() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -403,7 +403,7 @@ async fn test_get_operation_db_error() {
     mock.fail_next.store(true, Ordering::SeqCst);
     state.dtako_operations = mock;
 
-    let base_url = crate::common::spawn_test_server(state.clone()).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state.clone()).await;
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
@@ -429,7 +429,7 @@ async fn test_delete_operation_success() {
     *mock.delete_rows_affected.lock().unwrap() = 1;
     state.dtako_operations = mock;
 
-    let base_url = crate::common::spawn_test_server(state.clone()).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state.clone()).await;
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
@@ -451,7 +451,7 @@ async fn test_delete_operation_success() {
 #[tokio::test]
 async fn test_delete_operation_not_found() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state.clone()).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state.clone()).await;
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
@@ -473,7 +473,7 @@ async fn test_delete_operation_not_found() {
 #[tokio::test]
 async fn test_delete_operation_no_auth() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -496,7 +496,7 @@ async fn test_delete_operation_db_error() {
     mock.fail_next.store(true, Ordering::SeqCst);
     state.dtako_operations = mock;
 
-    let base_url = crate::common::spawn_test_server(state.clone()).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state.clone()).await;
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();

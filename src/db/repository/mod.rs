@@ -1,25 +1,28 @@
 // Re-export traits from alc-core
 pub use alc_core::repository::{
     ApiTokensRepository, AuthRepository, BotAdminRepository, CarInspectionRepository,
-    CarinsFilesRepository, CarryingItemsRepository, CommunicationItemsRepository,
-    DailyHealthRepository, DeviceRepository, DriverInfoRepository, DtakoCsvProxyRepository,
-    DtakoDailyHoursRepository, DtakoDriversRepository, DtakoEventClassificationsRepository,
-    DtakoLogsRepository, DtakoOperationsRepository, DtakoRestraintReportPdfRepository,
-    DtakoRestraintReportRepository, DtakoScraperRepository, DtakoTicketsRepository,
-    DtakoUploadRepository, DtakoVehiclesRepository, DtakoWorkTimesRepository,
-    DtakoYTimeExportRepository, EmployeeRepository, EquipmentFailuresRepository,
-    GuidanceRecordsRepository, HealthBaselinesRepository, ItemFilesRepository, ItemsRepository,
-    LineworksChannelsRepository, MeasurementsRepository, NfcTagRepository,
-    NotifyDeliveryRepository, NotifyDocumentRepository, NotifyGroupRepository,
-    NotifyLineConfigRepository, NotifyRecipientRepository, SsoAdminRepository,
-    TenantUsersRepository, TenkoCallRepository, TenkoRecordsRepository, TenkoSchedulesRepository,
-    TenkoSessionRepository, TenkoWebhooksRepository, TimecardRepository,
-    TroubleCategoriesRepository, TroubleFieldLayoutsRepository, TroubleFilesRepository,
-    TroubleNotificationPrefsRepository, TroubleOfficesRepository,
-    TroubleProgressStatusesRepository, TroubleSchedulesRepository, TroubleTaskStatusesRepository,
-    TroubleTaskTypesRepository, TroubleTasksFilter, TroubleTasksRepository, TroubleTasksSortBy,
-    TroubleTicketsRepository, TroubleWorkflowRepository, VehicleSettingsDumpsRepository,
-    WebhookRepository,
+    CarinsFilesRepository, CarryingItemsRepository, CommunicationItemsRepository, DeviceRepository,
+    DtakoCsvProxyRepository, DtakoDailyHoursRepository, DtakoDriversRepository,
+    DtakoEventClassificationsRepository, DtakoLogsRepository, DtakoOperationsRepository,
+    DtakoRestraintReportPdfRepository, DtakoRestraintReportRepository, DtakoScraperRepository,
+    DtakoTicketsRepository, DtakoUploadRepository, DtakoVehiclesRepository,
+    DtakoWorkTimesRepository, DtakoYTimeExportRepository, EmployeeRepository,
+    GuidanceRecordsRepository, ItemFilesRepository, ItemsRepository, LineworksChannelsRepository,
+    MeasurementsRepository, NfcTagRepository, NotifyDeliveryRepository, NotifyDocumentRepository,
+    NotifyGroupRepository, NotifyLineConfigRepository, NotifyRecipientRepository,
+    SsoAdminRepository, TenantUsersRepository, TimecardRepository, TroubleCategoriesRepository,
+    TroubleFieldLayoutsRepository, TroubleFilesRepository, TroubleNotificationPrefsRepository,
+    TroubleOfficesRepository, TroubleProgressStatusesRepository, TroubleSchedulesRepository,
+    TroubleTaskStatusesRepository, TroubleTaskTypesRepository, TroubleTasksFilter,
+    TroubleTasksRepository, TroubleTasksSortBy, TroubleTicketsRepository,
+    TroubleWorkflowRepository, VehicleSettingsDumpsRepository, WebhookRepository,
+};
+
+// Re-export tenko traits from alc-tenko (Refs #513)
+pub use alc_tenko::repository::{
+    DailyHealthRepository, DriverInfoRepository, EquipmentFailuresRepository,
+    HealthBaselinesRepository, TenkoCallRepository, TenkoRecordsRepository,
+    TenkoSchedulesRepository, TenkoSessionRepository, TenkoWebhooksRepository,
 };
 
 // Re-export TenantConn from alc-core
@@ -37,12 +40,12 @@ pub use alc_dtako::repo::{
     vehicle_settings_dumps,
 };
 pub use alc_misc::repo::{
-    bot_admin, carrying_items, communication_items, driver_info, employees, guidance_records,
-    items, measurements, sso_admin, tenant_users, timecard, webhook,
+    bot_admin, carrying_items, communication_items, employees, guidance_records, items,
+    measurements, sso_admin, tenant_users, timecard, webhook,
 };
 pub use alc_tenko::repo::{
-    daily_health, equipment_failures, health_baselines, tenko_call, tenko_records, tenko_schedules,
-    tenko_sessions, tenko_webhooks,
+    daily_health, driver_info, equipment_failures, health_baselines, overdue, tenko_call,
+    tenko_records, tenko_schedules, tenko_sessions, tenko_webhooks,
 };
 
 // Re-export notify submodules and Pg implementations
@@ -71,15 +74,15 @@ pub use alc_dtako::repo::{
 };
 pub use alc_misc::repo::{
     PgApiTokensRepository, PgBotAdminRepository, PgCarryingItemsRepository,
-    PgCommunicationItemsRepository, PgDriverInfoRepository, PgEmployeeRepository,
-    PgGuidanceRecordsRepository, PgItemFilesRepository, PgItemsRepository,
-    PgMeasurementsRepository, PgSsoAdminRepository, PgTenantUsersRepository, PgTimecardRepository,
-    PgWebhookRepository,
+    PgCommunicationItemsRepository, PgEmployeeRepository, PgGuidanceRecordsRepository,
+    PgItemFilesRepository, PgItemsRepository, PgMeasurementsRepository, PgSsoAdminRepository,
+    PgTenantUsersRepository, PgTimecardRepository, PgWebhookRepository,
 };
 pub use alc_tenko::repo::{
-    PgDailyHealthRepository, PgEquipmentFailuresRepository, PgHealthBaselinesRepository,
-    PgTenkoCallRepository, PgTenkoRecordsRepository, PgTenkoSchedulesRepository,
-    PgTenkoSessionRepository, PgTenkoWebhooksRepository,
+    PgDailyHealthRepository, PgDriverInfoRepository, PgEquipmentFailuresRepository,
+    PgHealthBaselinesRepository, PgTenkoCallRepository, PgTenkoOverdueRepository,
+    PgTenkoRecordsRepository, PgTenkoSchedulesRepository, PgTenkoSessionRepository,
+    PgTenkoWebhooksRepository,
 };
 pub use alc_trouble::repo::{
     trouble_categories::PgTroubleCategoriesRepository,

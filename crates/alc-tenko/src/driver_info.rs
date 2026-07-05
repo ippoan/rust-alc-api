@@ -8,16 +8,19 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use alc_core::auth_middleware::TenantId;
-use alc_core::models::{
-    CarryingItem, DtakoDailyWorkHours, Employee, EmployeeHealthBaseline, EquipmentFailure,
-    TenkoRecord,
-};
-use alc_core::repository::driver_info::{
+use alc_core::models::{CarryingItem, DtakoDailyWorkHours, Employee};
+
+use crate::models::{EmployeeHealthBaseline, EquipmentFailure, TenkoRecord};
+use crate::repository::driver_info::{
     DailyInspectionSummary, InstructionSummary, MeasurementSummary,
 };
-use alc_core::AppState;
+use crate::TenkoState;
 
-pub fn tenant_router() -> Router<AppState> {
+pub fn tenant_router<S>() -> Router<S>
+where
+    TenkoState: axum::extract::FromRef<S>,
+    S: Clone + Send + Sync + 'static,
+{
     Router::new().route("/tenko/driver-info/{employee_id}", get(get_driver_info))
 }
 
@@ -48,7 +51,7 @@ pub struct DriverInfo {
 }
 
 async fn get_driver_info(
-    State(state): State<AppState>,
+    State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
     Path(employee_id): Path<Uuid>,
 ) -> Result<Json<DriverInfo>, StatusCode> {

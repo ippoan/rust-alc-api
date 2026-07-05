@@ -8,7 +8,7 @@ use crate::mock_helpers::MockDtakoDriversRepository;
 #[tokio::test]
 async fn list_drivers_success_returns_empty() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let tenant_id = uuid::Uuid::new_v4();
     let token = crate::common::create_test_jwt(tenant_id, "admin");
@@ -29,7 +29,7 @@ async fn list_drivers_success_returns_empty() {
 #[tokio::test]
 async fn list_drivers_no_auth_returns_401() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -50,7 +50,7 @@ async fn list_drivers_db_error_returns_500() {
     let mut state = setup_mock_app_state();
     state.dtako_drivers = mock_drivers;
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let tenant_id = uuid::Uuid::new_v4();
     let token = crate::common::create_test_jwt(tenant_id, "admin");
@@ -69,7 +69,7 @@ async fn list_drivers_db_error_returns_500() {
 #[tokio::test]
 async fn list_drivers_with_tenant_header_returns_200() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let tenant_id = uuid::Uuid::new_v4();
 

@@ -148,7 +148,7 @@ async fn spawn_with_mock(mock: Arc<dyn CommunicationItemsRepository>) -> (String
 
     let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
     state.communication_items = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
     (base_url, jwt, tenant_id)
 }
@@ -578,7 +578,7 @@ async fn test_no_auth_returns_401() {
     let mock = Arc::new(crate::mock_helpers::MockCommunicationItemsRepository::default());
     let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
     state.communication_items = mock;
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let fake_id = Uuid::new_v4();
 

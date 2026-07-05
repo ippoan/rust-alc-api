@@ -11,7 +11,7 @@ use crate::mock_helpers::MockDtakoLogsRepository;
 #[tokio::test]
 async fn current_list_all_success_returns_empty() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let tenant_id = uuid::Uuid::new_v4();
     let token = crate::common::create_test_jwt(tenant_id, "admin");
@@ -31,7 +31,7 @@ async fn current_list_all_success_returns_empty() {
 #[tokio::test]
 async fn current_list_all_no_auth_returns_401() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -51,7 +51,7 @@ async fn current_list_all_db_error_returns_500() {
     let mut state = setup_mock_app_state();
     state.dtako_logs = mock;
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let tenant_id = uuid::Uuid::new_v4();
     let token = crate::common::create_test_jwt(tenant_id, "admin");
@@ -69,7 +69,7 @@ async fn current_list_all_db_error_returns_500() {
 #[tokio::test]
 async fn current_list_all_with_tenant_header_returns_200() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let tenant_id = uuid::Uuid::new_v4();
 
@@ -90,7 +90,7 @@ async fn current_list_all_with_tenant_header_returns_200() {
 #[tokio::test]
 async fn get_by_date_success() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let tenant_id = uuid::Uuid::new_v4();
     let token = crate::common::create_test_jwt(tenant_id, "admin");
@@ -112,7 +112,7 @@ async fn get_by_date_success() {
 #[tokio::test]
 async fn get_by_date_with_vehicle_cd() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let tenant_id = uuid::Uuid::new_v4();
     let token = crate::common::create_test_jwt(tenant_id, "admin");
@@ -132,7 +132,7 @@ async fn get_by_date_with_vehicle_cd() {
 #[tokio::test]
 async fn get_by_date_no_auth_returns_401() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -154,7 +154,7 @@ async fn get_by_date_db_error_returns_500() {
     let mut state = setup_mock_app_state();
     state.dtako_logs = mock;
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let tenant_id = uuid::Uuid::new_v4();
     let token = crate::common::create_test_jwt(tenant_id, "admin");
@@ -178,7 +178,7 @@ async fn get_by_date_db_error_returns_500() {
 #[tokio::test]
 async fn current_list_select_success() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let tenant_id = uuid::Uuid::new_v4();
     let token = crate::common::create_test_jwt(tenant_id, "admin");
@@ -198,7 +198,7 @@ async fn current_list_select_success() {
 #[tokio::test]
 async fn current_list_select_with_filters() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let tenant_id = uuid::Uuid::new_v4();
     let token = crate::common::create_test_jwt(tenant_id, "admin");
@@ -218,7 +218,7 @@ async fn current_list_select_with_filters() {
 #[tokio::test]
 async fn current_list_select_no_auth_returns_401() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -238,7 +238,7 @@ async fn current_list_select_db_error_returns_500() {
     let mut state = setup_mock_app_state();
     state.dtako_logs = mock;
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let tenant_id = uuid::Uuid::new_v4();
     let token = crate::common::create_test_jwt(tenant_id, "admin");
@@ -260,7 +260,7 @@ async fn current_list_select_db_error_returns_500() {
 #[tokio::test]
 async fn get_by_date_range_success() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let tenant_id = uuid::Uuid::new_v4();
     let token = crate::common::create_test_jwt(tenant_id, "admin");
@@ -282,7 +282,7 @@ async fn get_by_date_range_success() {
 #[tokio::test]
 async fn get_by_date_range_with_vehicle_cd() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let tenant_id = uuid::Uuid::new_v4();
     let token = crate::common::create_test_jwt(tenant_id, "admin");
@@ -302,7 +302,7 @@ async fn get_by_date_range_with_vehicle_cd() {
 #[tokio::test]
 async fn get_by_date_range_no_auth_returns_401() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -324,7 +324,7 @@ async fn get_by_date_range_db_error_returns_500() {
     let mut state = setup_mock_app_state();
     state.dtako_logs = mock;
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let tenant_id = uuid::Uuid::new_v4();
     let token = crate::common::create_test_jwt(tenant_id, "admin");
@@ -364,7 +364,7 @@ fn sample_bulk_body() -> serde_json::Value {
 #[tokio::test]
 async fn bulk_upsert_success() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let tenant_id = uuid::Uuid::new_v4();
     let token = crate::common::create_test_jwt(tenant_id, "admin");
@@ -387,7 +387,7 @@ async fn bulk_upsert_success() {
 #[tokio::test]
 async fn bulk_upsert_empty_array() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let tenant_id = uuid::Uuid::new_v4();
     let token = crate::common::create_test_jwt(tenant_id, "admin");
@@ -410,7 +410,7 @@ async fn bulk_upsert_empty_array() {
 #[tokio::test]
 async fn bulk_upsert_no_auth_returns_401() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -431,7 +431,7 @@ async fn bulk_upsert_db_error_returns_500() {
     let mut state = setup_mock_app_state();
     state.dtako_logs = mock;
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let tenant_id = uuid::Uuid::new_v4();
     let token = crate::common::create_test_jwt(tenant_id, "admin");
@@ -450,7 +450,7 @@ async fn bulk_upsert_db_error_returns_500() {
 #[tokio::test]
 async fn bulk_upsert_with_tenant_header_returns_200() {
     let state = setup_mock_app_state();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let tenant_id = uuid::Uuid::new_v4();
 
@@ -578,7 +578,7 @@ async fn get_by_date_range_r2_dedup_and_sort() {
     state.dtako_logs = mock_logs;
     state.dtako_storage = Some(dtako_storage as Arc<dyn rust_alc_api::storage::StorageBackend>);
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let token = crate::common::create_test_jwt(tenant_id, "admin");
 
@@ -624,7 +624,7 @@ async fn get_by_date_range_r2_corrupted_manifest() {
     state.dtako_logs = mock_logs;
     state.dtako_storage = Some(dtako_storage as Arc<dyn rust_alc_api::storage::StorageBackend>);
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let token = crate::common::create_test_jwt(tenant_id, "admin");
 
@@ -684,7 +684,7 @@ async fn get_by_date_range_r2_decompress_error() {
     state.dtako_logs = mock_logs;
     state.dtako_storage = Some(dtako_storage as Arc<dyn rust_alc_api::storage::StorageBackend>);
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let token = crate::common::create_test_jwt(tenant_id, "admin");
 
@@ -718,7 +718,7 @@ async fn get_by_date_range_no_dtako_storage() {
     state.dtako_logs = mock_logs;
     state.dtako_storage = None;
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
     let token = crate::common::create_test_jwt(tenant_id, "admin");
 

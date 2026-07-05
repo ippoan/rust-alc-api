@@ -15,7 +15,7 @@ use rust_alc_api::db::repository::dtako_upload::{
 async fn setup() -> (String, String, Uuid) {
     let state = setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let auth_header = format!("Bearer {jwt}");
     (base_url, auth_header, tenant_id)
@@ -106,7 +106,7 @@ async fn test_dtako_upload_db_error() {
     state.dtako_upload = mock;
 
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -139,7 +139,7 @@ async fn test_dtako_upload_tenant_fk_violation_returns_400() {
     state.dtako_upload = mock;
 
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -218,7 +218,7 @@ async fn test_dtako_list_uploads_db_error() {
     state.dtako_upload = mock;
 
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -265,7 +265,7 @@ async fn test_dtako_list_pending_db_error() {
     state.dtako_upload = mock;
 
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -313,7 +313,7 @@ async fn test_dtako_download_db_error() {
     state.dtako_upload = mock;
 
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -361,7 +361,7 @@ async fn test_dtako_rerun_db_error() {
     state.dtako_upload = mock;
 
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -407,7 +407,7 @@ async fn test_dtako_split_csv_db_error() {
     state.dtako_upload = mock;
 
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -456,7 +456,7 @@ async fn test_dtako_split_csv_all_db_error() {
     state.dtako_upload = mock;
 
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -511,7 +511,7 @@ async fn test_dtako_recalculate_driver_db_error() {
     state.dtako_upload = mock;
 
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -573,7 +573,7 @@ async fn test_dtako_recalculate_drivers_db_error() {
     state.dtako_upload = mock;
 
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -634,7 +634,7 @@ async fn test_dtako_recalculate_db_error() {
     state.dtako_upload = mock;
 
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -697,7 +697,7 @@ async fn test_dtako_upload_invalid_multipart() {
 async fn test_dtako_upload_with_tenant_header() {
     let state = setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let zip_bytes = crate::common::create_test_dtako_zip();
@@ -746,7 +746,7 @@ fn setup_with_storage_and_mock(
 async fn test_dtako_upload_rich_zip_success() {
     let state = setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -781,7 +781,7 @@ async fn test_dtako_upload_rich_zip_with_employee_id() {
 
     let state = setup_with_mock(mock);
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -811,7 +811,7 @@ async fn test_dtako_upload_rich_zip_with_employee_id() {
 async fn test_dtako_upload_empty_csv() {
     let state = setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -867,7 +867,7 @@ fn create_empty_csv_zip() -> Vec<u8> {
 async fn test_dtako_upload_missing_kudguri() {
     let state = setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -917,7 +917,7 @@ fn create_missing_kudguri_zip() -> Vec<u8> {
 async fn test_dtako_upload_missing_kudgivt() {
     let state = setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -967,7 +967,7 @@ fn create_missing_kudgivt_zip() -> Vec<u8> {
 async fn test_dtako_upload_multipart_with_extra_fields() {
     let state = setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -1013,7 +1013,7 @@ async fn test_dtako_download_success() {
     dtako_storage.insert_file(&zip_key, zip_bytes.clone());
 
     let state = setup_with_storage_and_mock(mock, dtako_storage);
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -1055,7 +1055,7 @@ async fn test_dtako_download_ascii_safe_filename() {
     dtako_storage.insert_file(&zip_key, vec![0x50, 0x4B, 0x03, 0x04]); // minimal data
 
     let state = setup_with_storage_and_mock(mock, dtako_storage);
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -1103,7 +1103,7 @@ async fn test_dtako_rerun_success() {
     dtako_storage.insert_file(&zip_key, zip_bytes);
 
     let state = setup_with_storage_and_mock(mock, dtako_storage);
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -1148,7 +1148,7 @@ async fn test_dtako_rerun_rich_zip() {
     dtako_storage.insert_file(&zip_key, zip_bytes);
 
     let state = setup_with_storage_and_mock(mock, dtako_storage);
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -1186,7 +1186,7 @@ async fn test_dtako_split_csv_success() {
     dtako_storage.insert_file(&zip_key, zip_bytes);
 
     let state = setup_with_storage_and_mock(mock, dtako_storage);
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -1225,7 +1225,7 @@ async fn test_dtako_split_csv_all_with_uploads() {
     dtako_storage.insert_file(&zip_key, zip_bytes);
 
     let state = setup_with_storage_and_mock(mock, dtako_storage);
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -1283,7 +1283,7 @@ async fn test_dtako_recalculate_with_operations() {
     dtako_storage.insert_file(&kudgivt_key, kudgivt_csv.into_bytes());
 
     let state = setup_with_storage_and_mock(mock, dtako_storage);
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -1327,7 +1327,7 @@ async fn test_dtako_recalculate_no_kudgivt_error() {
 
     // No KUDGIVT in storage → should trigger "KUDGIVTが見つかりません" error
     let state = setup_with_mock(mock);
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -1398,7 +1398,7 @@ async fn test_dtako_recalculate_driver_with_data() {
     dtako_storage.insert_file(&ferry_key, ferry_bytes.to_vec());
 
     let state = setup_with_storage_and_mock(mock, dtako_storage);
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -1471,7 +1471,7 @@ async fn test_dtako_recalculate_drivers_batch_with_data() {
     dtako_storage.insert_file(&zip_key, create_zip_with_kudgivt(kudgivt_csv));
 
     let state = setup_with_storage_and_mock(mock, dtako_storage);
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -1573,7 +1573,7 @@ async fn test_dtako_recalculate_with_ferry_data() {
     dtako_storage.insert_file(&ferry_key2, ferry_bytes2.to_vec());
 
     let state = setup_with_storage_and_mock(mock, dtako_storage);
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -1633,7 +1633,7 @@ async fn test_dtako_recalculate_ferry_zero_duration() {
     dtako_storage.insert_file(&ferry_key, ferry_bytes.to_vec());
 
     let state = setup_with_storage_and_mock(mock, dtako_storage);
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -1692,7 +1692,7 @@ async fn test_dtako_recalculate_ferry_short_cols() {
     dtako_storage.insert_file(&ferry_key, ferry_bytes.to_vec());
 
     let state = setup_with_storage_and_mock(mock, dtako_storage);
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -1752,7 +1752,7 @@ async fn test_dtako_recalculate_ferry_invalid_datetime() {
     dtako_storage.insert_file(&ferry_key, ferry_bytes.to_vec());
 
     let state = setup_with_storage_and_mock(mock, dtako_storage);
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -1826,7 +1826,7 @@ async fn test_dtako_recalculate_driver_not_found() {
     let state = setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
     let driver_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -1852,7 +1852,7 @@ async fn test_dtako_recalculate_driver_not_found() {
 async fn test_dtako_recalculate_invalid_month() {
     let state = setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -1880,7 +1880,7 @@ async fn test_dtako_recalculate_driver_invalid_month() {
     let state = setup_with_mock(mock);
     let tenant_id = Uuid::new_v4();
     let driver_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -1906,7 +1906,7 @@ async fn test_dtako_recalculate_driver_invalid_month() {
 async fn test_dtako_recalculate_drivers_batch_invalid_month() {
     let state = setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -1988,7 +1988,7 @@ async fn test_dtako_recalculate_multiple_operations_with_rest() {
     dtako_storage.insert_file(&kudgivt_key2, kudgivt_csv.as_bytes().to_vec());
 
     let state = setup_with_storage_and_mock(mock, dtako_storage);
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -2044,7 +2044,7 @@ async fn test_dtako_recalculate_with_employee_id_mapped() {
     dtako_storage.insert_file(&kudgivt_key, kudgivt_csv.into_bytes());
 
     let state = setup_with_storage_and_mock(mock, dtako_storage);
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -2070,7 +2070,7 @@ async fn test_dtako_upload_process_zip_error_marks_failed() {
     // This exercises the mark_upload_failed path (line 82-87)
     let state = setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -2128,7 +2128,7 @@ async fn test_dtako_recalculate_driver_bad_zip_in_storage() {
     dtako_storage.insert_file(&bad_zip_key, vec![0x00, 0x01, 0x02, 0x03]);
 
     let state = setup_with_storage_and_mock(mock, dtako_storage);
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -2187,7 +2187,7 @@ async fn test_dtako_recalculate_driver_kudgivt_parse_error_in_zip() {
     dtako_storage.insert_file(&zip_key, zip_bytes);
 
     let state = setup_with_storage_and_mock(mock, dtako_storage);
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -2246,7 +2246,7 @@ async fn test_dtako_recalculate_late_night_work() {
     dtako_storage.insert_file(&kudgivt_key, kudgivt_csv.into_bytes());
 
     let state = setup_with_storage_and_mock(mock, dtako_storage);
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -2270,7 +2270,7 @@ async fn test_dtako_recalculate_late_night_work() {
 async fn test_dtako_upload_no_filename() {
     let state = setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -2312,7 +2312,7 @@ async fn test_dtako_download_r2_download_failure() {
     // Do NOT insert the file → download will fail
 
     let state = setup_with_storage_and_mock(mock, dtako_storage);
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -2350,7 +2350,7 @@ async fn test_dtako_rerun_r2_download_failure() {
     // Do NOT insert the file → download will fail
 
     let state = setup_with_storage_and_mock(mock, dtako_storage);
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -2390,7 +2390,7 @@ async fn test_dtako_rerun_process_zip_failure() {
     dtako_storage.insert_file(&zip_key, zip_bytes);
 
     let state = setup_with_storage_and_mock(mock, dtako_storage);
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -2426,7 +2426,7 @@ async fn test_dtako_upload_with_event_classifications_from_db() {
 
     let state = setup_with_mock(mock);
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -2470,7 +2470,7 @@ async fn test_dtako_split_csv_update_has_kudgivt_failure() {
     dtako_storage.insert_file(&zip_key, zip_bytes);
 
     let state = setup_with_storage_and_mock(mock, dtako_storage);
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -2499,7 +2499,7 @@ async fn test_dtako_recalculate_drivers_batch_driver_not_found() {
     let mock = MockDtakoUploadRepository::default();
 
     let state = setup_with_mock(mock);
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -2544,7 +2544,7 @@ async fn test_dtako_split_csv_all_with_failures() {
     // tenant_and_key is None → split_csv_from_r2 fails with "upload X not found"
 
     let state = setup_with_mock(mock);
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -2595,7 +2595,7 @@ async fn test_dtako_recalculate_kudgivt_parse_error_per_unko() {
     dtako_storage.insert_file(&kudgivt_key, b"this is not valid CSV".to_vec());
 
     let state = setup_with_storage_and_mock(mock, dtako_storage);
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -2620,7 +2620,7 @@ async fn test_dtako_recalculate_kudgivt_parse_error_per_unko() {
 async fn test_dtako_upload_rest_event_zero_duration() {
     let state = setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -2681,7 +2681,7 @@ fn create_zip_with_zero_duration_rest() -> Vec<u8> {
 async fn test_dtako_upload_no_driver_cd() {
     let state = setup_mock_app_state();
     let tenant_id = Uuid::new_v4();
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -2753,7 +2753,7 @@ async fn test_dtako_split_csv_non_csv_files_skipped() {
     dtako_storage.insert_file(&zip_key, zip_bytes);
 
     let state = setup_with_storage_and_mock(mock, dtako_storage);
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -2832,7 +2832,7 @@ async fn test_dtako_recalculate_driver_zip_download_error() {
     // Do NOT insert the file → triggers line 739
 
     let state = setup_with_storage_and_mock(mock, dtako_storage);
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -2889,7 +2889,7 @@ async fn test_dtako_recalculate_driver_zip_no_kudgivt_inside() {
     dtako_storage.insert_file(&zip_key, zip_bytes);
 
     let state = setup_with_storage_and_mock(mock, dtako_storage);
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
 
@@ -3005,7 +3005,7 @@ dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,2026/03/01 10:00:00,
     state.dtako_upload = mock;
     state.dtako_storage = Some(storage);
 
-    let base_url = crate::common::spawn_test_server(state).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let client = reqwest::Client::new();
 
     let res = client
