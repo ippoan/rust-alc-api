@@ -1,5 +1,4 @@
 use async_trait::async_trait;
-use chrono::Utc;
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 use std::sync::Arc;
@@ -231,6 +230,7 @@ fn is_global_ip(ip: std::net::IpAddr) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Utc;
 
     #[test]
     fn webhook_url_allows_public_https() {
