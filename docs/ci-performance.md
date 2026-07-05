@@ -77,6 +77,12 @@ CI ビルド時間の実測ベースライン・改善施策の履歴・確定�
 3. **`debug = "line-tables-only"`**: rust-cache 795MB の縮小 (restore 高速化)。導入 PR の 1 run はフル再ビルドになる点と、llvm-cov の行カバレッジ表示検証が必要
 4. **nextest slow test の特定**: lib 38s / mock 系の実行時間の内訳。nextest の slow test レポートで sleep / wiremock 系を特定
 5. **larger runner**: analysis (CPU-bound) と test 実行の両方に効くがコスト増
+6. **依存グラフ削減** (2026-07-05 Cargo.lock 実測: 572 packages / 53 crate が複数バージョン重複):
+   - **rust-s3 0.35 が単独で hyper 0.14 / http 0.2 の旧 HTTP スタックを引き込んでいる** (workspace は reqwest 0.12 = hyper 1.x に統一済みなのに二重、~15-20 packages)。rust-s3 の hyper 1.x 対応版へ更新 or object_store 等へ移行が最大の単発削減
+   - 小物: lopdf 0.34/0.35 二重 (pdf-extract 0.7 経由)、rand 0.7 + getrandom 0.1 (phf 0.8 経由)、getrandom は 4 バージョン共存
+   - 未使用依存は `cargo machete` (ビルド不要・数秒) で棚卸し
+   - **期待値**: analysis はグラフサイズ比例なので 1 割減で 60s → ~54s 程度。ただし rust-cache 795MB 縮小 / fingerprint 検証対象減 / コンパイル総量減と全レイヤーに薄く効く
+   - targets 数 (23369) は crate_universe が 1 crate に複数 target (lib + build script + env vars) を生成するため。`annotations` の `gen_build_script = False` 個別指定は管理コストの割に効果薄 → 依存削減の方が筋が良い
 
 ## 計測方法 (再現手順)
 
