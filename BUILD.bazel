@@ -86,6 +86,8 @@ rust_test(
     name = "mock_carins",
     srcs = ["tests/mock_carins/main.rs"] + _MOCK_TEST_SRCS,
     crate_root = "tests/mock_carins/main.rs",
+    # tests/common/mod.rs の sqlx::migrate! が compile 時に migrations/ を読む
+    compile_data = glob(["migrations/**"]),
     deps = [":rust_alc_api_lib"] + all_crate_deps(
         normal = True,
         normal_dev = True,
@@ -100,6 +102,8 @@ rust_test(
     name = "mock_devices",
     srcs = ["tests/mock_devices/main.rs"] + _MOCK_TEST_SRCS,
     crate_root = "tests/mock_devices/main.rs",
+    # tests/common/mod.rs の sqlx::migrate! が compile 時に migrations/ を読む
+    compile_data = glob(["migrations/**"]),
     deps = [":rust_alc_api_lib"] + all_crate_deps(
         normal = True,
         normal_dev = True,
@@ -114,6 +118,8 @@ rust_test(
     name = "mock_dtako",
     srcs = ["tests/mock_dtako/main.rs"] + _MOCK_TEST_SRCS,
     crate_root = "tests/mock_dtako/main.rs",
+    # tests/common/mod.rs の sqlx::migrate! が compile 時に migrations/ を読む
+    compile_data = glob(["migrations/**"]),
     deps = [":rust_alc_api_lib"] + all_crate_deps(
         normal = True,
         normal_dev = True,
@@ -128,6 +134,8 @@ rust_test(
     name = "mock_misc",
     srcs = ["tests/mock_misc/main.rs"] + _MOCK_TEST_SRCS,
     crate_root = "tests/mock_misc/main.rs",
+    # tests/common/mod.rs の sqlx::migrate! が compile 時に migrations/ を読む
+    compile_data = glob(["migrations/**"]),
     deps = [":rust_alc_api_lib"] + all_crate_deps(
         normal = True,
         normal_dev = True,
@@ -142,6 +150,8 @@ rust_test(
     name = "mock_tenko",
     srcs = ["tests/mock_tenko/main.rs"] + _MOCK_TEST_SRCS,
     crate_root = "tests/mock_tenko/main.rs",
+    # tests/common/mod.rs の sqlx::migrate! が compile 時に migrations/ を読む
+    compile_data = glob(["migrations/**"]),
     deps = [":rust_alc_api_lib"] + all_crate_deps(
         normal = True,
         normal_dev = True,
@@ -156,6 +166,8 @@ rust_test(
     name = "mock_trouble",
     srcs = ["tests/mock_trouble/main.rs"] + _MOCK_TEST_SRCS,
     crate_root = "tests/mock_trouble/main.rs",
+    # tests/common/mod.rs の sqlx::migrate! が compile 時に migrations/ を読む
+    compile_data = glob(["migrations/**"]),
     deps = [":rust_alc_api_lib"] + all_crate_deps(
         normal = True,
         normal_dev = True,
