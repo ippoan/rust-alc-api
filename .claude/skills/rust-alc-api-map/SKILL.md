@@ -1,6 +1,6 @@
 ---
 name: rust-alc-api-map
-generated-from: rust-alc-api:3388b2824b5b99d14fad8e52b4d3b2238c1a092b
+generated-from: rust-alc-api:c8fea07261f4633ccf58a650369e5fffd09dfa48
 paths: [crates/, src/, migrations/]
 description: rust-alc-api (アルコールチェッカー基盤の Rust/Axum Cargo workspace — 13 domain crate + gateway/tenko/carins/dtako/trouble の複数バイナリ、PostgreSQL+RLS、Cloud Run) の構造ナビゲーション。どの crate に何のルートがあるか / monolith(rust-alc-api) と per-domain API + gateway の二系統 / RLS・migration・deploy/release 分離の gotcha を 1 枚にまとめる。トリガー:「rust-alc-api」「alc-api」「alc-notify」「alc-tenko」「alc-trouble」「alc-carins」「alc-dtako」「gateway」「tenko-api」「carins-api」「dtako-api」「trouble-api」「RLS テナント」「sqlx migration」「ts-rs」「Release Wave」「Bazel」等。
 ---
@@ -135,7 +135,12 @@ monolith と per-domain API は同じ domain crate (`alc-tenko` 等) を共有 �
 ## CI / deploy から見た立ち位置
 
 - **Bazel + Cargo の二重ビルド**: `BUILD.bazel` (rust_library `rust_alc_api_lib` + rust_binary 群 + rust_test)
-  と Cargo workspace の両方が存在 (`MODULE.bazel` / `.bazelrc`)。CI は主に Cargo (`cargo llvm-cov nextest`)。
+  と Cargo workspace の両方が存在 (`MODULE.bazel` / `.bazelrc`)。CI の merge gate は Cargo
+  (`cargo llvm-cov nextest`)。`bazel test //... --build_tests_only` は観測用 job
+  (`bazel-test-poc`) + main-push warm で全 unit test を回す (run 跨ぎ result cache、Refs #515)。
+  **dev-dependencies を持つ crate (alc-misc / alc-notify) の rust_test には
+  `all_crate_deps(normal_dev/proc_macro_dev)` の配線が必須** — 無いと `#[tokio::test]` 等が
+  unresolved で FAILED TO BUILD になる。
 - **deploy.yml は deploy/release 分離 (Refs #137)**: PR → staging 自動 deploy、tag(v*) push → production。
   **production の tag release は新 revision を 0% (no-traffic) で deploy するだけ**で traffic は旧 revision に残す。
   実際の切替は **Release Wave flip** が行う。`verify-no-traffic` job がこの不変条件を検証 (latest revision が
