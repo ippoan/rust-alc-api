@@ -844,9 +844,10 @@ jobs:
 
   # PR3b (Refs #515): 全 shard の lcov を merge して coverage_100.toml 全域を検証する
   # 集約 gate。寄与 shard が file ごとに異なる (mock=route / db=Pg repo / unit=crate)
-  # ため per-shard では判定できない。fail 化は差分ゼロを確認してから (現状 warn)。
+  # ため per-shard では判定できない。2026-07-05 に全域 63/63 一致を確認して fail 化済み
+  # (cargo llvm-cov gate と同等の効力。cargo 側は PR4 で退役)。
   bazel-coverage-gate:
-    name: "Bazel coverage gate (warn)"
+    name: "Bazel coverage gate"
     needs: [bazel-test-poc, bazel-test-db]
     if: "always() && github.event_name == 'pull_request'"
     runs-on: ubuntu-latest
@@ -856,15 +857,15 @@ jobs:
         with:
           pattern: lcov-*
           path: /tmp/lcov
-      - name: merge lcov + coverage_100.toml 全域突合 (warn モード)
+      - name: merge lcov + coverage_100.toml 全域突合
         run: |
           shopt -s globstar nullglob
           files=(/tmp/lcov/**/*.dat)
           echo "merged inputs: ${#files[@]}"
-          [ "${#files[@]}" -gt 0 ] || { echo "::warning::lcov artifact が 0 件 (shard 失敗?)"; exit 0; }
+          # shard が全滅して artifact 0 件なら loud fail (無言 green を許さない)
+          [ "${#files[@]}" -gt 0 ] || { echo "::error::lcov artifact が 0 件 (shard 失敗?)"; exit 1; }
           cat "${files[@]}" > /tmp/merged.dat
-          bash scripts/check_coverage_100_lcov.sh /tmp/merged.dat \
-            || echo "::warning::PR3b: 全域 lcov gate に差分あり — fail 化前に #515 で解消する"
+          bash scripts/check_coverage_100_lcov.sh /tmp/merged.dat
 
   # staging の postgres sidecar image。旧 deploy.yml の staging-db job からの
   # 移設 (Refs #482)。build-image と並列に走らせることで、deploy workflow 側の
