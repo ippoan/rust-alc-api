@@ -54,6 +54,24 @@ for run_job, warm_job in PAIRS:
             fail += 1
         listed[t] = run_job
 
+# --- matrix の coverage config が .bazelrc に定義されているか ---
+# (filter 実体は .bazelrc の "coverage:cov-<shard>" config。ci.yml 側は config 名のみ)
+rc_src = open(".bazelrc", encoding="utf-8").read()
+rc_configs = set(re.findall(r"^coverage:(\S+) --instrumentation_filter=", rc_src, re.M))
+used_configs = set()
+for run_job, _ in PAIRS:
+    for e in matrix_targets(run_job).values():
+        cov = e.get("coverage")
+        if cov is None:
+            continue
+        used_configs.add(cov)
+        if cov not in rc_configs:
+            print(f"::error::matrix の coverage config '{cov}' が .bazelrc に定義されていません (coverage:{cov} --instrumentation_filter=... を追加)")
+            fail += 1
+for stale_cfg in sorted(rc_configs - used_configs):
+    print(f"::error::.bazelrc の coverage config '{stale_cfg}' を使う matrix entry がありません (削除漏れ)")
+    fail += 1
+
 # --- BUILD ファイルから rust_test target を列挙 ---
 expected = set()
 for f in glob.glob("crates/*/BUILD.bazel") + ["BUILD.bazel"]:
