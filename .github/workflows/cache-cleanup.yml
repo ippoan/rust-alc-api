@@ -12,9 +12,14 @@ name: Cache Cleanup
 on:
   pull_request:
     types: [closed]
+  # closed PR の残骸一括掃除 (下の cleanup-closed-prs)。close 時削除は closed
+  # イベントの瞬間に 1 回だけ走るため、削除が不完全なまま close された PR
+  # (--limit 30 バグ時代の #540-#545 等) には遡って効かない。手動で回収する。
+  workflow_dispatch:
 
 jobs:
   cleanup-branch-cache:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       actions: write
@@ -41,3 +46,47 @@ jobs:
           gh cache list --ref "$HEAD_REF" --limit 1000 --json id -q '.[].id' | while read id; do
             gh cache delete "$id" || true
           done
+
+  # 全 cache を列挙し、refs/pull/N/merge のうち PR が closed のものを一括削除する。
+  # open PR の cache は残す (走行中 CI の cache hit を壊さない)。
+  cleanup-closed-prs:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Delete caches of closed PRs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh cache list -R "$REPO" --limit 5000 \
+            --json id,ref,sizeInBytes > /tmp/caches.json
+          # open PR の番号一覧 (これ以外の pull ref は closed とみなす)
+          gh pr list -R "$REPO" --state open --limit 500 --json number \
+            -q '.[].number' > /tmp/open_prs.txt
+          python3 - <<'PY'
+          import json, re
+
+          caches = json.load(open("/tmp/caches.json"))
+          open_prs = {line.strip() for line in open("/tmp/open_prs.txt") if line.strip()}
+
+          to_delete = []
+          total = 0
+          for e in caches:
+              m = re.fullmatch(r"refs/pull/(\d+)/merge", e["ref"])
+              if m and m.group(1) not in open_prs:
+                  to_delete.append(e)
+                  total += e["sizeInBytes"]
+
+          with open("/tmp/ids.txt", "w") as f:
+              for e in to_delete:
+                  f.write(f"{e['id']}\n")
+          print(f"closed-PR 残骸: {len(to_delete)} entries / {total / 1024**3:.2f}GB を削除します")
+          PY
+          while read -r id; do
+            gh cache delete "$id" || true
+          done < /tmp/ids.txt
+          echo "done"
