@@ -1,14 +1,20 @@
 name: Cache Cleanup
 
+# PR close/merge 時にその PR scope の cache を全削除する。
+#
+# 旧構成にあった週次「最新 10 個以外を全削除」job (cleanup-stale-cache) は削除済み:
+# - `--sort last_used` が無効値で gh が即エラー → 作成以来ずっと無音の no-op だった
+# - 仮に「直す」と bazel shard tar 21 個を毎週日曜に全滅させる (cargo 時代に cache が
+#   数個しか無かった頃の遺物)
+# - 世代掃除は ci.yml の cache-cleanup job (base ごと keep 3 / shard tar keep 1) と
+#   GitHub の 7 日未アクセス自動削除が既に担っている
+
 on:
   pull_request:
     types: [closed]
-  schedule:
-    - cron: '0 3 * * 0' # 毎週日曜 03:00 UTC
 
 jobs:
   cleanup-branch-cache:
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       actions: write
@@ -17,31 +23,21 @@ jobs:
       - name: Delete caches for closed branch
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          # head.ref は fork の branch 名 = untrusted input。run 内に ${{ }} で
+          # 直接展開すると shell injection になるため env 経由で渡す
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
-          BRANCH="refs/pull/${{ github.event.pull_request.number }}/merge"
+          # --limit 既定は 30。bazel 化後は 1 PR あたり数十〜数百 entry
+          # (shard tar + buildkit blob) あるため、明示しないと大半が残る
+          # (実害: merge 済み PR の cache が数 GB 残留し 30GB 上限を圧迫)。
+          BRANCH="refs/pull/${PR_NUMBER}/merge"
           echo "Deleting caches for: $BRANCH"
-          gh cache list --ref "$BRANCH" --json id -q '.[].id' | while read id; do
+          gh cache list --ref "$BRANCH" --limit 1000 --json id -q '.[].id' | while read id; do
             gh cache delete "$id" || true
           done
-          HEAD_REF="refs/heads/${{ github.event.pull_request.head.ref }}"
+          HEAD_REF="refs/heads/${PR_HEAD_REF}"
           echo "Deleting caches for: $HEAD_REF"
-          gh cache list --ref "$HEAD_REF" --json id -q '.[].id' | while read id; do
-            gh cache delete "$id" || true
-          done
-
-  cleanup-stale-cache:
-    if: github.event_name == 'schedule'
-    runs-on: ubuntu-latest
-    permissions:
-      actions: write
-    steps:
-      - uses: actions/checkout@v4
-      - name: Keep only 10 newest caches
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh cache list --json id --sort last_used --order desc --limit 1000 -q '.[].id' \
-            | tail -n +11 | while read id; do
-            echo "Deleting cache: $id"
+          gh cache list --ref "$HEAD_REF" --limit 1000 --json id -q '.[].id' | while read id; do
             gh cache delete "$id" || true
           done
