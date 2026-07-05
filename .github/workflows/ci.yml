@@ -128,7 +128,7 @@ jobs:
           r2-access-key-id: ${{ secrets.BAZEL_R2_ACCESS_KEY_ID }}
           r2-secret-access-key: ${{ secrets.BAZEL_R2_SECRET_ACCESS_KEY }}
       - name: Warm test result cache (Bazel)
-        run: bazel test //... --build_tests_only --keep_going --test_summary=short
+        run: bazel test //... --build_tests_only --keep_going --test_output=errors --test_summary=short
 
   cache-cleanup:
     name: Cache Cleanup
@@ -602,7 +602,7 @@ jobs:
       - name: bazel test (全 unit test、result cache は main warm から)
         run: |
           set -o pipefail
-          bazel test //... --build_tests_only --keep_going --test_summary=short 2>&1 | tee /tmp/test_run.txt
+          bazel test //... --build_tests_only --keep_going --test_output=errors --test_summary=short 2>&1 | tee /tmp/test_run.txt
           CACHED=$(grep -c "(cached)" /tmp/test_run.txt || true)
           TOTAL=$(grep -cE "^//.* PASSED" /tmp/test_run.txt || true)
           echo "::notice::test result cache: ${CACHED}/${TOTAL} targets が (cached) — ソース/BUILD を触った PR や warm 未反映の初回は少なくて正常"
