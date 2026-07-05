@@ -44,7 +44,7 @@ for run_job, warm_job in PAIRS:
     else:
         for t, e in run_m.items():
             w = warm_m[t]
-            for k in ("name", "pdfium"):
+            for k in ("name", "pdfium", "coverage"):
                 if e.get(k) != w.get(k):
                     print(f"::error::{t} の matrix field '{k}' が {run_job}/{warm_job} で不一致 ({e.get(k)} != {w.get(k)})")
                     fail += 1

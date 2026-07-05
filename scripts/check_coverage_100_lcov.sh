@@ -6,13 +6,14 @@
 # lcov の DA (line, hit-count) レコードから「登録ファイルの全計装行が hit>0」を検証し、
 # llvm-cov --text ベースの gate と同じ判定が出るかを確かめる。
 #
-# 使い方: check_coverage_100_lcov.sh <lcov.dat> <path-prefix>
-#   <path-prefix> に一致する coverage_100.toml 登録ファイルだけを対象にする
-#   (PoC は crates/alc-csv-parser 限定。全体適用は gate 移行の判断後)。
+# 使い方: check_coverage_100_lcov.sh <lcov.dat> [path-prefix]
+#   <path-prefix> に一致する coverage_100.toml 登録ファイルだけを対象にする。
+#   省略時は全域 (PR3b の集約 gate が merge 済み lcov に対して使う)。
 set -euo pipefail
 
-LCOV_FILE="${1:?usage: $0 <lcov.dat> <path-prefix>}"
-PREFIX="${2:?usage: $0 <lcov.dat> <path-prefix>}"
+LCOV_FILE="${1:?usage: $0 <lcov.dat> [path-prefix]}"
+# prefix 省略時は coverage_100.toml 全域を対象にする (PR3b 集約 gate 用)
+PREFIX="${2-}"
 
 python3 - "$LCOV_FILE" "$PREFIX" <<'PYEOF'
 import re
@@ -28,7 +29,7 @@ with open("coverage_100.toml", "rb") as fh:
 registered = [f["path"] for f in toml.get("files", []) if f["path"].startswith(prefix)]
 
 if not registered:
-    print(f"::error::coverage_100.toml に prefix '{prefix}' の登録ファイルがありません")
+    print(f"::error::coverage_100.toml に prefix '{prefix or '(全域)'}' の登録ファイルがありません")
     sys.exit(1)
 
 # --- lcov をパース: SF -> {line: max(hit)} (複数レコードはマージ) ---
@@ -54,7 +55,7 @@ def find_record(path):
     return None, None
 
 fail = 0
-print(f"=== lcov 100% gate ({prefix}) ===")
+print(f"=== lcov 100% gate ({prefix or 'coverage_100.toml 全域'}) ===")
 for path in registered:
     sf, das = find_record(path)
     if das is None:

@@ -127,28 +127,28 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: monolith, target: "//:unit_tests" }
-          - { name: mock-carins, target: "//:mock_carins" }
-          - { name: mock-devices, target: "//:mock_devices" }
-          - { name: mock-dtako, target: "//:mock_dtako" }
-          - { name: mock-misc, target: "//:mock_misc" }
-          - { name: mock-tenko, target: "//:mock_tenko" }
-          - { name: mock-trouble, target: "//:mock_trouble" }
+          - { name: monolith, target: "//:unit_tests", coverage: "^//$" }
+          - { name: mock-carins, target: "//:mock_carins", coverage: "//crates/alc-carins" }
+          - { name: mock-devices, target: "//:mock_devices", coverage: "//crates/alc-devices,//crates/alc-core" }
+          - { name: mock-dtako, target: "//:mock_dtako", coverage: "//crates/alc-dtako" }
+          - { name: mock-misc, target: "//:mock_misc", coverage: "//crates/alc-misc,//crates/alc-core,^//$" }
+          - { name: mock-tenko, target: "//:mock_tenko", coverage: "//crates/alc-tenko" }
+          - { name: mock-trouble, target: "//:mock_trouble", coverage: "//crates/alc-trouble" }
           - { name: auth, target: "//crates/alc-auth:alc-auth_test" }
-          - { name: auth-jwt, target: "//crates/alc-auth-jwt:alc-auth-jwt_test" }
+          - { name: auth-jwt, target: "//crates/alc-auth-jwt:alc-auth-jwt_test", coverage: "//crates/alc-auth-jwt" }
           - { name: camera, target: "//crates/alc-camera:alc-camera_test" }
-          - { name: carins, target: "//crates/alc-carins:alc-carins_test" }
-          - { name: compare, target: "//crates/alc-compare:alc-compare_test" }
-          - { name: core, target: "//crates/alc-core:alc-core_test" }
-          - { name: csv-parser, target: "//crates/alc-csv-parser:alc-csv-parser_test" }
-          - { name: devices, target: "//crates/alc-devices:alc-devices_test" }
-          - { name: dtako, target: "//crates/alc-dtako:alc-dtako_test" }
-          - { name: misc, target: "//crates/alc-misc:alc-misc_test" }
-          - { name: notify, target: "//crates/alc-notify:alc-notify_test", pdfium: true }
-          - { name: pdf, target: "//crates/alc-pdf:alc-pdf_test" }
+          - { name: carins, target: "//crates/alc-carins:alc-carins_test", coverage: "//crates/alc-carins" }
+          - { name: compare, target: "//crates/alc-compare:alc-compare_test", coverage: "//crates/alc-compare" }
+          - { name: core, target: "//crates/alc-core:alc-core_test", coverage: "//crates/alc-core" }
+          - { name: csv-parser, target: "//crates/alc-csv-parser:alc-csv-parser_test", coverage: "//crates/alc-csv-parser" }
+          - { name: devices, target: "//crates/alc-devices:alc-devices_test", coverage: "//crates/alc-devices" }
+          - { name: dtako, target: "//crates/alc-dtako:alc-dtako_test", coverage: "//crates/alc-dtako" }
+          - { name: misc, target: "//crates/alc-misc:alc-misc_test", coverage: "//crates/alc-misc" }
+          - { name: notify, target: "//crates/alc-notify:alc-notify_test", pdfium: true, coverage: "//crates/alc-notify" }
+          - { name: pdf, target: "//crates/alc-pdf:alc-pdf_test", coverage: "//crates/alc-pdf" }
           - { name: storage, target: "//crates/alc-storage:alc-storage_test" }
-          - { name: tenko, target: "//crates/alc-tenko:alc-tenko_test" }
-          - { name: trouble, target: "//crates/alc-trouble:alc-trouble_test" }
+          - { name: tenko, target: "//crates/alc-tenko:alc-tenko_test", coverage: "//crates/alc-tenko" }
+          - { name: trouble, target: "//crates/alc-trouble:alc-trouble_test", coverage: "//crates/alc-trouble" }
           - { name: gateway, target: "//crates/gateway:gateway_test" }
     steps:
       - uses: actions/checkout@v4
@@ -171,14 +171,14 @@ jobs:
       - name: Warm test result cache (Bazel)
         run: bazel test ${{ matrix.target }} --test_output=errors --test_summary=short
 
-      # PR3a pilot (Refs #515): coverage の計装ビルドも warm して PR 側を cache hit に
-      # する戦略の実測。mock-trouble 1 shard のみ。flags は poc 側と完全一致必須。
-      - name: Warm coverage build (Bazel, PR3a pilot)
-        if: matrix.name == 'mock-trouble'
+      # PR3b (Refs #515): coverage の計装ビルド + テスト実行も warm し、PR 側を
+      # cache hit にする。flags は poc 側と完全一致必須。
+      - name: Warm coverage build (Bazel)
+        if: matrix.coverage
         run: |
           bazel coverage ${{ matrix.target }} \
             --combined_report=lcov \
-            --instrumentation_filter=//crates/alc-trouble
+            --instrumentation_filter="${{ matrix.coverage }}"
 
   # DB integration テスト用 warm (Refs #515 PR2)。postgres service + TEST_DATABASE_URL
   # を持つ点以外は cache-warm-bazel-test-poc と同じ。matrix / flags は bazel-test-db と
@@ -191,8 +191,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: db-trouble, target: "//:trouble_test" }
-          - { name: db-archive, target: "//:archive_repo_test" }
+          - { name: db-trouble, target: "//:trouble_test", coverage: "//crates/alc-trouble" }
+          - { name: db-archive, target: "//:archive_repo_test", coverage: "^//$" }
     services:
       postgres:
         image: postgres:16
@@ -220,6 +220,14 @@ jobs:
         run: psql "postgresql://postgres:test@localhost:5432/postgres" -f scripts/init_local_db.sql
       - name: Warm test result cache (Bazel)
         run: bazel test ${{ matrix.target }} --test_env=TEST_DATABASE_URL --test_output=errors --test_summary=short
+      # PR3b (Refs #515): coverage も warm (flags は bazel-test-db と一致必須)
+      - name: Warm coverage build (Bazel)
+        if: matrix.coverage
+        run: |
+          bazel coverage ${{ matrix.target }} \
+            --test_env=TEST_DATABASE_URL \
+            --combined_report=lcov \
+            --instrumentation_filter="${{ matrix.coverage }}"
 
   cache-cleanup:
     name: Cache Cleanup
@@ -687,28 +695,28 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: monolith, target: "//:unit_tests" }
-          - { name: mock-carins, target: "//:mock_carins" }
-          - { name: mock-devices, target: "//:mock_devices" }
-          - { name: mock-dtako, target: "//:mock_dtako" }
-          - { name: mock-misc, target: "//:mock_misc" }
-          - { name: mock-tenko, target: "//:mock_tenko" }
-          - { name: mock-trouble, target: "//:mock_trouble" }
+          - { name: monolith, target: "//:unit_tests", coverage: "^//$" }
+          - { name: mock-carins, target: "//:mock_carins", coverage: "//crates/alc-carins" }
+          - { name: mock-devices, target: "//:mock_devices", coverage: "//crates/alc-devices,//crates/alc-core" }
+          - { name: mock-dtako, target: "//:mock_dtako", coverage: "//crates/alc-dtako" }
+          - { name: mock-misc, target: "//:mock_misc", coverage: "//crates/alc-misc,//crates/alc-core,^//$" }
+          - { name: mock-tenko, target: "//:mock_tenko", coverage: "//crates/alc-tenko" }
+          - { name: mock-trouble, target: "//:mock_trouble", coverage: "//crates/alc-trouble" }
           - { name: auth, target: "//crates/alc-auth:alc-auth_test" }
-          - { name: auth-jwt, target: "//crates/alc-auth-jwt:alc-auth-jwt_test" }
+          - { name: auth-jwt, target: "//crates/alc-auth-jwt:alc-auth-jwt_test", coverage: "//crates/alc-auth-jwt" }
           - { name: camera, target: "//crates/alc-camera:alc-camera_test" }
-          - { name: carins, target: "//crates/alc-carins:alc-carins_test" }
-          - { name: compare, target: "//crates/alc-compare:alc-compare_test" }
-          - { name: core, target: "//crates/alc-core:alc-core_test" }
-          - { name: csv-parser, target: "//crates/alc-csv-parser:alc-csv-parser_test" }
-          - { name: devices, target: "//crates/alc-devices:alc-devices_test" }
-          - { name: dtako, target: "//crates/alc-dtako:alc-dtako_test" }
-          - { name: misc, target: "//crates/alc-misc:alc-misc_test" }
-          - { name: notify, target: "//crates/alc-notify:alc-notify_test", pdfium: true }
-          - { name: pdf, target: "//crates/alc-pdf:alc-pdf_test" }
+          - { name: carins, target: "//crates/alc-carins:alc-carins_test", coverage: "//crates/alc-carins" }
+          - { name: compare, target: "//crates/alc-compare:alc-compare_test", coverage: "//crates/alc-compare" }
+          - { name: core, target: "//crates/alc-core:alc-core_test", coverage: "//crates/alc-core" }
+          - { name: csv-parser, target: "//crates/alc-csv-parser:alc-csv-parser_test", coverage: "//crates/alc-csv-parser" }
+          - { name: devices, target: "//crates/alc-devices:alc-devices_test", coverage: "//crates/alc-devices" }
+          - { name: dtako, target: "//crates/alc-dtako:alc-dtako_test", coverage: "//crates/alc-dtako" }
+          - { name: misc, target: "//crates/alc-misc:alc-misc_test", coverage: "//crates/alc-misc" }
+          - { name: notify, target: "//crates/alc-notify:alc-notify_test", pdfium: true, coverage: "//crates/alc-notify" }
+          - { name: pdf, target: "//crates/alc-pdf:alc-pdf_test", coverage: "//crates/alc-pdf" }
           - { name: storage, target: "//crates/alc-storage:alc-storage_test" }
-          - { name: tenko, target: "//crates/alc-tenko:alc-tenko_test" }
-          - { name: trouble, target: "//crates/alc-trouble:alc-trouble_test" }
+          - { name: tenko, target: "//crates/alc-tenko:alc-tenko_test", coverage: "//crates/alc-tenko" }
+          - { name: trouble, target: "//crates/alc-trouble:alc-trouble_test", coverage: "//crates/alc-trouble" }
           - { name: gateway, target: "//crates/gateway:gateway_test" }
     steps:
       - uses: actions/checkout@v4
@@ -742,30 +750,28 @@ jobs:
         if: matrix.name == 'csv-parser'
         run: bash scripts/check_bazel_test_matrix.sh
 
-      # PR3a pilot (Refs #515): mock target 経由の route ファイル coverage を lcov で
-      # 取れるか + 計装ビルドのコスト実測。gate は warn モード (fail させない)。
-      - name: bazel coverage (PR3a pilot, warn モード)
-        if: matrix.name == 'mock-trouble'
+      # PR3b (Refs #515): coverage field を持つ shard は lcov を生成して artifact 化。
+      # bazel-coverage-gate job が全 shard 分を merge して coverage_100.toml 全域を
+      # warn モードで突合する (mock は route / db は Pg repo / unit は crate と、
+      # file ごとに寄与 shard が異なるため merge が必須)。flags は warm 側と一致必須。
+      - name: bazel coverage (lcov 出力)
+        if: matrix.coverage
         run: |
           bazel coverage ${{ matrix.target }} \
             --combined_report=lcov \
-            --instrumentation_filter=//crates/alc-trouble
+            --instrumentation_filter="${{ matrix.coverage }}"
           LCOV="$(bazel info output_path)/_coverage/_coverage_report.dat"
           cp "$LCOV" /tmp/lcov.dat
-          bash scripts/check_coverage_100_lcov.sh /tmp/lcov.dat crates/alc-trouble \
-            || echo "::warning::PR3a pilot: lcov gate (crates/alc-trouble) に差分あり — 里帰りテスト対象として #515 に記録"
 
-      - name: bazel coverage (lcov 出力)
-        if: matrix.name == 'csv-parser'
-        run: |
-          bazel coverage //crates/alc-csv-parser:alc-csv-parser_test \
-            --combined_report=lcov \
-            --instrumentation_filter=//crates/alc-csv-parser
-          LCOV="$(bazel info output_path)/_coverage/_coverage_report.dat"
-          cp "$LCOV" /tmp/lcov.dat
-          echo "=== lcov head ==="
-          head -30 /tmp/lcov.dat
+      - name: upload lcov artifact
+        if: matrix.coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: lcov-${{ matrix.name }}
+          path: /tmp/lcov.dat
+          retention-days: 3
 
+      # csv-parser は PoC で意味論一致を実証済みのため strict gate を維持 (fail する)
       - name: coverage 100% gate の lcov 再現 (coverage_100.toml 突合)
         if: matrix.name == 'csv-parser'
         run: bash scripts/check_coverage_100_lcov.sh /tmp/lcov.dat crates/alc-csv-parser
@@ -784,8 +790,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: db-trouble, target: "//:trouble_test" }
-          - { name: db-archive, target: "//:archive_repo_test" }
+          - { name: db-trouble, target: "//:trouble_test", coverage: "//crates/alc-trouble" }
+          - { name: db-archive, target: "//:archive_repo_test", coverage: "^//$" }
     services:
       postgres:
         image: postgres:16
@@ -818,6 +824,49 @@ jobs:
           if grep -q "(cached)" /tmp/test_run.txt; then
             echo "::notice::${{ matrix.target }} は (cached) — main warm から restore"
           fi
+
+      # PR3b (Refs #515): DB shard の lcov (Pg repo 実装の寄与分)。flags は warm と一致必須。
+      - name: bazel coverage (lcov 出力)
+        if: matrix.coverage
+        run: |
+          bazel coverage ${{ matrix.target }} \
+            --test_env=TEST_DATABASE_URL \
+            --combined_report=lcov \
+            --instrumentation_filter="${{ matrix.coverage }}"
+          LCOV="$(bazel info output_path)/_coverage/_coverage_report.dat"
+          cp "$LCOV" /tmp/lcov.dat
+
+      - name: upload lcov artifact
+        if: matrix.coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: lcov-${{ matrix.name }}
+          path: /tmp/lcov.dat
+          retention-days: 3
+
+  # PR3b (Refs #515): 全 shard の lcov を merge して coverage_100.toml 全域を検証する
+  # 集約 gate。寄与 shard が file ごとに異なる (mock=route / db=Pg repo / unit=crate)
+  # ため per-shard では判定できない。fail 化は差分ゼロを確認してから (現状 warn)。
+  bazel-coverage-gate:
+    name: "Bazel coverage gate (warn)"
+    needs: [bazel-test-poc, bazel-test-db]
+    if: "always() && github.event_name == 'pull_request'"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: lcov-*
+          path: /tmp/lcov
+      - name: merge lcov + coverage_100.toml 全域突合 (warn モード)
+        run: |
+          shopt -s globstar nullglob
+          files=(/tmp/lcov/**/*.dat /tmp/lcov/**/lcov.dat)
+          echo "merged inputs: ${#files[@]}"
+          [ "${#files[@]}" -gt 0 ] || { echo "::warning::lcov artifact が 0 件 (shard 失敗?)"; exit 0; }
+          cat "${files[@]}" > /tmp/merged.dat
+          bash scripts/check_coverage_100_lcov.sh /tmp/merged.dat \
+            || echo "::warning::PR3b: 全域 lcov gate に差分あり — fail 化前に #515 で解消する"
 
   # staging の postgres sidecar image。旧 deploy.yml の staging-db job からの
   # 移設 (Refs #482)。build-image と並列に走らせることで、deploy workflow 側の
