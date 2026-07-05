@@ -56,12 +56,15 @@ struct CachedJwks {
     fetched_at: std::time::Instant,
 }
 
-/// Google ID トークン検証器
+/// Google ID トークン検証器 (internal OIDC 専用)。
+///
+/// 旧ログイン用途 (human Google Sign-In の `verify()` / Device Flow の
+/// `extra_client_ids`) は auth-worker へのログイン完全移管 (#479 PR-3) で
+/// 呼び出し元が消えたため削除済み。残る用途は `verify_internal_oidc` =
+/// #434 lockdown の internal-auth OIDC (aud=alc-api-internal) の暗号学的検証のみ。
 #[derive(Clone)]
 pub struct GoogleTokenVerifier {
     client_id: String,
-    /// 追加で受け入れる Client ID (Device Flow 用など)
-    extra_client_ids: Vec<String>,
     http_client: Client,
     jwks_cache: Arc<RwLock<Option<CachedJwks>>>,
     /// テスト用: Some の場合、verify で固定 claims を返す
@@ -72,24 +75,16 @@ impl GoogleTokenVerifier {
     pub fn new(client_id: String) -> Self {
         Self {
             client_id,
-            extra_client_ids: Vec::new(),
             http_client: Client::new(),
             jwks_cache: Arc::new(RwLock::new(None)),
             test_claims: None,
         }
     }
 
-    /// 追加の Client ID を受け入れるように設定 (Device Flow 等)
-    pub fn with_extra_client_ids(mut self, ids: Vec<String>) -> Self {
-        self.extra_client_ids = ids;
-        self
-    }
-
     /// テスト用: verify で固定 claims を返す verifier を作成
     pub fn with_test_claims(client_id: String, claims: GoogleClaims) -> Self {
         Self {
             client_id,
-            extra_client_ids: Vec::new(),
             http_client: Client::new(),
             jwks_cache: Arc::new(RwLock::new(None)),
             test_claims: Some(Arc::new(claims)),
@@ -100,19 +95,7 @@ impl GoogleTokenVerifier {
         &self.client_id
     }
 
-    /// Google ID トークンを検証し、クレームを返す
-    pub async fn verify(&self, id_token: &str) -> Result<GoogleClaims, VerifyError> {
-        let claims = self.verify_claims(id_token).await?;
-
-        // email_verified チェック (human Google Sign-In 用)。
-        if !claims.email_verified {
-            return Err(VerifyError::EmailNotVerified);
-        }
-
-        Ok(claims)
-    }
-
-    /// 署名 (JWKS RS256) + `iss` (Google) + `aud` (client_id / extra) + `exp` を検証して
+    /// 署名 (JWKS RS256) + `iss` (Google) + `aud` (client_id) + `exp` を検証して
     /// claims を返す。`email_verified` は確認しない (machine token = SA OIDC でも通すため)。
     async fn verify_claims(&self, id_token: &str) -> Result<GoogleClaims, VerifyError> {
         // テストモード: 固定 claims を返す
@@ -137,11 +120,7 @@ impl GoogleTokenVerifier {
         // 検証パラメータ (RS256 のみ = alg confusion 防止)
         let mut validation = Validation::new(Algorithm::RS256);
         validation.set_issuer(&[GOOGLE_ISSUER, "accounts.google.com"]);
-        let mut audiences: Vec<&str> = vec![&self.client_id];
-        for id in &self.extra_client_ids {
-            audiences.push(id.as_str());
-        }
-        validation.set_audience(&audiences);
+        validation.set_audience(&[&self.client_id]);
 
         // デコード + 検証
         let token_data =
@@ -219,8 +198,6 @@ pub enum VerifyError {
     InvalidToken,
     #[error("invalid key")]
     InvalidKey,
-    #[error("email not verified")]
-    EmailNotVerified,
     #[error("failed to fetch JWKS")]
     JwksFetchFailed,
     #[error("key not found in JWKS")]
@@ -334,49 +311,12 @@ mod tests {
     fn test_verifier_new() {
         let v = GoogleTokenVerifier::new("cid".into());
         assert_eq!(v.client_id(), "cid");
-        assert!(v.extra_client_ids.is_empty());
         assert!(v.test_claims.is_none());
-    }
-
-    #[test]
-    fn test_verifier_with_extra_client_ids() {
-        let v = GoogleTokenVerifier::new("cid".into())
-            .with_extra_client_ids(vec!["device-id".into(), "other-id".into()]);
-        assert_eq!(v.client_id(), "cid");
-        assert_eq!(v.extra_client_ids, vec!["device-id", "other-id"]);
     }
 
     // --- verify with wiremock ---
 
     /// extra_client_ids に含まれる audience のトークンも検証が通ること
-    #[tokio::test]
-    async fn test_verify_extra_client_id() {
-        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let server = MockServer::start().await;
-        std::env::set_var("GOOGLE_JWKS_URL", format!("{}/jwks", server.uri()));
-
-        let device_client_id = "device-flow-client-id";
-        let key = test_key();
-        let (n, e) = (&key.n, &key.e);
-        // トークンの aud は device_client_id
-        let claims = test_claims(device_client_id);
-        let token = create_test_jwt(&claims, TEST_KID);
-
-        Mock::given(method("GET"))
-            .and(path("/jwks"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(build_jwks_response(&n, &e)))
-            .mount(&server)
-            .await;
-
-        // primary client_id は "web-client-id" だが、extra に device_client_id を含む
-        let verifier = GoogleTokenVerifier::new("web-client-id".into())
-            .with_extra_client_ids(vec![device_client_id.into()]);
-        let result = verifier.verify(&token).await;
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap().email, "test@example.com");
-
-        std::env::remove_var("GOOGLE_JWKS_URL");
-    }
 
     #[tokio::test]
     async fn test_verify_success() {
@@ -397,10 +337,8 @@ mod tests {
             .await;
 
         let verifier = GoogleTokenVerifier::new(client_id.into());
-        let result = verifier.verify(&token).await;
+        let result = verifier.verify_internal_oidc(&token).await;
         assert!(result.is_ok());
-        let c = result.unwrap();
-        assert_eq!(c.email, "test@example.com");
 
         std::env::remove_var("GOOGLE_JWKS_URL");
     }
@@ -408,7 +346,7 @@ mod tests {
     #[tokio::test]
     async fn test_verify_invalid_token() {
         let verifier = GoogleTokenVerifier::new("cid".into());
-        let result = verifier.verify("not-a-jwt").await;
+        let result = verifier.verify_internal_oidc("not-a-jwt").await;
         assert!(matches!(result, Err(VerifyError::InvalidToken)));
     }
 
@@ -461,12 +399,6 @@ mod tests {
         let result = verifier.verify_internal_oidc(&token).await;
         assert!(result.is_ok());
 
-        // 同じ machine token を verify() に通すと email_verified=false で弾かれる (対比)。
-        assert!(matches!(
-            verifier.verify(&token).await,
-            Err(VerifyError::EmailNotVerified)
-        ));
-
         std::env::remove_var("GOOGLE_JWKS_URL");
     }
 
@@ -495,32 +427,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_verify_email_not_verified() {
-        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let server = MockServer::start().await;
-        std::env::set_var("GOOGLE_JWKS_URL", format!("{}/jwks", server.uri()));
-
-        let client_id = "test-client-id";
-        let key = test_key();
-        let (n, e) = (&key.n, &key.e);
-        let mut claims = test_claims(client_id);
-        claims.email_verified = false;
-        let token = create_test_jwt(&claims, TEST_KID);
-
-        Mock::given(method("GET"))
-            .and(path("/jwks"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(build_jwks_response(&n, &e)))
-            .mount(&server)
-            .await;
-
-        let verifier = GoogleTokenVerifier::new(client_id.into());
-        let result = verifier.verify(&token).await;
-        assert!(matches!(result, Err(VerifyError::EmailNotVerified)));
-
-        std::env::remove_var("GOOGLE_JWKS_URL");
-    }
-
-    #[tokio::test]
     async fn test_verify_kid_not_found() {
         let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let server = MockServer::start().await;
@@ -540,7 +446,7 @@ mod tests {
             .await;
 
         let verifier = GoogleTokenVerifier::new(client_id.into());
-        let result = verifier.verify(&token).await;
+        let result = verifier.verify_internal_oidc(&token).await;
         assert!(matches!(result, Err(VerifyError::KeyNotFound)));
 
         std::env::remove_var("GOOGLE_JWKS_URL");
@@ -566,7 +472,7 @@ mod tests {
             .await;
 
         let verifier = GoogleTokenVerifier::new(client_id.into());
-        let result = verifier.verify(&token).await;
+        let result = verifier.verify_internal_oidc(&token).await;
         assert!(matches!(
             result,
             Err(VerifyError::InvalidKey | VerifyError::InvalidToken)
@@ -599,11 +505,11 @@ mod tests {
 
         let verifier = GoogleTokenVerifier::new(client_id.into());
         // First call — cache miss, fetches JWKS
-        let r1 = verifier.verify(&token).await;
+        let r1 = verifier.verify_internal_oidc(&token).await;
         assert!(r1.is_ok());
         // Second call — cache hit, no fetch
         let token2 = create_test_jwt(&test_claims(client_id), TEST_KID);
-        let r2 = verifier.verify(&token2).await;
+        let r2 = verifier.verify_internal_oidc(&token2).await;
         assert!(r2.is_ok());
 
         std::env::remove_var("GOOGLE_JWKS_URL");
@@ -630,11 +536,11 @@ mod tests {
 
         let verifier = GoogleTokenVerifier::new(client_id.into());
         let token1 = create_test_jwt(&test_claims(client_id), TEST_KID);
-        let r1 = verifier.verify(&token1).await;
+        let r1 = verifier.verify_internal_oidc(&token1).await;
         assert!(r1.is_ok());
         // Cache expired immediately, will fetch again
         let token2 = create_test_jwt(&test_claims(client_id), TEST_KID);
-        let r2 = verifier.verify(&token2).await;
+        let r2 = verifier.verify_internal_oidc(&token2).await;
         assert!(r2.is_ok());
 
         std::env::remove_var("GOOGLE_JWKS_URL");
@@ -649,7 +555,7 @@ mod tests {
         let verifier = GoogleTokenVerifier::new("cid".into());
         let claims = test_claims("cid");
         let token = create_test_jwt(&claims, TEST_KID);
-        let result = verifier.verify(&token).await;
+        let result = verifier.verify_internal_oidc(&token).await;
         assert!(matches!(result, Err(VerifyError::JwksFetchFailed)));
 
         std::env::remove_var("GOOGLE_JWKS_URL");
@@ -659,10 +565,6 @@ mod tests {
     fn test_verify_error_display() {
         assert_eq!(VerifyError::InvalidToken.to_string(), "invalid token");
         assert_eq!(VerifyError::InvalidKey.to_string(), "invalid key");
-        assert_eq!(
-            VerifyError::EmailNotVerified.to_string(),
-            "email not verified"
-        );
         assert_eq!(
             VerifyError::JwksFetchFailed.to_string(),
             "failed to fetch JWKS"

@@ -1,0 +1,303 @@
+//! auth-worker `/device/pair-internal` を叩いて device credential を新規発行する
+//! クライアント (adapter、Refs #495)。値 (`device_secret`) は rust 側で保持せず、
+//! 応答をそのまま端末に転送する。
+//!
+//! port (`DevicePairClient` trait / `PairedCredential` / エラー型) は
+//! `alc_core::device_pair_client` に居る (AppState が trait object を保持するため)。
+//! 実装はデバイス re-pair (`POST /api/devices/{id}/re-pair`) だけが使うので
+//! alc-devices に置く (port/adapter 分離、Refs #539)。
+//!
+//! auth-worker 側の実装 (ippoan/auth-worker#345、`replace_label` 追加) に
+//! 合わせて header 名 (`X-Internal-Shared-Secret`)・レスポンスキー
+//! (`device_id`)・role (`device-kiosk`、既存 allowlist) を確定済み。
+
+use alc_core::device_pair_client::{DevicePairClient, DevicePairClientError, PairedCredential};
+use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+#[derive(Serialize)]
+struct PairInternalRequest<'a> {
+    tenant_id: Uuid,
+    label: &'a str,
+    role: &'a str,
+    /// 同一 (tenant_id, label) の旧 credential を revoke してから mint する
+    /// (auth-worker#345)。re-pair は常に rotate したいので true 固定。
+    replace_label: bool,
+}
+
+#[derive(Deserialize)]
+struct PairInternalResponse {
+    device_id: String,
+    device_secret: String,
+}
+
+/// alc-app キオスク端末向け既存 role (auth-worker `DEVICE_ROLE_KIOSK`)。
+const RE_PAIR_ROLE: &str = "device-kiosk";
+
+/// 実 HTTP 実装。`with_endpoint` はテスト用にエンドポイントを直指定する。
+pub struct HttpDevicePairClient {
+    client: reqwest::Client,
+    pair_internal_url: String,
+    shared_secret: String,
+}
+
+impl HttpDevicePairClient {
+    pub fn new(auth_worker_url: &str, shared_secret: String) -> Self {
+        Self::with_endpoint(
+            format!(
+                "{}/device/pair-internal",
+                auth_worker_url.trim_end_matches('/')
+            ),
+            shared_secret,
+        )
+    }
+
+    /// テスト用にエンドポイント (wiremock 等) を直指定するコンストラクタ。
+    pub fn with_endpoint(pair_internal_url: String, shared_secret: String) -> Self {
+        Self {
+            client: reqwest::Client::new(),
+            pair_internal_url,
+            shared_secret,
+        }
+    }
+
+    /// `AUTH_WORKER_URL` / `INTERNAL_SHARED_SECRET` が両方揃っていれば
+    /// `Some`。片方でも欠けていれば re-pair 機能は未設定 (`None`) とする。
+    /// shared secret は既存 `INTERNAL_SHARED_SECRET` (dtako ingest 等と共用の
+    /// ippoan 4 worker 間 secret) を再利用する。新規 secret は発行しない
+    /// (用途ごとに secret を増やさない方針)。
+    pub fn from_env() -> Option<Self> {
+        Self::from_env_lookup(|k| std::env::var(k).ok())
+    }
+
+    /// env 依存を分離したテスト可能な実装 (`redact_broadcast::from_env_lookup` と同パターン)。
+    fn from_env_lookup<F: Fn(&str) -> Option<String>>(getter: F) -> Option<Self> {
+        let auth_worker_url = getter("AUTH_WORKER_URL").filter(|s| !s.is_empty())?;
+        let shared_secret = getter("INTERNAL_SHARED_SECRET").filter(|s| !s.is_empty())?;
+        Some(Self::new(&auth_worker_url, shared_secret))
+    }
+}
+
+#[async_trait]
+impl DevicePairClient for HttpDevicePairClient {
+    async fn mint(
+        &self,
+        tenant_id: Uuid,
+        label: &str,
+    ) -> Result<PairedCredential, DevicePairClientError> {
+        let resp = self
+            .client
+            .post(&self.pair_internal_url)
+            .header("X-Internal-Shared-Secret", &self.shared_secret)
+            .json(&PairInternalRequest {
+                tenant_id,
+                label,
+                role: RE_PAIR_ROLE,
+                replace_label: true,
+            })
+            .send()
+            .await
+            .map_err(|e| DevicePairClientError::Upstream(e.to_string()))?;
+
+        if !resp.status().is_success() {
+            return Err(DevicePairClientError::Upstream(format!(
+                "pair-internal status={}",
+                resp.status()
+            )));
+        }
+
+        let body: PairInternalResponse = resp
+            .json()
+            .await
+            .map_err(|e| DevicePairClientError::Upstream(e.to_string()))?;
+
+        Ok(PairedCredential {
+            device_id: body.device_id,
+            device_secret: body.device_secret,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wiremock::matchers::{header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    // from_env_lookup は注入した getter closure だけで完結するテストで、実
+    // プロセス env には触れない (並行実行される他テストとのレース無し)。
+
+    #[test]
+    fn from_env_lookup_none_when_url_missing() {
+        assert!(HttpDevicePairClient::from_env_lookup(|k| {
+            if k == "INTERNAL_SHARED_SECRET" {
+                Some("secret".to_string())
+            } else {
+                None
+            }
+        })
+        .is_none());
+    }
+
+    #[test]
+    fn from_env_lookup_none_when_secret_missing() {
+        assert!(HttpDevicePairClient::from_env_lookup(|k| {
+            if k == "AUTH_WORKER_URL" {
+                Some("https://auth.example.com".to_string())
+            } else {
+                None
+            }
+        })
+        .is_none());
+    }
+
+    #[test]
+    fn from_env_lookup_none_when_url_empty() {
+        assert!(HttpDevicePairClient::from_env_lookup(|k| {
+            match k {
+                "AUTH_WORKER_URL" => Some(String::new()),
+                "INTERNAL_SHARED_SECRET" => Some("secret".to_string()),
+                _ => None,
+            }
+        })
+        .is_none());
+    }
+
+    #[test]
+    fn from_env_lookup_none_when_secret_empty() {
+        assert!(HttpDevicePairClient::from_env_lookup(|k| {
+            match k {
+                "AUTH_WORKER_URL" => Some("https://auth.example.com".to_string()),
+                "INTERNAL_SHARED_SECRET" => Some(String::new()),
+                _ => None,
+            }
+        })
+        .is_none());
+    }
+
+    #[test]
+    fn from_env_lookup_returns_some_when_both_set() {
+        let client = HttpDevicePairClient::from_env_lookup(|k| match k {
+            "AUTH_WORKER_URL" => Some("https://auth.example.com".to_string()),
+            "INTERNAL_SHARED_SECRET" => Some("secret".to_string()),
+            _ => None,
+        })
+        .unwrap();
+        assert_eq!(
+            client.pair_internal_url,
+            "https://auth.example.com/device/pair-internal"
+        );
+    }
+
+    fn restore_env(key: &str, saved: Option<String>) {
+        match saved {
+            Some(v) => std::env::set_var(key, v),
+            None => std::env::remove_var(key),
+        }
+    }
+
+    #[test]
+    fn from_env_uses_real_env() {
+        // 唯一実 env を触るテスト。このキーは他テストで使われないため並行
+        // 実行下でも安全 (redact_broadcast::from_env_uses_real_env と同パターン)。
+        let saved_url = std::env::var("AUTH_WORKER_URL").ok();
+        let saved_secret = std::env::var("INTERNAL_SHARED_SECRET").ok();
+
+        std::env::remove_var("AUTH_WORKER_URL");
+        std::env::remove_var("INTERNAL_SHARED_SECRET");
+        assert!(HttpDevicePairClient::from_env().is_none());
+
+        std::env::set_var("AUTH_WORKER_URL", "https://auth.example.com");
+        std::env::set_var("INTERNAL_SHARED_SECRET", "secret");
+        assert!(HttpDevicePairClient::from_env().is_some());
+
+        restore_env("AUTH_WORKER_URL", saved_url);
+        restore_env("INTERNAL_SHARED_SECRET", saved_secret);
+    }
+
+    #[test]
+    fn new_builds_pair_internal_url() {
+        let client = HttpDevicePairClient::new("https://auth.example.com/", "secret".into());
+        assert_eq!(
+            client.pair_internal_url,
+            "https://auth.example.com/device/pair-internal"
+        );
+    }
+
+    #[tokio::test]
+    async fn mint_success() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/device/pair-internal"))
+            .and(header("X-Internal-Shared-Secret", "s3cr3t"))
+            .and(wiremock::matchers::body_string_contains(
+                "\"replace_label\":true",
+            ))
+            .and(wiremock::matchers::body_string_contains(
+                "\"role\":\"device-kiosk\"",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "device_id": "dev-1",
+                "device_secret": "top-secret"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = HttpDevicePairClient::with_endpoint(
+            format!("{}/device/pair-internal", server.uri()),
+            "s3cr3t".into(),
+        );
+        let cred = client
+            .mint(Uuid::new_v4(), "alc-app:device-1")
+            .await
+            .unwrap();
+        assert_eq!(cred.device_id, "dev-1");
+        assert_eq!(cred.device_secret, "top-secret");
+    }
+
+    #[tokio::test]
+    async fn mint_non_2xx_is_upstream_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/device/pair-internal"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+
+        let client = HttpDevicePairClient::with_endpoint(
+            format!("{}/device/pair-internal", server.uri()),
+            "s".into(),
+        );
+        let err = client.mint(Uuid::new_v4(), "label").await.unwrap_err();
+        assert!(matches!(err, DevicePairClientError::Upstream(_)));
+    }
+
+    #[tokio::test]
+    async fn mint_parse_error_is_upstream_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/device/pair-internal"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("not json"))
+            .mount(&server)
+            .await;
+
+        let client = HttpDevicePairClient::with_endpoint(
+            format!("{}/device/pair-internal", server.uri()),
+            "s".into(),
+        );
+        let err = client.mint(Uuid::new_v4(), "label").await.unwrap_err();
+        assert!(matches!(err, DevicePairClientError::Upstream(_)));
+    }
+
+    #[tokio::test]
+    async fn mint_unreachable_is_upstream_error() {
+        let client = HttpDevicePairClient::with_endpoint(
+            "http://127.0.0.1:1/device/pair-internal".into(),
+            "s".into(),
+        );
+        let err = client.mint(Uuid::new_v4(), "label").await.unwrap_err();
+        assert!(matches!(err, DevicePairClientError::Upstream(_)));
+    }
+}

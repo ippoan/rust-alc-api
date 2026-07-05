@@ -15,4 +15,7 @@ rust_library(
 rust_test(
     name = "alc-devices_test",
     crate = ":alc-devices",
+    # device_pair_client のテストが wiremock / tokio (dev-dependencies) を使う
+    deps = all_crate_deps(normal_dev = True),
+    proc_macro_deps = all_crate_deps(proc_macro_dev = True),
 )
