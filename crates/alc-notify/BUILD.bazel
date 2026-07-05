@@ -15,4 +15,6 @@ rust_library(
 rust_test(
     name = "alc-notify_test",
     crate = ":alc-notify",
+    deps = all_crate_deps(normal_dev = True),
+    proc_macro_deps = all_crate_deps(proc_macro_dev = True),
 )
