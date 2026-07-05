@@ -1061,7 +1061,10 @@ jobs:
     # 防ぐ (Refs #405、#391 で 2 回実害)。drift-check 失敗時も merge を止めて
     # cross-store drift を可視化する (Refs #424)。トレードオフとして staging
     # 障害時は全 PR が merge 不能になる。
-    needs: [check, bazel-tests-ok, bazel-coverage-gate, build-image, deploy, drift-check-staging]
+    # docker-dev (Tag dev) も needs に含める: merge → branch 削除で :dev への
+    # copy が cancel されると、main push の Tag latest / release の Promote images
+    # が前 PR の :dev image を無音で promote する (同 #405 と同クラスの穴)。
+    needs: [check, bazel-tests-ok, bazel-coverage-gate, build-image, docker-dev, deploy, drift-check-staging]
     if: >-
       always() &&
       github.event_name == 'pull_request' &&
@@ -1069,6 +1072,7 @@ jobs:
       needs.bazel-tests-ok.result == 'success' &&
       needs.bazel-coverage-gate.result == 'success' &&
       needs.build-image.result == 'success' &&
+      needs.docker-dev.result == 'success' &&
       needs.deploy.result == 'success' &&
       needs.drift-check-staging.result == 'success'
     uses: ippoan/ci-workflows/.github/workflows/auto-merge.yml@main
