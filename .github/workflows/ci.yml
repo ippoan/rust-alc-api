@@ -64,6 +64,9 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-llvm-cov@0.8.4,cargo-nextest
+      # mold: test-matrix / test-lib と同じリンカで warm する (fingerprint 影響
+      # なしだが、--all-targets の全 test binary リンクが速くなる)
+      - uses: rui314/setup-mold@v1
       - name: Build (${{ matrix.target.name }})
         env:
           SCCACHE_GHA_ENABLED: "true"
@@ -190,7 +193,8 @@ jobs:
       fail-fast: false
       matrix:
         group:
-          - { name: "lib", cmd: "--lib --workspace" }
+          # lib (unit) は DB 不要なのに postgres service 起動 (~20s) を払っていた
+          # ため、service なしの test-lib job に分離した (Refs #506 実測)。
           - { name: "mock-tenko", cmd: "--test mock_tenko" }
           - { name: "mock-dtako", cmd: "--test mock_dtako" }
           - { name: "mock-devices", cmd: "--test mock_devices" }
@@ -229,6 +233,12 @@ jobs:
         with:
           tool: cargo-llvm-cov@0.8.4,cargo-nextest
 
+      # mold: システム ld を mold に差し替える (rui314/setup-mold は mold 作者の
+      # action)。RUSTFLAGS を変えないので rust-cache / sccache のフィンガープリント
+      # に影響せず、warm cache との互換を保ったままリンクだけ速くなる (build 段
+      # 28s の大半がリンクだった、Refs #506 実測: sccache 100% hit でも 28s)。
+      - uses: rui314/setup-mold@v1
+
       # alc-notify::redact が pdfium-render 経由で libpdfium.so を dlopen するので、
       # テスト実行ホスト (ubuntu-latest) にも prebuilt PDFium を配置する。
       # bblanchon/pdfium-binaries chromium/7825 (linux-x64.tgz, ~3.5 MB) を /usr/lib/ に展開。
@@ -260,14 +270,66 @@ jobs:
           path: /tmp/llvm-cov-output.txt
           retention-days: 1
 
-      # ts-rs の export_bindings_* テスト (lib target 内 #[test]) が上の lib shard
-      # 実行で .ts を生成するので、ここで artifact 化する (check job から移設、
-      # Refs #482)。scripts/export-ts-bindings.sh がこの artifact 名で download
-      # する契約は不変。将来 nextest filter 等で export テストが走らなくなった
-      # 場合に無音で空 artifact にならないよう if-no-files-found: error で
-      # loud fail させる。
+  # lib (unit) テスト専用 job。test-matrix と違い postgres service を持たない —
+  # lib テストは DB 不要 (make test 相当) なのに matrix 共通定義で service 起動
+  # (~20s、job 開始→checkout 間の大半) を毎回払っていた (Refs #506 実測)。
+  # cache / tool / PDFium のセットアップは test-matrix と同一に保つこと
+  # (shared-key test-shared の warm cache を共有するため)。
+  test-lib:
+    name: Tests (lib)
+    needs: [pr-limit]
+    if: "always() && !(github.ref == 'refs/heads/main' && github.event_name == 'push') && (needs.pr-limit.result == 'success' || needs.pr-limit.result == 'skipped')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.92.0
+        with:
+          components: llvm-tools-preview
+      - uses: mozilla-actions/sccache-action@v0.0.9
+      - uses: swatinem/rust-cache@v2
+        with:
+          shared-key: test-shared
+          save-if: 'false'
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov@0.8.4,cargo-nextest
+
+      # mold: test-matrix と同じ理由 (リンク短縮、fingerprint 影響なし)
+      - uses: rui314/setup-mold@v1
+
+      # alc-notify::redact (lib テスト) が libpdfium.so を dlopen するため必要
+      - name: Install PDFium (for redact tests)
+        run: |
+          curl -fsSL "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/7825/pdfium-linux-x64.tgz" \
+            | sudo tar -xz -C /tmp
+          sudo cp /tmp/lib/libpdfium.so /usr/lib/libpdfium.so
+          sudo ldconfig
+
+      - name: Run tests with coverage
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+          RUSTC_WRAPPER: "sccache"
+        run: |
+          cargo llvm-cov nextest --no-report --lib --workspace
+          PKGS=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name' | sed 's/^/-p /' | tr '\n' ' ')
+          cargo llvm-cov report $PKGS --text > /tmp/llvm-cov-output.txt
+          echo "=== Coverage Summary ==="
+          tail -5 /tmp/llvm-cov-output.txt
+
       - uses: actions/upload-artifact@v4
-        if: matrix.group.name == 'lib'
+        if: always()
+        with:
+          name: coverage-lib
+          path: /tmp/llvm-cov-output.txt
+          retention-days: 1
+
+      # ts-rs の export_bindings_* テスト (lib target 内 #[test]) が上の lib 実行で
+      # .ts を生成するので、ここで artifact 化する (check job から移設、Refs #482。
+      # lib shard の test-matrix → test-lib 分離に伴い本 job へ移動)。
+      # scripts/export-ts-bindings.sh がこの artifact 名で download する契約は不変。
+      # 将来 nextest filter 等で export テストが走らなくなった場合に無音で空
+      # artifact にならないよう if-no-files-found: error で loud fail させる。
+      - uses: actions/upload-artifact@v4
         with:
           name: ts-bindings-${{ github.sha }}
           path: crates/*/bindings/**/*.ts
@@ -276,8 +338,8 @@ jobs:
 
   coverage-check:
     name: Coverage Check
-    needs: [test-matrix]
-    if: "always() && needs.test-matrix.result == 'success'"
+    needs: [test-matrix, test-lib]
+    if: "always() && needs.test-matrix.result == 'success' && needs.test-lib.result == 'success'"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
