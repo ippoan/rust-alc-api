@@ -72,6 +72,26 @@ for stale_cfg in sorted(rc_configs - used_configs):
     print(f"::error::.bazelrc の coverage config '{stale_cfg}' を使う matrix entry がありません (削除漏れ)")
     fail += 1
 
+# --- dev-dependencies を持つ crate の rust_test に normal_dev 配線があるか ---
+# cargo は Cargo.toml から dev-deps を自動解決するが bazel は BUILD 配線が別なので、
+# `cargo check --tests` では捕まらない (alc-misc #523 / alc-devices #539 で 2 回実害)。
+import tomllib
+for bf in glob.glob("crates/*/BUILD.bazel") + ["BUILD.bazel"]:
+    crate_dir = "." if bf == "BUILD.bazel" else bf[: -len("/BUILD.bazel")]
+    try:
+        manifest = tomllib.load(open(f"{crate_dir}/Cargo.toml", "rb"))
+    except FileNotFoundError:
+        continue
+    if not manifest.get("dev-dependencies"):
+        continue
+    bsrc = open(bf, encoding="utf-8").read()
+    for m in re.finditer(r'rust_test\((.*?)\n\)', bsrc, re.S):
+        block = m.group(1)
+        name = re.search(r'name = "([^"]+)"', block)
+        if "normal_dev" not in block:
+            print(f"::error::{bf} の rust_test '{name.group(1) if name else '?'}' に all_crate_deps(normal_dev = True) がありません ({crate_dir}/Cargo.toml は dev-dependencies を持つ → bazel で FAILED TO BUILD になる)")
+            fail += 1
+
 # --- BUILD ファイルから rust_test target を列挙 ---
 expected = set()
 for f in glob.glob("crates/*/BUILD.bazel") + ["BUILD.bazel"]:
