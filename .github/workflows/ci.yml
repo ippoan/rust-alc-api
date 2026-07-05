@@ -146,7 +146,9 @@ jobs:
           - { name: core, target: "//crates/alc-core:alc-core_test", coverage: "//crates/alc-core" }
           - { name: csv-parser, target: "//crates/alc-csv-parser:alc-csv-parser_test", coverage: "//crates/alc-csv-parser" }
           - { name: devices, target: "//crates/alc-devices:alc-devices_test", coverage: "//crates/alc-devices" }
-          - { name: dtako, target: "//crates/alc-dtako:alc-dtako_test", coverage: "//crates/alc-dtako" }
+          # alc-dtako の unit テスト (dtako_upload / dtako_restraint_report) は alc_compare を
+          # 直接呼ぶ — compare/lib.rs の残り ~314 行はこの shard 経由でしか踏まれない
+          - { name: dtako, target: "//crates/alc-dtako:alc-dtako_test", coverage: "//crates/alc-dtako,//crates/alc-compare" }
           - { name: misc, target: "//crates/alc-misc:alc-misc_test", coverage: "//crates/alc-misc" }
           - { name: notify, target: "//crates/alc-notify:alc-notify_test", pdfium: true, coverage: "//crates/alc-notify" }
           - { name: pdf, target: "//crates/alc-pdf:alc-pdf_test", coverage: "//crates/alc-pdf" }
@@ -718,7 +720,9 @@ jobs:
           - { name: core, target: "//crates/alc-core:alc-core_test", coverage: "//crates/alc-core" }
           - { name: csv-parser, target: "//crates/alc-csv-parser:alc-csv-parser_test", coverage: "//crates/alc-csv-parser" }
           - { name: devices, target: "//crates/alc-devices:alc-devices_test", coverage: "//crates/alc-devices" }
-          - { name: dtako, target: "//crates/alc-dtako:alc-dtako_test", coverage: "//crates/alc-dtako" }
+          # alc-dtako の unit テスト (dtako_upload / dtako_restraint_report) は alc_compare を
+          # 直接呼ぶ — compare/lib.rs の残り ~314 行はこの shard 経由でしか踏まれない
+          - { name: dtako, target: "//crates/alc-dtako:alc-dtako_test", coverage: "//crates/alc-dtako,//crates/alc-compare" }
           - { name: misc, target: "//crates/alc-misc:alc-misc_test", coverage: "//crates/alc-misc" }
           - { name: notify, target: "//crates/alc-notify:alc-notify_test", pdfium: true, coverage: "//crates/alc-notify" }
           - { name: pdf, target: "//crates/alc-pdf:alc-pdf_test", coverage: "//crates/alc-pdf" }
