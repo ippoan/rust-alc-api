@@ -111,6 +111,7 @@ jobs:
   # refs/pull/N/merge scope に隔離され別 PR から読めない (2026-07-05 実測)。全 PR
   # から読めるのは main scope の cache だけなので、main push でここが `bazel test`
   # を 1 回走らせ、test action の結果込み disk cache を main scope に save する。
+  # run 跨ぎ hit の成立は PR #521 で実証済み (1 回目 invocation で '(cached)')。
   # 注意: invocation の flags は bazel-test-poc job と完全一致させること
   # (configuration が違うと action key が変わり、PR 側で '(cached)' にならない)。
   cache-warm-bazel-test-poc:
@@ -127,7 +128,7 @@ jobs:
           r2-access-key-id: ${{ secrets.BAZEL_R2_ACCESS_KEY_ID }}
           r2-secret-access-key: ${{ secrets.BAZEL_R2_SECRET_ACCESS_KEY }}
       - name: Warm test result cache (Bazel)
-        run: bazel test //crates/alc-csv-parser:alc-csv-parser_test --test_summary=short
+        run: bazel test //... --build_tests_only --test_summary=short
 
   cache-cleanup:
     name: Cache Cleanup
@@ -573,15 +574,18 @@ jobs:
           cache-from: "type=gha,scope=${{ matrix.name }}-staging"
           cache-to: "type=gha,mode=max,scope=${{ matrix.name }}-staging"
 
-  # Bazel test 化 PoC (Refs #515): alc-csv-parser 1 crate で `bazel test` の実行と
-  # テスト結果キャッシュ、`bazel coverage` (lcov) による coverage 100% gate の再現
-  # 可否を検証する。独立 job (deploy chain の needs 外) = critical path に乗らない。
-  # PoC が有効と判断されるまで他 crate へは広げない。
+  # Bazel test 化 PoC (Refs #515): 全 crate の unit test (`<crate>_test` + root
+  # `//:unit_tests`) を `bazel test` で実行し、run 跨ぎ test result cache の効果を
+  # 実測する。alc-csv-parser 1 crate での分水嶺検証 (result cache / lcov gate) は
+  # PR #517-#521 で全て突破済み → 全 unit test に拡大 (2026-07-05)。
+  # 独立 job (deploy chain の needs 外) = critical path に乗らず、merge gate でも
+  # ない。coverage gate (coverage_100.toml) の SoT は引き続き cargo llvm-cov 側で、
+  # ここの lcov gate は alc-csv-parser 限定の並走検証。
   # run 跨ぎの test result cache は cache-warm-bazel-test-poc (main push warm) 経由
   # でのみ hit する — PR run 自身の save は refs/pull/N/merge scope に隔離され、
   # 別 PR から読めない (2026-07-05 実測、詳細は #515 のコメント)。
   bazel-test-poc:
-    name: "Bazel test PoC (alc-csv-parser)"
+    name: "Bazel test PoC (all unit tests)"
     needs: [pr-limit]
     if: "always() && github.event_name == 'pull_request' && (needs.pr-limit.result == 'success' || needs.pr-limit.result == 'skipped')"
     runs-on: ubuntu-latest
@@ -595,16 +599,13 @@ jobs:
           r2-access-key-id: ${{ secrets.BAZEL_R2_ACCESS_KEY_ID }}
           r2-secret-access-key: ${{ secrets.BAZEL_R2_SECRET_ACCESS_KEY }}
 
-      - name: bazel test (2 回目で result cache を確認)
+      - name: bazel test (全 unit test、result cache は main warm から)
         run: |
-          bazel test //crates/alc-csv-parser:alc-csv-parser_test --test_summary=short
-          echo "=== 2nd invocation (expect cached) ==="
-          bazel test //crates/alc-csv-parser:alc-csv-parser_test --test_summary=short 2>&1 | tee /tmp/second_run.txt
-          if grep -q "cached" /tmp/second_run.txt; then
-            echo "::notice::bazel test result cache HIT (同一サーバ内)。run 跨ぎは 1 回目の invocation で '(cached)' が出るか (= main warm からの restore) で確認する"
-          else
-            echo "::warning::2 回目の実行で cached にならなかった (要調査、#515 に記録)"
-          fi
+          set -o pipefail
+          bazel test //... --build_tests_only --test_summary=short 2>&1 | tee /tmp/test_run.txt
+          CACHED=$(grep -c "(cached)" /tmp/test_run.txt || true)
+          TOTAL=$(grep -cE "^//.* PASSED" /tmp/test_run.txt || true)
+          echo "::notice::test result cache: ${CACHED}/${TOTAL} targets が (cached) — ソース/BUILD を触った PR や warm 未反映の初回は少なくて正常"
 
       - name: bazel coverage (lcov 出力)
         run: |
