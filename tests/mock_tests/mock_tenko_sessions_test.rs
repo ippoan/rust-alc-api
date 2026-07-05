@@ -2813,10 +2813,10 @@ async fn test_submit_alcohol_normal_pre_operation() {
 
 /// Helper: setup with webhook=Some(MockWebhookService) + custom mock repo.
 async fn setup_with_webhook(mock: Arc<MockTenkoSessionRepository>) -> (String, String, uuid::Uuid) {
-    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
     tenko_state.tenko_sessions = mock;
-    state.webhook = Some(Arc::new(
+    tenko_state.webhook = Some(Arc::new(
         crate::mock_helpers::webhook::MockWebhookService::default(),
     ));
     let tenant_id = uuid::Uuid::new_v4();

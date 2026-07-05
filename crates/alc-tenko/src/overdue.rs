@@ -226,6 +226,13 @@ mod tests {
 
         assert!(result.is_ok());
         assert!(repo.notified.lock().unwrap().is_empty());
+        // mock の find_config 経路も実行しておく (coverage 100% gate 対象、Refs #513)
+        assert!(
+            WebhookRepository::find_config(&repo, Uuid::new_v4(), "tenko_overdue")
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[tokio::test(start_paused = true)]
