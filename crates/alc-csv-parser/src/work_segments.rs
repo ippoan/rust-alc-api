@@ -933,4 +933,74 @@ mod tests {
             assert_eq!(result.len(), 2); // 08:00-20:00, 20:00-12:00
         });
     }
+
+    #[test]
+    fn test_split_at_24h_with_workdays_short_segment_passthrough() {
+        test_group!("CSVパーサー");
+        test_case!(
+            "24h以内かつworkday境界なしのセグメントはそのまま通る",
+            {
+                let segments = vec![WorkSegment {
+                    start: dt(2026, 2, 24, 8, 0),
+                    end: dt(2026, 2, 24, 17, 0),
+                    labor_minutes: 300,
+                    drive_minutes: 200,
+                    cargo_minutes: 100,
+                }];
+                let result = split_segments_at_24h_with_workdays(segments, &[]);
+                assert_eq!(result.len(), 1);
+                assert_eq!(result[0].start, dt(2026, 2, 24, 8, 0));
+                assert_eq!(result[0].end, dt(2026, 2, 24, 17, 0));
+                assert_eq!(result[0].labor_minutes, 300);
+            }
+        );
+    }
+
+    #[test]
+    fn test_sum_events_cargo_class() {
+        test_group!("CSVパーサー");
+        test_case!("Cargo分類のイベントがcargoに集計される", {
+            let events = vec![
+                make_event("001", dt(2026, 2, 24, 10, 0), "202", Some(45)), // Cargo
+                make_event("001", dt(2026, 2, 24, 11, 0), "110", Some(60)), // Drive
+            ];
+            let refs: Vec<&KudgivtRow> = events.iter().collect();
+            let double_refs: Vec<&&KudgivtRow> = refs.iter().collect();
+            let cls = make_classifications();
+            let (drive, cargo) = sum_events_in_range(
+                &double_refs,
+                &cls,
+                dt(2026, 2, 24, 9, 0),
+                dt(2026, 2, 24, 12, 0),
+            );
+            assert_eq!(drive, 60);
+            assert_eq!(cargo, 45);
+        });
+    }
+
+    #[test]
+    fn test_split_segments_by_day_zero_minute_tail_skipped() {
+        test_group!("CSVパーサー");
+        test_case!(
+            "日跨ぎ直後数十秒の尻尾は分単位切り捨てで0分になりskipされる",
+            {
+                // 24日23:00〜25日00:00:30: 2日目分は day_start=day_end (分精度) で
+                // work_mins=0 → 行を作らず continue する分岐を踏む
+                let segments = vec![WorkSegment {
+                    start: dt(2026, 2, 24, 23, 0),
+                    end: NaiveDate::from_ymd_opt(2026, 2, 25)
+                        .unwrap()
+                        .and_hms_opt(0, 0, 30)
+                        .unwrap(),
+                    labor_minutes: 60,
+                    drive_minutes: 60,
+                    cargo_minutes: 0,
+                }];
+                let daily = split_segments_by_day(&segments);
+                assert_eq!(daily.len(), 1);
+                assert_eq!(daily[0].date, NaiveDate::from_ymd_opt(2026, 2, 24).unwrap());
+                assert_eq!(daily[0].work_minutes, 60);
+            }
+        );
+    }
 }
