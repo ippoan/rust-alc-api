@@ -219,6 +219,13 @@ Build backend (Bazel) job 139s の内訳: setup ~8s / **analysis 60s**
   lib-only build に縮小。`Bazel tests OK` 集約 job を新設 (required checks は shard 個別
   ではなくこの job + `Bazel coverage gate` の 2 つに張る)。bazel test/gate の if を
   v* tag push にも拡張 (本番 deploy の test gate を cargo から引き継ぐ)
+- **cache 上限を 20GB に引き上げて eviction を根治 (2026-07-05)**: GitHub Actions cache は
+  2025-11 から 10GB/repo 超えが可能 (超過分 $0.07/GB/月、Team plan 以上)。org の maximum →
+  repo の eviction limit を 20GB に設定し、**Billing の budget も $2/月 に設定** —
+  budget が $0 のままだと 10GB 超過時点で cache が **read-only** になり、warm job は
+  success に見えて save だけ無音で失敗する (`Cache reservation failed: You have reached
+  your configured budget` warning、2026-07-05 実害 → budget 設定 + warm re-run で解消)。
+  定常 ~13GB の実使用で課金は ~$0.21/月。無料 10GB は repo ごとなので他 repo には影響なし
 - 残: dormant な DB テスト 6 binary の扱い (#530)、Phase C (notify → dtako → carins
   分割 + mock ハーネスの per-domain 化 = tar 縮小の構造解)
 
