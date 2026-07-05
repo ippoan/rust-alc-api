@@ -127,6 +127,14 @@ jobs:
           r2-bucket: ${{ vars.BAZEL_R2_BUCKET }}
           r2-access-key-id: ${{ secrets.BAZEL_R2_ACCESS_KEY_ID }}
           r2-secret-access-key: ${{ secrets.BAZEL_R2_SECRET_ACCESS_KEY }}
+      # alc-notify::redact が libpdfium.so を dlopen する (test-matrix と同一 step、
+      # processwrapper-sandbox はシステムパスに到達できるので /usr/lib で足りる)
+      - name: Install PDFium (for redact tests)
+        run: |
+          curl -fsSL "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/7825/pdfium-linux-x64.tgz" \
+            | sudo tar -xz -C /tmp
+          sudo cp /tmp/lib/libpdfium.so /usr/lib/libpdfium.so
+          sudo ldconfig
       - name: Warm test result cache (Bazel)
         run: bazel test //... --build_tests_only --keep_going --test_output=errors --test_summary=short
 
@@ -598,6 +606,15 @@ jobs:
           r2-bucket: ${{ vars.BAZEL_R2_BUCKET }}
           r2-access-key-id: ${{ secrets.BAZEL_R2_ACCESS_KEY_ID }}
           r2-secret-access-key: ${{ secrets.BAZEL_R2_SECRET_ACCESS_KEY }}
+
+      # alc-notify::redact が libpdfium.so を dlopen する (test-matrix と同一 step、
+      # processwrapper-sandbox はシステムパスに到達できるので /usr/lib で足りる)
+      - name: Install PDFium (for redact tests)
+        run: |
+          curl -fsSL "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/7825/pdfium-linux-x64.tgz" \
+            | sudo tar -xz -C /tmp
+          sudo cp /tmp/lib/libpdfium.so /usr/lib/libpdfium.so
+          sudo ldconfig
 
       - name: bazel test (全 unit test、result cache は main warm から)
         run: |
