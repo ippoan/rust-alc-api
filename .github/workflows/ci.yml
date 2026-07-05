@@ -547,6 +547,49 @@ jobs:
           cache-from: "type=gha,scope=${{ matrix.name }}-staging"
           cache-to: "type=gha,mode=max,scope=${{ matrix.name }}-staging"
 
+  # Bazel test 化 PoC (Refs #515): alc-csv-parser 1 crate で `bazel test` の実行と
+  # テスト結果キャッシュ、`bazel coverage` (lcov) による coverage 100% gate の再現
+  # 可否を検証する。独立 job (deploy chain の needs 外) = critical path に乗らない。
+  # PoC が有効と判断されるまで他 crate へは広げない。
+  bazel-test-poc:
+    name: "Bazel test PoC (alc-csv-parser)"
+    needs: [pr-limit]
+    if: "always() && github.event_name == 'pull_request' && (needs.pr-limit.result == 'success' || needs.pr-limit.result == 'skipped')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ippoan/setup-bazel@main
+        with:
+          disk-cache: "bazel-test-poc"
+          r2-endpoint: ${{ vars.BAZEL_R2_ENDPOINT }}
+          r2-bucket: ${{ vars.BAZEL_R2_BUCKET }}
+          r2-access-key-id: ${{ secrets.BAZEL_R2_ACCESS_KEY_ID }}
+          r2-secret-access-key: ${{ secrets.BAZEL_R2_SECRET_ACCESS_KEY }}
+
+      - name: bazel test (2 回目で result cache を確認)
+        run: |
+          bazel test //crates/alc-csv-parser:alc-csv-parser_test --test_summary=short
+          echo "=== 2nd invocation (expect cached) ==="
+          bazel test //crates/alc-csv-parser:alc-csv-parser_test --test_summary=short 2>&1 | tee /tmp/second_run.txt
+          if grep -q "cached" /tmp/second_run.txt; then
+            echo "::notice::bazel test result cache HIT (同一サーバ内)。run 跨ぎの cache は次 push の 1 回目で '(cached)' が出るかで確認する"
+          else
+            echo "::warning::2 回目の実行で cached にならなかった (要調査、#515 に記録)"
+          fi
+
+      - name: bazel coverage (lcov 出力)
+        run: |
+          bazel coverage //crates/alc-csv-parser:alc-csv-parser_test \
+            --combined_report=lcov \
+            --instrumentation_filter=//crates/alc-csv-parser
+          LCOV="$(bazel info output_path)/_coverage/_coverage_report.dat"
+          cp "$LCOV" /tmp/lcov.dat
+          echo "=== lcov head ==="
+          head -30 /tmp/lcov.dat
+
+      - name: coverage 100% gate の lcov 再現 (coverage_100.toml 突合)
+        run: bash scripts/check_coverage_100_lcov.sh /tmp/lcov.dat crates/alc-csv-parser
+
   # staging の postgres sidecar image。旧 deploy.yml の staging-db job からの
   # 移設 (Refs #482)。build-image と並列に走らせることで、deploy workflow 側の
   # 直列 hop (staging-db → deploy-services) を消す。staging/ 配下は変更頻度が
