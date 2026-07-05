@@ -455,16 +455,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # external-cache / repository-cache は cache-warm-bazel (main push) が保存し、
-      # PR 側の本 job は restore して使う。これが無いと crate_universe の external
-      # repo 構築を毎 run やり直し、analysis だけで ~60s かかる (2026-07-04 実測:
-      # "Analyzed 3 targets (603 packages loaded)" まで 60s、execution は disk/R2
-      # cache hit で 41s)。
+      # NOTE: external-cache / repository-cache は #506 で追加 → 実測で逆効果と
+      # 確定し revert 済み。理由 (PR #506/#507 の 2 run で実測):
+      # (1) external cache の manifest は job 名 + PR merge-ref で scope される
+      #     ため、cache-warm-bazel (main) からも他 PR からも restore できず恒常 miss
+      # (2) save も並列 7 job が同一キーの reserve を取り合って全滅
+      # (3) repository-cache (266MB) が hit しても analysis 60s は不変 —
+      #     60s の正体はダウンロードではなく repo rule 実行 + loading/analysis の
+      #     CPU 処理で、cache では削れない
+      # (4) restore/save 試行のオーバーヘッドで job が 139s → 201s に悪化
       - uses: ippoan/setup-bazel@main
         with:
           disk-cache: "bazel-${{ matrix.name }}"
-          external-cache: true
-          repository-cache: true
           r2-endpoint: ${{ vars.BAZEL_R2_ENDPOINT }}
           r2-bucket: ${{ vars.BAZEL_R2_BUCKET }}
           r2-access-key-id: ${{ secrets.BAZEL_R2_ACCESS_KEY_ID }}
