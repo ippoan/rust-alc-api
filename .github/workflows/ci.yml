@@ -171,6 +171,47 @@ jobs:
       - name: Warm test result cache (Bazel)
         run: bazel test ${{ matrix.target }} --test_output=errors --test_summary=short
 
+  # DB integration テスト用 warm (Refs #515 PR2)。postgres service + TEST_DATABASE_URL
+  # を持つ点以外は cache-warm-bazel-test-poc と同じ。matrix / flags は bazel-test-db と
+  # 1:1 同期 (check_bazel_test_matrix.sh が poc/db の union で検証)。
+  cache-warm-bazel-test-db:
+    name: "Cache Warm (bazel-test-${{ matrix.name }})"
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: db-trouble, target: "//:trouble_test" }
+          - { name: db-archive, target: "//:archive_repo_test" }
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: test
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    env:
+      TEST_DATABASE_URL: "postgresql://postgres:test@localhost:5432/postgres?options=-c search_path=alc_api"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ippoan/setup-bazel@main
+        with:
+          disk-cache: "bazel-test-${{ matrix.name }}"
+          r2-endpoint: ${{ vars.BAZEL_R2_ENDPOINT }}
+          r2-bucket: ${{ vars.BAZEL_R2_BUCKET }}
+          r2-access-key-id: ${{ secrets.BAZEL_R2_ACCESS_KEY_ID }}
+          r2-secret-access-key: ${{ secrets.BAZEL_R2_SECRET_ACCESS_KEY }}
+      - name: Init test DB (alc_api schema + roles)
+        run: psql "postgresql://postgres:test@localhost:5432/postgres" -f scripts/init_local_db.sql
+      - name: Warm test result cache (Bazel)
+        run: bazel test ${{ matrix.target }} --test_env=TEST_DATABASE_URL --test_output=errors --test_summary=short
+
   cache-cleanup:
     name: Cache Cleanup
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
@@ -706,6 +747,55 @@ jobs:
       - name: coverage 100% gate の lcov 再現 (coverage_100.toml 突合)
         if: matrix.name == 'csv-parser'
         run: bash scripts/check_coverage_100_lcov.sh /tmp/lcov.dat crates/alc-csv-parser
+
+  # DB integration テストの bazel shard (Refs #515 PR2)。postgres service +
+  # TEST_DATABASE_URL + init_local_db.sql を持つ点以外は bazel-test-poc と同じ。
+  # sandbox (processwrapper) はネットワークを遮断しないので localhost:5432 に届く。
+  # DB を挟むため test result は入力不変でも DB 状態に依存し得るが、テスト自体が
+  # 冪等設計 (tenant 分離 + 専用ロック) なので cache hit を許容する。
+  bazel-test-db:
+    name: "Bazel test (${{ matrix.name }})"
+    needs: [pr-limit]
+    if: "always() && github.event_name == 'pull_request' && (needs.pr-limit.result == 'success' || needs.pr-limit.result == 'skipped')"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: db-trouble, target: "//:trouble_test" }
+          - { name: db-archive, target: "//:archive_repo_test" }
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: test
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    env:
+      TEST_DATABASE_URL: "postgresql://postgres:test@localhost:5432/postgres?options=-c search_path=alc_api"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ippoan/setup-bazel@main
+        with:
+          disk-cache: "bazel-test-${{ matrix.name }}"
+          r2-endpoint: ${{ vars.BAZEL_R2_ENDPOINT }}
+          r2-bucket: ${{ vars.BAZEL_R2_BUCKET }}
+          r2-access-key-id: ${{ secrets.BAZEL_R2_ACCESS_KEY_ID }}
+          r2-secret-access-key: ${{ secrets.BAZEL_R2_SECRET_ACCESS_KEY }}
+      - name: Init test DB (alc_api schema + roles)
+        run: psql "postgresql://postgres:test@localhost:5432/postgres" -f scripts/init_local_db.sql
+      - name: bazel test (result cache は main warm から)
+        run: |
+          set -o pipefail
+          bazel test ${{ matrix.target }} --test_env=TEST_DATABASE_URL --test_output=errors --test_summary=short 2>&1 | tee /tmp/test_run.txt
+          if grep -q "(cached)" /tmp/test_run.txt; then
+            echo "::notice::${{ matrix.target }} は (cached) — main warm から restore"
+          fi
 
   # staging の postgres sidecar image。旧 deploy.yml の staging-db job からの
   # 移設 (Refs #482)。build-image と並列に走らせることで、deploy workflow 側の

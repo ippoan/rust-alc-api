@@ -82,6 +82,43 @@ _MOCK_TEST_SRCS = glob([
     "tests/mock_tests/**/*.rs",
 ])
 
+# --- DB integration テスト (postgres 必須、Refs #515 bazel gate 移行 PR2) ---
+#
+# ci.yml の bazel-test-db job (postgres service + TEST_DATABASE_URL) で走らせる。
+# sqlx::migrate! は compile 時に migrations/ を埋め込む (runtime 再読込なし) ので
+# compile_data だけで足りる。新 target を足したら ci.yml の db matrix にも追記
+# (check_bazel_test_matrix.sh が poc/db の union で同期を検証する)。
+
+rust_test(
+    name = "trouble_test",
+    srcs = ["tests/trouble_test.rs"] + glob(["tests/common/**/*.rs"]),
+    crate_root = "tests/trouble_test.rs",
+    compile_data = glob(["migrations/**"]),
+    deps = [":rust_alc_api_lib"] + all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ) + _WORKSPACE_CRATES,
+    proc_macro_deps = all_crate_deps(
+        proc_macro = True,
+        proc_macro_dev = True,
+    ),
+)
+
+rust_test(
+    name = "archive_repo_test",
+    srcs = ["tests/archive_repo_test.rs"] + glob(["tests/common/**/*.rs"]),
+    crate_root = "tests/archive_repo_test.rs",
+    compile_data = glob(["migrations/**"]),
+    deps = [":rust_alc_api_lib"] + all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ) + _WORKSPACE_CRATES,
+    proc_macro_deps = all_crate_deps(
+        proc_macro = True,
+        proc_macro_dev = True,
+    ),
+)
+
 rust_test(
     name = "mock_carins",
     srcs = ["tests/mock_carins/main.rs"] + _MOCK_TEST_SRCS,
