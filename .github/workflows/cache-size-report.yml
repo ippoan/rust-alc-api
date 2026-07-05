@@ -2,9 +2,9 @@
 # ippoan/cf-billing-monitor#16)。
 #
 # cache は上限 30GB + budget $2 の従量運用で、使用量が eviction race と課金に
-# 直結する。毎朝 gh cache list で集計し、cf-billing-monitor の
-# POST /gh-cache-report に送ってメール化する (CF Email Routing 発、06:00 JST の
-# billing レポートと同じ受信箱に届く)。
+# 直結する。毎朝 05:00 JST に gh cache list で集計し、cf-billing-monitor の
+# POST /gh-cache-report に送ってメール化する (CF Email Routing 発、
+# billing レポート (06:00 JST) と同じ受信箱に届く)。
 #
 # - 収集: GITHUB_TOKEN の actions:read だけで動く (新規 token 不要)
 # - 認証: GH_CACHE_REPORT_SECRET (GitHub org secret。CF Secrets Store 側の
@@ -13,7 +13,7 @@ name: Cache Size Report
 
 on:
   schedule:
-    - cron: '15 21 * * *' # 06:15 JST (billing メール 06:00 の直後)
+    - cron: '0 20 * * *' # 05:00 JST
   workflow_dispatch:
 
 permissions:
@@ -30,8 +30,12 @@ jobs:
           # repo の cache size limit (GB)。Settings → Actions → Caches の設定値と
           # 手動で同期する (API では読めないため)。
           CACHE_LIMIT_GB: '30'
+          # gh cache list の取得上限。初回実測で entries がちょうど 1000 になり
+          # 打ち切りが発覚した (buildkit-blob 等の小粒 entry が大量にある)。
+          # これを超えたら summary に警告行が出るので、その時はさらに上げる。
+          LIST_LIMIT: '5000'
         run: |
-          gh cache list -R "$REPO" --limit 1000 \
+          gh cache list -R "$REPO" --limit "$LIST_LIMIT" \
             --json key,ref,sizeInBytes,lastAccessedAt > /tmp/caches.json
           python3 - <<'PY'
           import json, os, datetime
@@ -58,6 +62,9 @@ jobs:
           top_entries = sorted(entries, key=lambda e: e["sizeInBytes"], reverse=True)[:10]
 
           lines = []
+          if len(entries) >= int(os.environ["LIST_LIMIT"]):
+              lines.append(f"⚠ 一覧が LIST_LIMIT={os.environ['LIST_LIMIT']} で打ち切られています — 合計は過小評価。workflow の LIST_LIMIT を上げること")
+              lines.append("")
           lines.append(f"合計: {gb(total)} / {len(entries)} entries (limit {os.environ['CACHE_LIMIT_GB']}GB)")
           lines.append(f"  main: {gb(sum(e['sizeInBytes'] for e in main_e))} ({len(main_e)})"
                        f" / PR 等: {gb(sum(e['sizeInBytes'] for e in other_e))} ({len(other_e)})")
