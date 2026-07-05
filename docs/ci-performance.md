@@ -84,6 +84,13 @@ CI ビルド時間の実測ベースライン・改善施策の履歴・確定�
    - **期待値**: analysis はグラフサイズ比例なので 1 割減で 60s → ~54s 程度。ただし rust-cache 795MB 縮小 / fingerprint 検証対象減 / コンパイル総量減と全レイヤーに薄く効く
    - targets 数 (23369) は crate_universe が 1 crate に複数 target (lib + build script + env vars) を生成するため。`annotations` の `gen_build_script = False` 個別指定は管理コストの割に効果薄 → 依存削減の方が筋が良い
 
+## CI 常設ガード (2026-07-05 導入)
+
+- **`ci.yml` の `dep-check` job** — `ippoan/ci-workflows` の `rust-dep-check.yml` reusable を呼ぶ:
+  - cargo-deny `check bans`: 重複バージョン警告。設定 SoT は repo root の `deny.toml` (`multiple-versions = "warn"`)。既知重複が解消され warn ゼロになったら `"deny"` 引き上げを検討
+  - cargo-machete: 未使用依存の警告 (`machete_enforce: warn`)。false positive は `[package.metadata.cargo-machete] ignored` で除外
+- **`dep-graph.yml` の BEP metrics step** (main push 毎) — Bazel BuildMetrics から targets configured / packages loaded / analysis 時間を Job Summary に出力し、しきい値 (26000 targets / 660 packages) 超過で `::warning::`
+
 ## 計測方法 (再現手順)
 
 - job 一覧と started_at/completed_at: `gh api repos/ippoan/rust-alc-api/actions/runs/<run_id>/jobs` (または ci-dashboard)
