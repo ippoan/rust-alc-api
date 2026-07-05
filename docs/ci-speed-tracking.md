@@ -184,8 +184,21 @@ Build backend (Bazel) job 139s の内訳: setup ~8s / **analysis 60s**
   対象外)。各 shard が lcov を artifact 化し `bazel-coverage-gate` job が merge して
   coverage_100.toml **全域**を warn モードで突合。warm も coverage を焼く (PR 側 cache hit)。
   差分ゼロを確認したら fail 化
-- 残: PR3b の warn → fail 化、cargo Tests matrix 退役 + required checks 差し替え (PR4)、
-  dormant な DB テスト 6 binary の扱い (#530)
+- **PR3b 初回 warn 結果 (PR #533 run 28747584151)**: 63 file 中 53 OK / 10 差分。
+  **差分は全て instrumentation_filter の配線問題で、テスト不足・意味論不一致はゼロ**
+  (分析全文は #515 コメント)。修正は PR #534:
+  - `^//$` は label 文字列 (`//:unit_tests` 等) への regex match でどれにも一致せず
+    root-package shard (monolith / db-archive) の lcov が空だった → **`^//:` が正**
+  - shard の filter には「そのテストが exercise する**他 crate**」も含める必要がある
+    (driver_info は mock_misc に、compare/pdf は mock_dtako に、alc-core の serde
+    default fn は各 mock shard にテスト実体が居る)。coverage_100.toml の mock/combined
+    type は shard 横断の lcov max-merge union で 100% になる設計
+  - 大物 (devices.rs 1245 行 / dtako_upload.rs 1244 行 / tenko_sessions.rs 851 行) は
+    行数まで cargo llvm-cov gate と一致 — merge 方式の意味論は確定
+  - dormant DB テスト 6 binary (#530) に coverage を依存している file は無し
+    (gate 移行のブロッカーではない)
+- 残: PR #534 で warn 差分ゼロ確認 → fail 化、cargo Tests matrix 退役 + required
+  checks 差し替え (PR4)、dormant な DB テスト 6 binary の扱い (#530)
 
 ### cache-warm build-only 化の実測 (PR #519、2026-07-05)
 
