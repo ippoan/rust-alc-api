@@ -187,6 +187,15 @@ jobs:
       # (coverage 計装は出力内容に影響しない、diff 検証済み)。check job で
       # test profile のビルドを重複させない。
 
+  # 依存グラフ監視: cargo-deny (重複バージョン warn、設定 SoT は deny.toml) +
+  # cargo-machete (未使用依存 warn)。経緯と削減方針は docs/ci-performance.md の
+  # 「依存グラフ削減」参照 (rust-s3 の旧 hyper スタック二重等)。
+  dep-check:
+    name: Dep Check
+    needs: [pr-limit]
+    if: "always() && !(github.ref == 'refs/heads/main' && github.event_name == 'push') && (needs.pr-limit.result == 'success' || needs.pr-limit.result == 'skipped')"
+    uses: ippoan/ci-workflows/.github/workflows/rust-dep-check.yml@main
+
   test-matrix:
     name: Tests (${{ matrix.group.name }})
     needs: [pr-limit]
