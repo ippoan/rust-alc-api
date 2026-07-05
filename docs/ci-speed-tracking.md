@@ -28,6 +28,58 @@ Bazel build + staging deploy を PR CI に含む運用)。改善は「同一ソ�
 プロファイルが違うため sccache / rust-cache のキャッシュキーは一切共有されず、
 `alc-core` 等の変更のたびに実質フルリコンパイルが 3 回走る。
 
+## 確定した事実 (2026-07-04/05 実測、Refs #506-#511)
+
+### ベースライン (2026-07-04)
+
+計測元: PR run [28698773673](https://github.com/ippoan/rust-alc-api/actions/runs/28698773673) / tag run [28701104111](https://github.com/ippoan/rust-alc-api/actions/runs/28701104111)
+
+| run | 全体時間 | critical path |
+|---|---|---|
+| PR CI | 4分52秒 | runner queue 待ち (~50-80s) → Tests (~2分) → Coverage Check (11s) → staging deploy (60s) |
+| tag CI | 7分01秒 | Tests matrix (~3分) → Promote 22s → migrations 62s → deploy×6 並列 60s → verify 38s → report 26s |
+
+Tests (lib) job 122s の内訳: postgres service 起動 ~21s / setup (rustup + 795MB cache
+restore) ~27s / cargo build 段 28.5s / nextest 実行 (677 tests) 38.2s / upload ~5s。
+
+Build backend (Bazel) job 139s の内訳: setup ~8s / **analysis 60s**
+(`Analyzed 3 targets (603 packages loaded, 23369 targets configured)`) / execution 41s
+(1824 actions 中 1366 disk cache hit、実行 15) / docker ×2 ~20s。
+
+### Bazel analysis 60s はダウンロードではなく CPU 処理
+
+- repository-cache (266MB) が hit した run でも analysis は 60s で不変 (#507 run で実証)
+- 正体は repo rule 実行 + 603 packages の loading + 23369 targets の analysis (Skyframe、CPU-bound)
+- **actions/cache 系では削れない**。削るなら larger runner (CPU 並列) か依存グラフ削減のみ
+
+### setup-bazel の external-cache は job 跨ぎ warm が構造的に効かない (#506/#508 で実証)
+
+- manifest のキャッシュキーは `external-<workflow>-<job>-manifest` 形式で **job 名 namespace**
+  → `cache-warm-bazel` job が保存した manifest は `build-image` job から見えない
+- さらに PR run の cache scope は PR merge-ref 単位 → 前 PR の cache も次の PR から見えない
+- 並列 matrix (7 job) の save は同一キーの reserve を取り合い全滅し得る (2 run 連続で確認)
+- restore/save 試行のオーバーヘッドで Build backend が 139s → 201s に**悪化**したため revert (#508)
+
+### cargo build 段 28s は「リンク」でも「コンパイル」でもない固定費
+
+- sccache 100% hit (`Compile requests executed 14, Cache hits 14`) でも 28s かかる
+- mold (ld 差し替え) で 28.46s → 27.93s = リンク支配ではない (#507 で実証)
+- `build.rs` は `rerun-if-changed=migrations` のみで無害 (sha 焼き込みなし)
+- 残る候補: cargo のフィンガープリント再検証 + 依存チェーン直列の sccache 復元 + rustc 起動。
+  深掘りは `cargo build --timings` を CI で一度取るのが次の手
+
+### 依存グラフの実態 (2026-07-05 Cargo.lock 実測)
+
+- 572 packages / 53 crate が複数バージョン重複
+- **rust-s3 0.35 が単独で hyper 0.14 / http 0.2 の旧 HTTP スタックを引き込んでいる**
+  (workspace は reqwest 0.12 = hyper 1.x に統一済みなのに二重、~15-20 packages)。
+  rust-s3 の hyper 1.x 対応版へ更新 or object_store 等へ移行が最大の単発削減
+- 小物: lopdf 0.34/0.35 二重 (pdf-extract 0.7 経由)、rand 0.7 + getrandom 0.1 (phf 0.8 経由)
+- 期待値: analysis はグラフサイズ比例なので 1 割減で 60s → ~54s 程度。ただし rust-cache
+  795MB 縮小 / fingerprint 検証対象減 / コンパイル総量減と全レイヤーに薄く効く
+- targets 数 (23369) は crate_universe が 1 crate に複数 target を生成するため。
+  依存 crate 数にほぼ比例するので依存削減がそのままターゲット削減になる
+
 ## 施策 log
 
 ### #482: check job の TS bindings 生成を test-matrix(lib) に統合 (PR #483)
@@ -100,6 +152,41 @@ image の build 失敗は CI 前半 (build-image) で早く検出されるよう
   への影響は backend の +6s のみ。`<name>-staging` buildx cache と bazel
   disk-cache (//:migrate) が温まれば縮む見込み
 
+### #506/#508: build-image への external/repository cache は実測で逆効果 → revert
+
+期待は「analysis 60s の短縮」だったが、上記「external-cache は job 跨ぎ warm が
+構造的に効かない」の通り機能せず、Build backend 139s → 201s に悪化。#508 で revert し、
+経緯は ci.yml の build-image NOTE コメントにも固定 (再導入の再発防止)。
+
+### #507: Tests (lib) の DB なし分離 + mold 導入
+
+- **lib shard を test-matrix から分離し postgres service なしの test-lib job に**:
+  Tests (lib) **122s → 108s**、runner queue 待ち 49s → 8s (run 相対で完了 66s 早い)。✅ 維持
+- **mold (rui314/setup-mold、ld 差し替え = RUSTFLAGS 非変更で cache 互換)**:
+  cargo build 段 28.46s → 27.93s で**中立** (リンク支配仮説は否定)。warm 側
+  (--all-targets 全リンク) でも 8分29秒 vs 導入前 ~9分半でノイズ範囲。撤去判断は保留
+
+### #510: 依存グラフ監視の常設化 (CI 常設ガード)
+
+- **`ci.yml` の `dep-check` job** — `ippoan/ci-workflows` の `rust-dep-check.yml` reusable
+  (ci-workflows#153) を呼ぶ。cargo-deny `check bans` (deny.toml `multiple-versions = "warn"`、
+  重複解消後に `"deny"` 引き上げ検討) + cargo-machete (未使用依存 warn)。
+  独立 job (~13s) で needs チェーン外 = critical path に乗らない
+- **`dep-graph.yml` の BEP metrics step** (main push 毎) — BuildMetrics から
+  targets configured / packages loaded / analysis 時間を Job Summary に出力、
+  しきい値 (26000 targets / 660 packages) 超過で `::warning::`
+  - 注意: `packagesLoaded` は invocation 相対値 (同 job 内の先行 bazel query がサーバを
+    温めるため小さく出る、初回実測 61)。**推移監視の主役は targetsConfigured** (絶対値、
+    初回実測 23370)
+
+### #511: cargo-machete 初回検出の未使用依存 7 件を削除
+
+grep 裏取りの上で root:alc-pdf 直接依存 / alc-dtako:csv,reqwest,zip / alc-trouble:tokio /
+alc-auth:sqlx,ts-rs / gateway:http-body-util を削除。alc-storage の rust-s3 は false
+positive (lib 名 `s3` で text match に掛からない) → `[package.metadata.cargo-machete]
+ignored` 登録。**削除依存は全て他 crate が使用中のため package 数は 572 のまま** =
+グラフ削減効果はゼロ (マニフェスト衛生 + machete warn 解消)。
+
 ## 検証済みで「効果薄い / スコープ外」と判断した案 (Refs #482)
 
 - **FROM scratch image 化**: docker build は既に軽い (3-9s、Bazel がコンパイルを担い、
@@ -116,6 +203,31 @@ image の build 失敗は CI 前半 (build-image) で早く検出されるよう
 - 上表 #2 (coverage 計装) と #3 (Bazel fastbuild) のプロファイル統合は原理的に不可能
   (計装バイナリと配布バイナリは別物)。残る余地は shard 分割の見直し・cache 世代管理の
   チューニング程度で、いずれも計測してから判断する
+- **tag run の test-matrix スキップ** (期待 −3分): tag は main の green sha に打たれ、
+  同一 commit は PR CI + main CI でテスト済み。tag run では check / test-matrix を省き
+  deploy chain へ直行 (docker-latest の存在 = main CI green を軽量 gate にする)。
+  tag→staged 7分→約4分
+- **runner queue 待ち削減** (期待 −1分弱): PR run は同時 17 job 起動で started_at が
+  最大 81s 遅延。Bazel build job 統合 (共通化) は analysis 60s を「7 回→1 回」にする
+  だけで critical path の 60s は消えない (wall-clock ほぼ中立、CPU 総量 / 課金 1/7 の
+  コスト削減策)。docker push 直列化のトレードオフあり
+- **analysis 60s 自体を縮めるなら larger runner が本命** (loading/analysis は Skyframe
+  並列でコア数が効く。4→8/16 vCPU で 60s → 25-35s 見込み。コスト増)
+- **`debug = "line-tables-only"`**: rust-cache 795MB の縮小 (restore 高速化)。導入 PR の
+  1 run はフル再ビルド + llvm-cov の行カバレッジ表示検証が必要
+- **nextest slow test の特定**: lib 38s / mock 系の実行時間の内訳を slow test レポートで
+- **rust-s3 の hyper 1.x 化 or object_store 移行**: 依存グラフ削減の最大の単発ターゲット
+  (上記「依存グラフの実態」参照)
+
+## 計測方法 (再現手順)
+
+- job 一覧と started_at/completed_at: `gh api repos/ippoan/rust-alc-api/actions/runs/<run_id>/jobs`
+- job 内のステップ境界: job log の `##[group]Run ` 行のタイムスタンプ
+- Bazel analysis 時間: log の `INFO: Invocation ID` → `INFO: Analyzed N targets` の差分。
+  execution は `Elapsed time` / `Critical Path` / `N processes:` 行。構造化して取るなら
+  dep-graph.yml の BEP metrics step (main push 毎に Job Summary へ自動出力)
+- cargo build 段: `Finished` 行の `in Xs`。sccache hit 状況は post step の `sccache --show-stats`
+- テスト実行: nextest の `Summary [ Xs] N tests run` 行
 
 ## 関連
 

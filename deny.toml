@@ -4,7 +4,7 @@
 # multiple-versions = "warn" — 同一 crate の複数バージョン共存を PR ごとに警告する
 # (CI は fail させない)。既知の重複 (rust-s3 0.35 が hyper 0.14 / http 0.2 の
 # 旧スタックを引き込む等、2026-07-05 時点で 53 crate) の詳細と削減方針は
-# docs/ci-performance.md の「依存グラフ削減」を参照。
+# docs/ci-speed-tracking.md の「依存グラフの実態」を参照。
 # 重複を解消していき、warn が出なくなった時点で "deny" への引き上げを検討する。
 
 [bans]

@@ -80,7 +80,7 @@ jobs:
             -Eweight=2
 
       - name: Extract Bazel graph metrics (BEP)
-        # 依存グラフ肥大の監視 (docs/ci-performance.md「依存グラフ削減」参照)。
+        # 依存グラフ肥大の監視 (docs/ci-speed-tracking.md「依存グラフの実態」参照)。
         # analysis 対象の targets / packages 数と analysis 時間を BEP の
         # BuildMetrics から抽出し、Job Summary + しきい値超過で ::warning:: を出す。
         # しきい値は 2026-07-05 実測 (23369 targets / 603 packages) の約 1 割増。
@@ -110,10 +110,10 @@ jobs:
             echo "| analysis phase | ${ANALYSIS_MS} ms | - |"
           } >> "$GITHUB_STEP_SUMMARY"
           if [ "$TARGETS" -gt 26000 ]; then
-            echo "::warning::Bazel targets configured が $TARGETS (> 26000)。依存グラフ肥大 — docs/ci-performance.md「依存グラフ削減」参照"
+            echo "::warning::Bazel targets configured が $TARGETS (> 26000)。依存グラフ肥大 — docs/ci-speed-tracking.md「依存グラフの実態」参照"
           fi
           if [ "$PACKAGES" -gt 660 ]; then
-            echo "::warning::Bazel packages loaded が $PACKAGES (> 660)。依存グラフ肥大 — docs/ci-performance.md「依存グラフ削減」参照"
+            echo "::warning::Bazel packages loaded が $PACKAGES (> 660)。依存グラフ肥大 — docs/ci-speed-tracking.md「依存グラフの実態」参照"
           fi
 
       - name: Write metadata

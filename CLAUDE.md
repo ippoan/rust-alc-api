@@ -239,7 +239,7 @@ bash ~/.claude/skills/migrate-test/scripts/migrate_test.sh
   - artifact (`llvm-cov-text`) も同時にアップロード (30日保持)
 - **100% ファイル登録簿**: `coverage_100.toml` — CI でリグレッション検出
 - **CI artifact 取得**: `make cov-not100` / `make cov-summary` / `make cov-file F=xxx` — `gh run download` で最新 artifact をダウンロードしてローカル解析
-- **CI ビルド時間の実測・改善履歴**: [`docs/ci-performance.md`](./docs/ci-performance.md) — CI 高速化施策の追加/revert 前に必読 (external cache 等、実測済みの失敗パターンあり)。実施後は実測を追記する
+- **CI ビルド時間の実測・改善履歴**: [`docs/ci-speed-tracking.md`](./docs/ci-speed-tracking.md) — CI 高速化施策の追加/revert 前に必読 (external cache 等、実測済みの失敗パターンあり)。実施後は実測を追記する
 
 ### カバレッジ
 

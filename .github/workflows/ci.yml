@@ -1,7 +1,7 @@
 name: CI
 
 # CI パフォーマンス (job 時間の実測ベースライン・改善履歴・実測済み失敗パターン) は
-# docs/ci-performance.md に記録している。CI 高速化の施策を追加/revert する前に必読、
+# docs/ci-speed-tracking.md に記録している。CI 高速化の施策を追加/revert する前に必読、
 # 実施後は同 doc に実測を追記すること。
 on:
   push:
@@ -188,7 +188,7 @@ jobs:
       # test profile のビルドを重複させない。
 
   # 依存グラフ監視: cargo-deny (重複バージョン warn、設定 SoT は deny.toml) +
-  # cargo-machete (未使用依存 warn)。経緯と削減方針は docs/ci-performance.md の
+  # cargo-machete (未使用依存 warn)。経緯と削減方針は docs/ci-speed-tracking.md の
   # 「依存グラフ削減」参照 (rust-s3 の旧 hyper スタック二重等)。
   dep-check:
     name: Dep Check
@@ -476,7 +476,7 @@ jobs:
       #     60s の正体はダウンロードではなく repo rule 実行 + loading/analysis の
       #     CPU 処理で、cache では削れない
       # (4) restore/save 試行のオーバーヘッドで job が 139s → 201s に悪化
-      # 実測の詳細と他の施策履歴: docs/ci-performance.md
+      # 実測の詳細と他の施策履歴: docs/ci-speed-tracking.md
       - uses: ippoan/setup-bazel@main
         with:
           disk-cache: "bazel-${{ matrix.name }}"
