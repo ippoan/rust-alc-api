@@ -16,9 +16,42 @@ use tower_http::{
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use alc_camera::repo::PgCamerasRepository;
-use alc_camera::{CameraState, DEFAULT_DOWN_THRESHOLD};
+use alc_camera::{CameraDownTicket, CameraState, DownTicketSink, DEFAULT_DOWN_THRESHOLD};
 use alc_core::auth_middleware::require_tenant_header;
+use alc_trouble::models::CreateTroubleTicket;
 use alc_trouble::repo::trouble_tickets::PgTroubleTicketsRepository;
+use alc_trouble::repository::TroubleTicketsRepository;
+use uuid::Uuid;
+
+/// camera 所有 port [`DownTicketSink`] → alc-trouble への adapter (Refs #513 Phase B)。
+/// category / custom_fields マーカー等の trouble 語彙への写像はここが持ち、
+/// alc-camera crate は trouble に依存しない。
+struct TroubleDownTicketSink(Arc<dyn TroubleTicketsRepository>);
+
+#[async_trait::async_trait]
+impl DownTicketSink for TroubleDownTicketSink {
+    async fn open_down_ticket(
+        &self,
+        tenant_id: Uuid,
+        t: CameraDownTicket,
+    ) -> Result<Uuid, sqlx::Error> {
+        let input = CreateTroubleTicket {
+            category: "その他".to_string(),
+            title: Some(t.title),
+            occurred_at: Some(t.occurred_at),
+            location: Some(t.location),
+            description: Some(t.description),
+            // 自動起票である事を識別するマーカー (UI の出所表示 / 集計用)。
+            custom_fields: Some(serde_json::json!({
+                "source": "camera_auto",
+                "camera_id": t.camera_id,
+            })),
+            ..Default::default()
+        };
+        let ticket = self.0.create(tenant_id, &input, None, None).await?;
+        Ok(ticket.id)
+    }
+}
 
 #[tokio::main]
 async fn main() {
@@ -49,7 +82,9 @@ async fn main() {
 
     let state = CameraState {
         cameras: Arc::new(PgCamerasRepository::new(pool.clone())),
-        trouble_tickets: Arc::new(PgTroubleTicketsRepository::new(pool.clone())),
+        down_ticket_sink: Arc::new(TroubleDownTicketSink(Arc::new(
+            PgTroubleTicketsRepository::new(pool.clone()),
+        ))),
         down_threshold,
     };
 

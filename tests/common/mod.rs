@@ -257,20 +257,6 @@ fn build_app_state(
     let notify_deliveries = Arc::new(PgNotifyDeliveryRepository::new(pool.clone()));
     let notify_line_config = Arc::new(PgNotifyLineConfigRepository::new(pool.clone()));
     let lineworks_channels = Arc::new(PgLineworksChannelsRepository::new(pool.clone()));
-    let trouble_tickets = Arc::new(PgTroubleTicketsRepository::new(pool.clone()));
-    let trouble_files = Arc::new(PgTroubleFilesRepository::new(pool.clone()));
-    let trouble_workflow = Arc::new(PgTroubleWorkflowRepository::new(pool.clone()));
-    let trouble_categories = Arc::new(PgTroubleCategoriesRepository::new(pool.clone()));
-    let trouble_offices = Arc::new(PgTroubleOfficesRepository::new(pool.clone()));
-    let trouble_progress_statuses =
-        Arc::new(PgTroubleProgressStatusesRepository::new(pool.clone()));
-    let trouble_notification_prefs =
-        Arc::new(PgTroubleNotificationPrefsRepository::new(pool.clone()));
-    let trouble_schedules = Arc::new(PgTroubleSchedulesRepository::new(pool.clone()));
-    let trouble_tasks = Arc::new(PgTroubleTasksRepository::new(pool.clone()));
-    let trouble_task_types = Arc::new(PgTroubleTaskTypesRepository::new(pool.clone()));
-    let trouble_task_statuses = Arc::new(PgTroubleTaskStatusesRepository::new(pool.clone()));
-    let trouble_field_layouts = Arc::new(PgTroubleFieldLayoutsRepository::new(pool.clone()));
 
     AppState {
         pool: Some(pool),
@@ -319,19 +305,6 @@ fn build_app_state(
         notify_storage: None,
         redact_broadcaster: None,
         realtime_bus: None,
-        trouble_tickets,
-        trouble_files,
-        trouble_workflow,
-        trouble_categories,
-        trouble_offices,
-        trouble_progress_statuses,
-        trouble_notification_prefs,
-        trouble_schedules,
-        trouble_tasks,
-        trouble_task_types,
-        trouble_task_statuses,
-        trouble_field_layouts,
-        trouble_storage: Some(Arc::new(MockStorage::new("trouble-bucket"))),
         device_pair_client: None,
         webhook: None,
     }
@@ -608,14 +581,45 @@ pub fn pg_tenko_state(state: &AppState) -> alc_tenko::TenkoState {
     }
 }
 
-pub async fn spawn_test_server(state: AppState) -> String {
-    let tenko_state = pg_tenko_state(&state);
-    spawn_test_server_with_tenko(state, tenko_state).await
+/// pool から trouble ドメインの Pg TroubleState を合成する (Refs #513 Phase B)。
+pub fn pg_trouble_state(state: &AppState) -> alc_trouble::TroubleState {
+    let pool = state
+        .pool
+        .clone()
+        .expect("spawn_test_server: state.pool is None — mock state は spawn_test_server_with_states を使うこと");
+    alc_trouble::TroubleState {
+        trouble_tickets: Arc::new(PgTroubleTicketsRepository::new(pool.clone())),
+        trouble_files: Arc::new(PgTroubleFilesRepository::new(pool.clone())),
+        trouble_workflow: Arc::new(PgTroubleWorkflowRepository::new(pool.clone())),
+        trouble_categories: Arc::new(PgTroubleCategoriesRepository::new(pool.clone())),
+        trouble_offices: Arc::new(PgTroubleOfficesRepository::new(pool.clone())),
+        trouble_progress_statuses: Arc::new(PgTroubleProgressStatusesRepository::new(pool.clone())),
+        trouble_notification_prefs: Arc::new(PgTroubleNotificationPrefsRepository::new(
+            pool.clone(),
+        )),
+        trouble_schedules: Arc::new(PgTroubleSchedulesRepository::new(pool.clone())),
+        trouble_tasks: Arc::new(PgTroubleTasksRepository::new(pool.clone())),
+        trouble_task_types: Arc::new(PgTroubleTaskTypesRepository::new(pool.clone())),
+        trouble_task_statuses: Arc::new(PgTroubleTaskStatusesRepository::new(pool.clone())),
+        trouble_field_layouts: Arc::new(PgTroubleFieldLayoutsRepository::new(pool)),
+        trouble_storage: Some(Arc::new(MockStorage::new("trouble-bucket"))),
+        webhook: state.webhook.clone(),
+        cloud_tasks: None,
+        notifier: None,
+        employees: Some(state.employees.clone()),
+    }
 }
 
-pub async fn spawn_test_server_with_tenko(
+pub async fn spawn_test_server(state: AppState) -> String {
+    let tenko_state = pg_tenko_state(&state);
+    let trouble_state = pg_trouble_state(&state);
+    spawn_test_server_with_states(state, tenko_state, trouble_state).await
+}
+
+pub async fn spawn_test_server_with_states(
     state: AppState,
     tenko_state: alc_tenko::TenkoState,
+    trouble_state: alc_trouble::TroubleState,
 ) -> String {
     use axum::{Extension, Router};
     use rust_alc_api::auth::google::GoogleTokenVerifier;
@@ -643,7 +647,11 @@ pub async fn spawn_test_server_with_tenko(
     let app = Router::new()
         .nest(
             "/api",
-            rust_alc_api::routes::router(internal_oidc_trust_for_tests(), tenko_state),
+            rust_alc_api::routes::router(
+                internal_oidc_trust_for_tests(),
+                tenko_state,
+                trouble_state,
+            ),
         )
         // テスト用 proxy emulation (Refs #434)。#434 で rust-alc-api は JWT 検証を
         // 撤去し、注入された identity ヘッダー (X-Tenant-ID / X-User-*) を信頼する

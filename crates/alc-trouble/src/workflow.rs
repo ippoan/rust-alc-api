@@ -6,12 +6,12 @@ use axum::{
 };
 use uuid::Uuid;
 
-use crate::TroubleState;
-use alc_core::auth_middleware::TenantId;
-use alc_core::models::{
+use crate::models::{
     CreateWorkflowState, CreateWorkflowTransition, TroubleStatusHistory, TroubleWorkflowState,
     TroubleWorkflowTransition,
 };
+use crate::TroubleState;
+use alc_core::auth_middleware::TenantId;
 
 pub fn tenant_router<S>() -> Router<S>
 where

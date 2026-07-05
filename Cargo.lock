@@ -76,12 +76,15 @@ dependencies = [
  "alc-camera",
  "alc-core",
  "alc-trouble",
+ "async-trait",
  "axum",
+ "serde_json",
  "sqlx",
  "tokio",
  "tower-http",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
@@ -308,6 +311,7 @@ dependencies = [
  "sqlx",
  "thiserror 2.0.18",
  "tracing",
+ "ts-rs",
  "uuid",
 ]
 

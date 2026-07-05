@@ -24,8 +24,11 @@ async fn test_register_success() {
         let state = setup_mock_app_state();
         let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
         tenko_state.tenko_call = mock;
-        let base_url =
-            crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server_with_tenko(
+            state,
+            tenko_state.clone(),
+        )
+        .await;
 
         let client = reqwest::Client::new();
         let res = client
@@ -60,8 +63,11 @@ async fn test_register_without_employee_code() {
         let state = setup_mock_app_state();
         let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
         tenko_state.tenko_call = mock;
-        let base_url =
-            crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server_with_tenko(
+            state,
+            tenko_state.clone(),
+        )
+        .await;
 
         let client = reqwest::Client::new();
         let res = client
@@ -93,8 +99,11 @@ async fn test_register_unknown_call_number() {
         let state = setup_mock_app_state();
         let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
         tenko_state.tenko_call = mock;
-        let base_url =
-            crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server_with_tenko(
+            state,
+            tenko_state.clone(),
+        )
+        .await;
 
         let client = reqwest::Client::new();
         let res = client
@@ -127,8 +136,11 @@ async fn test_register_db_error() {
         let state = setup_mock_app_state();
         let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
         tenko_state.tenko_call = mock;
-        let base_url =
-            crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server_with_tenko(
+            state,
+            tenko_state.clone(),
+        )
+        .await;
 
         let client = reqwest::Client::new();
         let res = client
@@ -164,8 +176,11 @@ async fn test_tenko_success() {
         let state = setup_mock_app_state();
         let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
         tenko_state.tenko_call = mock;
-        let base_url =
-            crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server_with_tenko(
+            state,
+            tenko_state.clone(),
+        )
+        .await;
 
         let client = reqwest::Client::new();
         let res = client
@@ -198,8 +213,11 @@ async fn test_tenko_driver_not_found() {
         let state = setup_mock_app_state();
         let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
         tenko_state.tenko_call = mock;
-        let base_url =
-            crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server_with_tenko(
+            state,
+            tenko_state.clone(),
+        )
+        .await;
 
         let client = reqwest::Client::new();
         let res = client
@@ -229,8 +247,11 @@ async fn test_tenko_db_error() {
         let state = setup_mock_app_state();
         let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
         tenko_state.tenko_call = mock;
-        let base_url =
-            crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server_with_tenko(
+            state,
+            tenko_state.clone(),
+        )
+        .await;
 
         let client = reqwest::Client::new();
         let res = client
@@ -263,8 +284,11 @@ async fn test_list_numbers_empty() {
         let state = setup_mock_app_state();
         let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
         tenko_state.tenko_call = mock;
-        let base_url =
-            crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server_with_tenko(
+            state,
+            tenko_state.clone(),
+        )
+        .await;
 
         let tenant_id = Uuid::new_v4();
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -294,8 +318,11 @@ async fn test_list_numbers_with_data() {
         let state = setup_mock_app_state();
         let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
         tenko_state.tenko_call = mock;
-        let base_url =
-            crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server_with_tenko(
+            state,
+            tenko_state.clone(),
+        )
+        .await;
 
         let tenant_id = Uuid::new_v4();
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -330,8 +357,11 @@ async fn test_list_numbers_with_x_tenant_id() {
         let state = setup_mock_app_state();
         let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
         tenko_state.tenko_call = mock;
-        let base_url =
-            crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server_with_tenko(
+            state,
+            tenko_state.clone(),
+        )
+        .await;
 
         let client = reqwest::Client::new();
         let res = client
@@ -355,8 +385,11 @@ async fn test_list_numbers_no_auth() {
         let state = setup_mock_app_state();
         let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
         tenko_state.tenko_call = mock;
-        let base_url =
-            crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server_with_tenko(
+            state,
+            tenko_state.clone(),
+        )
+        .await;
 
         let client = reqwest::Client::new();
         let res = client
@@ -380,8 +413,11 @@ async fn test_list_numbers_db_error() {
         let state = setup_mock_app_state();
         let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
         tenko_state.tenko_call = mock;
-        let base_url =
-            crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server_with_tenko(
+            state,
+            tenko_state.clone(),
+        )
+        .await;
 
         let tenant_id = Uuid::new_v4();
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -412,8 +448,11 @@ async fn test_create_number_success() {
         let state = setup_mock_app_state();
         let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
         tenko_state.tenko_call = mock;
-        let base_url =
-            crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server_with_tenko(
+            state,
+            tenko_state.clone(),
+        )
+        .await;
 
         let tenant_id = Uuid::new_v4();
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -448,8 +487,11 @@ async fn test_create_number_without_tenant_id() {
         let state = setup_mock_app_state();
         let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
         tenko_state.tenko_call = mock;
-        let base_url =
-            crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server_with_tenko(
+            state,
+            tenko_state.clone(),
+        )
+        .await;
 
         let tenant_id = Uuid::new_v4();
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -482,8 +524,11 @@ async fn test_create_number_without_label() {
         let state = setup_mock_app_state();
         let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
         tenko_state.tenko_call = mock;
-        let base_url =
-            crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server_with_tenko(
+            state,
+            tenko_state.clone(),
+        )
+        .await;
 
         let tenant_id = Uuid::new_v4();
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -516,8 +561,11 @@ async fn test_create_number_no_auth() {
         let state = setup_mock_app_state();
         let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
         tenko_state.tenko_call = mock;
-        let base_url =
-            crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server_with_tenko(
+            state,
+            tenko_state.clone(),
+        )
+        .await;
 
         let client = reqwest::Client::new();
         let res = client
@@ -544,8 +592,11 @@ async fn test_create_number_db_error() {
         let state = setup_mock_app_state();
         let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
         tenko_state.tenko_call = mock;
-        let base_url =
-            crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server_with_tenko(
+            state,
+            tenko_state.clone(),
+        )
+        .await;
 
         let tenant_id = Uuid::new_v4();
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -579,8 +630,11 @@ async fn test_delete_number_success() {
         let state = setup_mock_app_state();
         let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
         tenko_state.tenko_call = mock;
-        let base_url =
-            crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server_with_tenko(
+            state,
+            tenko_state.clone(),
+        )
+        .await;
 
         let tenant_id = Uuid::new_v4();
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -607,8 +661,11 @@ async fn test_delete_number_no_auth() {
         let state = setup_mock_app_state();
         let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
         tenko_state.tenko_call = mock;
-        let base_url =
-            crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server_with_tenko(
+            state,
+            tenko_state.clone(),
+        )
+        .await;
 
         let client = reqwest::Client::new();
         let res = client
@@ -632,8 +689,11 @@ async fn test_delete_number_db_error() {
         let state = setup_mock_app_state();
         let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
         tenko_state.tenko_call = mock;
-        let base_url =
-            crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server_with_tenko(
+            state,
+            tenko_state.clone(),
+        )
+        .await;
 
         let tenant_id = Uuid::new_v4();
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -664,8 +724,11 @@ async fn test_list_drivers_empty() {
         let state = setup_mock_app_state();
         let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
         tenko_state.tenko_call = mock;
-        let base_url =
-            crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server_with_tenko(
+            state,
+            tenko_state.clone(),
+        )
+        .await;
 
         let tenant_id = Uuid::new_v4();
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -695,8 +758,11 @@ async fn test_list_drivers_with_data() {
         let state = setup_mock_app_state();
         let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
         tenko_state.tenko_call = mock;
-        let base_url =
-            crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server_with_tenko(
+            state,
+            tenko_state.clone(),
+        )
+        .await;
 
         let tenant_id = Uuid::new_v4();
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");
@@ -733,8 +799,11 @@ async fn test_list_drivers_no_auth() {
         let state = setup_mock_app_state();
         let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
         tenko_state.tenko_call = mock;
-        let base_url =
-            crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server_with_tenko(
+            state,
+            tenko_state.clone(),
+        )
+        .await;
 
         let client = reqwest::Client::new();
         let res = client
@@ -758,8 +827,11 @@ async fn test_list_drivers_db_error() {
         let state = setup_mock_app_state();
         let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
         tenko_state.tenko_call = mock;
-        let base_url =
-            crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server_with_tenko(
+            state,
+            tenko_state.clone(),
+        )
+        .await;
 
         let tenant_id = Uuid::new_v4();
         let jwt = crate::common::create_test_jwt(tenant_id, "admin");

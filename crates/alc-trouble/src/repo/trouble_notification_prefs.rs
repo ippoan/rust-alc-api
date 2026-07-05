@@ -2,10 +2,10 @@ use async_trait::async_trait;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use alc_core::models::{TroubleNotificationPref, UpsertNotificationPref};
+use crate::models::{TroubleNotificationPref, UpsertNotificationPref};
 use alc_core::tenant::TenantConn;
 
-pub use alc_core::repository::trouble_notification_prefs::*;
+pub use crate::repository::trouble_notification_prefs::*;
 
 pub struct PgTroubleNotificationPrefsRepository {
     pool: PgPool,

@@ -6,9 +6,9 @@ use axum::{
 };
 use uuid::Uuid;
 
+use crate::models::{TroubleNotificationPref, UpsertNotificationPref};
 use crate::TroubleState;
 use alc_core::auth_middleware::TenantId;
-use alc_core::models::{TroubleNotificationPref, UpsertNotificationPref};
 
 const VALID_EVENT_TYPES: &[&str] = &[
     "trouble_created",

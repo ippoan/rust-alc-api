@@ -15,7 +15,9 @@ async fn setup() -> (String, String) {
     let tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
-    let base = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+    let base =
+        crate::mock_helpers::app_state::spawn_mock_server_with_tenko(state, tenko_state.clone())
+            .await;
     let auth = format!("Bearer {jwt}");
     (base, auth)
 }
@@ -27,7 +29,9 @@ async fn setup_with_mock(mock: Arc<MockHealthBaselinesRepository>) -> (String, S
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     tenko_state.health_baselines = mock;
-    let base = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+    let base =
+        crate::mock_helpers::app_state::spawn_mock_server_with_tenko(state, tenko_state.clone())
+            .await;
     let auth = format!("Bearer {jwt}");
     (base, auth)
 }
@@ -42,7 +46,9 @@ async fn setup_failing() -> (String, String) {
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     tenko_state.health_baselines = mock;
-    let base = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+    let base =
+        crate::mock_helpers::app_state::spawn_mock_server_with_tenko(state, tenko_state.clone())
+            .await;
     let auth = format!("Bearer {jwt}");
     (base, auth)
 }
@@ -454,7 +460,9 @@ async fn list_baselines_with_tenant_header() {
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
     let tenant_id = Uuid::new_v4();
-    let base = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+    let base =
+        crate::mock_helpers::app_state::spawn_mock_server_with_tenko(state, tenko_state.clone())
+            .await;
 
     let res = client()
         .get(format!("{base}/api/tenko/health-baselines"))

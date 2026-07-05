@@ -7,12 +7,12 @@ use axum::{
 };
 use uuid::Uuid;
 
-use crate::TroubleState;
-use alc_core::auth_middleware::TenantId;
-use alc_core::models::{
+use crate::models::{
     CreateTroubleTicket, TransitionRequest, TroubleTicket, TroubleTicketFilter,
     TroubleTicketsResponse, UpdateTroubleTicket,
 };
+use crate::TroubleState;
+use alc_core::auth_middleware::TenantId;
 
 pub fn tenant_router<S>() -> Router<S>
 where

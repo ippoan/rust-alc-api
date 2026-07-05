@@ -14,8 +14,11 @@ use crate::mock_helpers::MockDailyHealthRepository;
 async fn test_daily_health_status_success_empty() {
     let state = setup_mock_app_state();
     let tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
-    let base_url =
-        crate::common::spawn_test_server_with_tenko(state.clone(), tenko_state.clone()).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server_with_tenko(
+        state.clone(),
+        tenko_state.clone(),
+    )
+    .await;
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
@@ -51,8 +54,11 @@ async fn test_daily_health_status_success_empty() {
 async fn test_daily_health_status_with_date_param() {
     let state = setup_mock_app_state();
     let tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
-    let base_url =
-        crate::common::spawn_test_server_with_tenko(state.clone(), tenko_state.clone()).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server_with_tenko(
+        state.clone(),
+        tenko_state.clone(),
+    )
+    .await;
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
@@ -80,7 +86,9 @@ async fn test_daily_health_status_with_date_param() {
 async fn test_daily_health_status_no_auth() {
     let state = setup_mock_app_state();
     let tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
-    let base_url = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+    let base_url =
+        crate::mock_helpers::app_state::spawn_mock_server_with_tenko(state, tenko_state.clone())
+            .await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -100,8 +108,11 @@ async fn test_daily_health_status_no_auth() {
 async fn test_daily_health_status_tenant_header() {
     let state = setup_mock_app_state();
     let tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
-    let base_url =
-        crate::common::spawn_test_server_with_tenko(state.clone(), tenko_state.clone()).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server_with_tenko(
+        state.clone(),
+        tenko_state.clone(),
+    )
+    .await;
     let tenant_id = Uuid::new_v4();
     let client = reqwest::Client::new();
 
@@ -132,8 +143,11 @@ async fn test_daily_health_status_db_error() {
     mock.fail_next.store(true, Ordering::SeqCst);
     tenko_state.daily_health = mock;
 
-    let base_url =
-        crate::common::spawn_test_server_with_tenko(state.clone(), tenko_state.clone()).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server_with_tenko(
+        state.clone(),
+        tenko_state.clone(),
+    )
+    .await;
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
@@ -245,8 +259,11 @@ async fn test_daily_health_status_with_safety_judgment() {
     });
     tenko_state.daily_health = mock;
 
-    let base_url =
-        crate::common::spawn_test_server_with_tenko(state.clone(), tenko_state.clone()).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server_with_tenko(
+        state.clone(),
+        tenko_state.clone(),
+    )
+    .await;
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
@@ -277,8 +294,11 @@ async fn test_daily_health_status_with_safety_judgment() {
 async fn test_daily_health_status_invalid_date() {
     let state = setup_mock_app_state();
     let tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
-    let base_url =
-        crate::common::spawn_test_server_with_tenko(state.clone(), tenko_state.clone()).await;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server_with_tenko(
+        state.clone(),
+        tenko_state.clone(),
+    )
+    .await;
     let tenant_id = Uuid::new_v4();
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();

@@ -6,9 +6,9 @@ use axum::{
 };
 use uuid::Uuid;
 
+use crate::models::{CreateTroubleOffice, TroubleOffice};
 use crate::TroubleState;
 use alc_core::auth_middleware::TenantId;
-use alc_core::models::{CreateTroubleOffice, TroubleOffice};
 
 pub fn tenant_router<S>() -> Router<S>
 where

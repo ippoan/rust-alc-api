@@ -2,10 +2,10 @@ use async_trait::async_trait;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use alc_core::models::{CreateTroubleTaskStatus, TroubleTaskStatus, UpdateTroubleTaskStatus};
+use crate::models::{CreateTroubleTaskStatus, TroubleTaskStatus, UpdateTroubleTaskStatus};
 use alc_core::tenant::TenantConn;
 
-pub use alc_core::repository::trouble_task_statuses::*;
+pub use crate::repository::trouble_task_statuses::*;
 
 pub struct PgTroubleTaskStatusesRepository {
     pool: PgPool,

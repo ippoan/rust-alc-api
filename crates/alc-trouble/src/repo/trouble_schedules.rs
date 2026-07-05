@@ -2,10 +2,10 @@ use async_trait::async_trait;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use alc_core::models::{CreateTroubleSchedule, TroubleSchedule};
+use crate::models::{CreateTroubleSchedule, TroubleSchedule};
 use alc_core::tenant::TenantConn;
 
-pub use alc_core::repository::trouble_schedules::*;
+pub use crate::repository::trouble_schedules::*;
 
 pub struct PgTroubleSchedulesRepository {
     pool: PgPool,

@@ -6,10 +6,10 @@ use axum::{
 };
 use uuid::Uuid;
 
+use crate::models::{CreateTroubleTask, TroubleFile, TroubleTask, UpdateTroubleTask};
+use crate::repository::trouble_tasks::{TroubleTasksFilter, TroubleTasksSortBy};
 use crate::TroubleState;
 use alc_core::auth_middleware::TenantId;
-use alc_core::models::{CreateTroubleTask, TroubleFile, TroubleTask, UpdateTroubleTask};
-use alc_core::repository::trouble_tasks::{TroubleTasksFilter, TroubleTasksSortBy};
 
 pub fn tenant_router<S>() -> Router<S>
 where

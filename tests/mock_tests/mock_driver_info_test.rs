@@ -171,7 +171,9 @@ async fn test_get_driver_info_success() {
     let tenant_id = Uuid::new_v4();
     let employee_id = Uuid::new_v4();
     let (state, tenko_state) = setup_state_with_employee(tenant_id, employee_id).await;
-    let base_url = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+    let base_url =
+        crate::mock_helpers::app_state::spawn_mock_server_with_tenko(state, tenko_state.clone())
+            .await;
 
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
@@ -205,7 +207,9 @@ async fn test_get_driver_info_employee_not_found() {
     let known_employee_id = Uuid::new_v4();
     let unknown_employee_id = Uuid::new_v4();
     let (state, tenko_state) = setup_state_with_employee(tenant_id, known_employee_id).await;
-    let base_url = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+    let base_url =
+        crate::mock_helpers::app_state::spawn_mock_server_with_tenko(state, tenko_state.clone())
+            .await;
 
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
@@ -226,7 +230,9 @@ async fn test_get_driver_info_employee_not_found() {
 async fn test_get_driver_info_no_auth() {
     let state = setup_mock_app_state();
     let tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
-    let base_url = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+    let base_url =
+        crate::mock_helpers::app_state::spawn_mock_server_with_tenko(state, tenko_state.clone())
+            .await;
 
     let employee_id = Uuid::new_v4();
     let client = reqwest::Client::new();
@@ -245,7 +251,9 @@ async fn test_get_driver_info_with_tenant_header() {
     let tenant_id = Uuid::new_v4();
     let employee_id = Uuid::new_v4();
     let (state, tenko_state) = setup_state_with_employee(tenant_id, employee_id).await;
-    let base_url = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+    let base_url =
+        crate::mock_helpers::app_state::spawn_mock_server_with_tenko(state, tenko_state.clone())
+            .await;
 
     let client = reqwest::Client::new();
     let res = client
@@ -271,7 +279,9 @@ async fn test_get_driver_info_db_error_get_employee() {
     let state = setup_mock_app_state();
     let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
     tenko_state.driver_info = mock;
-    let base_url = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+    let base_url =
+        crate::mock_helpers::app_state::spawn_mock_server_with_tenko(state, tenko_state.clone())
+            .await;
 
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
@@ -296,7 +306,9 @@ async fn test_get_driver_info_db_error_get_health_baseline() {
     let state = setup_mock_app_state();
     let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
     tenko_state.driver_info = mock;
-    let base_url = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+    let base_url =
+        crate::mock_helpers::app_state::spawn_mock_server_with_tenko(state, tenko_state.clone())
+            .await;
 
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
@@ -322,7 +334,9 @@ async fn test_get_driver_info_db_error_get_recent_measurements() {
     let state = setup_mock_app_state();
     let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
     tenko_state.driver_info = mock;
-    let base_url = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+    let base_url =
+        crate::mock_helpers::app_state::spawn_mock_server_with_tenko(state, tenko_state.clone())
+            .await;
 
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
@@ -342,7 +356,9 @@ async fn test_get_driver_info_invalid_uuid() {
     let tenant_id = Uuid::new_v4();
     let state = setup_mock_app_state();
     let tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
-    let base_url = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+    let base_url =
+        crate::mock_helpers::app_state::spawn_mock_server_with_tenko(state, tenko_state.clone())
+            .await;
 
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
@@ -362,7 +378,9 @@ async fn test_get_driver_info_viewer_role() {
     let tenant_id = Uuid::new_v4();
     let employee_id = Uuid::new_v4();
     let (state, tenko_state) = setup_state_with_employee(tenant_id, employee_id).await;
-    let base_url = crate::common::spawn_test_server_with_tenko(state, tenko_state.clone()).await;
+    let base_url =
+        crate::mock_helpers::app_state::spawn_mock_server_with_tenko(state, tenko_state.clone())
+            .await;
 
     let jwt = crate::common::create_test_jwt(tenant_id, "viewer");
     let client = reqwest::Client::new();

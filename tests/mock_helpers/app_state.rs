@@ -111,19 +111,6 @@ pub fn setup_mock_app_state() -> AppState {
         notify_storage: None,
         redact_broadcaster: None,
         realtime_bus: None,
-        trouble_tickets: Arc::new(MockTroubleTicketsRepository::default()),
-        trouble_files: Arc::new(MockTroubleFilesRepository::default()),
-        trouble_workflow: Arc::new(MockTroubleWorkflowRepository::default()),
-        trouble_categories: Arc::new(MockTroubleCategoriesRepository::default()),
-        trouble_offices: Arc::new(MockTroubleOfficesRepository::default()),
-        trouble_progress_statuses: Arc::new(MockTroubleProgressStatusesRepository::default()),
-        trouble_notification_prefs: Arc::new(MockTroubleNotificationPrefsRepository::default()),
-        trouble_schedules: Arc::new(MockTroubleSchedulesRepository::default()),
-        trouble_tasks: Arc::new(MockTroubleTasksRepository::default()),
-        trouble_task_types: Arc::new(MockTroubleTaskTypesRepository::default()),
-        trouble_task_statuses: Arc::new(MockTroubleTaskStatusesRepository::default()),
-        trouble_field_layouts: Arc::new(MockTroubleFieldLayoutsRepository::default()),
-        trouble_storage: Some(Arc::new(MockStorage::new("trouble-bucket"))),
         device_pair_client: None,
         webhook: None,
     }
@@ -148,5 +135,52 @@ pub fn setup_mock_tenko_state() -> alc_tenko::TenkoState {
 
 /// mock 用 spawn wrapper: デフォルトの mock TenkoState を合成して起動する。
 pub async fn spawn_mock_server(state: AppState) -> String {
-    crate::common::spawn_test_server_with_tenko(state, setup_mock_tenko_state()).await
+    crate::common::spawn_test_server_with_states(
+        state,
+        setup_mock_tenko_state(),
+        setup_mock_trouble_state(),
+    )
+    .await
+}
+
+/// tenko_state を差し替えたい mock テスト用 (trouble はデフォルト mock)。
+pub async fn spawn_mock_server_with_tenko(
+    state: AppState,
+    tenko_state: alc_tenko::TenkoState,
+) -> String {
+    crate::common::spawn_test_server_with_states(state, tenko_state, setup_mock_trouble_state())
+        .await
+}
+
+/// trouble_state を差し替えたい mock テスト用 (tenko はデフォルト mock)。
+pub async fn spawn_mock_server_with_trouble(
+    state: AppState,
+    trouble_state: alc_trouble::TroubleState,
+) -> String {
+    crate::common::spawn_test_server_with_states(state, setup_mock_tenko_state(), trouble_state)
+        .await
+}
+
+/// mock trouble state (Refs #513 Phase B)。差し替えたい field を上書きしてから
+/// `spawn_mock_server_with_trouble` に渡す。
+pub fn setup_mock_trouble_state() -> alc_trouble::TroubleState {
+    alc_trouble::TroubleState {
+        trouble_tickets: Arc::new(MockTroubleTicketsRepository::default()),
+        trouble_files: Arc::new(MockTroubleFilesRepository::default()),
+        trouble_workflow: Arc::new(MockTroubleWorkflowRepository::default()),
+        trouble_categories: Arc::new(MockTroubleCategoriesRepository::default()),
+        trouble_offices: Arc::new(MockTroubleOfficesRepository::default()),
+        trouble_progress_statuses: Arc::new(MockTroubleProgressStatusesRepository::default()),
+        trouble_notification_prefs: Arc::new(MockTroubleNotificationPrefsRepository::default()),
+        trouble_schedules: Arc::new(MockTroubleSchedulesRepository::default()),
+        trouble_tasks: Arc::new(MockTroubleTasksRepository::default()),
+        trouble_task_types: Arc::new(MockTroubleTaskTypesRepository::default()),
+        trouble_task_statuses: Arc::new(MockTroubleTaskStatusesRepository::default()),
+        trouble_field_layouts: Arc::new(MockTroubleFieldLayoutsRepository::default()),
+        trouble_storage: Some(Arc::new(MockStorage::new("trouble-bucket"))),
+        webhook: None,
+        cloud_tasks: None,
+        notifier: None,
+        employees: None,
+    }
 }

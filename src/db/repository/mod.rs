@@ -10,12 +10,17 @@ pub use alc_core::repository::{
     GuidanceRecordsRepository, ItemFilesRepository, ItemsRepository, LineworksChannelsRepository,
     MeasurementsRepository, NfcTagRepository, NotifyDeliveryRepository, NotifyDocumentRepository,
     NotifyGroupRepository, NotifyLineConfigRepository, NotifyRecipientRepository,
-    SsoAdminRepository, TenantUsersRepository, TimecardRepository, TroubleCategoriesRepository,
-    TroubleFieldLayoutsRepository, TroubleFilesRepository, TroubleNotificationPrefsRepository,
-    TroubleOfficesRepository, TroubleProgressStatusesRepository, TroubleSchedulesRepository,
-    TroubleTaskStatusesRepository, TroubleTaskTypesRepository, TroubleTasksFilter,
-    TroubleTasksRepository, TroubleTasksSortBy, TroubleTicketsRepository,
-    TroubleWorkflowRepository, VehicleSettingsDumpsRepository, WebhookRepository,
+    SsoAdminRepository, TenantUsersRepository, TimecardRepository, VehicleSettingsDumpsRepository,
+    WebhookRepository,
+};
+
+// Re-export trouble traits from alc-trouble (Refs #513 Phase B)
+pub use alc_trouble::repository::{
+    TroubleCategoriesRepository, TroubleFieldLayoutsRepository, TroubleFilesRepository,
+    TroubleNotificationPrefsRepository, TroubleOfficesRepository,
+    TroubleProgressStatusesRepository, TroubleSchedulesRepository, TroubleTaskStatusesRepository,
+    TroubleTaskTypesRepository, TroubleTasksFilter, TroubleTasksRepository, TroubleTasksSortBy,
+    TroubleTicketsRepository, TroubleWorkflowRepository,
 };
 
 // Re-export tenko traits from alc-tenko (Refs #513)

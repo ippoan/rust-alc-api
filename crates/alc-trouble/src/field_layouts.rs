@@ -1,8 +1,8 @@
 use axum::{extract::State, http::StatusCode, routing::get, Json, Router};
 
+use crate::models::TroubleFieldLayout;
 use crate::TroubleState;
 use alc_core::auth_middleware::TenantId;
-use alc_core::models::TroubleFieldLayout;
 
 pub fn tenant_router<S>() -> Router<S>
 where
