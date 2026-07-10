@@ -21,6 +21,20 @@ where
         .route("/operations/{unko_no}", delete(delete_operation))
 }
 
+/// 他サービス (ohishi-exp/nuxt-ichibanboshi 等) から `INTERNAL_SHARED_SECRET` +
+/// `X-Tenant-ID` で叩く読み取り専用経路 (Refs ohishi-exp/nuxt-dtako-admin#198
+/// Phase 8: 一番星の売上明細と dtako 実運行を突合する)。`/operations` (GET) は
+/// tenant_router に既存のため、`internal_shared_secret_router` へのマージ時の
+/// パス衝突を避けるため別パスにする。ハンドラは `list_operations` を再利用
+/// (TenantId Extension の由来 (JWT 経由 or 共有 secret 経由) はハンドラに影響しない)。
+pub fn internal_router<S>() -> Router<S>
+where
+    DtakoState: axum::extract::FromRef<S>,
+    S: Clone + Send + Sync + 'static,
+{
+    Router::new().route("/internal/operations", get(list_operations))
+}
+
 #[derive(serde::Deserialize)]
 struct CalendarQuery {
     year: i32,

@@ -249,6 +249,7 @@ pub fn internal_shared_secret_router(internal_secret: Option<String>) -> Router<
     match internal_secret {
         Some(secret) if !secret.is_empty() => Router::new()
             .merge(dtako_tickets::internal_router())
+            .merge(dtako_operations::internal_router())
             .layer(axum_middleware::from_fn(
                 alc_core::auth_middleware::require_internal_shared_secret,
             ))
