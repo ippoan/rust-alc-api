@@ -78,15 +78,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # targets は build-image matrix と揃える (staging image 用に各 service
-          # job が //:migrate も build するため、warm 側にも含める。Refs #482)。
+          # targets は build-image matrix と揃える。gateway + per-domain は #556 で
+          # 廃止し monolith (backend) 1 本のみ。
           - { name: backend, targets: "//:rust-alc-api //:migrate //:archive" }
-          - { name: gateway, targets: "//crates/gateway" }
-          - { name: tenko, targets: "//crates/tenko-api //:migrate" }
-          - { name: carins, targets: "//crates/carins-api //:migrate" }
-          - { name: dtako, targets: "//crates/dtako-api //:migrate" }
-          - { name: trouble, targets: "//crates/trouble-api //:migrate" }
-          - { name: camera, targets: "//crates/alc-camera-api //:migrate" }
     steps:
       - uses: actions/checkout@v4
       - uses: ippoan/setup-bazel@main
@@ -144,7 +138,6 @@ jobs:
           - { name: storage, target: "//crates/alc-storage:alc-storage_test" }
           - { name: tenko, target: "//crates/alc-tenko:alc-tenko_test", coverage: "cov-tenko" }
           - { name: trouble, target: "//crates/alc-trouble:alc-trouble_test", coverage: "cov-trouble" }
-          - { name: gateway, target: "//crates/gateway:gateway_test" }
     steps:
       - uses: actions/checkout@v4
       - uses: ippoan/setup-bazel@main
@@ -430,54 +423,6 @@ jobs:
             tag-suffix: ""
             extra-copy: "migrations"
             staging-bin: "rust-alc-api"
-          - name: gateway
-            targets: "//crates/gateway"
-            binaries: "gateway"
-            bin-paths: "bazel-bin/crates/gateway/gateway"
-            dockerfile: Dockerfile.gateway
-            tag-suffix: "-gateway"
-            extra-copy: ""
-            staging-bin: ""
-          - name: tenko
-            targets: "//crates/tenko-api //:migrate"
-            binaries: "tenko-api"
-            bin-paths: "bazel-bin/crates/tenko-api/tenko-api"
-            dockerfile: Dockerfile.tenko
-            tag-suffix: "-tenko"
-            extra-copy: ""
-            staging-bin: "tenko-api"
-          - name: carins
-            targets: "//crates/carins-api //:migrate"
-            binaries: "carins-api"
-            bin-paths: "bazel-bin/crates/carins-api/carins-api"
-            dockerfile: Dockerfile.carins
-            tag-suffix: "-carins"
-            extra-copy: ""
-            staging-bin: "carins-api"
-          - name: dtako
-            targets: "//crates/dtako-api //:migrate"
-            binaries: "dtako-api"
-            bin-paths: "bazel-bin/crates/dtako-api/dtako-api"
-            dockerfile: Dockerfile.dtako
-            tag-suffix: "-dtako"
-            extra-copy: ""
-            staging-bin: "dtako-api"
-          - name: trouble
-            targets: "//crates/trouble-api //:migrate"
-            binaries: "trouble-api"
-            bin-paths: "bazel-bin/crates/trouble-api/trouble-api"
-            dockerfile: Dockerfile.trouble
-            tag-suffix: "-trouble"
-            extra-copy: ""
-            staging-bin: "trouble-api"
-          - name: camera
-            targets: "//crates/alc-camera-api //:migrate"
-            binaries: "alc-camera-api"
-            bin-paths: "bazel-bin/crates/alc-camera-api/alc-camera-api"
-            dockerfile: Dockerfile.camera
-            tag-suffix: "-camera"
-            extra-copy: ""
-            staging-bin: "alc-camera-api"
     steps:
       - uses: actions/checkout@v4
 
@@ -609,7 +554,6 @@ jobs:
           - { name: storage, target: "//crates/alc-storage:alc-storage_test" }
           - { name: tenko, target: "//crates/alc-tenko:alc-tenko_test", coverage: "cov-tenko" }
           - { name: trouble, target: "//crates/alc-trouble:alc-trouble_test", coverage: "cov-trouble" }
-          - { name: gateway, target: "//crates/gateway:gateway_test" }
     steps:
       - uses: actions/checkout@v4
       - uses: ippoan/setup-bazel@main
@@ -817,7 +761,8 @@ jobs:
         run: |
           REPO="ghcr.io/${{ github.repository }}"
           SHA="${{ github.sha }}"
-          for suffix in "" "-gateway" "-tenko" "-carins" "-dtako" "-trouble" "-camera"; do
+          # gateway + per-domain 廃止で monolith 1 image のみ (Refs #556)。
+          for suffix in ""; do
             docker pull "${REPO}${suffix}:${SHA}"
             docker tag "${REPO}${suffix}:${SHA}" "${REPO}${suffix}:dev"
             docker push "${REPO}${suffix}:dev"
@@ -844,7 +789,8 @@ jobs:
         run: |
           REPO="ghcr.io/${{ github.repository }}"
           SHA="${{ github.sha }}"
-          for suffix in "" "-gateway" "-tenko" "-carins" "-dtako" "-trouble" "-camera"; do
+          # gateway + per-domain 廃止で monolith 1 image のみ (Refs #556)。
+          for suffix in ""; do
             docker pull "${REPO}${suffix}:dev"
             docker tag "${REPO}${suffix}:dev" "${REPO}${suffix}:${SHA}"
             docker tag "${REPO}${suffix}:dev" "${REPO}${suffix}:latest"
@@ -912,10 +858,12 @@ jobs:
       needs.deploy.result == 'success'
     runs-on: ubuntu-latest
     steps:
-      # gateway の no-traffic (0%) revision に付いた preview tag (block A, deploy.yml)
+      # backend (monolith) の no-traffic (0%) revision に付いた preview tag (deploy.yml)
       # の URL を解決して pending-release の preview_url に載せるため GCP に auth する。
-      # frontends は production で alc-api.ippoan.org (= gateway) を叩くので、admin が
-      # flip 前 E2E に使う preview URL は gateway の tagged URL を採る (Refs ci-dashboard#260)。
+      # gateway + per-domain は #556 で廃止。frontends は production で
+      # alc-api.ippoan.org (= backend monolith に domain-mapping) を叩くので、admin が
+      # flip 前 E2E に使う preview URL は backend の tagged URL を採る (Refs ci-dashboard#260)。
+      # auth-worker の ALC_API_PREVIEW_HOST_SUFFIX も backend を指すよう設定済み。
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
         with:
@@ -948,19 +896,20 @@ jobs:
           # にするため version_id を読まない (Refs ippoan/ci-dashboard#248)。よって
           # ダミーの pending-<tag> ではなく release tag をそのまま入れる。
           version_id="$TAG"
-          # preview_url: gateway の no-traffic revision に付いた preview tag の URL を
-          # GCP から解決する (deploy.yml が付ける tag = release タグの sanitize 版)。
+          # preview_url: backend (monolith) の no-traffic revision に付いた preview tag の
+          # URL を GCP から解決する (deploy.yml が付ける tag = release タグの sanitize 版)。
+          # gateway 廃止 (#556) で backend が alc-api.ippoan.org を提供するため backend を採る。
           # admin が CF Access (preview-*.ippoan.org) 経由で flip 前 E2E に使う。
           # best-effort: 解決できなくても pending-release 自体は preview_url 無しで送る。
           preview_tag="$(printf '%s' "${TAG##*/}" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9' '-' | sed -e 's/-\{2,\}/-/g' -e 's/^-//' -e 's/-$//' | cut -c1-60)"
-          preview_url=$(gcloud run services describe rust-alc-api-gateway \
+          preview_url=$(gcloud run services describe rust-alc-api \
             --region "$GCP_REGION" --project "$GCP_PROJECT" --format=json 2>/dev/null \
             | jq -r --arg t "$preview_tag" '.status.traffic[]? | select(.tag==$t) | .url' \
             | head -1 || true)
           if [ -n "${preview_url:-}" ]; then
             echo "resolved preview_url=$preview_url (tag=$preview_tag)"
           else
-            echo "::notice::gateway preview URL (tag=$preview_tag) を解決できず。preview_url 無しで報告。"
+            echo "::notice::backend preview URL (tag=$preview_tag) を解決できず。preview_url 無しで報告。"
           fi
           payload=$(jq -nc \
             --arg repo "$REPO" --arg version_id "$version_id" --arg tag "$TAG" \
@@ -999,7 +948,7 @@ jobs:
           repo: ${{ github.repository }}
           gcp_project: cloudsql-sv
           gcp_region: asia-northeast1
-          services_json: '["rust-alc-api","rust-alc-api-gateway","rust-alc-api-tenko","rust-alc-api-carins","rust-alc-api-dtako","rust-alc-api-trouble"]'
+          services_json: '["rust-alc-api"]'
           release_wave_gcp_base_url: https://release-wave-gcp-staging-566bls5vfq-an.a.run.app
           gcp_api_key: ${{ secrets.RELEASE_WAVE_GCP_API_KEY }}
           ci_dashboard_base_url: https://ci-dashboard.ippoan.org
