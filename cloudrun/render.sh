@@ -3,7 +3,7 @@
 # Generates a Cloud Run service YAML for any service × environment combination.
 #
 # Usage: bash cloudrun/render.sh <service> <environment> <image_sha> [options]
-#   service:     backend | gateway | tenko | carins | dtako | trouble | camera
+#   service:     backend  (gateway + per-domain は #556 で廃止、monolith 1 本のみ)
 #   environment: staging | production
 #   image_sha:   Docker image SHA tag
 #
@@ -46,25 +46,15 @@ REGION="asia-northeast1"
 # ---------------------------------------------------------------------------
 # Service name and image
 # ---------------------------------------------------------------------------
+# gateway + per-domain は #556 で廃止。monolith (backend) のみ受け付ける。
 case "$SERVICE" in
   backend)  SUFFIX="";         BIN="rust-alc-api" ;;
-  gateway)  SUFFIX="-gateway"; BIN="gateway" ;;
-  tenko)    SUFFIX="-tenko";   BIN="tenko-api" ;;
-  carins)   SUFFIX="-carins";  BIN="carins-api" ;;
-  dtako)    SUFFIX="-dtako";   BIN="dtako-api" ;;
-  trouble)  SUFFIX="-trouble"; BIN="trouble-api" ;;
-  camera)   SUFFIX="-camera";  BIN="alc-camera-api" ;;
-  *) echo "Unknown service: $SERVICE" >&2; exit 1 ;;
+  *) echo "Unknown service: $SERVICE (gateway/per-domain は #556 で廃止済み)" >&2; exit 1 ;;
 esac
 
 if [[ "$ENV" == "staging" ]]; then
   SERVICE_NAME="rust-alc-api-staging${SUFFIX}"
-  # Gateway has no sidecar, so use the production image directly
-  if [[ "$SERVICE" == "gateway" ]]; then
-    IMAGE="${AR_PREFIX}/${REPO}${SUFFIX}:${IMAGE_SHA}"
-  else
-    IMAGE="${AR_PREFIX}/${REPO}${SUFFIX}-staging:${IMAGE_SHA}"
-  fi
+  IMAGE="${AR_PREFIX}/${REPO}${SUFFIX}-staging:${IMAGE_SHA}"
 else
   SERVICE_NAME="rust-alc-api${SUFFIX}"
   IMAGE="${AR_PREFIX}/${REPO}${SUFFIX}:${IMAGE_SHA}"
@@ -286,163 +276,6 @@ YAML
 YAML
 }
 
-emit_env_gateway() {
-  # Gateway URLs differ: staging uses Cloud Run service URLs, production discovers them
-  cat <<YAML
-            - name: BACKEND_URL
-              value: "PLACEHOLDER_BACKEND_URL"
-            - name: TENKO_API_URL
-              value: "PLACEHOLDER_TENKO_URL"
-            - name: CARINS_API_URL
-              value: "PLACEHOLDER_CARINS_URL"
-            - name: DTAKO_API_URL
-              value: "PLACEHOLDER_DTAKO_URL"
-            - name: TROUBLE_API_URL
-              value: "PLACEHOLDER_TROUBLE_URL"
-            - name: CAMERA_API_URL
-              value: "PLACEHOLDER_CAMERA_URL"
-            # Refs #479 PR-2: gateway は JWT_SECRET を持たず、ユーザー JWT の
-            # 検証を auth-worker /auth/introspect に委譲する。
-            - name: AUTH_WORKER_URL
-              value: "$( [[ "$ENV" == "staging" ]] && echo "https://auth-worker-staging.m-tama-ramu.workers.dev" || echo "https://auth.ippoan.org" )"
-            - name: INTERNAL_SHARED_SECRET
-              valueFrom:
-                secretKeyRef:
-                  key: latest
-                  name: INTERNAL_SHARED_SECRET
-            - name: RUST_LOG
-              value: "gateway=info,tower_http=info"
-YAML
-}
-
-emit_env_tenko() {
-  cat <<YAML
-            - name: RUST_LOG
-              value: "tenko_api=info"
-YAML
-  emit_database_url
-}
-
-emit_env_carins() {
-  cat <<YAML
-            - name: STORAGE_BACKEND
-              value: "r2"
-            - name: CARINS_R2_BUCKET
-              value: "${ENV_CARINS_R2_BUCKET:-rust-logi-files}"
-            - name: CARINS_R2_ACCOUNT_ID
-              value: "${ENV_CARINS_R2_ACCOUNT_ID:-8556e484b273a868db8ec6800b074834}"
-            - name: CARINS_R2_ACCESS_KEY
-              valueFrom:
-                secretKeyRef:
-                  key: latest
-                  name: carins-r2-access-key
-            - name: CARINS_R2_SECRET_KEY
-              valueFrom:
-                secretKeyRef:
-                  key: latest
-                  name: carins-r2-secret-key
-            - name: RUST_LOG
-              value: "carins_api=info"
-YAML
-  emit_database_url
-}
-
-emit_env_dtako() {
-  cat <<YAML
-            - name: STORAGE_BACKEND
-              value: "r2"
-            - name: DTAKO_R2_BUCKET
-              value: "${ENV_DTAKO_R2_BUCKET:-ohishi-dtako}"
-            - name: DTAKO_R2_ACCOUNT_ID
-              value: "${ENV_DTAKO_R2_ACCOUNT_ID:-8556e484b273a868db8ec6800b074834}"
-            - name: DTAKO_R2_ACCESS_KEY
-              valueFrom:
-                secretKeyRef:
-                  key: latest
-                  name: dtako-r2-access-key
-            - name: DTAKO_R2_SECRET_KEY
-              valueFrom:
-                secretKeyRef:
-                  key: latest
-                  name: dtako-r2-secret-key
-            # email-receiver Worker からの internal ingest (POST /api/dtako/tickets)
-            # 検証用。empty なら dtako-api/src/main.rs:114 で internal route を disable
-            # するので、未投入の prod でも safe fallback。値は ippoan 4 worker と共有
-            # (Refs auth-worker CLAUDE.md "2026-05-24: prod/staging 統合")。
-            - name: INTERNAL_SHARED_SECRET
-              valueFrom:
-                secretKeyRef:
-                  key: latest
-                  name: INTERNAL_SHARED_SECRET
-            - name: RUST_LOG
-              value: "dtako_api=info"
-YAML
-  emit_database_url
-}
-
-emit_env_trouble() {
-  cat <<YAML
-            - name: RUST_LOG
-              value: "trouble_api=info"
-            - name: R2_ACCOUNT_ID
-              value: "24b45709d060d957340180e995f0d373"
-            - name: TROUBLE_R2_BUCKET
-              value: "${ENV_TROUBLE_R2_BUCKET:-trouble-files}"
-            - name: TROUBLE_R2_ACCESS_KEY
-              valueFrom:
-                secretKeyRef:
-                  key: latest
-                  name: trouble-r2-access-key
-            - name: TROUBLE_R2_SECRET_KEY
-              valueFrom:
-                secretKeyRef:
-                  key: latest
-                  name: trouble-r2-secret-key
-            # 通知予約の発火基盤 schedule-alarm DO worker (Refs #550/#551)。
-            - name: SCHEDULE_ALARM_URL
-              value: "$( [[ "$ENV" == "staging" ]] && echo "https://alarm.notify-staging.ippoan.org" || echo "https://alarm.notify.ippoan.org" )"
-            # alarm 登録の認証 (既存 secret 再利用、prod/staging 統合済)。
-            - name: INTERNAL_SHARED_SECRET
-              valueFrom:
-                secretKeyRef:
-                  key: latest
-                  name: INTERNAL_SHARED_SECRET
-            # LineworksTroubleNotifier が bot config を復号するのに必要。
-            - name: SSO_ENCRYPTION_KEY
-              valueFrom:
-                secretKeyRef:
-                  key: latest
-                  name: sso-encryption-key
-YAML
-  emit_database_url
-}
-
-emit_env_camera() {
-  cat <<YAML
-            - name: RUST_LOG
-              value: "alc_camera_api=info,alc_camera=info"
-YAML
-  emit_database_url
-}
-
-# Shared helper: emit DATABASE_URL (staging=localhost, production=Secret Manager)
-emit_database_url() {
-  if [[ "$ENV" == "staging" ]]; then
-    cat <<YAML
-            - name: DATABASE_URL
-              value: "postgresql://postgres:staging@localhost:5432/postgres?options=-c search_path=alc_api"
-YAML
-  else
-    cat <<YAML
-            - name: DATABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  key: latest
-                  name: alc-app-database-url
-YAML
-  fi
-}
-
 # ---------------------------------------------------------------------------
 # Environment-specific values
 # ---------------------------------------------------------------------------
@@ -468,47 +301,31 @@ else
   MIN_SCALE="0"
 fi
 
-# Resource limits per service
-case "$SERVICE" in
-  backend) MEMORY="512Mi"; CPU="1"   ;;
-  gateway) MEMORY="256Mi"; CPU="1"   ;;
-  tenko)   MEMORY="256Mi"; CPU="1"   ;;
-  carins)  MEMORY="256Mi"; CPU="1"   ;;
-  dtako)   MEMORY="512Mi"; CPU="1"   ;;
-  trouble) MEMORY="256Mi"; CPU="1"   ;;
-  camera)  MEMORY="256Mi"; CPU="1"   ;;
-esac
+# Resource limits (monolith backend のみ、Refs #556)
+MEMORY="512Mi"; CPU="1"
 
 # Port
-case "$SERVICE" in
-  gateway) PORT="8080" ;;
-  *)       PORT="8080" ;;
-esac
+PORT="8080"
 
 # Health check path
-case "$SERVICE" in
-  backend) HEALTH_PATH="/api/health" ;;
-  *)       HEALTH_PATH="/health" ;;
-esac
+HEALTH_PATH="/api/health"
 
-# Gateway and backend are public, others are internal
-if [[ "$SERVICE" == "gateway" || "$SERVICE" == "backend" ]]; then
-  INGRESS="all"
-fi
+# backend は public (allUsers 削除後は #434 lockdown で IAM 非強制のまま無害)
+INGRESS="all"
 
 # ---------------------------------------------------------------------------
 # Generate YAML
 # ---------------------------------------------------------------------------
 
-# Sidecar annotations
+# Sidecar annotations (staging は postgres sidecar を app が依存)
 SIDECAR_ANNOTATIONS=""
-if [[ "$ENV" == "staging" && "$SERVICE" != "gateway" ]]; then
+if [[ "$ENV" == "staging" ]]; then
   SIDECAR_ANNOTATIONS="
         run.googleapis.com/container-dependencies: '{\"app\":[\"postgres\"]}'"
 fi
 
 LAUNCH_STAGE=""
-if [[ "$ENV" == "staging" && "$SERVICE" != "gateway" ]]; then
+if [[ "$ENV" == "staging" ]]; then
   LAUNCH_STAGE="
     run.googleapis.com/launch-stage: BETA"
 fi
@@ -521,16 +338,13 @@ fi
 #     custom-audiences への明示登録が必須。staging は run.app URL = default audience
 #     なので登録不要 (alc-api-internal だけで足りる)。
 # public のままなら IAM 非強制で無害。
-CUSTOM_AUDIENCES=""
-if [[ "$SERVICE" == "backend" ]]; then
-  if [[ "$ENV" == "staging" ]]; then
-    AUDS='["alc-api-internal"]'
-  else
-    AUDS='["alc-api-internal","https://alc-api.ippoan.org"]'
-  fi
-  CUSTOM_AUDIENCES="
-    run.googleapis.com/custom-audiences: '${AUDS}'"
+if [[ "$ENV" == "staging" ]]; then
+  AUDS='["alc-api-internal"]'
+else
+  AUDS='["alc-api-internal","https://alc-api.ippoan.org"]'
 fi
+CUSTOM_AUDIENCES="
+    run.googleapis.com/custom-audiences: '${AUDS}'"
 
 cat <<YAML
 apiVersion: serving.knative.dev/v1
@@ -570,8 +384,8 @@ $(emit_env_${SERVICE})
             failureThreshold: 15
 YAML
 
-# Sidecar container (staging only, not for gateway)
-if [[ "$ENV" == "staging" && "$SERVICE" != "gateway" ]]; then
+# Sidecar container (staging only): postgres sidecar
+if [[ "$ENV" == "staging" ]]; then
   cat <<YAML
         - name: postgres
           image: ${DB_IMAGE}

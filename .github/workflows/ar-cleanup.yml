@@ -45,12 +45,10 @@ jobs:
       REGION: asia-northeast1
       PROJECT: cloudsql-sv
       DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
+      # gateway + per-domain (prod + staging) は #556 で廃止し monolith 1 本に集約。
+      # 残る image は backend prod / backend staging app / staging postgres sidecar のみ。
       IMAGES: >-
-        rust-alc-api rust-alc-api-gateway rust-alc-api-tenko rust-alc-api-carins
-        rust-alc-api-dtako rust-alc-api-trouble rust-alc-api-camera
-        rust-alc-api-staging rust-alc-api-tenko-staging rust-alc-api-carins-staging
-        rust-alc-api-dtako-staging rust-alc-api-trouble-staging
-        rust-alc-api-camera-staging rust-alc-api-staging-db
+        rust-alc-api rust-alc-api-staging rust-alc-api-staging-db
     steps:
       - uses: google-github-actions/auth@v2
         with:

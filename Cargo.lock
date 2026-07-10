@@ -70,24 +70,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "alc-camera-api"
-version = "0.1.0"
-dependencies = [
- "alc-camera",
- "alc-core",
- "alc-trouble",
- "async-trait",
- "axum",
- "serde_json",
- "sqlx",
- "tokio",
- "tower-http",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
 name = "alc-carins"
 version = "0.1.0"
 dependencies = [
@@ -795,21 +777,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "carins-api"
-version = "0.1.0"
-dependencies = [
- "alc-carins",
- "alc-core",
- "alc-storage",
- "axum",
- "sqlx",
- "tokio",
- "tower-http",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "cbc"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1213,21 +1180,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b"
 
 [[package]]
-name = "dtako-api"
-version = "0.1.0"
-dependencies = [
- "alc-core",
- "alc-dtako",
- "alc-storage",
- "axum",
- "sqlx",
- "tokio",
- "tower-http",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "dtoa"
 version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1548,23 +1500,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c31b6d751ae2c7f11320402d34e41349dd1016f8d5d45e48c4312bc8625af50c"
 dependencies = [
  "byteorder",
-]
-
-[[package]]
-name = "gateway"
-version = "0.1.0"
-dependencies = [
- "axum",
- "http 1.4.0",
- "reqwest",
- "serde",
- "serde_json",
- "tokio",
- "tower-http",
- "tracing",
- "tracing-subscriber",
- "uuid",
- "wiremock",
 ]
 
 [[package]]
@@ -4506,20 +4441,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tenko-api"
-version = "0.1.0"
-dependencies = [
- "alc-core",
- "alc-tenko",
- "axum",
- "sqlx",
- "tokio",
- "tower-http",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "termcolor"
 version = "1.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4876,23 +4797,6 @@ dependencies = [
  "tracing-core",
  "tracing-log",
  "tracing-serde",
-]
-
-[[package]]
-name = "trouble-api"
-version = "0.1.0"
-dependencies = [
- "alc-core",
- "alc-misc",
- "alc-notify",
- "alc-storage",
- "alc-trouble",
- "axum",
- "sqlx",
- "tokio",
- "tower-http",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]

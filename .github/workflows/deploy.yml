@@ -31,9 +31,8 @@ jobs:
   #   - staging app image → ci.yml build-image job (bazel-bin から直接 build)
   #   - staging-db image  → ci.yml staging-db job
   # 本 workflow が呼ばれる時点 (ci.yml deploy job の needs 充足後) で
-  # ${REPO}${suffix}-staging:${sha} / ${REPO}-staging-db:latest は push 済み。
-  # これにより deploy leg の直列 hop が staging-images → deploy-services →
-  # deploy-gateway の 3 段から deploy-services ∥ deploy-gateway の 1 段になる。
+  # ${REPO}-staging:${sha} / ${REPO}-staging-db:latest は push 済み。
+  # gateway + per-domain は #556 で廃止し、deploy は monolith (backend) 1 本のみ。
   # ---------------------------------------------------------------------------
   # ---------------------------------------------------------------------------
   # Production: promote dev → version tag
@@ -57,7 +56,8 @@ jobs:
           REPO="${{ env.REPO }}"
           TAG="${{ inputs.ref_name }}"
           SHA="${{ inputs.image_sha }}"
-          for suffix in "" "-gateway" "-tenko" "-carins" "-dtako" "-trouble" "-camera"; do
+          # gateway + per-domain 廃止で monolith (backend) の 1 image のみ (Refs #556)。
+          for suffix in ""; do
             docker pull "${REPO}${suffix}:dev"
             docker tag "${REPO}${suffix}:dev" "${REPO}${suffix}:${TAG}"
             docker tag "${REPO}${suffix}:dev" "${REPO}${suffix}:${SHA}"
@@ -124,7 +124,7 @@ jobs:
       # 独立してロールバックする (Refs #375)。
       fail-fast: false
       matrix:
-        service: [backend, tenko, carins, dtako, trouble, camera]
+        service: [backend]
     steps:
       - uses: actions/checkout@v4
 
@@ -297,186 +297,6 @@ jobs:
               done || true
 
   # ---------------------------------------------------------------------------
-  # Deploy gateway (after other services, needs their URLs)
-  # ---------------------------------------------------------------------------
-  deploy-gateway:
-    name: "Deploy gateway"
-    # deploy-services と並列 (Refs #482)。gateway が必要とするのは各 service の
-    # `status.url` だけで、Cloud Run の URL は revision が変わっても不変のため
-    # deploy-services の完了を待つ理由がない (service が存在しさえすればよい)。
-    # 例外は完全新規環境の bootstrap (service 未作成で describe が空を返す) のみ
-    # — その場合は deploy-services 完走後に re-run すれば正しい URL で render
-    # される。旧 needs: [deploy-services] は直列 hop ~1 分を deploy leg に
-    # 追加していた。
-    needs: [promote-images, migrate]
-    if: >-
-      always() && (
-        github.event_name == 'pull_request' ||
-        (startsWith(github.ref, 'refs/tags/v') && needs.migrate.result == 'success')
-      )
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Authenticate to GCP
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
-
-      - name: Capture current serving revision (for rollback)
-        run: |
-          set -euo pipefail
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            SVC="rust-alc-api-staging-gateway"
-          else
-            SVC="rust-alc-api-gateway"
-          fi
-          PREV=""
-          if JSON=$(gcloud run services describe "$SVC" \
-               --region ${{ env.REGION }} --project ${{ env.PROJECT }} --format=json 2>/dev/null); then
-            PREV=$(printf '%s' "$JSON" | jq -r \
-              '(([.status.traffic[]? | select((.percent // 0) > 0) | .revisionName] | map(select(. != null)))[0]) // ""')
-          fi
-          echo "ROLLBACK_SVC=$SVC" >> "$GITHUB_ENV"
-          echo "PREV_REVISION=$PREV" >> "$GITHUB_ENV"
-          echo "captured serving revision for rollback: ${PREV:-<none>} (svc=$SVC)"
-
-      - name: Render gateway YAML with service URLs
-        id: deploy
-        env:
-          REF_NAME: ${{ inputs.ref_name }}
-        run: |
-          set -euo pipefail
-          # Discover backend/service URLs
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            BACKEND_URL=$(gcloud run services describe rust-alc-api-staging \
-              --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
-              --format 'value(status.url)')
-            TENKO_URL=$(gcloud run services describe rust-alc-api-staging-tenko \
-              --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
-              --format 'value(status.url)' 2>/dev/null || echo "")
-            CARINS_URL=$(gcloud run services describe rust-alc-api-staging-carins \
-              --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
-              --format 'value(status.url)' 2>/dev/null || echo "")
-            DTAKO_URL=$(gcloud run services describe rust-alc-api-staging-dtako \
-              --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
-              --format 'value(status.url)' 2>/dev/null || echo "")
-            TROUBLE_URL=$(gcloud run services describe rust-alc-api-staging-trouble \
-              --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
-              --format 'value(status.url)' 2>/dev/null || echo "")
-            CAMERA_URL=$(gcloud run services describe rust-alc-api-staging-camera \
-              --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
-              --format 'value(status.url)' 2>/dev/null || echo "")
-          else
-            BACKEND_URL=$(gcloud run services describe rust-alc-api \
-              --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
-              --format 'value(status.url)')
-            TENKO_URL=$(gcloud run services describe rust-alc-api-tenko \
-              --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
-              --format 'value(status.url)' 2>/dev/null || echo "")
-            CARINS_URL=$(gcloud run services describe rust-alc-api-carins \
-              --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
-              --format 'value(status.url)' 2>/dev/null || echo "")
-            DTAKO_URL=$(gcloud run services describe rust-alc-api-dtako \
-              --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
-              --format 'value(status.url)' 2>/dev/null || echo "")
-            TROUBLE_URL=$(gcloud run services describe rust-alc-api-trouble \
-              --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
-              --format 'value(status.url)' 2>/dev/null || echo "")
-            CAMERA_URL=$(gcloud run services describe rust-alc-api-camera \
-              --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
-              --format 'value(status.url)' 2>/dev/null || echo "")
-          fi
-
-          # Render gateway YAML
-          if [ "${{ github.event_name }}" = "pull_request" ]; then GW_ENV="staging"; else GW_ENV="production"; fi
-          GW_RENDER_ARGS="gateway ${GW_ENV} ${{ inputs.image_sha }}"
-          if [ "${GW_ENV}" = "production" ]; then
-            # production gateway も新 revision を 0% (no-traffic) で deploy し traffic は
-            # 現 revision に残す (切替は Release Wave flip)。Refs #137 Phase 5。
-            CURRENT_REV=""
-            if GW_JSON=$(gcloud run services describe rust-alc-api-gateway \
-                 --region ${{ env.REGION }} --project ${{ env.PROJECT }} --format=json 2>/dev/null); then
-              CURRENT_REV=$(printf '%s' "$GW_JSON" | jq -r \
-                '(([.status.traffic[]? | select((.percent // 0) > 0) | .revisionName] | map(select(. != null)))[0]) // .status.latestReadyRevisionName // ""')
-            fi
-            if [ -n "$CURRENT_REV" ]; then
-              GW_RENDER_ARGS="${GW_RENDER_ARGS} --pin-traffic-revision ${CURRENT_REV}"
-              # gateway も no-traffic (0%) revision に release タグ由来の revision tag を付ける
-              # (admin が CF Access 経由で flip 前 E2E 検証する。Refs ippoan/ci-dashboard#260)。
-              GW_PREVIEW_TAG="$(printf '%s' "${REF_NAME##*/}" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9' '-' | sed -e 's/-\{2,\}/-/g' -e 's/^-//' -e 's/-$//' | cut -c1-60)"
-              GW_RENDER_ARGS="${GW_RENDER_ARGS} --pending-tag ${GW_PREVIEW_TAG}"
-              echo "::notice::gateway production no-traffic deploy: keep 100% on ${CURRENT_REV}; new revision -> 0% (preview tag=${GW_PREVIEW_TAG})."
-            else
-              echo "::warning::no current revision for rust-alc-api-gateway (first deploy?) — default traffic (latest 100%)."
-            fi
-          fi
-          bash cloudrun/render.sh ${GW_RENDER_ARGS} \
-            > /tmp/gateway.yaml
-
-          # Replace gateway URL placeholders
-          sed -i \
-            -e "s|PLACEHOLDER_BACKEND_URL|${BACKEND_URL}|" \
-            -e "s|PLACEHOLDER_TENKO_URL|${TENKO_URL}|" \
-            -e "s|PLACEHOLDER_CARINS_URL|${CARINS_URL}|" \
-            -e "s|PLACEHOLDER_DTAKO_URL|${DTAKO_URL}|" \
-            -e "s|PLACEHOLDER_TROUBLE_URL|${TROUBLE_URL}|" \
-            -e "s|PLACEHOLDER_CAMERA_URL|${CAMERA_URL}|" \
-            /tmp/gateway.yaml
-
-          echo "=== Gateway YAML ==="
-          cat /tmp/gateway.yaml
-
-          gcloud run services replace /tmp/gateway.yaml \
-            --region ${{ env.REGION }} \
-            --project ${{ env.PROJECT }}
-
-      - name: Rollback traffic on deploy failure
-        # gateway deploy が失敗した時だけ直前 serving revision に traffic を戻す
-        # (Refs #375)。staging の 100% フリップ救済 / production では冪等。
-        if: always() && steps.deploy.outcome == 'failure' && env.PREV_REVISION != ''
-        run: |
-          echo "::warning::gateway deploy failed — restoring 100% traffic to ${PREV_REVISION} on ${ROLLBACK_SVC}"
-          gcloud run services update-traffic "${ROLLBACK_SVC}" \
-            --to-revisions="${PREV_REVISION}=100" \
-            --region ${{ env.REGION }} \
-            --project ${{ env.PROJECT }}
-
-      - name: Ensure public access
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then SVC="rust-alc-api-staging-gateway"
-          else SVC="rust-alc-api-gateway"; fi
-          gcloud run services add-iam-policy-binding "$SVC" \
-            --region ${{ env.REGION }} \
-            --member="allUsers" \
-            --role="roles/run.invoker" \
-            --project ${{ env.PROJECT }}
-
-      - name: Print gateway URL
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then SVC="rust-alc-api-staging-gateway"
-          else SVC="rust-alc-api-gateway"; fi
-          URL=$(gcloud run services describe "$SVC" \
-            --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
-            --format 'value(status.url)')
-          echo "::notice ::Gateway URL: $URL"
-
-      - name: Print gateway preview URL (production no-traffic tag)
-        if: github.event_name != 'pull_request'
-        run: |
-          # gateway の tagged (= preview) traffic target URL を列挙
-          # (Refs ippoan/ci-dashboard#260)。
-          gcloud run services describe rust-alc-api-gateway \
-            --region ${{ env.REGION }} --project ${{ env.PROJECT }} --format=json 2>/dev/null \
-            | jq -r '.status.traffic[]? | select(.tag != null) | "preview tag=\(.tag) url=\(.url)"' \
-            | while IFS= read -r line; do
-                [ -n "$line" ] && echo "::notice ::gateway $line"
-              done || true
-
-  # ---------------------------------------------------------------------------
   # Staging: smoke test /api/notify/ingest after staging deploy
   #
   # email-receiver Worker から backend に届く shared secret 経路の検証。
@@ -571,12 +391,11 @@ jobs:
   # ---------------------------------------------------------------------------
   verify-no-traffic:
     name: "Verify release did not flip traffic"
-    needs: [deploy-services, deploy-gateway]
+    needs: [deploy-services]
     if: >-
       always() &&
       startsWith(github.ref, 'refs/tags/v') &&
-      needs.deploy-services.result == 'success' &&
-      needs.deploy-gateway.result == 'success'
+      needs.deploy-services.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Authenticate to GCP
@@ -590,7 +409,8 @@ jobs:
       - name: Assert latest revision receives 0% traffic
         run: |
           set -euo pipefail
-          SERVICES="rust-alc-api rust-alc-api-gateway rust-alc-api-tenko rust-alc-api-carins rust-alc-api-dtako rust-alc-api-trouble rust-alc-api-camera"
+          # gateway + per-domain 廃止で monolith (rust-alc-api) 1 本のみ検証 (Refs #556)。
+          SERVICES="rust-alc-api"
           fail=0
           for SVC in $SERVICES; do
             echo "::group::$SVC traffic split"
