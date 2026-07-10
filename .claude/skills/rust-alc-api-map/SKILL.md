@@ -1,29 +1,32 @@
 ---
 name: rust-alc-api-map
-generated-from: rust-alc-api:91b02a4ea763ca1d6310e8326cf13987130688d2
+generated-from: rust-alc-api:a509da33dea73adf0f86477eda097a12e4fbf226
 paths: [crates/, src/, migrations/]
-description: rust-alc-api (アルコールチェッカー基盤の Rust/Axum Cargo workspace — 13 domain crate + gateway/tenko/carins/dtako/trouble の複数バイナリ、PostgreSQL+RLS、Cloud Run) の構造ナビゲーション。どの crate に何のルートがあるか / monolith(rust-alc-api) と per-domain API + gateway の二系統 / RLS・migration・deploy/release 分離の gotcha を 1 枚にまとめる。トリガー:「rust-alc-api」「alc-api」「alc-notify」「alc-tenko」「alc-trouble」「alc-carins」「alc-dtako」「gateway」「tenko-api」「carins-api」「dtako-api」「trouble-api」「RLS テナント」「sqlx migration」「ts-rs」「Release Wave」「Bazel」等。
+description: rust-alc-api (アルコールチェッカー基盤の Rust/Axum Cargo workspace — domain crate 群 + monolith 単一バイナリ、PostgreSQL+RLS、Cloud Run) の構造ナビゲーション。どの crate に何のルートがあるか / monolith (rust-alc-api) 一本化 (gateway + per-domain は #556 で廃止) / RLS・migration・deploy/release 分離の gotcha を 1 枚にまとめる。トリガー:「rust-alc-api」「alc-api」「alc-notify」「alc-tenko」「alc-trouble」「alc-carins」「alc-dtako」「gateway」「tenko-api」「carins-api」「dtako-api」「trouble-api」「RLS テナント」「sqlx migration」「ts-rs」「Release Wave」「Bazel」等。
 ---
 
 # rust-alc-api-map — rust-alc-api 構造ナビゲーション
 
-アルコールチェッカーシステムの backend。Cargo workspace で **13 の domain crate** (`alc-*`)
-+ **複数バイナリ** を持つ。PostgreSQL (`alc_api` スキーマ + RLS) / Cloudflare R2 (or GCS) /
+アルコールチェッカーシステムの backend。Cargo workspace で **domain crate 群** (`alc-*`)
++ **monolith 単一バイナリ** を持つ。PostgreSQL (`alc_api` スキーマ + RLS) / Cloudflare R2 (or GCS) /
 Google OAuth + LINE WORKS。Cloud Run にデプロイ。
 
 > ここは索引。網羅ではない。実ルートの完全列挙や関数シグネチャは repo 側が正。
 > frontmatter の `generated-from` が現 tree-sha とズレたら hook が再生成を促す。
 
-## 二系統のバイナリ構成 (重要)
+## バイナリ構成 (monolith 一本化、Refs #556)
 
 | 系統 | バイナリ | 役割 |
 |---|---|---|
-| **monolith** | `rust-alc-api` (`src/main.rs`) | 全 domain crate の router を `/api` 下に一括 nest。全 repo を 1 プロセスで提供 |
-| **gateway** | `gateway` (`crates/gateway`) | 認証 + reverse proxy。ユーザー JWT の検証は auth-worker `/auth/introspect` に委譲 (#479 PR-2、gateway は JWT_SECRET を持たない)。public route 判定 (`routes.rs::is_public_route`) して各 per-domain API へ転送 |
-| **per-domain API** | `tenko-api` / `carins-api` / `dtako-api` / `trouble-api` | 各 domain crate の router だけを単独で立てる薄い main。`X-Tenant-ID` header 認証 (`require_tenant_header`) |
+| **monolith** | `rust-alc-api` (`src/main.rs`) | 全 domain crate の router を `/api` 下に一括 nest。全 domain (tenko/carins/dtako/trouble/camera/notify/misc/auth) を 1 プロセスで提供 |
 | **CLI** | `migrate` (`src/bin/migrate.rs`) / `archive` (`src/bin/archive.rs`) | sqlx migration 実行 / アーカイブ Job |
 
-monolith と per-domain API は同じ domain crate (`alc-tenko` 等) を共有 → ルート実装は 1 箇所。
+**gateway (`crates/gateway`) + per-domain API (`tenko-api` / `carins-api` / `dtako-api` /
+`trouble-api` / `alc-camera-api`) は #556 で廃止** (本番・staging とも休眠していたため、
+attack surface と CI 時間削減で monolith に集約)。`alc-api.ippoan.org` は monolith に
+domain-mapping。domain crate (`alc-tenko` 等) は monolith が `.with_state` でマウントする
+router 実装として存続。旧 per-domain は同じ domain crate を単独 main で立てていたが、
+その薄い main (bin crate) だけを削除した。
 
 ## 区画 (workspace crate)
 
@@ -32,13 +35,13 @@ monolith と per-domain API は同じ domain crate (`alc-tenko` 等) を共有 �
 | `alc-core` | 共通基盤: **共有** models / **共有** repository trait / `auth_middleware` / `tenant` / `webhook` (generic 配信) / `realtime_bus` / `redact_broadcast`。**port 化進行中 (Refs #539)**: `fcm` / `device_pair_client` は **trait (port) だけが core に残り、実装 (adapter) は alc-notify / alc-devices へ移設済み**。`auth_google` は internal OIDC 専用に縮小 (login 用 `verify()`/`extra_client_ids` は削除)。ts-rs 型 export 元。**tenko / trouble ドメインの models/trait は alc-tenko / alc-trouble へ分割済み** (Refs #513、再流入は `scripts/check_domain_split.sh` が CI で loud fail)。**新機能は原則ドメイン crate (無ければ新 crate) に置く** — alc-core に足してよいのは全ドメイン共有の基盤だけ。alc-core に struct 1 個足すと 12 test shard + 7 Builds が再ビルドされる (コストは CI 時間で可視) |
 | `alc-auth` | **認証 JWT の発行・検証は auth-worker に完全移管 (#479 PR-3)**。rust に残るのは `internal.rs` の DB プリミティブと me / logout / my_orgs のみ。旧 login/OAuth handler 群 (public_router = Google / LINE / LINE WORKS OAuth / WOFF / password login / refresh / switch-org) は撤去済み。`routes/mod.rs` で `auth` として re-export。`internal.rs` (`internal_router`) は **認証 DB プリミティブを `/api/internal/auth/*` で公開** (sso-config 読み / user upsert-line(works) / **upsert-google** (旧 `/api/auth/google` の tenant 解決 = 招待 → email_domain → STAGING_MODE 自動テナント作成 → 403 を移植) / recipient / refresh-token 保存、`require_internal_jwt` 配下)。token は発行せず user + tenant slug を返すのみで、JWT 組み立ては auth-worker が行う (Refs #434 / #479)。`alc-auth-jwt` leaf crate は `INTERNAL_AUD` 定数のみ残存 |
 | `alc-misc` | health (`/health` + `/health/secret-fingerprint?name=&expected=` = 任意 env の sha256[0..8] と `expected` 突合、`{match: bool}` のみ返し oracle 防止。cross-store drift を CI で自動検出、Refs ippoan/rust-alc-api#424 / ippoan/ci-workflows#131。health_canary = JWT_SECRET drift 検知は #479 PR-3 の JWT_SECRET 全撤去に伴い削除) / measurements / employees / items / api_tokens / sso_admin / tenant_users / timecard / access_requests / staging / upload / bot_admin / members / communication_items / carrying_items / guidance_records |
-| `alc-tenko` | 点呼: tenko_call / tenko_records / tenko_schedules / tenko_sessions / tenko_webhooks / daily_health / equipment_failures / health_baselines / driver_info (alc-misc から移設)。**専用の `models` / `repository` (trait) / `TenkoState` / `overdue` (check_overdue_schedules + TenkoOverdueRepository) を自前で持つ** (alc-core から分割、Refs #513)。route は `tenant_router<S>()` generic で monolith / tenko-api 両対応 |
+| `alc-tenko` | 点呼: tenko_call / tenko_records / tenko_schedules / tenko_sessions / tenko_webhooks / daily_health / equipment_failures / health_baselines / driver_info (alc-misc から移設)。**専用の `models` / `repository` (trait) / `TenkoState` / `overdue` (check_overdue_schedules + TenkoOverdueRepository) を自前で持つ** (alc-core から分割、Refs #513)。route は `tenant_router<S>()` generic を monolith が mount (旧 tenko-api は #556 で廃止) |
 | `alc-carins` | 車検証(carins): car_inspections / car_inspection_files / carins_files / nfc_tags |
 | `alc-dtako` | デジタコ: dtako_* (csv_proxy / daily_hours / drivers / logs / operations / restraint_report(_pdf) / scraper / tickets / upload / vehicles / work_times / y_time_export / event_classifications) / vehicle_settings_dumps。`dtako_tickets` は email-receiver Worker から SD カードエラー通知メールを起票し F-VOS3020 設定 ZIP DL → QR で close する pipeline (Refs ippoan/email-receiver#1)。tenant_router (JWT) + internal_router (`INTERNAL_SHARED_SECRET` + `X-Tenant-ID`) + public_close_router (`close_token` のみ) の 3 経路。`upload` (`dtako_upload.rs`) の `POST /api/upload` は tenant FK 違反 (`dtako_upload_history_tenant_id_fkey` = tenants に tenant_id が無い、staging 揮発 DB で頻出) を 500 に潰さず actionable な 400 で返す (Refs ohishi-exp/dtako-scraper#22)。`scraper` (`dtako_scraper.rs`) は **rust から dtako-scraper への直接中継 (`SCRAPER_URL` 経由の SSE relay) を撤去済み** (Cloud Run は gVisor sandbox で Cloudflare Tunnel/VPC 到達不可のため)。front Worker (`ohishi-exp/nuxt-dtako-admin`) が DO 経由で dtako-scraper に直接 WebSocket 接続し、rust 側は結果受領後の `POST /api/scraper/history` (履歴 insert) と `GET /api/scraper/history` のみを持つ薄い保存専用エンドポイントに縮小 (Refs ohishi-exp/dtako-scraper#17, ohishi-exp/nuxt-dtako-admin#63) |
-| `alc-trouble` | トラブル管理: tickets / files / workflow / categories / offices / progress_statuses / schedules / tasks / task_types / task_statuses / notifications / notifier / cloud_tasks / lineworks_members / **field_layouts** (新規、tenant 単位でチケット入力フォームの表示/非表示・幅・並び順・カスタムラベルを保持する `trouble_field_layouts` テーブル、`GET`/`PUT /api/trouble/field-layout`、settings は JSONB 1 カラムの upsert)。`trouble_tickets` には `counterparty_vehicle`(相手方車両) / `disciplinary_committee`(賞罰委員会) カラムを追加済み (migration 124/125)。**schedule fire は #434 lockdown で internal 化**: `schedules::internal_fire_router` (`/api/internal/trouble/schedules/{id}/fire`, `require_internal_jwt`) を monolith の internal_protected に集約。旧 bare public `fire_router` は撤去。**発火は `worker_alarm::WorkerAlarmClient` (`CloudTasksClient` trait の DO Alarm 実装、Refs #550/#551) で schedule-alarm worker (ippoan/nuxt-notify) に登録**: `PUT/DELETE {SCHEDULE_ALARM_URL}/alarms/{id}`、認証は既存 `INTERNAL_SHARED_SECRET` 再利用。`cloud_tasks` / `notifier` (LineworksTroubleNotifier) は monolith / trouble-api 両バイナリで配線済み (env 未設定なら None + warn)。trouble-api サブサービスは fire を mount しない (gateway が `/api/internal/*` を backend へ振るため)。**fire_schedule はメッセージ先頭にチケット見出し (`person_name`・`occurred_at` の JST 表示 (無ければ `occurred_date`)・`company_name`/`office_name` | `location`、空フィールドは行省略) を連結する (Refs #553)。チケット URL は入れない — LINE アプリ内ブラウザだと Google OAuth が 403 disallowed_useragent でブロックされるため (TROUBLE_FRONTEND_URL は撤去済み)**。見出し用チケット取得は `schedule.tenant_id` 明示の既存 `TroubleTicketsRepository::get` (TenantConn、bypass getter 追加なし)、取得失敗時は loud log + 本文のみ送信。組み立ては pure 関数 `build_ticket_heading` / `build_fire_message` (schedules.rs、unit test 付き)。**専用の `models` (TS derive 付き 32 struct) / `repository` (trait 12 本) / `TroubleState` を自前で持つ** (alc-core から分割、Refs #513 Phase B)。route は `Router<TroubleState>` を monolith が `.with_state` でマウント |
+| `alc-trouble` | トラブル管理: tickets / files / workflow / categories / offices / progress_statuses / schedules / tasks / task_types / task_statuses / notifications / notifier / cloud_tasks / lineworks_members / **field_layouts** (新規、tenant 単位でチケット入力フォームの表示/非表示・幅・並び順・カスタムラベルを保持する `trouble_field_layouts` テーブル、`GET`/`PUT /api/trouble/field-layout`、settings は JSONB 1 カラムの upsert)。`trouble_tickets` には `counterparty_vehicle`(相手方車両) / `disciplinary_committee`(賞罰委員会) カラムを追加済み (migration 124/125)。**schedule fire は #434 lockdown で internal 化**: `schedules::internal_fire_router` (`/api/internal/trouble/schedules/{id}/fire`, `require_internal_jwt`) を monolith の internal_protected に集約。旧 bare public `fire_router` は撤去。**発火は `worker_alarm::WorkerAlarmClient` (`CloudTasksClient` trait の DO Alarm 実装、Refs #550/#551) で schedule-alarm worker (ippoan/nuxt-notify) に登録**: `PUT/DELETE {SCHEDULE_ALARM_URL}/alarms/{id}`、認証は既存 `INTERNAL_SHARED_SECRET` 再利用。`cloud_tasks` / `notifier` (LineworksTroubleNotifier) は monolith で配線済み (env 未設定なら None + warn、旧 trouble-api は #556 で廃止)。**fire_schedule はメッセージ先頭にチケット見出し (`person_name`・`occurred_at` の JST 表示 (無ければ `occurred_date`)・`company_name`/`office_name` | `location`、空フィールドは行省略) を連結する (Refs #553)。チケット URL は入れない — LINE アプリ内ブラウザだと Google OAuth が 403 disallowed_useragent でブロックされるため (TROUBLE_FRONTEND_URL は撤去済み)**。見出し用チケット取得は `schedule.tenant_id` 明示の既存 `TroubleTicketsRepository::get` (TenantConn、bypass getter 追加なし)、取得失敗時は loud log + 本文のみ送信。組み立ては pure 関数 `build_ticket_heading` / `build_fire_message` (schedules.rs、unit test 付き)。**専用の `models` (TS derive 付き 32 struct) / `repository` (trait 12 本) / `TroubleState` を自前で持つ** (alc-core から分割、Refs #513 Phase B)。route は `Router<TroubleState>` を monolith が `.with_state` でマウント |
 | `alc-notify` | LINE/LINE WORKS 配信: recipients / groups / documents / distribute / ingest / line_config / line_webhook / lineworks_* / read_tracker / viewer / email_documents / extract / redact / background_extract / background_redaction。**`line_webhook` は #434 lockdown で internal_router 併設**: `/api/internal/notify/line/webhook` (`require_internal_jwt`、auth-worker の public 受け口が OIDC mint で forward)。署名検証 (全テナント channel secret 照合) は rust 側で、**`list_enabled_line_configs()` SECURITY DEFINER 関数経由で RLS バイパス** (migration 117。生クエリだと未認証パスで `app.current_tenant_id=''` → `''::UUID` キャストが 500 する既知罠)。**ただし 072 の `FORCE ROW LEVEL SECURITY` があると所有者=SECURITY DEFINER 実行ロールにも RLS が効いて関数経由でも 500 するため、migration 118 で `NO FORCE` にして所有者バイパスを効かせている** (devices は元から FORCE 無し)。app ロール (非所有者) には RLS 維持。`public_router` (`/notify/line/webhook`) は LINE Console URL 切替 + allUsers 削除までの移行期間 dual-mount |
 | `alc-devices` | デバイス登録 (`devices`)。kiosk 端末 re-pair (再認証、Refs #495) は `re_pair_policy.rs` (pure 判定 fn) + `devices.rs` の `authorize_repair`/`re_pair` handler。auth-worker `/device/pair-internal` 呼び出しは port/adapter 分離 (Refs #539): trait `DevicePairClient` + `PairedCredential` は `alc-core::device_pair_client` (AppState が trait object を保持するため)、実装 `HttpDevicePairClient` は `alc-devices::device_pair_client`。合成は main.rs。設計 SoT: `docs/plan-device-repair.md` |
-| `alc-camera` | 監視カメラ死活管理 (Refs #345)。障害自動起票は **camera 所有 port `DownTicketSink`** にのみ依存し trouble crate には依存しない (Refs #513 Phase B)。**trouble への adapter (`TroubleDownTicketSink`) は #556 PR1 で per-domain の alc-camera-api binary から monolith `src/main.rs` へ移設済み**。route は `alc_camera::handlers::tenant_router()` (`Router<CameraState>`) を monolith が `require_tenant_header` 配下 (`/api/cameras*`) に `.with_state(camera_state)` でマウント。gateway + per-domain (alc-camera-api 含む) は #556 で廃止予定 (PR2)、camera は本移植で monolith 側に存続 |
+| `alc-camera` | 監視カメラ死活管理 (Refs #345)。障害自動起票は **camera 所有 port `DownTicketSink`** にのみ依存し trouble crate には依存しない (Refs #513 Phase B)。**trouble への adapter (`TroubleDownTicketSink`) は #556 PR1 で per-domain の alc-camera-api binary から monolith `src/main.rs` へ移設済み**。route は `alc_camera::handlers::tenant_router()` (`Router<CameraState>`) を monolith が `require_tenant_header` 配下 (`/api/cameras*`) に `.with_state(camera_state)` でマウント。gateway + per-domain (alc-camera-api 含む) は #556 PR2 で廃止済み、camera は monolith 側に存続 |
 | `alc-storage` | StorageBackend trait + R2 / GCS / HttpProxy 実装 |
 | `alc-csv-parser` / `alc-compare` | CSV パース / 比較ロジック |
 | `alc-pdf` | PDF 生成 (assets/fonts 同梱) |
@@ -63,7 +66,7 @@ monolith と per-domain API は同じ domain crate (`alc-tenko` 等) を共有 �
   **#434 で monolith のローカル JWT 検証を撤去**: 旧 `require_jwt` / `require_tenant` (bare X-Tenant-ID
   フォールバック) / `TenantProxySecret` gate (#437) / 未配線の `require_tenant_or_device` (#436、device-token)
   を全削除し、tenant/admin 経路を `require_tenant_header` に一本化した。rust-alc-api は JWT を検証せず、
-  前段 proxy (CF Worker = alc-app/carins/nuxt-items、または per-domain gateway) が auth-worker
+  前段 proxy (CF Worker = alc-app/carins/nuxt-items、実体は auth-worker の `/alc-proxy` 系) が auth-worker
   `/auth/introspect` で検証して注入する `X-Tenant-ID` / `X-User-*` ヘッダーを信頼する dumb backend。
   外部直叩き防止は **Cloud Run IAM 網層ロックダウン** (proxy の OIDC ID token のみ到達可) が担う
   (確定アーキ #4807535677、step 3)。テストは `tests/common/mod.rs` の `test_proxy_inject` が proxy 役で
@@ -71,19 +74,12 @@ monolith と per-domain API は同じ domain crate (`alc-tenko` 等) を共有 �
   **JWT_SECRET は rust から全撤去済み (#479 完了)**: main.rs の env 読取 / `Extension(JwtSecret)` /
   render.sh の secretKeyRef 注入 / `alc-auth-jwt` の HS256 発行・検証関数 / health_canary を全て削除。
   rust バイナリは HS256 鍵を一切持たず、JWT の発行・検証は auth-worker が単独で担う。
-- **gateway**: `crates/gateway/src/{main,routes,proxy,auth,config}.rs`。`is_public_route` に
-  列挙された path (health / auth/* / tenko-call register / devices register / staging /
-  `/notify/line/webhook` / notify read / access-requests 等) は認証 skip でそのまま proxy。
-  非 public path は **auth-worker `/auth/introspect` に検証委譲** (#479 PR-2):
-  `auth.rs::IntrospectClient` が Bearer token + request `Origin` を POST し
-  (`Authorization: <INTERNAL_SHARED_SECRET>` 生値認証)、`active:true` なら
-  `X-Tenant-ID`/`X-User-*` を注入。失敗/不達/Origin 欠落は未認証として素通し
-  (認可は backend 側)。env: `AUTH_WORKER_URL` + `INTERNAL_SHARED_SECRET`
-  (旧 `JWT_SECRET` は gateway から撤去済み)。
-  **#434 lockdown**: trouble schedule fire は public 列挙から外し internal 化、LINE webhook の
-  判定 path も `/notify/line-webhook` (誤) → `/notify/line/webhook` (実パス) に修正。
-  `resolve_backend` は `/api/internal/*` を **dtako_url (fallback backend)** へ振る = internal
-  ルートは monolith backend が処理する。
+- **gateway (廃止済み、Refs #556 PR2)**: 旧 `crates/gateway` は auth + reverse proxy で
+  `is_public_route` 判定して per-domain へ振る役だったが、本番・staging とも休眠のため削除。
+  introspect 検証 + identity 注入は **auth-worker の `/alc-proxy` / `/alc-internal-proxy` 系**が
+  担い、monolith backend へ直接 forward する (gateway を経由しない)。internal ルート
+  (`/api/internal/*`) も monolith が直接処理する。前段の introspect 委譲設計 (#479 PR-2) 自体は
+  auth-worker 側に存続。
 
 ## gotcha (CLAUDE.md / README 由来)
 
@@ -91,8 +87,8 @@ monolith と per-domain API は同じ domain crate (`alc-tenko` 等) を共有 �
   secret / LINE WORKS bot secret / SSO client_secret の AES-256-GCM 鍵素材
   (`SHA-256(SSO_ENCRYPTION_KEY)`、`alc-core::auth_lineworks::{encrypt,decrypt}_secret`)。
   旧 `or_else(JWT_SECRET)` の env-presence fallback は撤去済み — 未設定は loud に 500。
-  復号側は auth-worker (同 secret の CF binding) と共有。render.sh は backend と trouble に注入
-  (trouble-api も #551 で LineworksTroubleNotifier を配線したため復号経路を持つ)。
+  復号側は auth-worker (同 secret の CF binding) と共有。render.sh は monolith backend に注入
+  (LineworksTroubleNotifier の復号経路も monolith が持つ、旧 trouble-api は #556 で廃止)。
 
 - **DB 接続**: `alc_api_app` ロール (NOBYPASSRLS → RLS 有効) で、**直接接続 port 5432** を使う
   (Supavisor 6543 は `set_config` がリセットされ RLS テナント分離が壊れる)。
@@ -147,9 +143,10 @@ monolith と per-domain API は同じ domain crate (`alc-tenko` 等) を共有 �
   **production の tag release は新 revision を 0% (no-traffic) で deploy するだけ**で traffic は旧 revision に残す。
   実際の切替は **Release Wave flip** が行う。`verify-no-traffic` job がこの不変条件を検証 (latest revision が
   0% traffic でなければ FAIL)。
-- **複数 Dockerfile**: `Dockerfile` (monolith + migrate + archive + PDFium 同梱) / `Dockerfile.gateway` /
-  `.tenko` / `.carins` / `.dtako` / `.trouble`。各 service が個別 Cloud Run service (`rust-alc-api`,
-  `rust-alc-api-gateway`, `rust-alc-api-tenko` ...) として deploy される。`cloudrun/render.sh` が YAML 生成。
+- **単一 Dockerfile**: `Dockerfile` (monolith + migrate + archive + PDFium 同梱) のみ。monolith が
+  単一 Cloud Run service (`rust-alc-api` / staging `rust-alc-api-staging`) として deploy される。
+  `cloudrun/render.sh` が YAML 生成 (service は `backend` のみ受理)。gateway + per-domain の
+  `Dockerfile.*` / per-service deploy は #556 で廃止。
 - **手動 `deploy.sh`** もあり (monolith のみ、AR `cloudsql-sv/alc-app` へ)。通常は CI 経由。
 - **coverage 100% ガード**: `coverage_100.toml` 登録ファイルは CI でリグレッション検出。mock テストは
   domain 別 (`tests/mock_tenko` `mock_dtako` `mock_carins` `mock_trouble` `mock_devices` `mock_misc`)。
