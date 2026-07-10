@@ -193,13 +193,11 @@ fn build_ticket_heading(ticket: &TroubleTicket) -> String {
 }
 
 /// 発火する LINE WORKS メッセージ本体を組み立てる (Refs #553)。
-/// チケットが取得できない場合 (削除済み等) は見出し・URL なしで本文のみ。
-/// `frontend_url` (env `TROUBLE_FRONTEND_URL`) 未設定なら URL 行は省略。
-fn build_fire_message(
-    ticket: Option<&TroubleTicket>,
-    frontend_url: Option<&str>,
-    message: &str,
-) -> String {
+/// チケットが取得できない場合 (削除済み等) は見出しなしで本文のみ。
+/// チケット URL は入れない: LINE (WORKS) のアプリ内ブラウザで開くと Google
+/// OAuth が 403 disallowed_useragent でブロックされ、必ずアクセスエラーに
+/// なるため (Refs #553 フィードバック)。
+fn build_fire_message(ticket: Option<&TroubleTicket>, message: &str) -> String {
     let Some(ticket) = ticket else {
         return message.to_string();
     };
@@ -211,12 +209,6 @@ fn build_fire_message(
         out.push_str("\n\n");
     }
     out.push_str(message);
-    if let Some(base) = frontend_url {
-        let base = base.trim_end_matches('/');
-        if !base.is_empty() {
-            out.push_str(&format!("\n\n{base}/tickets/{}", ticket.id));
-        }
-    }
     out
 }
 
@@ -254,8 +246,7 @@ async fn fire_schedule(
             None
         }
     };
-    let frontend_url = std::env::var("TROUBLE_FRONTEND_URL").ok();
-    let message = build_fire_message(ticket.as_ref(), frontend_url.as_deref(), &schedule.message);
+    let message = build_fire_message(ticket.as_ref(), &schedule.message);
 
     // 通知送信
     if let Some(notifier) = &state.notifier {
@@ -380,43 +371,32 @@ mod tests {
         t.location = String::new();
         assert_eq!(build_ticket_heading(&t), "");
         // 見出しが空でも本文は素のまま (先頭に空行を作らない)
-        assert_eq!(build_fire_message(Some(&t), None, "本文です"), "本文です");
+        assert_eq!(build_fire_message(Some(&t), "本文です"), "本文です");
     }
 
     #[test]
-    fn fire_message_prepends_heading_and_appends_url() {
+    fn fire_message_prepends_heading() {
         let t = ticket_fixture();
-        let msg = build_fire_message(Some(&t), Some("https://trouble.ippoan.org"), "本文です");
+        let msg = build_fire_message(Some(&t), "本文です");
         assert_eq!(
             msg,
-            "松江 寛人  2026-05-19 07:00\n大石運輸/本社 | 本社整備工場前\n\n本文です\n\nhttps://trouble.ippoan.org/tickets/61cf27f0-0000-0000-0000-000000000000"
+            "松江 寛人  2026-05-19 07:00\n大石運輸/本社 | 本社整備工場前\n\n本文です"
         );
     }
 
     #[test]
-    fn fire_message_trims_trailing_slash_of_frontend_url() {
+    fn fire_message_never_contains_ticket_url() {
+        // LINE アプリ内ブラウザで開くと Google OAuth が 403 disallowed_useragent に
+        // なるため、チケット URL は一切入れない (Refs #553 フィードバック)
         let t = ticket_fixture();
-        let msg = build_fire_message(Some(&t), Some("https://trouble.ippoan.org/"), "本文");
-        assert!(msg.ends_with(
-            "\n\nhttps://trouble.ippoan.org/tickets/61cf27f0-0000-0000-0000-000000000000"
-        ));
-    }
-
-    #[test]
-    fn fire_message_omits_url_when_env_unset_or_empty() {
-        let t = ticket_fixture();
-        let msg = build_fire_message(Some(&t), None, "本文");
+        let msg = build_fire_message(Some(&t), "本文");
+        assert!(!msg.contains("http"));
         assert!(!msg.contains("/tickets/"));
-        let msg2 = build_fire_message(Some(&t), Some(""), "本文");
-        assert!(!msg2.contains("/tickets/"));
     }
 
     #[test]
     fn fire_message_body_only_when_ticket_missing() {
-        // チケット削除済み等で取得できない場合は見出しも URL も付けない
-        assert_eq!(
-            build_fire_message(None, Some("https://trouble.ippoan.org"), "本文です"),
-            "本文です"
-        );
+        // チケット削除済み等で取得できない場合は見出しを付けない
+        assert_eq!(build_fire_message(None, "本文です"), "本文です");
     }
 }
