@@ -426,6 +426,9 @@ pub struct DtakoOperationListItem {
     pub operation_date: Option<chrono::NaiveDate>,
     pub driver_name: Option<String>,
     pub vehicle_name: Option<String>,
+    /// 車輌CD (`dtako_vehicles.vehicle_cd`)。一番星 (CAPE#01) の車番との突合キーに使う
+    /// (Refs ohishi-exp/nuxt-dtako-admin#198 Phase 8)。
+    pub vehicle_cd: Option<String>,
     pub total_distance: Option<f64>,
     pub safety_score: Option<f64>,
     pub economy_score: Option<f64>,
