@@ -67,6 +67,19 @@ async fn main() {
             ) as Arc<dyn alc_core::storage::StorageBackend>
         });
 
+    // LINE WORKS メンバー一覧 + 通知予約 fire 時の送信用
+    let bot_admin: Arc<dyn BotAdminRepository> = Arc::new(PgBotAdminRepository::new(pool.clone()));
+    let lw_client = Arc::new(LineworksBotClient::new());
+
+    // 通知予約の発火は schedule-alarm DO worker (ippoan/nuxt-notify) に登録する
+    // (Refs ippoan/rust-alc-api#550/#551)。SCHEDULE_ALARM_URL 未設定なら登録なし (warn)。
+    let trouble_alarm = alc_trouble::worker_alarm::WorkerAlarmClient::from_env();
+    if trouble_alarm.is_none() {
+        tracing::warn!(
+            "SCHEDULE_ALARM_URL not set; trouble schedule alarms are disabled (Refs #551)"
+        );
+    }
+
     let state = TroubleState {
         trouble_tickets: Arc::new(PgTroubleTicketsRepository::new(pool.clone())),
         trouble_files: Arc::new(PgTroubleFilesRepository::new(pool.clone())),
@@ -84,14 +97,16 @@ async fn main() {
         trouble_field_layouts: Arc::new(PgTroubleFieldLayoutsRepository::new(pool.clone())),
         trouble_storage,
         webhook: None,
-        cloud_tasks: None,
-        notifier: None,
+        cloud_tasks: trouble_alarm
+            .map(|c| Arc::new(c) as Arc<dyn alc_trouble::cloud_tasks::CloudTasksClient>),
+        notifier: Some(Arc::new(
+            alc_trouble::notifier::LineworksTroubleNotifier::new(
+                bot_admin.clone(),
+                lw_client.clone(),
+            ),
+        )),
         employees: None,
     };
-
-    // LINE WORKS メンバー一覧用
-    let bot_admin: Arc<dyn BotAdminRepository> = Arc::new(PgBotAdminRepository::new(pool.clone()));
-    let lw_client = Arc::new(LineworksBotClient::new());
 
     let tenant_protected = Router::new()
         .merge(alc_trouble::tickets::tenant_router())

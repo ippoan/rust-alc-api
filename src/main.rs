@@ -307,6 +307,14 @@ async fn main() -> anyhow::Result<()> {
     };
 
     // trouble ドメイン (Refs #513 Phase B) — AppState から分離した TroubleState。
+    // 通知予約の発火は schedule-alarm DO worker (ippoan/nuxt-notify) に登録する
+    // (Refs #550/#551)。SCHEDULE_ALARM_URL 未設定なら従来どおり登録なし (warn)。
+    let trouble_alarm = alc_trouble::worker_alarm::WorkerAlarmClient::from_env();
+    if trouble_alarm.is_none() {
+        tracing::warn!(
+            "SCHEDULE_ALARM_URL not set; trouble schedule alarms are disabled (Refs #551)"
+        );
+    }
     let trouble_state = alc_trouble::TroubleState {
         trouble_tickets,
         trouble_files,
@@ -322,8 +330,14 @@ async fn main() -> anyhow::Result<()> {
         trouble_field_layouts,
         trouble_storage,
         webhook: webhook_service.clone(),
-        cloud_tasks: None,
-        notifier: None,
+        cloud_tasks: trouble_alarm
+            .map(|c| Arc::new(c) as Arc<dyn alc_trouble::cloud_tasks::CloudTasksClient>),
+        notifier: Some(Arc::new(
+            alc_trouble::notifier::LineworksTroubleNotifier::new(
+                bot_admin_ext.clone(),
+                lw_client.clone(),
+            ),
+        )),
         employees: Some(employees.clone()),
     };
 
