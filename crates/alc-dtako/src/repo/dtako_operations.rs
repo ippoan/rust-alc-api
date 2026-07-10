@@ -72,7 +72,7 @@ impl DtakoOperationsRepository for PgDtakoOperationsRepository {
 
         let operations = sqlx::query_as::<_, DtakoOperationListItem>(
             r#"SELECT o.id, o.unko_no, o.crew_role, o.reading_date, o.operation_date,
-                      d.name AS driver_name, v.vehicle_name,
+                      d.name AS driver_name, v.vehicle_name, v.vehicle_cd,
                       o.total_distance, o.safety_score, o.economy_score, o.total_score,
                       o.has_kudgivt
                FROM alc_api.dtako_operations o
