@@ -1,0 +1,20 @@
+{
+  "displayName": "rust-alc-api gateway/per-domain access detected",
+  "documentation": {
+    "content": "gateway + per-domain (tenko/carins/dtako/trouble/camera) は廃止予定 (Refs #556)。これらは本番・staging とも休眠のはずで、この policy は「万一 実リクエストが来たら」= 隠れ consumer 検出 or 削除判断の材料として通知する安全網。削除完了後は policy ごと消してよい。",
+    "mimeType": "text/markdown"
+  },
+  "combiner": "OR",
+  "conditions": [
+    {
+      "displayName": "any HTTP request to gateway/per-domain (prod+staging)",
+      "conditionMatchedLog": {
+        "filter": "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=~\"rust-alc-api(-staging)?-(gateway|tenko|carins|dtako|trouble|camera)\" AND httpRequest.requestMethod!=\"\""
+      }
+    }
+  ],
+  "alertStrategy": {
+    "notificationRateLimit": { "period": "3600s" }
+  },
+  "notificationChannels": ["__NOTIFICATION_CHANNEL__"]
+}
