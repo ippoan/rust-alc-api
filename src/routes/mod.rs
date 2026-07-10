@@ -94,6 +94,7 @@ pub fn router(
     internal_oidc: InternalOidcTrust,
     tenko_state: alc_tenko::TenkoState,
     trouble_state: alc_trouble::TroubleState,
+    camera_state: alc_camera::CameraState,
 ) -> Router<AppState> {
     // 管理者ルート — 注入 identity (X-User-*) を信頼 (Refs #434)。
     // 前段 proxy / gateway が introspect 検証済みの identity を注入する前提。
@@ -217,6 +218,14 @@ pub fn router(
         .layer(axum_middleware::from_fn(require_tenant_header))
         .with_state(trouble_state);
 
+    // camera ドメイン (Refs #556) — per-domain の alc-camera-api を廃止し monolith へ
+    // 移植。AppState から分離した CameraState でマウントする。tenant 系ルートには
+    // monolith 本体と同じ require_tenant_header を張る。
+    let camera_tenant: Router<AppState> = Router::new()
+        .merge(alc_camera::handlers::tenant_router())
+        .layer(axum_middleware::from_fn(require_tenant_header))
+        .with_state(camera_state);
+
     Router::new()
         .merge(public_routes)
         .merge(tenko_public)
@@ -225,6 +234,7 @@ pub fn router(
         .merge(tenant_protected)
         .merge(tenko_tenant)
         .merge(trouble_tenant)
+        .merge(camera_tenant)
 }
 
 /// email-receiver Worker から `POST /api/dtako/tickets` を受ける internal ingest

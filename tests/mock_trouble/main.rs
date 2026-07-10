@@ -5,6 +5,8 @@ mod common;
 #[path = "../mock_helpers/mod.rs"]
 mod mock_helpers;
 
+#[path = "../mock_tests/mock_camera_test.rs"]
+mod mock_camera_test;
 #[path = "../mock_tests/mock_trouble_categories_test.rs"]
 mod mock_trouble_categories_test;
 #[path = "../mock_tests/mock_trouble_field_layouts_test.rs"]

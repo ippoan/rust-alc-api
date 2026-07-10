@@ -12,10 +12,15 @@ use tower_http::set_header::SetResponseHeaderLayer;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
+use sqlx::types::Uuid;
+
+use alc_camera::repo::PgCamerasRepository;
+use alc_camera::{CameraDownTicket, CameraState, DownTicketSink, DEFAULT_DOWN_THRESHOLD};
 use alc_notify::repo::{
     PgLineworksChannelsRepository, PgNotifyDeliveryRepository, PgNotifyDocumentRepository,
     PgNotifyGroupRepository, PgNotifyLineConfigRepository, PgNotifyRecipientRepository,
 };
+use alc_trouble::models::CreateTroubleTicket;
 use alc_trouble::repo::{
     trouble_categories::PgTroubleCategoriesRepository,
     trouble_field_layouts::PgTroubleFieldLayoutsRepository,
@@ -28,6 +33,7 @@ use alc_trouble::repo::{
     trouble_task_types::PgTroubleTaskTypesRepository, trouble_tasks::PgTroubleTasksRepository,
     trouble_tickets::PgTroubleTicketsRepository, trouble_workflow::PgTroubleWorkflowRepository,
 };
+use alc_trouble::repository::TroubleTicketsRepository;
 use rust_alc_api::db::repository::{
     PgApiTokensRepository, PgAuthRepository, PgBotAdminRepository, PgCarInspectionRepository,
     PgCarinsFilesRepository, PgCarryingItemsRepository, PgCommunicationItemsRepository,
@@ -45,6 +51,36 @@ use rust_alc_api::db::repository::{
 };
 use rust_alc_api::storage::StorageBackend;
 use rust_alc_api::AppState;
+
+/// camera 所有 port [`DownTicketSink`] → alc-trouble への adapter (Refs #556、旧
+/// `crates/alc-camera-api/src/main.rs` から移設)。category / custom_fields マーカー
+/// 等の trouble 語彙への写像はここが持ち、alc-camera crate は trouble に依存しない。
+struct TroubleDownTicketSink(Arc<dyn TroubleTicketsRepository>);
+
+#[async_trait::async_trait]
+impl DownTicketSink for TroubleDownTicketSink {
+    async fn open_down_ticket(
+        &self,
+        tenant_id: Uuid,
+        t: CameraDownTicket,
+    ) -> Result<Uuid, sqlx::Error> {
+        let input = CreateTroubleTicket {
+            category: "その他".to_string(),
+            title: Some(t.title),
+            occurred_at: Some(t.occurred_at),
+            location: Some(t.location),
+            description: Some(t.description),
+            // 自動起票である事を識別するマーカー (UI の出所表示 / 集計用)。
+            custom_fields: Some(serde_json::json!({
+                "source": "camera_auto",
+                "camera_id": t.camera_id,
+            })),
+            ..Default::default()
+        };
+        let ticket = self.0.create(tenant_id, &input, None, None).await?;
+        Ok(ticket.id)
+    }
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -341,6 +377,22 @@ async fn main() -> anyhow::Result<()> {
         employees: Some(employees.clone()),
     };
 
+    // camera ドメイン (Refs #556) — per-domain の alc-camera-api を廃止し monolith へ
+    // 移植。障害の自動起票は TroubleDownTicketSink 経由で既存 trouble_tickets repo に
+    // 配線する。CAMERA_DOWN_THRESHOLD 未設定なら DEFAULT_DOWN_THRESHOLD を使う。
+    let camera_down_threshold: usize = std::env::var("CAMERA_DOWN_THRESHOLD")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .filter(|n| *n >= 1)
+        .unwrap_or(DEFAULT_DOWN_THRESHOLD);
+    let camera_state = CameraState {
+        cameras: Arc::new(PgCamerasRepository::new(pool.clone())),
+        down_ticket_sink: Arc::new(TroubleDownTicketSink(Arc::new(
+            PgTroubleTicketsRepository::new(pool.clone()),
+        ))),
+        down_threshold: camera_down_threshold,
+    };
+
     let state = AppState {
         pool: Some(pool.clone()),
         api_tokens,
@@ -480,6 +532,7 @@ async fn main() -> anyhow::Result<()> {
         rust_alc_api::routes::internal_oidc_trust(),
         tenko_state,
         trouble_state,
+        camera_state,
     )
     .merge(rust_alc_api::routes::internal_shared_secret_router(
         internal_secret,

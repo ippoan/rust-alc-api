@@ -3545,6 +3545,7 @@ name = "rust-alc-api"
 version = "0.1.0"
 dependencies = [
  "alc-auth",
+ "alc-camera",
  "alc-carins",
  "alc-compare",
  "alc-core",
