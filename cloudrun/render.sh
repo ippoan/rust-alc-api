@@ -121,6 +121,10 @@ emit_env_backend() {
               value: "$( [[ "$ENV" == "staging" ]] && echo "notify-files-staging" || echo "notify-files" )"
             - name: NOTIFY_FRONTEND_URL
               value: "$( [[ "$ENV" == "staging" ]] && echo "https://notify-staging.ippoan.org" || echo "https://notify.ippoan.org" )"
+            # 通知予約の発火基盤 schedule-alarm DO worker (ippoan/nuxt-notify、Refs #550/#551)。
+            # 認証は既存 INTERNAL_SHARED_SECRET を再利用 (下の secretKeyRef、新規 secret なし)。
+            - name: SCHEDULE_ALARM_URL
+              value: "$( [[ "$ENV" == "staging" ]] && echo "https://alarm.notify-staging.ippoan.org" || echo "https://alarm.notify.ippoan.org" )"
             - name: NOTIFY_REDACT_BROADCAST_URL
               value: "$(notify_redact_broadcast_url)"
             - name: NOTIFY_REDACT_2STAGE
@@ -394,6 +398,21 @@ emit_env_trouble() {
                 secretKeyRef:
                   key: latest
                   name: trouble-r2-secret-key
+            # 通知予約の発火基盤 schedule-alarm DO worker (Refs #550/#551)。
+            - name: SCHEDULE_ALARM_URL
+              value: "$( [[ "$ENV" == "staging" ]] && echo "https://alarm.notify-staging.ippoan.org" || echo "https://alarm.notify.ippoan.org" )"
+            # alarm 登録の認証 (既存 secret 再利用、prod/staging 統合済)。
+            - name: INTERNAL_SHARED_SECRET
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: INTERNAL_SHARED_SECRET
+            # LineworksTroubleNotifier が bot config を復号するのに必要。
+            - name: SSO_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: sso-encryption-key
 YAML
   emit_database_url
 }

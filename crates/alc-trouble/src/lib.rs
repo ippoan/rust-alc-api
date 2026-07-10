@@ -15,6 +15,7 @@ pub mod task_statuses;
 pub mod task_types;
 pub mod tasks;
 pub mod tickets;
+pub mod worker_alarm;
 pub mod workflow;
 
 pub const DEFAULT_CATEGORIES: &[&str] = &[

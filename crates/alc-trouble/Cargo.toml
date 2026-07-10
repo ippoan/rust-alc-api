@@ -18,3 +18,7 @@ thiserror = "2"
 tracing = "0.1"
 ts-rs = { version = "10", features = ["chrono-impl", "uuid-impl", "serde-json-impl"] }
 uuid = { version = "1", features = ["v4", "serde"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }
+wiremock = "0.6"
