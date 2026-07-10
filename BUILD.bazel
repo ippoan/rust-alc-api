@@ -3,6 +3,7 @@ load("@crates//:defs.bzl", "all_crate_deps")
 
 _WORKSPACE_CRATES = [
     "//crates/alc-auth",
+    "//crates/alc-camera",
     "//crates/alc-carins",
     "//crates/alc-compare",
     "//crates/alc-core",

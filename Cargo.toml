@@ -38,6 +38,7 @@ unexpected_cfgs = { level = "allow", check-cfg = ['cfg(coverage)'] }
 
 [dependencies]
 alc-auth = { path = "crates/alc-auth" }
+alc-camera = { path = "crates/alc-camera" }
 alc-carins = { path = "crates/alc-carins" }
 alc-core = { path = "crates/alc-core" }
 alc-devices = { path = "crates/alc-devices" }

@@ -610,16 +610,47 @@ pub fn pg_trouble_state(state: &AppState) -> alc_trouble::TroubleState {
     }
 }
 
+/// camera ドメインの起票 port テスト実装 (Refs #556)。実 trouble への配線は
+/// binary 側の `TroubleDownTicketSink` が持つが、テストの camera route 検証は
+/// CRUD/status が主で down 起票経路は fire しないため、ここでは no-op で発番のみ返す。
+pub struct TestDownTicketSink;
+
+#[async_trait::async_trait]
+impl alc_camera::DownTicketSink for TestDownTicketSink {
+    async fn open_down_ticket(
+        &self,
+        _tenant_id: Uuid,
+        _ticket: alc_camera::CameraDownTicket,
+    ) -> Result<Uuid, sqlx::Error> {
+        Ok(Uuid::new_v4())
+    }
+}
+
+/// pool から camera ドメインの Pg CameraState を合成する (Refs #556)。
+pub fn pg_camera_state(state: &AppState) -> alc_camera::CameraState {
+    let pool = state
+        .pool
+        .clone()
+        .expect("spawn_test_server: state.pool is None — mock state は spawn_test_server_with_states を使うこと");
+    alc_camera::CameraState {
+        cameras: Arc::new(alc_camera::repo::PgCamerasRepository::new(pool)),
+        down_ticket_sink: Arc::new(TestDownTicketSink),
+        down_threshold: alc_camera::DEFAULT_DOWN_THRESHOLD,
+    }
+}
+
 pub async fn spawn_test_server(state: AppState) -> String {
     let tenko_state = pg_tenko_state(&state);
     let trouble_state = pg_trouble_state(&state);
-    spawn_test_server_with_states(state, tenko_state, trouble_state).await
+    let camera_state = pg_camera_state(&state);
+    spawn_test_server_with_states(state, tenko_state, trouble_state, camera_state).await
 }
 
 pub async fn spawn_test_server_with_states(
     state: AppState,
     tenko_state: alc_tenko::TenkoState,
     trouble_state: alc_trouble::TroubleState,
+    camera_state: alc_camera::CameraState,
 ) -> String {
     use axum::{Extension, Router};
     use rust_alc_api::auth::google::GoogleTokenVerifier;
@@ -651,6 +682,7 @@ pub async fn spawn_test_server_with_states(
                 internal_oidc_trust_for_tests(),
                 tenko_state,
                 trouble_state,
+                camera_state,
             ),
         )
         // テスト用 proxy emulation (Refs #434)。#434 で rust-alc-api は JWT 検証を
