@@ -42,6 +42,11 @@ use mock_storage::MockStorage;
 /// ため、残る用途は SSO_ENCRYPTION_KEY の値のみ (名前もそれに揃えた)。
 pub const TEST_ENCRYPTION_KEY: &str = "test-jwt-secret-for-integration-tests-2026";
 
+/// テスト用 `INTERNAL_SHARED_SECRET` (`internal_shared_secret_router` 経由の
+/// `X-Internal-Shared-Secret` 検証に使う、dtako_tickets/dtako_operations の
+/// internal_router テストが参照する)。
+pub const TEST_INTERNAL_SHARED_SECRET: &str = "test-internal-shared-secret-2026";
+
 /// env::set_var を使うテスト同士の直列化用ロック
 /// (env var はプロセスグローバルなので並列実行すると競合する)
 pub static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -683,7 +688,12 @@ pub async fn spawn_test_server_with_states(
                 tenko_state,
                 trouble_state,
                 camera_state,
-            ),
+            )
+            // main.rs と同じ配線 (internal_shared_secret_router を /api 直下にマージ)。
+            // テスト用共有 secret は TEST_INTERNAL_SHARED_SECRET で固定する。
+            .merge(rust_alc_api::routes::internal_shared_secret_router(Some(
+                TEST_INTERNAL_SHARED_SECRET.to_string(),
+            ))),
         )
         // テスト用 proxy emulation (Refs #434)。#434 で rust-alc-api は JWT 検証を
         // 撤去し、注入された identity ヘッダー (X-Tenant-ID / X-User-*) を信頼する

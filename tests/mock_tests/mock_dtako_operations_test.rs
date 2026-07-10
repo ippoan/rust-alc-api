@@ -108,6 +108,72 @@ async fn test_list_operations_tenant_header() {
 }
 
 // ---------------------------------------------------------------------------
+// GET /api/internal/operations — X-Internal-Shared-Secret + X-Tenant-ID (Refs
+// ohishi-exp/nuxt-dtako-admin#198 Phase 8: nuxt-ichibanboshi の service
+// binding 呼び出し用 internal_router)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_list_operations_internal_shared_secret() {
+    let state = setup_mock_app_state();
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state.clone()).await;
+    let tenant_id = Uuid::new_v4();
+    let client = reqwest::Client::new();
+
+    let res = client
+        .get(format!("{base_url}/api/internal/operations"))
+        .header(
+            "X-Internal-Shared-Secret",
+            crate::common::TEST_INTERNAL_SHARED_SECRET,
+        )
+        .header("X-Tenant-ID", tenant_id.to_string())
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["operations"].as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn test_list_operations_internal_wrong_secret() {
+    let state = setup_mock_app_state();
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state.clone()).await;
+    let tenant_id = Uuid::new_v4();
+    let client = reqwest::Client::new();
+
+    let res = client
+        .get(format!("{base_url}/api/internal/operations"))
+        .header("X-Internal-Shared-Secret", "wrong-secret")
+        .header("X-Tenant-ID", tenant_id.to_string())
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 401);
+}
+
+#[tokio::test]
+async fn test_list_operations_internal_missing_tenant_id() {
+    let state = setup_mock_app_state();
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state.clone()).await;
+    let client = reqwest::Client::new();
+
+    let res = client
+        .get(format!("{base_url}/api/internal/operations"))
+        .header(
+            "X-Internal-Shared-Secret",
+            crate::common::TEST_INTERNAL_SHARED_SECRET,
+        )
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 401);
+}
+
+// ---------------------------------------------------------------------------
 // GET /api/operations — DB error → 500
 // ---------------------------------------------------------------------------
 
