@@ -125,6 +125,9 @@ emit_env_backend() {
             # 認証は既存 INTERNAL_SHARED_SECRET を再利用 (下の secretKeyRef、新規 secret なし)。
             - name: SCHEDULE_ALARM_URL
               value: "$( [[ "$ENV" == "staging" ]] && echo "https://alarm.notify-staging.ippoan.org" || echo "https://alarm.notify.ippoan.org" )"
+            # trouble 通知メッセージ末尾のチケット URL 用 (Refs #553)。未設定なら URL 行省略。
+            - name: TROUBLE_FRONTEND_URL
+              value: "$( [[ "$ENV" == "staging" ]] && echo "https://trouble-staging.ippoan.org" || echo "https://trouble.ippoan.org" )"
             - name: NOTIFY_REDACT_BROADCAST_URL
               value: "$(notify_redact_broadcast_url)"
             - name: NOTIFY_REDACT_2STAGE
@@ -401,6 +404,9 @@ emit_env_trouble() {
             # 通知予約の発火基盤 schedule-alarm DO worker (Refs #550/#551)。
             - name: SCHEDULE_ALARM_URL
               value: "$( [[ "$ENV" == "staging" ]] && echo "https://alarm.notify-staging.ippoan.org" || echo "https://alarm.notify.ippoan.org" )"
+            # trouble 通知メッセージ末尾のチケット URL 用 (Refs #553)。未設定なら URL 行省略。
+            - name: TROUBLE_FRONTEND_URL
+              value: "$( [[ "$ENV" == "staging" ]] && echo "https://trouble-staging.ippoan.org" || echo "https://trouble.ippoan.org" )"
             # alarm 登録の認証 (既存 secret 再利用、prod/staging 統合済)。
             - name: INTERNAL_SHARED_SECRET
               valueFrom:

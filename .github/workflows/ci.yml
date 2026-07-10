@@ -1079,6 +1079,10 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      # ci-workflows#170 で auto-merge.yml の job が checks: read を宣言した
+      # (全 check green 検証ガード)。caller 側が許可しないと startup_failure
+      # (0 job / 0s) になる (Refs ippoan/ci-workflows#169)。
+      checks: read
     secrets:
       # GitHub App installation token を優先 (ci-workflows#65)。App は独自の
       # rate-limit bucket を持つので、user PAT の GraphQL quota を食わず
