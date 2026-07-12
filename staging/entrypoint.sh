@@ -29,25 +29,13 @@ DATABASE_URL="postgresql://postgres:staging@localhost:5432/postgres?options=-c s
 echo "Seeding staging default tenant..."
 PGPASSWORD=staging psql -h localhost -p 5432 -U postgres -d postgres -v ON_ERROR_STOP=1 <<'SQL'
 INSERT INTO alc_api.tenants (id, name, slug, email_domain, created_at)
-VALUES
-  (
-    '11111111-1111-1111-1111-111111111111',
-    'Staging Default',
-    'staging-default',
-    'example.com',
-    NOW()
-  ),
-  -- auth-staging の operator テナント。CoreS3 (alc-app-s3) の device credential は
-  -- operator の org に束縛され、device JWT の tenant_id claim がそのまま
-  -- /api/hub/measurements の INSERT に使われるため、無いと FK 違反で 500
-  -- (Refs ippoan/alc-app-s3#21 — 2026-07-12 実機 e2e で踏んだ。上と同型)。
-  (
-    '24e4265b-d8bf-409c-9eed-23c368462373',
-    'Auth Staging Operator',
-    'auth-staging-operator',
-    'example.com',
-    NOW()
-  )
+VALUES (
+  '11111111-1111-1111-1111-111111111111',
+  'Staging Default',
+  'staging-default',
+  'example.com',
+  NOW()
+)
 ON CONFLICT (id) DO NOTHING;
 SQL
 echo "Staging default tenant seeded"

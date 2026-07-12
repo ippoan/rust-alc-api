@@ -1,8 +1,33 @@
 use axum::{extract::State, http::StatusCode, routing::post, Extension, Json, Router};
+use uuid::Uuid;
 
 use alc_core::auth_middleware::TenantId;
 use alc_core::models::{HubMeasurementCreate, HubMeasurementsIngestResponse};
 use alc_core::AppState;
+
+/// `STAGING_MODE=true` かどうか (alc-auth / alc-misc::staging と同判定)。
+fn is_staging_mode() -> bool {
+    std::env::var("STAGING_MODE")
+        .map(|v| v == "true")
+        .unwrap_or(false)
+}
+
+/// staging の揮発 DB では device credential に紐づく operator テナントが
+/// cold start 毎に消え、device JWT 由来の tenant_id が dangling になって
+/// `hub_measurements_tenant_id_fkey` 違反で 500 になる (ippoan/alc-app-s3#21
+/// 実機 e2e で確認)。alc-auth::internal の `ensure_tenant_for_staging` と
+/// 同方針で、STAGING_MODE 限定で tenant を冪等作成して救済する。
+/// 本番では tenant が永続なので dangling は起きず、この救済は走らない (no-op)。
+/// seed (staging/entrypoint.sh) への tenant ハードコード追記は不要になる。
+async fn ensure_tenant_for_staging(state: &AppState, tenant_id: Uuid) -> Result<(), StatusCode> {
+    if !is_staging_mode() {
+        return Ok(());
+    }
+    state.auth.ensure_tenant_exists(tenant_id).await.map_err(|e| {
+        tracing::error!("hub_measurements ensure_tenant_exists error: {e}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })
+}
 
 /// 受理する測定種別の allowlist (Refs #564 設計レビュー 2026-07-12)。
 ///
@@ -64,6 +89,7 @@ async fn ingest(
     if !items.iter().all(validate) {
         return Err(StatusCode::BAD_REQUEST);
     }
+    ensure_tenant_for_staging(&state, tenant.0 .0).await?;
     let resp = state
         .hub_measurements
         .insert_batch(tenant.0 .0, &items)
