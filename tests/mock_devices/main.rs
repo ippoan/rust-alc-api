@@ -7,3 +7,6 @@ mod mock_helpers;
 
 #[path = "../mock_tests/mock_devices_test.rs"]
 mod mock_devices_test;
+
+#[path = "../mock_tests/mock_hub_measurements_test.rs"]
+mod mock_hub_measurements_test;

@@ -32,10 +32,11 @@ use repository::{
     DtakoRestraintReportPdfRepository, DtakoRestraintReportRepository, DtakoScraperRepository,
     DtakoTicketsRepository, DtakoUploadRepository, DtakoVehiclesRepository,
     DtakoWorkTimesRepository, DtakoYTimeExportRepository, EmployeeRepository,
-    GuidanceRecordsRepository, ItemFilesRepository, ItemsRepository, LineworksChannelsRepository,
-    MeasurementsRepository, NfcTagRepository, NotifyDeliveryRepository, NotifyDocumentRepository,
-    NotifyGroupRepository, NotifyLineConfigRepository, NotifyRecipientRepository,
-    SsoAdminRepository, TenantUsersRepository, TimecardRepository, VehicleSettingsDumpsRepository,
+    GuidanceRecordsRepository, HubMeasurementsRepository, ItemFilesRepository, ItemsRepository,
+    LineworksChannelsRepository, MeasurementsRepository, NfcTagRepository,
+    NotifyDeliveryRepository, NotifyDocumentRepository, NotifyGroupRepository,
+    NotifyLineConfigRepository, NotifyRecipientRepository, SsoAdminRepository,
+    TenantUsersRepository, TimecardRepository, VehicleSettingsDumpsRepository,
 };
 use storage::StorageBackend;
 
@@ -67,6 +68,7 @@ pub struct AppState {
     pub vehicle_settings_dumps: Arc<dyn VehicleSettingsDumpsRepository>,
     pub employees: Arc<dyn EmployeeRepository>,
     pub guidance_records: Arc<dyn GuidanceRecordsRepository>,
+    pub hub_measurements: Arc<dyn HubMeasurementsRepository>,
     pub items: Arc<dyn ItemsRepository>,
     pub item_files: Arc<dyn ItemFilesRepository>,
     pub measurements: Arc<dyn MeasurementsRepository>,

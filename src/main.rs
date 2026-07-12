@@ -43,9 +43,9 @@ use rust_alc_api::db::repository::{
     PgDtakoRestraintReportRepository, PgDtakoScraperRepository, PgDtakoTicketsRepository,
     PgDtakoUploadRepository, PgDtakoVehiclesRepository, PgDtakoWorkTimesRepository,
     PgDtakoYTimeExportRepository, PgEmployeeRepository, PgEquipmentFailuresRepository,
-    PgGuidanceRecordsRepository, PgHealthBaselinesRepository, PgItemFilesRepository,
-    PgItemsRepository, PgMeasurementsRepository, PgNfcTagRepository, PgSsoAdminRepository,
-    PgTenantUsersRepository, PgTenkoCallRepository, PgTenkoRecordsRepository,
+    PgGuidanceRecordsRepository, PgHealthBaselinesRepository, PgHubMeasurementsRepository,
+    PgItemFilesRepository, PgItemsRepository, PgMeasurementsRepository, PgNfcTagRepository,
+    PgSsoAdminRepository, PgTenantUsersRepository, PgTenkoCallRepository, PgTenkoRecordsRepository,
     PgTenkoSchedulesRepository, PgTenkoSessionRepository, PgTenkoWebhooksRepository,
     PgTimecardRepository, PgVehicleSettingsDumpsRepository,
 };
@@ -248,6 +248,7 @@ async fn main() -> anyhow::Result<()> {
     let employees = Arc::new(PgEmployeeRepository::new(pool.clone()));
     let equipment_failures = Arc::new(PgEquipmentFailuresRepository::new(pool.clone()));
     let guidance_records = Arc::new(PgGuidanceRecordsRepository::new(pool.clone()));
+    let hub_measurements = Arc::new(PgHubMeasurementsRepository::new(pool.clone()));
     let health_baselines = Arc::new(PgHealthBaselinesRepository::new(pool.clone()));
     let items = Arc::new(PgItemsRepository::new(pool.clone()));
     let item_files = Arc::new(PgItemFilesRepository::new(pool.clone()));
@@ -420,6 +421,7 @@ async fn main() -> anyhow::Result<()> {
         vehicle_settings_dumps,
         employees,
         guidance_records,
+        hub_measurements,
         items,
         item_files,
         measurements,

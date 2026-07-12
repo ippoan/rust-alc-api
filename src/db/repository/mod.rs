@@ -7,11 +7,11 @@ pub use alc_core::repository::{
     DtakoRestraintReportPdfRepository, DtakoRestraintReportRepository, DtakoScraperRepository,
     DtakoTicketsRepository, DtakoUploadRepository, DtakoVehiclesRepository,
     DtakoWorkTimesRepository, DtakoYTimeExportRepository, EmployeeRepository,
-    GuidanceRecordsRepository, ItemFilesRepository, ItemsRepository, LineworksChannelsRepository,
-    MeasurementsRepository, NfcTagRepository, NotifyDeliveryRepository, NotifyDocumentRepository,
-    NotifyGroupRepository, NotifyLineConfigRepository, NotifyRecipientRepository,
-    SsoAdminRepository, TenantUsersRepository, TimecardRepository, VehicleSettingsDumpsRepository,
-    WebhookRepository,
+    GuidanceRecordsRepository, HubMeasurementsRepository, ItemFilesRepository, ItemsRepository,
+    LineworksChannelsRepository, MeasurementsRepository, NfcTagRepository,
+    NotifyDeliveryRepository, NotifyDocumentRepository, NotifyGroupRepository,
+    NotifyLineConfigRepository, NotifyRecipientRepository, SsoAdminRepository,
+    TenantUsersRepository, TimecardRepository, VehicleSettingsDumpsRepository, WebhookRepository,
 };
 
 // Re-export trouble traits from alc-trouble (Refs #513 Phase B)
@@ -37,6 +37,7 @@ pub use alc_core::tenant::TenantConn;
 pub use alc_carins::repo::{car_inspections, carins_files, nfc_tags};
 pub use alc_core::repo::auth;
 pub use alc_core::repository::api_tokens;
+pub use alc_core::repository::hub_measurements;
 pub use alc_devices::repo::devices;
 pub use alc_dtako::repo::{
     dtako_csv_proxy, dtako_daily_hours, dtako_drivers, dtako_event_classifications, dtako_logs,
@@ -69,6 +70,7 @@ pub use alc_carins::repo::{
 };
 pub use alc_core::repo::PgAuthRepository;
 pub use alc_devices::repo::PgDeviceRepository;
+pub use alc_devices::repo::PgHubMeasurementsRepository;
 pub use alc_dtako::repo::{
     PgDtakoCsvProxyRepository, PgDtakoDailyHoursRepository, PgDtakoDriversRepository,
     PgDtakoEventClassificationsRepository, PgDtakoLogsRepository, PgDtakoOperationsRepository,

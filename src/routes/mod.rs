@@ -5,6 +5,7 @@ pub use alc_carins::car_inspections;
 pub use alc_carins::carins_files;
 pub use alc_carins::nfc_tags;
 pub use alc_devices::devices;
+pub use alc_devices::hub_measurements;
 pub use alc_dtako::dtako_csv_proxy;
 pub use alc_dtako::dtako_daily_hours;
 pub use alc_dtako::dtako_drivers;
@@ -250,6 +251,8 @@ pub fn internal_shared_secret_router(internal_secret: Option<String>) -> Router<
         Some(secret) if !secret.is_empty() => Router::new()
             .merge(dtako_tickets::internal_router())
             .merge(dtako_operations::internal_router())
+            // cf-alc-recorder Worker からの CoreS3 測定 ingest (Refs #564)
+            .merge(hub_measurements::internal_router())
             .layer(axum_middleware::from_fn(
                 alc_core::auth_middleware::require_internal_shared_secret,
             ))

@@ -29,6 +29,7 @@ use rust_alc_api::db::repository::guidance_records::{
     GuidanceRecordWithName, GuidanceRecordsRepository,
 };
 use rust_alc_api::db::repository::health_baselines::HealthBaselinesRepository;
+use rust_alc_api::db::repository::hub_measurements::HubMeasurementsRepository;
 use rust_alc_api::db::repository::measurements::{ListResult, MeasurementsRepository};
 use rust_alc_api::routes::dtako_scraper::ScrapeHistoryItem;
 
@@ -1526,6 +1527,52 @@ impl MeasurementsRepository for MockMeasurementsRepository {
         Ok(ListResult {
             measurements: vec![],
             total: 0,
+        })
+    }
+}
+
+// =============================================================================
+// MockHubMeasurementsRepository (Refs #564)
+// =============================================================================
+
+/// insert された item を tenant ごとに記録し、(device_id, seq) 重複は本物の
+/// `ON CONFLICT (tenant_id, device_id, seq) DO NOTHING` と同じく duplicates に数える。
+pub struct MockHubMeasurementsRepository {
+    pub fail_next: AtomicBool,
+    pub inserted: std::sync::Mutex<Vec<(Uuid, HubMeasurementCreate)>>,
+    seen: std::sync::Mutex<std::collections::HashSet<(Uuid, String, i64)>>,
+}
+
+impl Default for MockHubMeasurementsRepository {
+    fn default() -> Self {
+        Self {
+            fail_next: AtomicBool::new(false),
+            inserted: std::sync::Mutex::new(vec![]),
+            seen: std::sync::Mutex::new(std::collections::HashSet::new()),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl HubMeasurementsRepository for MockHubMeasurementsRepository {
+    async fn insert_batch(
+        &self,
+        tenant_id: Uuid,
+        items: &[HubMeasurementCreate],
+    ) -> Result<HubMeasurementsIngestResponse, sqlx::Error> {
+        check_fail!(self);
+        let mut seen = self.seen.lock().unwrap();
+        let mut inserted_log = self.inserted.lock().unwrap();
+        let mut inserted: i64 = 0;
+        for item in items {
+            if seen.insert((tenant_id, item.device_id.clone(), item.seq)) {
+                inserted_log.push((tenant_id, item.clone()));
+                inserted += 1;
+            }
+        }
+        Ok(HubMeasurementsIngestResponse {
+            inserted,
+            duplicates: items.len() as i64 - inserted,
         })
     }
 }

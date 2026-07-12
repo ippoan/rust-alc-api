@@ -179,6 +179,7 @@ jobs:
         include:
           - { name: db-trouble, target: "//:trouble_test", coverage: "cov-db-trouble" }
           - { name: db-archive, target: "//:archive_repo_test", coverage: "cov-db-archive" }
+          - { name: db-hub-measurements, target: "//:hub_measurements_test" }
     services:
       postgres:
         image: postgres:16
@@ -655,6 +656,7 @@ jobs:
         include:
           - { name: db-trouble, target: "//:trouble_test", coverage: "cov-db-trouble" }
           - { name: db-archive, target: "//:archive_repo_test", coverage: "cov-db-archive" }
+          - { name: db-hub-measurements, target: "//:hub_measurements_test" }
     services:
       postgres:
         image: postgres:16
