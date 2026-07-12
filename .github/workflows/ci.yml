@@ -214,8 +214,14 @@ jobs:
 
   cache-cleanup:
     name: Cache Cleanup
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    needs: [cache-warm]
+    # needs に bazel warm 全 job を含める理由: disk-cache tar の save は warm job の
+    # post step なので、rust warm だけを待つ旧構成では今 push の新 tar が保存される
+    # 前に cleanup が走り、hash 変更 push では旧世代 tar が「最新」として keep され
+    # 新旧 2 世代 (~25GB) が次の main push まで併存した (実害 2026-07-12: 29.2GB/30GB)。
+    # always(): fail-fast:false の warm matrix で 1 shard 落ちただけで cleanup が
+    # skip されると stale tar が溜まり続けるため、warm の成否に関わらず走らせる。
+    if: always() && github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: [cache-warm, cache-warm-bazel, cache-warm-bazel-test-poc, cache-warm-bazel-test-db]
     runs-on: ubuntu-latest
     permissions:
       actions: write
@@ -240,14 +246,24 @@ jobs:
           # SIGPIPE を食らい、set -o pipefail が exit 141 で fail させる
           # (rust-flickr の Step 1 / Step 3 main run で 2 回再現)。pipe を消して
           # 中間ファイル経由の 2 段にして race を完全に消す。
-          gh cache list -R ${{ github.repository }} --limit 200 \
+          # データは argv でファイル名を渡す (`python3 - FILE <<PY`)。旧形式の
+          # `python3 - < FILE <<PY` は heredoc が stdin リダイレクトを上書きするため
+          # script 本体が stdin を占有し、FILE は一度も読まれず全 push で
+          # 「Total: 0 stale entries」のサイレント no-op だった (実害 2026-07-12:
+          # stale bazel tar 12GB + 孤児 tar が残留し 29.2GB/30GB 到達)。
+          # --key (server 側 prefix filter) を使う理由: sccache の小粒 entry が 750+ 個
+          # あり、無指定 list は直近アクセス順の先頭を sccache が独占して --limit の
+          # 打ち切りにかかり、対象 entry が 1 件も見えなくなる (実害 2026-07-12:
+          # stale bazel tar 12GB が list の 799 位で視界外 → 毎回 0 件削除。
+          # bd1b31e で cache-size-report 側に入れた打ち切り修正と同種)。
+          gh cache list -R ${{ github.repository }} --key v0-rust- --limit 500 \
             --json id,key,sizeInBytes,lastAccessedAt \
-            --jq '.[] | select(.key | startswith("v0-rust-"))' \
+            --jq '.[]' \
             > /tmp/rust-cache-entries.jsonl || true
-          python3 - < /tmp/rust-cache-entries.jsonl <<'PY'
+          python3 - /tmp/rust-cache-entries.jsonl <<'PY'
           import json, os, sys
           keep = int(os.environ.get("KEEP_GENERATIONS", "3"))
-          entries = [json.loads(line) for line in sys.stdin if line.strip()]
+          entries = [json.loads(line) for line in open(sys.argv[1]) if line.strip()]
           groups = {}
           for e in entries:
               base = '-'.join(e['key'].rsplit('-', 1)[:-1])
@@ -276,21 +292,33 @@ jobs:
           # (hash を除いた key prefix) ごとに最新 1 個だけ残して削除する。
           # PR scope の cache は対象外 (ref==refs/heads/main のみ、PR 側は
           # cache-cleanup.yml が PR close 時に削除する)。
-          gh cache list -R ${{ github.repository }} --limit 400 \
+          # --key で server 側 prefix filter (rust-cache 側と同じ理由: sccache 独占に
+          # よる --limit 打ち切りで stale tar が視界外になるのを防ぐ)
+          gh cache list -R ${{ github.repository }} --key setup-bazel- --limit 1000 \
             --json id,key,ref,sizeInBytes,lastAccessedAt \
-            --jq '.[] | select((.key | startswith("setup-bazel-")) and (.key | contains("-tar-")) and .ref == "refs/heads/main")' \
+            --jq '.[] | select((.key | contains("-tar-")) and .ref == "refs/heads/main")' \
             > /tmp/bazel-tar-entries.jsonl || true
-          python3 - < /tmp/bazel-tar-entries.jsonl <<'PY'
+          python3 - /tmp/bazel-tar-entries.jsonl <<'PY'
           import json, sys
-          entries = [json.loads(line) for line in sys.stdin if line.strip()]
+          from datetime import datetime, timedelta, timezone
+          entries = [json.loads(line) for line in open(sys.argv[1]) if line.strip()]
           groups = {}
           for e in entries:
               base = e['key'].rsplit('-tar-', 1)[0]
               groups.setdefault(base, []).append(e)
+          # shard 廃止 (例: #559 の gateway + per-domain 廃止) で base ごと消えた tar は
+          # 「最新 1 個 keep」では永遠に残るため、3 日以上未アクセスなら最新でも削除する。
+          # 現役 tar は warm / PR の restore で lastAccessedAt が更新され続けるので誤爆しない。
+          cutoff = datetime.now(timezone.utc) - timedelta(days=3)
+          def orphaned(e):
+              last = datetime.fromisoformat(e['lastAccessedAt'].replace('Z', '+00:00'))
+              return last < cutoff
           to_delete = []
           for base, items in groups.items():
               items.sort(key=lambda x: x['lastAccessedAt'], reverse=True)
               to_delete.extend(items[1:])
+              if orphaned(items[0]):
+                  to_delete.append(items[0])
           with open('/tmp/bazel-tar-ids.txt', 'w') as f:
               for d in to_delete:
                   print(f"Deleting {d['sizeInBytes']//1048576}MB {d['key']}")
