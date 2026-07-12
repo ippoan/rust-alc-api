@@ -1172,6 +1172,36 @@ pub struct DtakoTicketCloseResponse {
     pub ticket_id: Uuid,
 }
 
+// --- Hub measurements (CoreS3 ハブ ingest、Refs #564) ---
+
+/// cf-alc-recorder Worker → POST /api/hub/measurements の 1 item。
+/// 内部 shared-secret (X-Internal-Shared-Secret) + X-Tenant-ID で認証され、
+/// tenant_id はヘッダー由来 (ペイロードに持たせない、#434 の教訓)。
+/// device_id は cf-alc-recorder が introspect 済み device JWT の sub から注入する。
+#[derive(Debug, Clone, Deserialize, TS)]
+#[ts(export)]
+pub struct HubMeasurementCreate {
+    pub device_id: String,
+    /// temperature / blood_pressure / alcohol / fc1200_raw
+    /// (allowlist は alc-devices hub_measurements::HUB_MEASUREMENT_KINDS)。
+    pub kind: String,
+    /// device 内シーケンス。UNIQUE (tenant_id, device_id, seq) で再送を冪等に吸収する。
+    pub seq: i64,
+    /// 端末計時 (unix ms)。時計未同期端末では null。
+    pub recorded_at_ms: Option<i64>,
+    /// ble-medical-gateway 互換 JSON をそのまま格納。
+    pub payload: serde_json::Value,
+}
+
+#[derive(Debug, Serialize, TS)]
+#[ts(export)]
+pub struct HubMeasurementsIngestResponse {
+    /// 新規に insert された件数。
+    pub inserted: i64,
+    /// UNIQUE (tenant_id, device_id, seq) 衝突でスキップされた件数 (再送重複)。
+    pub duplicates: i64,
+}
+
 #[cfg(test)]
 mod dtako_ticket_tests {
     use super::*;
