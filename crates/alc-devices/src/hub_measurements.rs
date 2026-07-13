@@ -23,10 +23,14 @@ async fn ensure_tenant_for_staging(state: &AppState, tenant_id: Uuid) -> Result<
     if !is_staging_mode() {
         return Ok(());
     }
-    state.auth.ensure_tenant_exists(tenant_id).await.map_err(|e| {
-        tracing::error!("hub_measurements ensure_tenant_exists error: {e}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })
+    state
+        .auth
+        .ensure_tenant_exists(tenant_id)
+        .await
+        .map_err(|e| {
+            tracing::error!("hub_measurements ensure_tenant_exists error: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })
 }
 
 /// 受理する測定種別の allowlist (Refs #564 設計レビュー 2026-07-12)。
