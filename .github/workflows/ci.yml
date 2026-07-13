@@ -156,7 +156,11 @@ jobs:
             | sudo tar -xz -C /tmp
           sudo cp /tmp/lib/libpdfium.so /usr/lib/libpdfium.so
           sudo ldconfig
+      # coverage 付き shard は PR 側 (bazel-test-poc) が plain `bazel test` を
+      # 走らせない (coverage が test gate を兼ねる、Refs #568) ため、plain config の
+      # warm も不要 — coverage 無し shard に限定して warm 時間と tar サイズを削る。
       - name: Warm test result cache (Bazel)
+        if: ${{ !matrix.coverage }}
         run: bazel test ${{ matrix.target }} --test_output=errors --test_summary=short
 
       # PR3b (Refs #515): coverage の計装ビルド + テスト実行も warm し、PR 側を
@@ -164,7 +168,7 @@ jobs:
       - name: Warm coverage build (Bazel)
         if: matrix.coverage
         run: |
-          bazel coverage ${{ matrix.target }} --config=${{ matrix.coverage }}
+          bazel coverage ${{ matrix.target }} --config=${{ matrix.coverage }} --test_output=errors --test_summary=short
 
   # DB integration テスト用 warm (Refs #515 PR2)。postgres service + TEST_DATABASE_URL
   # を持つ点以外は cache-warm-bazel-test-poc と同じ。matrix / flags は bazel-test-db と
@@ -205,13 +209,17 @@ jobs:
           r2-secret-access-key: ${{ secrets.BAZEL_R2_SECRET_ACCESS_KEY }}
       - name: Init test DB (alc_api schema + roles)
         run: psql "postgresql://postgres:test@localhost:5432/postgres" -f scripts/init_local_db.sql
+      # coverage 付き shard は plain test warm を skip — PR 側 (bazel-test-db) が
+      # plain `bazel test` を走らせなくなったため (cache-warm-bazel-test-poc と同じ
+      # 理由、Refs #568)
       - name: Warm test result cache (Bazel)
+        if: ${{ !matrix.coverage }}
         run: bazel test ${{ matrix.target }} --test_env=TEST_DATABASE_URL --test_output=errors --test_summary=short
       # PR3b (Refs #515): coverage も warm (flags は bazel-test-db と一致必須)
       - name: Warm coverage build (Bazel)
         if: matrix.coverage
         run: |
-          bazel coverage ${{ matrix.target }} --test_env=TEST_DATABASE_URL --config=${{ matrix.coverage }}
+          bazel coverage ${{ matrix.target }} --test_env=TEST_DATABASE_URL --config=${{ matrix.coverage }} --test_output=errors --test_summary=short
 
   cache-cleanup:
     name: Cache Cleanup
@@ -603,7 +611,12 @@ jobs:
           sudo cp /tmp/lib/libpdfium.so /usr/lib/libpdfium.so
           sudo ldconfig
 
+      # coverage 付き shard では skip する (Refs #568): 後段の bazel coverage が
+      # 同じテストを計装ビルドで実行し、失敗すれば job を fail させる (test gate と
+      # して同等)。coverage は別 configuration で bazel test の結果を再利用しない
+      # ため、両方走らせると mock 系 shard (モノリス全体をリンク) で特に高くつく。
       - name: bazel test (result cache は main warm から)
+        if: ${{ !matrix.coverage }}
         run: |
           set -o pipefail
           bazel test ${{ matrix.target }} --test_output=errors --test_summary=short 2>&1 | tee /tmp/test_run.txt
@@ -619,10 +632,15 @@ jobs:
       # bazel-coverage-gate job が全 shard 分を merge して coverage_100.toml 全域を
       # warn モードで突合する (mock は route / db は Pg repo / unit は crate と、
       # file ごとに寄与 shard が異なるため merge が必須)。flags は warm 側と一致必須。
+      # coverage 付き shard の test gate はこの step が兼ねる (Refs #568)。
       - name: bazel coverage (lcov 出力)
         if: matrix.coverage
         run: |
-          bazel coverage ${{ matrix.target }} --config=${{ matrix.coverage }}
+          set -o pipefail
+          bazel coverage ${{ matrix.target }} --config=${{ matrix.coverage }} --test_output=errors --test_summary=short 2>&1 | tee /tmp/test_run.txt
+          if grep -q "(cached)" /tmp/test_run.txt; then
+            echo "::notice::${{ matrix.target }} は (cached) — main warm から restore"
+          fi
           LCOV="$(bazel info output_path)/_coverage/_coverage_report.dat"
           cp "$LCOV" /tmp/lcov.dat
 
@@ -682,7 +700,9 @@ jobs:
           r2-secret-access-key: ${{ secrets.BAZEL_R2_SECRET_ACCESS_KEY }}
       - name: Init test DB (alc_api schema + roles)
         run: psql "postgresql://postgres:test@localhost:5432/postgres" -f scripts/init_local_db.sql
+      # coverage 付き shard では skip する (bazel-test-poc 側と同じ理由、Refs #568)
       - name: bazel test (result cache は main warm から)
+        if: ${{ !matrix.coverage }}
         run: |
           set -o pipefail
           bazel test ${{ matrix.target }} --test_env=TEST_DATABASE_URL --test_output=errors --test_summary=short 2>&1 | tee /tmp/test_run.txt
@@ -691,10 +711,15 @@ jobs:
           fi
 
       # PR3b (Refs #515): DB shard の lcov (Pg repo 実装の寄与分)。flags は warm と一致必須。
+      # coverage 付き shard の test gate はこの step が兼ねる (Refs #568)。
       - name: bazel coverage (lcov 出力)
         if: matrix.coverage
         run: |
-          bazel coverage ${{ matrix.target }} --test_env=TEST_DATABASE_URL --config=${{ matrix.coverage }}
+          set -o pipefail
+          bazel coverage ${{ matrix.target }} --test_env=TEST_DATABASE_URL --config=${{ matrix.coverage }} --test_output=errors --test_summary=short 2>&1 | tee /tmp/test_run.txt
+          if grep -q "(cached)" /tmp/test_run.txt; then
+            echo "::notice::${{ matrix.target }} は (cached) — main warm から restore"
+          fi
           LCOV="$(bazel info output_path)/_coverage/_coverage_report.dat"
           cp "$LCOV" /tmp/lcov.dat
 
