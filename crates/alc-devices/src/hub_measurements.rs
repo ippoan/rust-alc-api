@@ -43,8 +43,13 @@ async fn ensure_tenant_for_staging(state: &AppState, tenant_id: Uuid) -> Result<
 ///
 /// 将来の拡張 (timecard イベント等) はここに足す。DB 側に CHECK は張っていない
 /// (migration 126 参照) ため、拡張はコード変更のみで済む。
-pub const HUB_MEASUREMENT_KINDS: &[&str] =
-    &["temperature", "blood_pressure", "alcohol", "fc1200_raw", "crash_log"];
+pub const HUB_MEASUREMENT_KINDS: &[&str] = &[
+    "temperature",
+    "blood_pressure",
+    "alcohol",
+    "fc1200_raw",
+    "crash_log",
+];
 
 /// 1 リクエストで受けるバッチの上限 (再送スパイクからの防御)。
 const MAX_BATCH_ITEMS: usize = 500;
