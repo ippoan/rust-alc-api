@@ -531,7 +531,10 @@ pub struct UpdateTroubleTask {
     pub next_action: Option<String>,
     #[serde(default)]
     pub next_action_detail: Option<String>,
-    #[serde(default)]
+    #[serde(
+        default,
+        deserialize_with = "alc_core::serde_helpers::empty_string_as_none_option_string"
+    )]
     pub next_action_by: Option<Option<String>>,
     #[serde(
         default,
@@ -545,4 +548,28 @@ pub struct UpdateTroubleTask {
     pub occurred_at: Option<Option<DateTime<Utc>>>,
     #[serde(default)]
     pub print_page_break_before: Option<bool>,
+}
+
+#[cfg(test)]
+mod update_trouble_task_tests {
+    use super::UpdateTroubleTask;
+
+    #[test]
+    fn next_action_by_absent_does_not_update() {
+        let t: UpdateTroubleTask = serde_json::from_str(r#"{}"#).unwrap();
+        assert!(t.next_action_by.is_none());
+    }
+
+    #[test]
+    fn next_action_by_null_clears() {
+        let t: UpdateTroubleTask = serde_json::from_str(r#"{"next_action_by": null}"#).unwrap();
+        assert_eq!(t.next_action_by, Some(None));
+    }
+
+    #[test]
+    fn next_action_by_value_updates() {
+        let t: UpdateTroubleTask =
+            serde_json::from_str(r#"{"next_action_by": "青井 健"}"#).unwrap();
+        assert_eq!(t.next_action_by, Some(Some("青井 健".to_string())));
+    }
 }
