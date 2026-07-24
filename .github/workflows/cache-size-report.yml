@@ -16,14 +16,17 @@ on:
     - cron: '0 20 * * *' # 05:00 JST
   workflow_dispatch:
 
+# actions: write は cache 全消失時の Cache Warm dispatch 用 (Refs #574)。
+# 集計自体は read だけで足りる。
 permissions:
-  actions: read
+  actions: write
 
 jobs:
   report:
     runs-on: ubuntu-latest
     steps:
       - name: Collect and aggregate cache sizes
+        id: collect
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -88,6 +91,9 @@ jobs:
               "summaryText": "\n".join(lines),
           }
           json.dump(payload, open("/tmp/payload.json", "w"), ensure_ascii=False)
+          # 後段の re-warm 判定用 (Refs #574)
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"entry_count={len(entries)}\n")
           print("\n".join(lines))
           PY
 
@@ -109,3 +115,23 @@ jobs:
             echo "::error::gh-cache-report POST failed (HTTP $code)"
             exit 1
           fi
+
+      # cache が 1 件も無い = 7 日間 CI が走らず GitHub の TTL eviction で全消失した状態
+      # (実害 2026-07-23: 15.92GB / 779 entries → 0。詳細は #574)。放置すると次の
+      # push / PR が cold build (bazel disk tar ~15GB の再生成) になるため、Cache Warm を
+      # 空回しして main scope の cache を作り直しておく。
+      #
+      # 開発が動いている間は entry が残るので発火しない = 平常時のコストはゼロ。停滞が
+      # 続く間だけ 7 日ごとに 1 回走り、warm な状態が保たれる。
+      #
+      # always(): レポート送信 (上の step) が落ちても re-warm は独立して必要。
+      # GITHUB_TOKEN 起因のイベントは通常 workflow を起動しないが、workflow_dispatch と
+      # repository_dispatch はその例外なので gh workflow run で発火する。
+      - name: Re-warm caches if empty
+        if: always() && steps.collect.outputs.entry_count == '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          echo "cache が 0 entries — Cache Warm workflow を dispatch します"
+          gh workflow run cache-warm.yml -R "$REPO" --ref main
