@@ -17,12 +17,17 @@ import sys
 
 import yaml
 
-ci = yaml.safe_load(open(".github/workflows/ci.yml", encoding="utf-8"))
+# 実行 job は ci.yml、warm job は cache-warm.yml (ci.yml から workflow_call で呼ぶ
+# reusable。cache 全消失時に単体 dispatch するため分離した、Refs #574) にある。
+WORKFLOWS = [".github/workflows/ci.yml", ".github/workflows/cache-warm.yml"]
+jobs = {}
+for wf in WORKFLOWS:
+    jobs.update(yaml.safe_load(open(wf, encoding="utf-8"))["jobs"])
 
 def matrix_targets(job_name):
-    job = ci["jobs"].get(job_name)
+    job = jobs.get(job_name)
     if job is None:
-        print(f"::error::ci.yml に job '{job_name}' がありません")
+        print(f"::error::{' / '.join(WORKFLOWS)} のどれにも job '{job_name}' がありません")
         sys.exit(1)
     return {e["target"]: e for e in job["strategy"]["matrix"]["include"]}
 

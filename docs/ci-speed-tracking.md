@@ -237,6 +237,41 @@ warm job が DB 依存テストを `--ignore-run-fail` で実行し、PoolTimedO
 同 run では tenko 分割 (Phase A) 後の warm 状態で Tests ~3 分・Builds ~3 分、
 PR CI 全体 4 分 44 秒 (run 28742465845) を確認。
 
+## 確定した事実 (2026-07-24 実測、Refs #574)
+
+### cache は「7 日間 CI が走らない」だけで全消失する
+
+GitHub Actions cache の TTL は **7 日間未アクセス**。この repo は cache 生成が
+main push (cache-warm 系) に集中しているため、全 entry の `lastAccessedAt` が
+同じ run で揃う。結果、開発が 7 日以上止まると段階的にではなく**一斉に**失効する。
+
+日次 Cache Size Report での実測:
+
+| 日時 (UTC) | cache |
+|---|---|
+| 07-15 23:56 | main への最終 push (#573) = 最後の CI run |
+| 07-22 21:10 | 15.92GB / 779 entries (main 766 / PR 13) |
+| 07-23 21:06 | **0.00GB / 0 entries** |
+
+- `ci.yml` の cache-cleanup が保証する keep 数 (rust-cache: base ごと 3 /
+  bazel disk tar: shard ごと 1) は**自分が消す時の下限**であって、GitHub 側の
+  TTL eviction には効かない。cleanup 自体も main push 限定なので最後に走ったのは
+  07-16 で、07-22 時点で 779 entries 残っていた = cleanup 犯人説は排除済み
+- 実害は「次の push / PR が cold build」= bazel disk tar ~15GB の再生成
+
+### 対策: 週次 keep-warm ではなく「0 になった時だけ warm」
+
+常時 keep-warm する週次 cron は、停滞していない週も 15GB 分の warm を払い続ける
+ので割に合わない。代わりに `cache-size-report.yml` が `entryCount == 0` を検出した
+時だけ Cache Warm を `workflow_dispatch` で空回しする。
+
+- 開発が動いている間は entry が残るので発火しない = 平常時のコスト 0
+- 停滞中だけ 7 日ごとに 1 回走り、warm な状態が保たれる
+- warm 系 job + cache-cleanup は `cache-warm.yml` (`workflow_call` +
+  `workflow_dispatch`) に切り出し、`ci.yml` は caller。`ci.yml` 側に
+  `workflow_dispatch` を足す案は、`pr-limit` が skip された時に `check` /
+  `build-image` / `deploy` 等の `if` が意図せず true になるため採らなかった
+
 ## 施策 log
 
 ### #482: check job の TS bindings 生成を test-matrix(lib) に統合 (PR #483)

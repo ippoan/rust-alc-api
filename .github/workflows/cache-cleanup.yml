@@ -6,8 +6,8 @@ name: Cache Cleanup
 # - `--sort last_used` が無効値で gh が即エラー → 作成以来ずっと無音の no-op だった
 # - 仮に「直す」と bazel shard tar 21 個を毎週日曜に全滅させる (cargo 時代に cache が
 #   数個しか無かった頃の遺物)
-# - 世代掃除は ci.yml の cache-cleanup job (base ごと keep 3 / shard tar keep 1) と
-#   GitHub の 7 日未アクセス自動削除が既に担っている
+# - 世代掃除は cache-warm.yml の cache-cleanup job (base ごと keep 3 / shard tar keep 1)
+#   と GitHub の 7 日未アクセス自動削除が既に担っている
 
 on:
   pull_request:
