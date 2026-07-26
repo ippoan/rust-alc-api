@@ -207,6 +207,10 @@ pub struct TroubleTicketFilter {
     pub q: Option<String>,
     pub page: Option<i64>,
     pub per_page: Option<i64>,
+    /// ソート対象カラム。whitelist ("occurred" | "ticket_no") 以外・未指定は
+    /// 既定の ticket_no 降順 (Refs ippoan/nuxt-trouble#225)。
+    pub sort_by: Option<String>,
+    pub sort_desc: Option<bool>,
 }
 
 #[derive(Debug, Serialize, TS)]

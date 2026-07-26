@@ -975,6 +975,152 @@ async fn test_trouble_ticket_search_registration_number_width() {
     );
 }
 
+// ============================================================
+// Ticket list sort (sort_by / sort_desc, Refs ippoan/nuxt-trouble#225)
+// ============================================================
+
+#[tokio::test]
+async fn test_trouble_ticket_list_sort() {
+    test_group!("チケット一覧ソート");
+    test_case!(
+        "sort_by=occurred asc/desc、sort_by=ticket_no asc、未指定/未知は ticket_no DESC",
+        {
+            let state = common::setup_app_state().await;
+            let base_url = common::spawn_test_server(state.clone()).await;
+            let tenant_id = common::create_test_tenant(state.pool(), "Trouble Sort Tenant").await;
+            let jwt = common::create_test_jwt(tenant_id, "admin");
+            let client = reqwest::Client::new();
+            let auth = format!("Bearer {jwt}");
+
+            let res = client
+                .post(format!("{base_url}/api/trouble/workflow/setup"))
+                .header("Authorization", &auth)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 200);
+
+            // 発生日が ticket_no 順と逆になるように作成する:
+            //   1件目 (ticket_no 小) = 発生日 新しい
+            //   2件目 = 発生日 古い
+            //   3件目 (ticket_no 大) = 発生日 中間 + occurred_at NULL (occurred_date のみ)
+            let mut ids: Vec<String> = Vec::new();
+            for (occurred_at, occurred_date) in [
+                (Some("2026-07-20T10:00:00Z"), Some("2026-07-20")),
+                (Some("2026-07-01T09:00:00Z"), Some("2026-07-01")),
+                (None, Some("2026-07-10")),
+            ] {
+                let mut body = serde_json::json!({ "category": "貨物事故" });
+                if let Some(at) = occurred_at {
+                    body["occurred_at"] = serde_json::json!(at);
+                }
+                if let Some(d) = occurred_date {
+                    body["occurred_date"] = serde_json::json!(d);
+                }
+                let res = client
+                    .post(format!("{base_url}/api/trouble/tickets"))
+                    .header("Authorization", &auth)
+                    .json(&body)
+                    .send()
+                    .await
+                    .unwrap();
+                assert_eq!(res.status(), 201);
+                let t: Value = res.json().await.unwrap();
+                ids.push(t["id"].as_str().unwrap().to_string());
+            }
+            let (id_new, id_old, id_mid) = (&ids[0], &ids[1], &ids[2]);
+
+            let list_ids = |body: &Value| -> Vec<String> {
+                body["tickets"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|t| t["id"].as_str().unwrap().to_string())
+                    .collect()
+            };
+
+            // occurred DESC: 新しい → 中間 (date のみ) → 古い
+            let res = client
+                .get(format!("{base_url}/api/trouble/tickets"))
+                .header("Authorization", &auth)
+                .query(&[("sort_by", "occurred"), ("sort_desc", "true")])
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 200);
+            let body: Value = res.json().await.unwrap();
+            assert_eq!(
+                list_ids(&body),
+                vec![id_new.clone(), id_mid.clone(), id_old.clone()],
+                "occurred desc"
+            );
+
+            // occurred ASC: 古い → 中間 → 新しい
+            let res = client
+                .get(format!("{base_url}/api/trouble/tickets"))
+                .header("Authorization", &auth)
+                .query(&[("sort_by", "occurred"), ("sort_desc", "false")])
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 200);
+            let body: Value = res.json().await.unwrap();
+            assert_eq!(
+                list_ids(&body),
+                vec![id_old.clone(), id_mid.clone(), id_new.clone()],
+                "occurred asc"
+            );
+
+            // ticket_no ASC: 作成順
+            let res = client
+                .get(format!("{base_url}/api/trouble/tickets"))
+                .header("Authorization", &auth)
+                .query(&[("sort_by", "ticket_no"), ("sort_desc", "false")])
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 200);
+            let body: Value = res.json().await.unwrap();
+            assert_eq!(
+                list_ids(&body),
+                vec![id_new.clone(), id_old.clone(), id_mid.clone()],
+                "ticket_no asc = 作成順"
+            );
+
+            // sort 未指定 → 従来通り ticket_no DESC (作成の逆順)
+            let res = client
+                .get(format!("{base_url}/api/trouble/tickets"))
+                .header("Authorization", &auth)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 200);
+            let body: Value = res.json().await.unwrap();
+            assert_eq!(
+                list_ids(&body),
+                vec![id_mid.clone(), id_old.clone(), id_new.clone()],
+                "default = ticket_no desc"
+            );
+
+            // 未知の sort_by → whitelist 外は既定 (ticket_no DESC) にフォールバック
+            let res = client
+                .get(format!("{base_url}/api/trouble/tickets"))
+                .header("Authorization", &auth)
+                .query(&[("sort_by", "person_name; DROP TABLE trouble_tickets")])
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 200);
+            let body: Value = res.json().await.unwrap();
+            assert_eq!(
+                list_ids(&body),
+                vec![id_mid.clone(), id_old.clone(), id_new.clone()],
+                "unknown sort_by falls back to ticket_no desc"
+            );
+        }
+    );
+}
+
 // NOTE: 旧「tenant 実在チェック (require_tenant ミドルウェア)」セクション (4 テスト) は
 // #434 で撤去した。rust-alc-api は JWT 検証 / bare X-Tenant-ID フォールバック / tenant
 // 実在チェックを行わず、前段 proxy が auth-worker introspect で検証して注入する identity
