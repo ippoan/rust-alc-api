@@ -158,6 +158,20 @@ impl TroubleTicketsRepository for PgTroubleTicketsRepository {
 
         let where_sql = where_clauses.join(" AND ");
 
+        // ソートは whitelist 方式 (SQL injection 防止のため filter の文字列を
+        // 直接埋め込まない)。未指定・未知の値は従来通り ticket_no DESC。
+        // "occurred" は日付のみ入力 (occurred_at NULL / occurred_date のみ) の
+        // 行も並ぶよう occurred_date を第1キーにする (Refs ippoan/nuxt-trouble#225)。
+        let sort_desc = filter.sort_desc.unwrap_or(true);
+        let direction = if sort_desc { "DESC" } else { "ASC" };
+        let order_sql = match filter.sort_by.as_deref() {
+            Some("occurred") => format!(
+                "occurred_date {direction} NULLS LAST, occurred_at {direction} NULLS LAST, ticket_no DESC"
+            ),
+            Some("ticket_no") => format!("ticket_no {direction}"),
+            _ => "ticket_no DESC".to_string(),
+        };
+
         let count_sql = format!("SELECT COUNT(*) as count FROM trouble_tickets WHERE {where_sql}");
         let list_sql = format!(
             r#"SELECT id, tenant_id, ticket_no, category, title,
@@ -176,7 +190,7 @@ impl TroubleTicketsRepository for PgTroubleTicketsRepository {
                 created_by, created_at, updated_at, deleted_at
             FROM trouble_tickets
             WHERE {where_sql}
-            ORDER BY ticket_no DESC
+            ORDER BY {order_sql}
             LIMIT ${idx} OFFSET ${}"#,
             idx + 1
         );
