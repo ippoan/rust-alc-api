@@ -215,14 +215,17 @@ mod tests {
     #[test]
     fn test_parse_kudgivt_falls_back_to_driver_cd1() {
         test_group!("CSVパーサー");
-        test_case!("対象乗務員CD が無ければ乗務員CD1にフォールバック", {
-            // 対象乗務員CD を持たない古い CSV (1人乗務)
-            let csv = "運行NO,読取日,乗務員CD1,乗務員名１,対象乗務員区分,開始日時,イベントCD,イベント名\n\
+        test_case!(
+            "対象乗務員CD が無ければ乗務員CD1にフォールバック",
+            {
+                // 対象乗務員CD を持たない古い CSV (1人乗務)
+                let csv = "運行NO,読取日,乗務員CD1,乗務員名１,対象乗務員区分,開始日時,イベントCD,イベント名\n\
                        1001,2026/03/01,DR01,テスト運転者,1,2026/03/01 08:00:00,100,出庫\n";
-            let rows = parse_kudgivt(csv).unwrap();
-            assert_eq!(rows.len(), 1);
-            assert_eq!(rows[0].driver_cd, "DR01");
-        });
+                let rows = parse_kudgivt(csv).unwrap();
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0].driver_cd, "DR01");
+            }
+        );
     }
 
     #[test]
