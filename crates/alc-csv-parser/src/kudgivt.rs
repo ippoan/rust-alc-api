@@ -48,7 +48,16 @@ fn build_column_index(headers: &[&str]) -> Result<ColumnIndex, String> {
 
     let unko_no = require_col(headers, "運行NO", &mut missing);
     let reading_date = require_col(headers, "読取日", &mut missing);
-    let driver_cd = require_col(headers, "乗務員CD1", &mut missing);
+    // 「乗務員CD1」は運行 primary driver で、KUDGIVT の全行で同じ値になる。
+    // 行ごとの「対象」は「対象乗務員CD」 (subject driver of this row) で、これを
+    // 採用しないと crew_role=2 副運転手の行も primary driver のイベントとして
+    // 集計されてしまう (KUDGURI 側は既に対象乗務員CD を採用しているため、
+    // dtako_daily_work_hours の休息集計でキーが食い違う)。
+    // 対象乗務員CD が無い古い CSV (1人乗務) は乗務員CD1 にフォールバック。
+    let driver_cd = find_col(headers, "対象乗務員CD").or_else(|| find_col(headers, "乗務員CD1"));
+    if driver_cd.is_none() {
+        missing.push("対象乗務員CD or 乗務員CD1");
+    }
     let driver_name = require_col(headers, "乗務員名１", &mut missing);
     let crew_role = require_col(headers, "対象乗務員区分", &mut missing);
     let start_at = require_col(headers, "開始日時", &mut missing);
@@ -178,6 +187,41 @@ mod tests {
             assert_eq!(row.duration_minutes, Some(1123));
             assert!((row.section_distance.unwrap() - 1.2).abs() < 0.01);
             assert_eq!(row.driver_cd, "2");
+        });
+    }
+
+    #[test]
+    fn test_parse_kudgivt_prefers_taisho_driver_cd() {
+        test_group!("CSVパーサー");
+        test_case!("対象乗務員CDを乗務員CD1より優先", {
+            // 乗務員CD1 は運行の primary driver (全行同じ)、対象乗務員CD が行ごとの対象。
+            // crew_role=2 の副運転手の行は対象乗務員CD 側を採らないと primary に寄ってしまう。
+            let csv = "運行NO,読取日,乗務員CD1,乗務員名１,対象乗務員CD,対象乗務員区分,開始日時,イベントCD,イベント名\n\
+                       1001,2026/03/01,2,梅津　政弘,2,1,2026/03/01 08:00:00,100,出庫\n\
+                       1001,2026/03/01,2,梅津　政弘,77,2,2026/03/01 09:00:00,302,休息\n";
+            let rows = parse_kudgivt(csv).unwrap();
+            assert_eq!(rows.len(), 2);
+            assert_eq!(rows[0].driver_cd, "2");
+            assert_eq!(rows[0].crew_role, 1);
+            // 副運転手の行は対象乗務員CD が採用される (乗務員CD1 の "2" ではない)
+            assert_eq!(rows[1].driver_cd, "77");
+            assert_eq!(rows[1].crew_role, 2);
+            // raw_data には両方の列がそのまま残る
+            assert_eq!(rows[1].raw_data["乗務員CD1"], "2");
+            assert_eq!(rows[1].raw_data["対象乗務員CD"], "77");
+        });
+    }
+
+    #[test]
+    fn test_parse_kudgivt_falls_back_to_driver_cd1() {
+        test_group!("CSVパーサー");
+        test_case!("対象乗務員CD が無ければ乗務員CD1にフォールバック", {
+            // 対象乗務員CD を持たない古い CSV (1人乗務)
+            let csv = "運行NO,読取日,乗務員CD1,乗務員名１,対象乗務員区分,開始日時,イベントCD,イベント名\n\
+                       1001,2026/03/01,DR01,テスト運転者,1,2026/03/01 08:00:00,100,出庫\n";
+            let rows = parse_kudgivt(csv).unwrap();
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].driver_cd, "DR01");
         });
     }
 
