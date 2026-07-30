@@ -94,6 +94,10 @@ path = "crates/alc-dtako/src/dtako_csv_proxy.rs"
 type = "mock"
 
 [[files]]
+path = "crates/alc-dtako/src/dtako_events.rs"
+type = "mock"
+
+[[files]]
 path = "crates/alc-dtako/src/dtako_daily_hours.rs"
 type = "mock"
 

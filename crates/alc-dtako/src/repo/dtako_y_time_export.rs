@@ -68,4 +68,67 @@ impl DtakoYTimeExportRepository for PgDtakoYTimeExportRepository {
         .fetch_all(&mut *tc.conn)
         .await
     }
+
+    async fn list_drivers_with_operations(
+        &self,
+        tenant_id: Uuid,
+        from: NaiveDate,
+        to: NaiveDate,
+        after_driver_cd: Option<&str>,
+        limit: i64,
+    ) -> Result<Vec<DtakoDriverRef>, sqlx::Error> {
+        // list_operations と同じく暦日跨ぎのため ±1 日広げる
+        let from_widened = from - chrono::Duration::days(1);
+        let to_widened = to + chrono::Duration::days(1);
+        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
+        sqlx::query_as::<_, DtakoDriverRef>(
+            "SELECT DISTINCT d.id AS driver_id, d.driver_cd, d.name AS driver_name \
+             FROM alc_api.dtako_operations o \
+             JOIN alc_api.employees d ON o.driver_id = d.id \
+             WHERE o.tenant_id = $1 \
+               AND o.reading_date BETWEEN $2 AND $3 \
+               AND o.has_kudgivt = TRUE \
+               AND d.deleted_at IS NULL \
+               AND d.driver_cd IS NOT NULL \
+               AND ($4::TEXT IS NULL OR d.driver_cd > $4) \
+             ORDER BY d.driver_cd \
+             LIMIT $5",
+        )
+        .bind(tenant_id)
+        .bind(from_widened)
+        .bind(to_widened)
+        .bind(after_driver_cd)
+        .bind(limit)
+        .fetch_all(&mut *tc.conn)
+        .await
+    }
+
+    async fn list_operations_for_drivers(
+        &self,
+        tenant_id: Uuid,
+        driver_ids: &[Uuid],
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> Result<Vec<DtakoDriverOperation>, sqlx::Error> {
+        let from_widened = from - chrono::Duration::days(1);
+        let to_widened = to + chrono::Duration::days(1);
+        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
+        // list_operations と同じ dedup (crew_role=1 優先) を乗務員ごとに行う
+        sqlx::query_as::<_, DtakoDriverOperation>(
+            "SELECT DISTINCT ON (driver_id, unko_no) \
+                    driver_id, unko_no, crew_role, departure_at, return_at, r2_key_prefix \
+             FROM alc_api.dtako_operations \
+             WHERE tenant_id = $1 \
+               AND driver_id = ANY($2) \
+               AND reading_date BETWEEN $3 AND $4 \
+               AND has_kudgivt = TRUE \
+             ORDER BY driver_id, unko_no, crew_role ASC, departure_at NULLS LAST",
+        )
+        .bind(tenant_id)
+        .bind(driver_ids)
+        .bind(from_widened)
+        .bind(to_widened)
+        .fetch_all(&mut *tc.conn)
+        .await
+    }
 }

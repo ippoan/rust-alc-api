@@ -239,7 +239,8 @@ impl std::fmt::Display for ComputeError {
 
 impl std::error::Error for ComputeError {}
 
-fn compute_error_to_response(err: ComputeError) -> (StatusCode, String) {
+/// `ComputeError` → HTTP。`dtako_events` も同じ写像を使う (Refs rust-ichibanboshi#205)。
+pub fn compute_error_to_response(err: ComputeError) -> (StatusCode, String) {
     match err {
         ComputeError::BadRequest(m) => (StatusCode::BAD_REQUEST, m),
         ComputeError::NotFound(m) => (StatusCode::NOT_FOUND, m),
