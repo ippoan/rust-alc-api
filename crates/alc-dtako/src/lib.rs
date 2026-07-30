@@ -9,6 +9,7 @@ pub mod dtako_csv_proxy;
 pub mod dtako_daily_hours;
 pub mod dtako_drivers;
 pub mod dtako_event_classifications;
+pub mod dtako_events;
 pub mod dtako_logs;
 pub mod dtako_operations;
 pub mod dtako_restraint_report;
