@@ -24,7 +24,9 @@ while [[ $# -gt 0 ]]; do
     --mock-only) MOCK_ONLY=true; shift ;;
     --combined) COMBINED=true; shift ;;
     --use-cache) EXTERNAL_CACHE="$2"; shift 2 ;;
-    *) shift ;;
+    # 未知のオプションを黙って捨てない。古い --xxx が script に残っていると
+    # gate が静かに緩くなるため、usage エラーで落とす
+    *) echo "ERROR: unknown option: $1" >&2; sed -n '4,8p' "$0" >&2; exit 2 ;;
   esac
 done
 
@@ -66,13 +68,20 @@ if [ -n "$EXTERNAL_CACHE" ]; then
   CACHE_FILE="$EXTERNAL_CACHE"
 else
   echo "Running cargo llvm-cov --text..."
+  # --workspace が無いと root package しか計測されず、crates/* の登録ファイルが
+  # 丸ごと「not found」になる (実際に kudgivt.rs / kudguri.rs が一度も検証されて
+  # いなかった)。--lib は --workspace と併せて全 package の lib target を見る
   if [ "$UNIT_ONLY" = true ]; then
-    cargo llvm-cov --lib --text > "$CACHE_FILE" 2>&1 || { echo "cargo llvm-cov failed:"; tail -50 "$CACHE_FILE"; exit 101; }
+    cargo llvm-cov --workspace --lib --text > "$CACHE_FILE" 2>&1 || { echo "cargo llvm-cov failed:"; tail -50 "$CACHE_FILE"; exit 101; }
   elif [ "$MOCK_ONLY" = true ]; then
-    cargo llvm-cov --test mock_tenko --test mock_dtako --test mock_devices --test mock_carins --test mock_misc --text > "$CACHE_FILE" 2>&1 || { echo "cargo llvm-cov failed:"; tail -50 "$CACHE_FILE"; exit 101; }
+    # --lib を併せる理由: workspace crate では「unit test は crate 内の lib に在り、
+    # mock test は root package から crate を叩く」ので、--lib を外すと crates/* の
+    # mock 登録ファイルが人工的な部分集合で測られる (例: alc-misc/health.rs が
+    # 124 行中 14 行 = 11.3% に見える。lib を含めれば 355/355 = 100%)
+    cargo llvm-cov --workspace --lib --test mock_tenko --test mock_dtako --test mock_devices --test mock_carins --test mock_misc --text > "$CACHE_FILE" 2>&1 || { echo "cargo llvm-cov failed:"; tail -50 "$CACHE_FILE"; exit 101; }
   else
     [[ -f .test-config ]] && source .test-config
-    cargo llvm-cov --text > "$CACHE_FILE" 2>&1 || { echo "cargo llvm-cov failed:"; tail -50 "$CACHE_FILE"; exit 101; }
+    cargo llvm-cov --workspace --text > "$CACHE_FILE" 2>&1 || { echo "cargo llvm-cov failed:"; tail -50 "$CACHE_FILE"; exit 101; }
   fi
 fi
 
@@ -88,8 +97,16 @@ awk '
     file = $0; sub(/:$/, "", file)
     covered = 0; uncovered = 0; next
 }
-/^[[:space:]]*[0-9]+\|[[:space:]]*0\|/ { uncovered++; next }
-/^[[:space:]]*[0-9]+\|[[:space:]]*[1-9][0-9]*\|/ { covered++; next }
+# ヒット数は 1.98k / 2.50M のようにサフィックス表記されることがある。
+# 純粋な数字だけを見ると、そういう行は covered/uncovered どちらにも掛からず
+# 分母から静かに消える。カウント欄を取り出して "0" かどうかだけで判定する
+/^[[:space:]]*[0-9]+\|[[:space:]]*[0-9][0-9.]*[kMGTE]?[[:space:]]*\|/ {
+    split($0, f, "|")
+    cnt = f[2]
+    gsub(/[[:space:]]/, "", cnt)
+    if (cnt == "0") uncovered++; else covered++
+    next
+}
 END {
     if (file != "") {
         total = covered + uncovered
@@ -121,11 +138,27 @@ for filepath in "${PATHS[@]}"; do
   # combined モードでは全タイプをチェック (lib + mock の combined report を使用)
   # unit, mock, combined すべて対象
 
-  # サマリから該当ファイルを検索 (パス末尾一致)
-  MATCH=$(grep "$filepath" "$SUMMARY_FILE" || true)
+  # サマリから該当ファイルを検索。
+  # 部分一致だと別ファイルに巻き込まれ、複数行ヒットした時に後段の数値比較が壊れる。
+  # "/" 境界での末尾完全一致にし、複数マッチは ambiguous として明示的に落とす
+  MATCH=$(awk -v want="/$filepath" 'index($1, want) == length($1) - length(want) + 1' "$SUMMARY_FILE" || true)
+  MATCH_COUNT=$(printf '%s' "$MATCH" | grep -c . || true)
+
+  if [ "$MATCH_COUNT" -gt 1 ]; then
+    echo "FAIL: $filepath — ambiguous, matched $MATCH_COUNT files in coverage data:"
+    printf '%s\n' "$MATCH" | awk '{print "      " $1}'
+    FAILED=1
+    continue
+  fi
 
   if [ -z "$MATCH" ]; then
-    echo "WARN: $filepath — not found in coverage data"
+    # 黙ってスキップしない。gate が「見ている」と広告する範囲が実際に検証した
+    # 範囲を静かに超えるなら、gate が無いより悪い
+    echo "FAIL: $filepath — not found in coverage data"
+    echo "      考えられる原因: (1) 計測コマンドの対象外 (crates/* は --workspace が要る)"
+    echo "                      (2) パスが coverage_100.toml と実体でずれている"
+    echo "                      (3) ファイルが削除・移動された"
+    FAILED=1
     continue
   fi
 
@@ -134,7 +167,10 @@ for filepath in "${PATHS[@]}"; do
   CHECKED=$((CHECKED + 1))
 
   if [ "$TOTAL" -eq 0 ]; then
-    echo "WARN: $filepath — 0 lines (no executable code)"
+    # 実行可能行ゼロを OK 扱いすると、登録されているのに何も検証していない
+    # ファイルが「維持されている」ように見える
+    echo "FAIL: $filepath — 0 executable lines (登録する意味がない。登録簿から外すこと)"
+    FAILED=1
     continue
   fi
 

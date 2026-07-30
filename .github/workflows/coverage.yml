@@ -71,7 +71,13 @@ jobs:
           grep "test result:" /tmp/llvm-cov-stderr.txt || true
 
       - name: Parse coverage → Job Summary
-        run: bash scripts/parse_coverage.sh "${{ inputs.mode }}" "${{ inputs.file_pattern }}" /tmp/llvm-cov-output.txt
+        # inputs.file_pattern は自由入力。run: の本体へ直接展開すると、
+        # workflow_dispatch を起動できる者が任意のシェルコマンドを注入できる。
+        # env 経由なら値は環境変数として渡り、シェルに解釈されない
+        env:
+          COV_MODE: ${{ inputs.mode }}
+          COV_FILE_PATTERN: ${{ inputs.file_pattern }}
+        run: bash scripts/parse_coverage.sh "$COV_MODE" "$COV_FILE_PATTERN" /tmp/llvm-cov-output.txt
 
       - name: Coverage 100% regression check
         run: bash scripts/check_coverage_100.sh --use-cache /tmp/llvm-cov-output.txt

@@ -33,9 +33,10 @@ type = "mock"
 
 # --- alc-core ---
 
-[[files]]
-path = "crates/alc-core/src/auth_jwt.rs"
-type = "mock"
+# crates/alc-core/src/auth_jwt.rs は登録から外した (2026-07-30)。
+# #479 PR-3 で JWT の発行・検証が auth-worker へ移管された結果、doc コメントと
+# `pub use alc_auth_jwt::INTERNAL_AUD;` だけの 10 行 shim になり、実行可能行が
+# ゼロになったため。計測データに現れようがなく、登録しても検証されない
 
 [[files]]
 path = "crates/alc-core/src/models.rs"
