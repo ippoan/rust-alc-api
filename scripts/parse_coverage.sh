@@ -45,8 +45,12 @@ case "$MODE" in
           file = $0; sub(/:$/, "", file); sub(/.*\/src\//, "src/", file)
           covered = 0; uncovered = 0; next
       }
-      /^[[:space:]]*[0-9]+\|[[:space:]]*0\|/ { uncovered++; next }
-      /^[[:space:]]*[0-9]+\|[[:space:]]*[1-9][0-9]*\|/ { covered++; next }
+      # ヒット数の 1.98k / 2.50M 表記を落とさない (check_coverage_100.sh と同じ規則)
+      /^[[:space:]]*[0-9]+\|[[:space:]]*[0-9][0-9.]*[kMGTE]?[[:space:]]*\|/ {
+        split($0, f, "|"); cnt = f[2]; gsub(/[[:space:]]/, "", cnt)
+        if (cnt == "0") uncovered++; else covered++
+        next
+      }
       END {
           if (file != "") {
               total = covered + uncovered
@@ -83,8 +87,12 @@ case "$MODE" in
           file = $0; sub(/:$/, "", file); sub(/.*\/src\//, "src/", file)
           covered = 0; uncovered = 0; next
       }
-      /^[[:space:]]*[0-9]+\|[[:space:]]*0\|/ { uncovered++; next }
-      /^[[:space:]]*[0-9]+\|[[:space:]]*[1-9][0-9]*\|/ { covered++; next }
+      # ヒット数の 1.98k / 2.50M 表記を落とさない (check_coverage_100.sh と同じ規則)
+      /^[[:space:]]*[0-9]+\|[[:space:]]*[0-9][0-9.]*[kMGTE]?[[:space:]]*\|/ {
+        split($0, f, "|"); cnt = f[2]; gsub(/[[:space:]]/, "", cnt)
+        if (cnt == "0") uncovered++; else covered++
+        next
+      }
       END {
           if (file != "") {
               total = covered + uncovered
@@ -120,8 +128,12 @@ case "$MODE" in
           file = $0; sub(/:$/, "", file); sub(/.*\/src\//, "src/", file)
           covered = 0; uncovered = 0; next
       }
-      /^[[:space:]]*[0-9]+\|[[:space:]]*0\|/ { uncovered++; next }
-      /^[[:space:]]*[0-9]+\|[[:space:]]*[1-9][0-9]*\|/ { covered++; next }
+      # ヒット数の 1.98k / 2.50M 表記を落とさない (check_coverage_100.sh と同じ規則)
+      /^[[:space:]]*[0-9]+\|[[:space:]]*[0-9][0-9.]*[kMGTE]?[[:space:]]*\|/ {
+        split($0, f, "|"); cnt = f[2]; gsub(/[[:space:]]/, "", cnt)
+        if (cnt == "0") uncovered++; else covered++
+        next
+      }
       END {
           if (file != "") {
               total = covered + uncovered
