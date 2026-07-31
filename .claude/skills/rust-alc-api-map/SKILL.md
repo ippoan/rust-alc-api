@@ -139,6 +139,15 @@ router 実装として存続。旧 per-domain は同じ domain crate を単独 m
   **dev-dependencies を持つ crate (alc-misc / alc-notify) の rust_test には
   `all_crate_deps(normal_dev/proc_macro_dev)` の配線が必須** — 無いと `#[tokio::test]` 等が
   unresolved で FAILED TO BUILD になる。
+  **`rust_test` を足したら matrix を 2 箇所に足す** — `ci.yml` の実行 job
+  (`bazel-test-poc` / DB 付きは `bazel-test-db`) と、**`cache-warm.yml` の対になる warm job**
+  (`cache-warm-bazel-test-poc` / `cache-warm-bazel-test-db`)。`scripts/check_bazel_test_matrix.sh`
+  が (a) BUILD の全 rust_test が matrix にあるか (b) **実行 job と warm job の matrix が
+  `target`/`name`/`pdfium`/`coverage` まで一致するか を検査し、片方だけだと落ちる。
+  このチェックは `bazel-test-poc` の **`csv-parser` セルでだけ**走るので、
+  **失敗ジョブ名 (`Bazel test (csv-parser)`) は原因と無関係** — ログの
+  `matrix target 不一致` を見ること。ローカル再現は `bash scripts/check_bazel_test_matrix.sh`
+  (数秒、bazel 不要)。
 - **deploy.yml は deploy/release 分離 (Refs #137)**: PR → staging 自動 deploy、tag(v*) push → production。
   **production の tag release は新 revision を 0% (no-traffic) で deploy するだけ**で traffic は旧 revision に残す。
   実際の切替は **Release Wave flip** が行う。`verify-no-traffic` job がこの不変条件を検証 (latest revision が
