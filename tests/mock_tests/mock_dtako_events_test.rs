@@ -795,9 +795,10 @@ async fn etags_returns_500_when_r2_list_fails() {
 }
 
 #[tokio::test]
-async fn etags_returns_500_when_scoped_month_list_fails() {
-    // unko_no が数字 (月で絞る通常経路) での LIST 失敗。安全弁フォールバックの
-    // エラー経路と production コード上は別の `map_err` なので、別に検査する。
+async fn etags_returns_500_when_scoped_day_list_fails() {
+    // unko_no が数字 (日で絞る通常経路) での LIST 失敗。並列 LIST のうち 1 本でも
+    // 落ちたら部分結果を返さず 500 に倒すこと (部分結果は下流の月ゲートが
+    // 「運行が消えた」と誤検出する)。
     let mock_storage = Arc::new(crate::common::mock_storage::MockStorage::new(
         "dtako-bucket",
     ));
@@ -932,12 +933,14 @@ async fn etags_returns_empty_items_when_no_operation_matches() {
 }
 
 #[tokio::test]
-async fn etags_scopes_r2_list_to_distinct_yymm_month_prefixes() {
-    // db_unko_nos が 2606 (6月) と 2607 (7月、翌月またぎ先読み分) にまたがるケース。
+async fn etags_scopes_r2_list_to_distinct_day_prefixes() {
+    // db_unko_nos が 260601 (6月) と 260701 (7月、翌月またぎ先読み分) にまたがるケース。
     // 検査するのは 2 点:
     // (1) 応答 (unko_no ごとの etag) が「全部を LIST した場合」と完全に一致すること
-    // (2) LIST が tenant 全体の裸 prefix ではなく、distinct な YYMM の数だけ
-    //     月で絞った prefix で呼ばれていること
+    //     — 下の etags_day_scoped_list_matches_full_list_byte_for_byte がこれを
+    //     参照実装との突き合わせで厳密にやる。ここでは値の性質だけ見る
+    // (2) LIST が tenant 全体の裸 prefix でも月 prefix でもなく、distinct な YYMMDD の
+    //     数だけ日で絞った prefix で呼ばれていること (Refs #205 comment 205-27)
     let mock_storage = Arc::new(crate::common::mock_storage::MockStorage::new(
         "dtako-bucket",
     ));
@@ -964,12 +967,21 @@ async fn etags_scopes_r2_list_to_distinct_yymm_month_prefixes() {
         KUDGIVT_CSV,
     )
     .await;
-    // 対象月の外 (5月)。DB には無いキー。月で絞れていれば LIST 呼び出しの対象にすら
+    // 対象日の外 (5月)。DB には無いキー。日で絞れていれば LIST 呼び出しの対象にすら
     // 入らない (呼び出し回数・prefix の assertion で検査する)。
     upload_kudgivt(
         mock_storage.as_ref(),
         &tenant_id,
         "260501090000009",
+        KUDGIVT_CSV,
+    )
+    .await;
+    // 同じ 6 月でも別の日 (06-02)。月 prefix (2606) なら巻き込まれるが、日 prefix
+    // なら LIST されない — 4 桁と 6 桁の差が出る唯一のキー。
+    upload_kudgivt(
+        mock_storage.as_ref(),
+        &tenant_id,
+        "260602090000008",
         KUDGIVT_CSV,
     )
     .await;
@@ -1013,24 +1025,116 @@ async fn etags_scopes_r2_list_to_distinct_yymm_month_prefixes() {
         "R2 にまだ現れていない運行は etag: null のはず: {items:?}"
     );
 
-    let calls = mock_storage.list_calls();
+    // LIST は並列に投げるので順序は不定。集合として検査する。
+    let mut calls = mock_storage.list_calls();
+    calls.sort();
     let bare_prefix = format!("{tenant_id}/unko/");
     assert_eq!(
-        calls.len(),
-        2,
-        "distinct な YYMM (2606, 2607) の数だけ呼ばれるはず: {calls:?}"
-    );
-    assert!(calls.contains(&format!("{bare_prefix}2606")), "{calls:?}");
-    assert!(calls.contains(&format!("{bare_prefix}2607")), "{calls:?}");
-    assert!(
-        !calls.contains(&bare_prefix),
-        "tenant 全体の裸 prefix では呼ばれていないはず: {calls:?}"
+        calls,
+        vec![
+            format!("{bare_prefix}260601"),
+            format!("{bare_prefix}260701"),
+        ],
+        "distinct な YYMMDD (260601, 260701) の数だけ日 prefix で呼ばれるはず: {calls:?}"
     );
 }
 
 #[tokio::test]
-async fn etags_falls_back_to_full_list_when_unko_no_yymm_is_non_numeric() {
-    // db_unko_nos の 1 件でも先頭 4 文字が数字でなければ、月で絞る前提が崩れるので
+async fn etags_day_scoped_list_matches_full_list_byte_for_byte() {
+    // #205-22 から引き継ぐ縛り: この口の応答は下流 (rust-ichibanboshi の月ゲート) の
+    // 指紋そのものなので、LIST の絞り方を変えても **1 バイトも変わってはいけない**。
+    // 「tenant 全体を裸 prefix で LIST して突き合わせる」= 絞り込み導入前の挙動を
+    // テスト側で参照実装として組み直し、endpoint の応答と完全一致することを検査する。
+    let mock_storage = Arc::new(crate::common::mock_storage::MockStorage::new(
+        "dtako-bucket",
+    ));
+    let mut state = setup_mock_app_state();
+    state.dtako_storage = Some(mock_storage.clone());
+    let tenant_id = test_tenant_id();
+
+    // 月境界 (5/31・7/01) と同月内の複数日をまたぐ、意地の悪い並び。
+    let in_db_and_r2 = [
+        "260531230000001",
+        "260601090000002",
+        "260601100000003",
+        "260615120000004",
+        "260701000000005",
+    ];
+    for unko_no in in_db_and_r2 {
+        upload_kudgivt(mock_storage.as_ref(), &tenant_id, unko_no, KUDGIVT_CSV).await;
+    }
+    // R2 にだけあって DB に無い運行 (応答に出てはいけない)
+    upload_kudgivt(
+        mock_storage.as_ref(),
+        &tenant_id,
+        "260610080000099",
+        KUDGIVT_CSV,
+    )
+    .await;
+    // DB にだけあって R2 に無い運行 (etag: null で出る)
+    let db_only = ["260601110000006", "260701010000007"];
+
+    let mut ops = Vec::new();
+    let mut drivers = Vec::new();
+    for (i, unko_no) in in_db_and_r2.iter().chain(db_only.iter()).enumerate() {
+        let id = uuid::Uuid::new_v4();
+        drivers.push(driver_ref(id, &format!("D{i:03}"), "テスト"));
+        ops.push(driver_op(id, unko_no, 1, 9));
+    }
+    state.dtako_y_time_export = Arc::new(
+        MockDtakoYTimeExportRepository::default()
+            .with_drivers(drivers)
+            .with_driver_operations(ops),
+    );
+
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let body: serde_json::Value = reqwest::Client::new()
+        .get(format!(
+            "{base_url}/api/dtako/events/etags?date_from=2026-06-01&date_to=2026-07-01"
+        ))
+        .header("Authorization", test_auth_header())
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    // 参照実装: 裸 prefix で全 LIST → KUDGIVT.csv だけ拾う → db_unko_nos (sort + dedup)
+    // を基準に突き合わせる。絞り込み導入前の production コードと同じ手順。
+    let bare_prefix = format!("{tenant_id}/unko/");
+    let listed = rust_alc_api::storage::StorageBackend::list(mock_storage.as_ref(), &bare_prefix)
+        .await
+        .unwrap();
+    let full: std::collections::HashMap<String, String> = listed
+        .into_iter()
+        .filter_map(|obj| {
+            let rest = obj.key.strip_prefix(&bare_prefix)?.to_string();
+            let unko_no = rest.strip_suffix("/KUDGIVT.csv")?.to_string();
+            obj.etag.map(|etag| (unko_no, etag))
+        })
+        .collect();
+    let mut db_unko_nos: Vec<&str> = in_db_and_r2.iter().chain(db_only.iter()).copied().collect();
+    db_unko_nos.sort_unstable();
+    let expected: serde_json::Value = db_unko_nos
+        .iter()
+        .map(|unko_no| {
+            serde_json::json!({
+                "unko_no": unko_no,
+                "etag": full.get(*unko_no).cloned(),
+            })
+        })
+        .collect();
+
+    assert_eq!(
+        body["items"], expected,
+        "日 prefix で絞っても応答は全 LIST 版と完全一致すること"
+    );
+}
+
+#[tokio::test]
+async fn etags_falls_back_to_full_list_when_unko_no_day_is_non_numeric() {
+    // db_unko_nos の 1 件でも先頭 6 文字が数字でなければ、日で絞る前提が崩れるので
     // 速さより正しさを優先し、tenant 全体の裸 prefix で全 LIST に倒す。
     let mock_storage = Arc::new(crate::common::mock_storage::MockStorage::new(
         "dtako-bucket",
@@ -1057,8 +1161,8 @@ async fn etags_falls_back_to_full_list_when_unko_no_yymm_is_non_numeric() {
             ])
             .with_driver_operations(vec![
                 driver_op(a, "260601090000001", 1, 9),
-                // 何らかの理由で YYMM 部分が数字でない unko_no が紛れ込んだケース
-                driver_op(b, "26X601090000002", 1, 10),
+                // 何らかの理由で YYMMDD 部分が数字でない unko_no が紛れ込んだケース
+                driver_op(b, "2606X1090000002", 1, 10),
             ]),
     );
 
@@ -1082,7 +1186,10 @@ async fn etags_falls_back_to_full_list_when_unko_no_yymm_is_non_numeric() {
 
 #[tokio::test]
 async fn etags_falls_back_to_full_list_when_unko_no_is_too_short() {
-    // 先頭 4 文字すら取れない (3 文字しかない) 壊れた unko_no のケース。
+    // 先頭 6 文字すら取れない (3 文字しかない) 壊れた unko_no のケース。
+    // 4 桁 (月) から 6 桁 (日) に変えた分、安全弁の発動条件はわずかに厳しくなっている
+    // (先頭 5 文字までしか無い unko_no も倒れる)。倒れた先は正しい結果を返す経路
+    // なので、壊れるのは速さだけ (Refs #205 comment 205-27)。
     let mock_storage = Arc::new(crate::common::mock_storage::MockStorage::new(
         "dtako-bucket",
     ));
