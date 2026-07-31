@@ -21,7 +21,8 @@ use rust_alc_api::db::repository::dtako_upload::{
 use rust_alc_api::db::repository::dtako_vehicles::DtakoVehiclesRepository;
 use rust_alc_api::db::repository::dtako_work_times::{DtakoWorkTimesRepository, WorkTimeItem};
 use rust_alc_api::db::repository::dtako_y_time_export::{
-    DtakoDriverOperation, DtakoDriverRef, DtakoYTimeExportRepository, YTimeExportOperation,
+    DtakoDriverOperation, DtakoDriverRef, DtakoYTimeExportRepository, UnsplitOperation,
+    YTimeExportOperation,
 };
 use rust_alc_api::db::repository::employees::EmployeeRepository;
 use rust_alc_api::db::repository::equipment_failures::EquipmentFailuresRepository;
@@ -853,6 +854,10 @@ pub struct MockDtakoYTimeExportRepository {
     /// `fail_next` は先に `lookup_driver` / `list_drivers_with_operations` で
     /// 消費されるため、後段のエラー経路を単独で試すのに要る。
     pub fail_operations: AtomicBool,
+    /// etags の `unsplit` (has_kudgivt = FALSE) 用 (Refs #205 の 36)。
+    pub unsplit_operations: std::sync::Mutex<Vec<UnsplitOperation>>,
+    /// `list_unsplit_operations` だけを失敗させる。
+    pub fail_unsplit: AtomicBool,
 }
 
 impl Default for MockDtakoYTimeExportRepository {
@@ -864,6 +869,8 @@ impl Default for MockDtakoYTimeExportRepository {
             drivers: std::sync::Mutex::new(Vec::new()),
             driver_operations: std::sync::Mutex::new(Vec::new()),
             fail_operations: AtomicBool::new(false),
+            unsplit_operations: std::sync::Mutex::new(Vec::new()),
+            fail_unsplit: AtomicBool::new(false),
         }
     }
 }
@@ -889,13 +896,30 @@ impl MockDtakoYTimeExportRepository {
         self
     }
 
+    pub fn with_unsplit_operations(self, ops: Vec<UnsplitOperation>) -> Self {
+        *self.unsplit_operations.lock().unwrap() = ops;
+        self
+    }
+
     pub fn failing_operations(self) -> Self {
         self.fail_operations.store(true, Ordering::SeqCst);
         self
     }
 
+    pub fn failing_unsplit(self) -> Self {
+        self.fail_unsplit.store(true, Ordering::SeqCst);
+        self
+    }
+
     fn check_fail_operations(&self) -> Result<(), sqlx::Error> {
         if self.fail_operations.swap(false, Ordering::SeqCst) {
+            return Err(sqlx::Error::RowNotFound);
+        }
+        Ok(())
+    }
+
+    fn check_fail_unsplit(&self) -> Result<(), sqlx::Error> {
+        if self.fail_unsplit.swap(false, Ordering::SeqCst) {
             return Err(sqlx::Error::RowNotFound);
         }
         Ok(())
@@ -962,6 +986,17 @@ impl DtakoYTimeExportRepository for MockDtakoYTimeExportRepository {
             .cloned()
             .collect();
         Ok(rows)
+    }
+
+    async fn list_unsplit_operations(
+        &self,
+        _tenant_id: Uuid,
+        _from: NaiveDate,
+        _to: NaiveDate,
+    ) -> Result<Vec<UnsplitOperation>, sqlx::Error> {
+        check_fail!(self);
+        self.check_fail_unsplit()?;
+        Ok(self.unsplit_operations.lock().unwrap().clone())
     }
 }
 

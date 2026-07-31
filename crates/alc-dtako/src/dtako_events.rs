@@ -64,7 +64,9 @@ use crate::dtako_y_time_export::csv_aggregator::build_kudgivt_key;
 use crate::dtako_y_time_export::{compute_error_to_response, ComputeError};
 use crate::DtakoState;
 use alc_core::auth_middleware::TenantId;
-use alc_core::repository::dtako_y_time_export::{DtakoDriverOperation, YTimeExportOperation};
+use alc_core::repository::dtako_y_time_export::{
+    DtakoDriverOperation, UnsplitOperation as DbUnsplitOperation, YTimeExportOperation,
+};
 use alc_core::storage::{ListedObject, StorageBackend};
 use alc_csv_parser::decode_shift_jis;
 use axum::{
@@ -378,7 +380,13 @@ async fn collect_all_drivers(
 // 4. DB 側の unko_no 集合と R2 側の unko_no→etag を突き合わせ、両方にある unko_no だけ
 //    採用する。DB にはあるが R2 の LIST にまだ現れない unko_no (split がまだ終わっていない
 //    等) は **etag: null で残す** (黙って落とすと「無かったこと」と区別が付かず、呼び出し側
-//    はそのアップロードが安定するまで指紋に含めない、という判断ができなくなるため)。
+//    はそのアップロードが安定するまで指紋に含めない、という判断ができなくなるため)。各
+//    item には `driver_cds` (乗務員 CD の集合) も添える。同じ unko_no が運転手/副運転手で
+//    別乗務員に紐づくことがあるため複数持てる形にしてある (Refs #205 の 36)。
+// 5. `has_kudgivt = FALSE` (未 split) の運行を別クエリで列挙し、`unsplit` /
+//    `unsplit_total` として応答に添える。手順 1〜4 は `has_kudgivt = TRUE` 側だけを見る
+//    ため、FALSE の運行はここまでの指紋に一切現れない — 存在に気づけるようにする専用の
+//    経路 (Refs #205 の 36)。
 //
 // ETag が「内容が変わったか」の指紋として使える前提 (単一パート PUT の ETag = content MD5)
 // については `alc_core::storage::ListedObject` の doc コメント参照。dtako CSV の upload 経路
@@ -403,16 +411,49 @@ pub struct DtakoEventsEtagsQuery {
 /// 1 運行分の R2 指紋。`etag` が `null` は「DB にはあるが R2 の LIST にまだ現れていない」
 /// ことを表す (アップロード直後の split 未完了など)。呼び出し側は `null` の unko_no を
 /// 「まだ安定していない」として指紋のゲートに使わないことを想定している。
+///
+/// `unko_no` / `etag` と `items` の件数・順序は月ゲートの指紋 (`digest_from_pairs`) の
+/// 入力そのものなので絶対に変えないこと。`driver_cds` は追加のみのフィールド。
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct DtakoEventsEtagItem {
     pub unko_no: String,
     pub etag: Option<String>,
+    /// この `unko_no` に紐づく乗務員 CD の集合 (安定ソート済み)。複数なのは、同じ運行が
+    /// `list_operations_for_drivers` の `DISTINCT ON (driver_id, unko_no)` により運転手
+    /// (crew_role=1) と副運転手 (crew_role=2) で別の乗務員に紐づくことがあるため。
+    pub driver_cds: Vec<String>,
 }
+
+/// `has_kudgivt = FALSE` (未 split) の 1 運行。
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct UnsplitOperation {
+    pub unko_no: String,
+    pub driver_cd: String,
+    pub reading_date: NaiveDate,
+}
+
+impl From<DbUnsplitOperation> for UnsplitOperation {
+    fn from(row: DbUnsplitOperation) -> Self {
+        Self {
+            unko_no: row.unko_no,
+            driver_cd: row.driver_cd,
+            reading_date: row.reading_date,
+        }
+    }
+}
+
+/// 応答に載せる `unsplit` の上限件数。`unsplit_total` には実数を入れるので、
+/// 超過分は「切ったが総数は分かる」形で読み取れる。
+const UNSPLIT_DISPLAY_LIMIT: usize = 500;
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct DtakoEventsEtagsResponse {
     pub period: DtakoEventsPeriod,
     pub items: Vec<DtakoEventsEtagItem>,
+    /// `has_kudgivt = FALSE` の運行 (未 split)。`UNSPLIT_DISPLAY_LIMIT` 件で切る。
+    pub unsplit: Vec<UnsplitOperation>,
+    /// `unsplit` の実際の総数 (`UNSPLIT_DISPLAY_LIMIT` を超えても切り捨てない)。
+    pub unsplit_total: usize,
     pub warnings: Vec<String>,
 }
 
@@ -457,6 +498,13 @@ pub async fn collect_dtako_events_etags(
         .map_err(|e| internal("list_drivers_with_operations", e))?;
     let ms_drv = started_drivers.elapsed().as_millis();
 
+    // driver_id → driver_cd。`drivers` はこの後 driver_ids に写して使い切るので、
+    // driver_cds を組むための対応表を先に作っておく。
+    let driver_cd_by_id: HashMap<Uuid, String> = drivers
+        .iter()
+        .map(|d| (d.driver_id, d.driver_cd.clone()))
+        .collect();
+
     let started_ops = std::time::Instant::now();
     let driver_ids: Vec<Uuid> = drivers.iter().map(|d| d.driver_id).collect();
     let rows = state
@@ -466,9 +514,25 @@ pub async fn collect_dtako_events_etags(
         .map_err(|e| internal("list_operations_for_drivers", e))?;
     let ms_ops = started_ops.elapsed().as_millis();
 
-    let mut db_unko_nos: Vec<String> = rows.into_iter().map(|r| r.unko_no).collect();
+    // unko_no → driver_cd の集合。同じ unko_no が運転手/副運転手で別乗務員に紐づく
+    // ことがあるので Vec で持ち、後でソート+dedup して安定させる。
+    let mut driver_cds_by_unko: HashMap<String, Vec<String>> = HashMap::new();
+    let mut db_unko_nos: Vec<String> = Vec::with_capacity(rows.len());
+    for row in rows {
+        if let Some(cd) = driver_cd_by_id.get(&row.driver_id) {
+            driver_cds_by_unko
+                .entry(row.unko_no.clone())
+                .or_default()
+                .push(cd.clone());
+        }
+        db_unko_nos.push(row.unko_no);
+    }
     db_unko_nos.sort();
     db_unko_nos.dedup();
+    for cds in driver_cds_by_unko.values_mut() {
+        cds.sort();
+        cds.dedup();
+    }
 
     // 2. R2 側: LIST を「対象日」まで絞り、日ごとに並列で投げる (Refs
     // ohishi-exp/rust-ichibanboshi#205 comment 205-27)。db_unko_nos が空なら
@@ -513,9 +577,33 @@ pub async fn collect_dtako_events_etags(
         .into_iter()
         .map(|unko_no| {
             let etag = r2_etags.get(&unko_no).cloned();
-            DtakoEventsEtagItem { unko_no, etag }
+            let driver_cds = driver_cds_by_unko.remove(&unko_no).unwrap_or_default();
+            DtakoEventsEtagItem {
+                unko_no,
+                etag,
+                driver_cds,
+            }
         })
         .collect();
+
+    // 5. 未 split (has_kudgivt = FALSE) の運行。上限で切り、総数は切る前の長さから取る。
+    let mut unsplit_rows = state
+        .dtako_y_time_export
+        .list_unsplit_operations(tenant_id, q.date_from, q.date_to)
+        .await
+        .map_err(|e| internal("list_unsplit_operations", e))?;
+    unsplit_rows.sort_by(|a, b| a.unko_no.cmp(&b.unko_no));
+    let unsplit_total = unsplit_rows.len();
+    unsplit_rows.truncate(UNSPLIT_DISPLAY_LIMIT);
+    let unsplit: Vec<UnsplitOperation> = unsplit_rows
+        .into_iter()
+        .map(UnsplitOperation::from)
+        .collect();
+
+    let mut warnings = Vec::new();
+    if unsplit_total > 0 {
+        warnings.push(format!("未 split の運行 {unsplit_total} 件 (has_kudgivt=FALSE、この期間のデータから欠けています)"));
+    }
 
     Ok(DtakoEventsEtagsResponse {
         period: DtakoEventsPeriod {
@@ -523,7 +611,9 @@ pub async fn collect_dtako_events_etags(
             date_to: q.date_to,
         },
         items,
-        warnings: Vec::new(),
+        unsplit,
+        unsplit_total,
+        warnings,
     })
 }
 

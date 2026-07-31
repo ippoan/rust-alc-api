@@ -14,7 +14,7 @@ use chrono::TimeZone;
 use crate::mock_helpers::app_state::setup_mock_app_state;
 use crate::mock_helpers::MockDtakoYTimeExportRepository;
 use rust_alc_api::db::repository::dtako_y_time_export::{
-    DtakoDriverOperation, DtakoDriverRef, YTimeExportOperation,
+    DtakoDriverOperation, DtakoDriverRef, UnsplitOperation, YTimeExportOperation,
 };
 
 fn test_tenant_id() -> uuid::Uuid {
@@ -893,12 +893,149 @@ async fn etags_intersects_db_and_r2_list_and_ignores_sibling_csv_types() {
         u001["etag"].is_string(),
         "U001 は R2 に KUDGIVT.csv があるので etag が付く: {u001:?}"
     );
+    assert_eq!(u001["driver_cds"], serde_json::json!(["D001"]));
 
     let u002 = items.iter().find(|i| i["unko_no"] == "U002").unwrap();
     assert!(
         u002["etag"].is_null(),
         "U002 はまだ R2 の LIST に現れていないので etag: null: {u002:?}"
     );
+    assert_eq!(u002["driver_cds"], serde_json::json!(["D002"]));
+
+    // unsplit を積んでいないので空のまま
+    assert!(body["unsplit"].as_array().unwrap().is_empty());
+    assert_eq!(body["unsplit_total"], 0);
+}
+
+#[tokio::test]
+async fn etags_driver_cds_has_two_entries_when_unko_no_is_shared_by_driver_and_co_driver() {
+    // list_operations_for_drivers は DISTINCT ON (driver_id, unko_no) なので、
+    // 同じ unko_no が運転手 (crew_role=1) と副運転手 (crew_role=2) で別の乗務員に
+    // 紐づくことがある。driver_cds はその両方を持てること。
+    let mut state = setup_mock_app_state();
+    let tenant_id = test_tenant_id();
+    let a = uuid::Uuid::new_v4();
+    let b = uuid::Uuid::new_v4();
+
+    upload_kudgivt(
+        state.dtako_storage.as_ref().unwrap().as_ref(),
+        &tenant_id,
+        "U001",
+        KUDGIVT_CSV,
+    )
+    .await;
+
+    state.dtako_y_time_export = Arc::new(
+        MockDtakoYTimeExportRepository::default()
+            .with_drivers(vec![
+                driver_ref(a, "D001", "テスト 一郎"),
+                driver_ref(b, "D002", "テスト 二郎"),
+            ])
+            .with_driver_operations(vec![driver_op(a, "U001", 1, 9), driver_op(b, "U001", 2, 9)]),
+    );
+
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let body: serde_json::Value = reqwest::Client::new()
+        .get(format!(
+            "{base_url}/api/dtako/events/etags?date_from=2026-06-01&date_to=2026-06-30"
+        ))
+        .header("Authorization", test_auth_header())
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let items = body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1, "{items:?}");
+    assert_eq!(
+        items[0]["driver_cds"],
+        serde_json::json!(["D001", "D002"]),
+        "{items:?}"
+    );
+}
+
+#[tokio::test]
+async fn etags_unko_no_etag_pairs_and_order_are_unaffected_by_driver_cds_field() {
+    // 月ゲートの指紋 (`digest_from_pairs`、rust-ichibanboshi 側) は `items` の
+    // (unko_no, etag) の組と件数・順序だけを入力にしている。`driver_cds` を足した後も
+    // その組と順序が一切変わらないことを、複数 unko_no・複数乗務員・etag null 混在で
+    // 明示的に固定する (Refs #205 の 36。ここが崩れると保存済み指紋が全部不一致になり、
+    // 全乗務員 stale → 全量再計算が Cloud Run/Cloudflare の実行時間上限を超える)。
+    let mut state = setup_mock_app_state();
+    let tenant_id = test_tenant_id();
+    let a = uuid::Uuid::new_v4();
+    let b = uuid::Uuid::new_v4();
+    let c = uuid::Uuid::new_v4();
+
+    // R2 にある 2 件 (etag が付く)。DB 投入順はわざと unko_no の昇順と逆にする。
+    for unko_no in ["U300", "U100"] {
+        upload_kudgivt(
+            state.dtako_storage.as_ref().unwrap().as_ref(),
+            &tenant_id,
+            unko_no,
+            KUDGIVT_CSV,
+        )
+        .await;
+    }
+
+    state.dtako_y_time_export = Arc::new(
+        MockDtakoYTimeExportRepository::default()
+            .with_drivers(vec![
+                driver_ref(a, "D001", "テスト 一郎"),
+                driver_ref(b, "D002", "テスト 二郎"),
+                driver_ref(c, "D003", "テスト 三郎"),
+            ])
+            .with_driver_operations(vec![
+                driver_op(a, "U300", 1, 9),
+                driver_op(b, "U100", 1, 10),
+                // U200: DB にはあるが R2 にはまだ無い → etag: null
+                driver_op(c, "U200", 1, 11),
+            ]),
+    );
+
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let body: serde_json::Value = reqwest::Client::new()
+        .get(format!(
+            "{base_url}/api/dtako/events/etags?date_from=2026-06-01&date_to=2026-06-30"
+        ))
+        .header("Authorization", test_auth_header())
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let items = body["items"].as_array().unwrap();
+    // 件数と順序 (unko_no 昇順) が固定であること。driver_cds の有無・中身に依存しない。
+    let pairs: Vec<(String, Option<String>)> = items
+        .iter()
+        .map(|i| {
+            (
+                i["unko_no"].as_str().unwrap().to_string(),
+                i["etag"].as_str().map(|s| s.to_string()),
+            )
+        })
+        .collect();
+    assert_eq!(
+        pairs,
+        vec![
+            (
+                "U100".to_string(),
+                Some("mock-etag-a33f352ad501ab18".to_string())
+            ),
+            ("U200".to_string(), None),
+            (
+                "U300".to_string(),
+                Some("mock-etag-a33f352ad501ab18".to_string())
+            ),
+        ],
+        "{items:?}"
+    );
+    // driver_cds は追加フィールドとして各 item に存在するだけで、上の組・順序には無関係
+    assert!(items.iter().all(|i| i["driver_cds"].is_array()));
 }
 
 #[tokio::test]
@@ -1076,10 +1213,13 @@ async fn etags_day_scoped_list_matches_full_list_byte_for_byte() {
 
     let mut ops = Vec::new();
     let mut drivers = Vec::new();
+    let mut driver_cd_by_unko: std::collections::HashMap<&str, String> = Default::default();
     for (i, unko_no) in in_db_and_r2.iter().chain(db_only.iter()).enumerate() {
         let id = uuid::Uuid::new_v4();
-        drivers.push(driver_ref(id, &format!("D{i:03}"), "テスト"));
+        let driver_cd = format!("D{i:03}");
+        drivers.push(driver_ref(id, &driver_cd, "テスト"));
         ops.push(driver_op(id, unko_no, 1, 9));
+        driver_cd_by_unko.insert(unko_no, driver_cd);
     }
     state.dtako_y_time_export = Arc::new(
         MockDtakoYTimeExportRepository::default()
@@ -1122,6 +1262,7 @@ async fn etags_day_scoped_list_matches_full_list_byte_for_byte() {
             serde_json::json!({
                 "unko_no": unko_no,
                 "etag": full.get(*unko_no).cloned(),
+                "driver_cds": [driver_cd_by_unko[unko_no].clone()],
             })
         })
         .collect();
@@ -1218,6 +1359,103 @@ async fn etags_falls_back_to_full_list_when_unko_no_is_too_short() {
     let calls = mock_storage.list_calls();
     let bare_prefix = format!("{tenant_id}/unko/");
     assert_eq!(calls, vec![bare_prefix], "{calls:?}");
+}
+
+// =============================================================================
+// etags の unsplit / unsplit_total (has_kudgivt = FALSE、Refs #205 の 36)
+// =============================================================================
+
+fn unsplit_op(unko_no: &str, driver_cd: &str, day: u32) -> UnsplitOperation {
+    UnsplitOperation {
+        unko_no: unko_no.into(),
+        driver_cd: driver_cd.into(),
+        reading_date: chrono::NaiveDate::from_ymd_opt(2026, 6, day).unwrap(),
+    }
+}
+
+#[tokio::test]
+async fn etags_returns_500_when_list_unsplit_operations_db_error() {
+    let mut state = setup_mock_app_state();
+    state.dtako_y_time_export =
+        Arc::new(MockDtakoYTimeExportRepository::default().failing_unsplit());
+
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let res = reqwest::Client::new()
+        .get(format!(
+            "{base_url}/api/dtako/events/etags?date_from=2026-06-01&date_to=2026-06-30"
+        ))
+        .header("Authorization", test_auth_header())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 500);
+}
+
+#[tokio::test]
+async fn etags_unsplit_lists_has_kudgivt_false_operations_and_sets_one_warning() {
+    let mut state = setup_mock_app_state();
+    state.dtako_y_time_export = Arc::new(
+        MockDtakoYTimeExportRepository::default().with_unsplit_operations(vec![
+            unsplit_op("U900", "D001", 15),
+            unsplit_op("U901", "D002", 16),
+        ]),
+    );
+
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let body: serde_json::Value = reqwest::Client::new()
+        .get(format!(
+            "{base_url}/api/dtako/events/etags?date_from=2026-06-01&date_to=2026-06-30"
+        ))
+        .header("Authorization", test_auth_header())
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let unsplit = body["unsplit"].as_array().unwrap();
+    assert_eq!(unsplit.len(), 2, "{unsplit:?}");
+    assert_eq!(unsplit[0]["unko_no"], "U900");
+    assert_eq!(unsplit[0]["driver_cd"], "D001");
+    assert_eq!(unsplit[0]["reading_date"], "2026-06-15");
+    assert_eq!(unsplit[1]["unko_no"], "U901");
+    assert_eq!(body["unsplit_total"], 2);
+
+    let warnings = body["warnings"].as_array().unwrap();
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(warnings[0].as_str().unwrap().contains("2 件"));
+    assert!(warnings[0].as_str().unwrap().contains("has_kudgivt=FALSE"));
+}
+
+#[tokio::test]
+async fn etags_unsplit_truncates_at_limit_but_keeps_true_total() {
+    let rows: Vec<UnsplitOperation> = (0..501)
+        .map(|i| unsplit_op(&format!("U{i:04}"), "D001", 1))
+        .collect();
+
+    let mut state = setup_mock_app_state();
+    state.dtako_y_time_export =
+        Arc::new(MockDtakoYTimeExportRepository::default().with_unsplit_operations(rows));
+
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let body: serde_json::Value = reqwest::Client::new()
+        .get(format!(
+            "{base_url}/api/dtako/events/etags?date_from=2026-06-01&date_to=2026-06-30"
+        ))
+        .header("Authorization", test_auth_header())
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(body["unsplit"].as_array().unwrap().len(), 500);
+    assert_eq!(body["unsplit_total"], 501);
+    let warnings = body["warnings"].as_array().unwrap();
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(warnings[0].as_str().unwrap().contains("501 件"));
 }
 
 #[tokio::test]
