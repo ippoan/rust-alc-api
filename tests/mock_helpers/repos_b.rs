@@ -463,6 +463,14 @@ pub struct MockDtakoUploadRepository {
     pub zip_keys: std::sync::Mutex<Vec<String>>,
     pub uploads_needing_split: std::sync::Mutex<Vec<(Uuid, String)>>,
     pub event_classifications: std::sync::Mutex<Vec<(String, String)>>,
+    /// 直近の `update_has_kudgivt` 呼び出しに渡された `unko_nos` を記録する
+    /// (PUT 失敗した unko_no が除外されているかをテストから検査するため。Refs
+    /// ohishi-exp/rust-ichibanboshi#205 の 31)。
+    pub last_update_has_kudgivt_unko_nos: std::sync::Mutex<Option<Vec<String>>>,
+    /// `update_has_kudgivt` が「当たらなかった」ことにする unko_no (突合キーのずれで
+    /// 一部が更新されない mismatch ケースのテスト用)。空なら渡された unko_nos 全部が
+    /// 当たったことにする (正常系)。
+    pub update_has_kudgivt_missing_unko_nos: std::sync::Mutex<Vec<String>>,
 }
 
 impl Default for MockDtakoUploadRepository {
@@ -480,6 +488,8 @@ impl Default for MockDtakoUploadRepository {
             zip_keys: std::sync::Mutex::new(vec![]),
             uploads_needing_split: std::sync::Mutex::new(vec![]),
             event_classifications: std::sync::Mutex::new(vec![]),
+            last_update_has_kudgivt_unko_nos: std::sync::Mutex::new(None),
+            update_has_kudgivt_missing_unko_nos: std::sync::Mutex::new(vec![]),
         }
     }
 }
@@ -628,13 +638,19 @@ impl DtakoUploadRepository for MockDtakoUploadRepository {
     async fn update_has_kudgivt(
         &self,
         _tenant_id: Uuid,
-        _unko_nos: &[String],
-    ) -> Result<(), sqlx::Error> {
+        unko_nos: &[String],
+    ) -> Result<std::collections::HashSet<String>, sqlx::Error> {
         check_fail!(self);
+        *self.last_update_has_kudgivt_unko_nos.lock().unwrap() = Some(unko_nos.to_vec());
         if self.fail_update_has_kudgivt.load(Ordering::SeqCst) {
             return Err(sqlx::Error::RowNotFound);
         }
-        Ok(())
+        let missing = self.update_has_kudgivt_missing_unko_nos.lock().unwrap();
+        Ok(unko_nos
+            .iter()
+            .filter(|u| !missing.contains(u))
+            .cloned()
+            .collect())
     }
 
     async fn load_event_classifications(

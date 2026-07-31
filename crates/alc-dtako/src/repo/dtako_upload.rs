@@ -405,28 +405,32 @@ impl DtakoUploadRepository for PgDtakoUploadRepository {
         &self,
         tenant_id: Uuid,
         unko_nos: &[String],
-    ) -> Result<(), sqlx::Error> {
+    ) -> Result<std::collections::HashSet<String>, sqlx::Error> {
         if unko_nos.is_empty() {
-            return Ok(());
+            return Ok(std::collections::HashSet::new());
         }
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
+        let mut matched: std::collections::HashSet<String> = std::collections::HashSet::new();
         for chunk in unko_nos.chunks(100) {
             let placeholders: Vec<String> = chunk
                 .iter()
                 .enumerate()
                 .map(|(i, _)| format!("${}", i + 2))
                 .collect();
+            // unko_no は運転手/副運転手で 2 行あることがあるが RETURNING はそのまま
+            // 2 行返すので、呼び出し側で数えず HashSet で dedup する。
             let sql = format!(
-                "UPDATE alc_api.dtako_operations SET has_kudgivt = TRUE WHERE tenant_id = $1 AND unko_no IN ({})",
+                "UPDATE alc_api.dtako_operations SET has_kudgivt = TRUE WHERE tenant_id = $1 AND unko_no IN ({}) RETURNING unko_no",
                 placeholders.join(", ")
             );
-            let mut query = sqlx::query(&sql).bind(tenant_id);
+            let mut query = sqlx::query_as::<_, (String,)>(&sql).bind(tenant_id);
             for unko_no in chunk {
                 query = query.bind(unko_no);
             }
-            query.execute(&mut *tc.conn).await?;
+            let rows = query.fetch_all(&mut *tc.conn).await?;
+            matched.extend(rows.into_iter().map(|(u,)| u));
         }
-        Ok(())
+        Ok(matched)
     }
 
     // --- event classifications ---

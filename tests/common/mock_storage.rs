@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::Mutex;
 
@@ -15,6 +15,9 @@ pub struct MockStorage {
     /// いるか」(呼び出し回数・prefix そのもの) をテストから検査するためのもの
     /// (Refs ohishi-exp/rust-ichibanboshi#205 comment 205-22)。
     list_calls: Mutex<Vec<String>>,
+    /// この key への `upload()` だけを失敗させる (CSV split の一部 PUT だけが失敗する
+    /// ケースの再現用。Refs ohishi-exp/rust-ichibanboshi#205 の 31)。
+    fail_upload_keys: Mutex<HashSet<String>>,
 }
 
 impl MockStorage {
@@ -25,12 +28,21 @@ impl MockStorage {
             fail_upload: std::sync::atomic::AtomicBool::new(false),
             fail_list: std::sync::atomic::AtomicBool::new(false),
             list_calls: Mutex::new(Vec::new()),
+            fail_upload_keys: Mutex::new(HashSet::new()),
         }
     }
 
     /// `list()` が呼ばれた prefix を呼び出し順に返す。
     pub fn list_calls(&self) -> Vec<String> {
         self.list_calls.lock().unwrap().clone()
+    }
+
+    /// 指定した key への `upload()` だけを失敗させる (他の key は成功させたまま)。
+    pub fn fail_upload_for(&self, key: &str) {
+        self.fail_upload_keys
+            .lock()
+            .unwrap()
+            .insert(key.to_string());
     }
 
     /// Pre-populate a file in the mock storage (for download tests).
@@ -51,6 +63,9 @@ impl StorageBackend for MockStorage {
     ) -> Result<String, StorageError> {
         if self.fail_upload.load(std::sync::atomic::Ordering::Relaxed) {
             return Err(StorageError::Upload("mock upload failure".to_string()));
+        }
+        if self.fail_upload_keys.lock().unwrap().contains(key) {
+            return Err(StorageError::Upload(format!("mock upload failure: {key}")));
         }
         self.files
             .lock()

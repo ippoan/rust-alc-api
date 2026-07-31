@@ -43,6 +43,11 @@ pub struct UploadResponse {
     pub upload_id: Uuid,
     pub operations_count: i32,
     pub status: String,
+    /// CSV split で失敗した件数 (0 なら split は問題なし)。ZIP の取り込み自体
+    /// (`process_zip`) は成功しているため `status` は "completed" のままだが、split の
+    /// 失敗を握り潰さず呼び手が気づけるようにする (Refs
+    /// ohishi-exp/rust-ichibanboshi#205 の 31)。
+    pub split_failed: usize,
 }
 
 async fn upload_zip(
@@ -73,13 +78,14 @@ async fn upload_zip(
                 .await
                 .map_err(internal_err)?;
 
-            // CSV split (non-blocking)
-            try_split_csv(&state, upload_id).await;
+            // CSV split (non-blocking): 失敗件数を split_failed として応答に載せる
+            let split_failed = try_split_csv(&state, upload_id).await;
 
             Ok(Json(UploadResponse {
                 upload_id,
                 operations_count: count,
                 status: "completed".to_string(),
+                split_failed,
             }))
         }
         Err(e) => {
@@ -850,6 +856,51 @@ pub fn tenant_fk_or_internal_err(e: sqlx::Error, tenant_id: Uuid) -> (StatusCode
     internal_err(e)
 }
 
+/// `update_has_kudgivt` に渡した `requested` のうち、実際に更新された集合 `matched`
+/// に無いものを求める。`matched` は `unko_no` の**集合**なので、1 つの `unko_no` が
+/// 運転手/副運転手で複数行 DB 更新されても (`UNIQUE(tenant_id, unko_no, crew_role)`)
+/// ここでは 1 件に畳まれる — 件数 (rows_affected) 比較だと誤検知するのはこのため
+/// (Refs ohishi-exp/rust-ichibanboshi#205 の 31)。
+fn find_unmatched_kudgivt_unko_nos<'a>(
+    requested: &'a [String],
+    matched: &std::collections::HashSet<String>,
+) -> Vec<&'a str> {
+    requested
+        .iter()
+        .filter(|u| !matched.contains(u.as_str()))
+        .map(|u| u.as_str())
+        .collect()
+}
+
+#[cfg(test)]
+mod has_kudgivt_matching_tests {
+    use super::find_unmatched_kudgivt_unko_nos;
+    use std::collections::HashSet;
+
+    /// crew_role 1 (運転手) / 2 (副運転手) で同じ unko_no が 2 行 UPDATE されても
+    /// (RETURNING が 2 行返る想定)、集合比較なら誤検知しない。これが今回の本題:
+    /// 件数比較 (rows_affected) に戻すとこのケースで再び誤検知する。
+    #[test]
+    fn duplicate_rows_for_same_unko_no_do_not_produce_false_positive() {
+        let requested = vec!["1001".to_string(), "1002".to_string(), "1003".to_string()];
+        let matched: HashSet<String> = ["1001", "1001", "1002", "1003"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        assert!(find_unmatched_kudgivt_unko_nos(&requested, &matched).is_empty());
+    }
+
+    #[test]
+    fn missing_unko_no_is_reported() {
+        let requested = vec!["1001".to_string(), "1002".to_string(), "1003".to_string()];
+        let matched: HashSet<String> = ["1001", "1003"].into_iter().map(String::from).collect();
+        assert_eq!(
+            find_unmatched_kudgivt_unko_nos(&requested, &matched),
+            vec!["1002"]
+        );
+    }
+}
+
 /// 年月から月初・月末を計算 (month==12 の年跨ぎ対応)
 pub fn compute_month_range(
     year: i32,
@@ -864,18 +915,25 @@ pub fn compute_month_range(
     Some((start, end))
 }
 
-/// CSV split を試行 (失敗してもブロックしない)
-pub(crate) async fn try_split_csv(state: &DtakoState, upload_id: Uuid) {
-    if let Err(e) = split_csv_from_r2(state, upload_id).await {
-        tracing::warn!("CSV split failed (will not block): {e}");
+/// CSV split を試行 (失敗してもブロックしない)。戻り値は失敗件数
+/// (`split_csv_from_r2` 自体が丸ごと失敗した場合は 1 を返す — 個別 CSV の件数は
+/// 分からないが、呼び手が split_failed の非ゼロで気づければ十分なため)。
+pub(crate) async fn try_split_csv(state: &DtakoState, upload_id: Uuid) -> usize {
+    match split_csv_from_r2(state, upload_id).await {
+        Ok(put_failed) => put_failed,
+        Err(e) => {
+            tracing::warn!("CSV split failed (will not block): {e}");
+            1
+        }
     }
 }
 
-/// R2 から ZIP をダウンロードして CSV を unko_no 別に分割アップロード
+/// R2 から ZIP をダウンロードして CSV を unko_no 別に分割アップロード。
+/// 戻り値は個別 CSV PUT の失敗件数 (0 なら全件成功)。
 pub(crate) async fn split_csv_from_r2(
     state: &DtakoState,
     upload_id: Uuid,
-) -> Result<(), anyhow::Error> {
+) -> Result<usize, anyhow::Error> {
     let record = state
         .dtako_upload
         .get_upload_tenant_and_key(upload_id)
@@ -898,8 +956,9 @@ pub(crate) async fn split_csv_from_r2(
 
     let mut kudgivt_unko_nos: Vec<String> = Vec::new();
 
-    // アップロード対象を事前に全て準備
-    let mut upload_items: Vec<(String, Vec<u8>, bool)> = Vec::new(); // (key, content, is_kudgivt)
+    // アップロード対象を事前に全て準備 (key, content, is_kudgivt, unko_no)
+    // unko_no は PUT 成功後にしか kudgivt_unko_nos へ積まない (下記参照)。
+    let mut upload_items: Vec<(String, Vec<u8>, bool, String)> = Vec::new();
     for (name, bytes) in &files {
         if !name.to_lowercase().ends_with(".csv") {
             continue;
@@ -926,21 +985,21 @@ pub(crate) async fn split_csv_from_r2(
                 content.push_str(line);
                 content.push('\n');
             }
-            upload_items.push((key, content.into_bytes(), is_kudgivt));
-
-            if is_kudgivt {
-                kudgivt_unko_nos.push(unko_no.clone());
-            }
+            upload_items.push((key, content.into_bytes(), is_kudgivt, unko_no.clone()));
         }
     }
 
-    // バッチ並列アップロード（20並列）
+    // バッチ並列アップロード（20並列）。PUT が失敗した unko_no は has_kudgivt 更新対象
+    // から除外する — 失敗も成功として数えると、R2 に CSV が無いのに DB 上は
+    // split 済み扱いになり、欠け検知の母集団からも消えて気づけなくなる
+    // (Refs ohishi-exp/rust-ichibanboshi#205 の 31)。csv_count は成功数のみ。
     let batch_size = 20;
     let mut csv_count = 0usize;
+    let mut put_failed = 0usize;
     for chunk in upload_items.chunks(batch_size) {
         let futures: Vec<_> = chunk
             .iter()
-            .map(|(key, content, _)| {
+            .map(|(key, content, _, _)| {
                 let storage = state.dtako_storage.as_ref().unwrap().clone();
                 let k = key.clone();
                 let c = content.clone();
@@ -948,20 +1007,43 @@ pub(crate) async fn split_csv_from_r2(
             })
             .collect();
         let results = futures::future::join_all(futures).await;
-        csv_count += results.len();
+        for ((_, _, is_kudgivt, unko_no), result) in chunk.iter().zip(results) {
+            match result {
+                Ok(_) => {
+                    csv_count += 1;
+                    if *is_kudgivt {
+                        kudgivt_unko_nos.push(unko_no.clone());
+                    }
+                }
+                Err(_) => put_failed += 1,
+            }
+        }
     }
 
-    // has_kudgivt フラグを更新
+    if put_failed > 0 {
+        tracing::warn!("CSV split: PUT failed for {put_failed} files (upload_id={upload_id})");
+    }
+
+    // has_kudgivt フラグを更新。ここは失敗を握り潰さず伝播させる — 「R2 は書けたが
+    // DB を更新しなかった」状態は現行の LIST 方式でも救えない最悪ケースのため
+    // (Refs ohishi-exp/rust-ichibanboshi#205 の 31)。
     if !kudgivt_unko_nos.is_empty() {
-        if let Err(e) = state
+        let matched = state
             .dtako_upload
             .update_has_kudgivt(tenant_id, &kudgivt_unko_nos)
-            .await
-        {
-            tracing::error!("Failed to update has_kudgivt: {e}");
-        } else {
-            tracing::info!("has_kudgivt updated: {} operations", kudgivt_unko_nos.len());
+            .await?;
+        // unko_no は運転手/副運転手で 2 行あることがあるため件数 (rows_affected) では
+        // 比較しない — 集合比較なら多重行があっても誤検知しない。当たらなかった
+        // unko_no は突合キーのずれ (R2 側は trim しない生文字列、DB 側は trim 済み) を
+        // 疑う材料としてそのまま warn に出す (正規化はまだしない、Refs
+        // ohishi-exp/rust-ichibanboshi#205 の 31)。
+        let missing = find_unmatched_kudgivt_unko_nos(&kudgivt_unko_nos, &matched);
+        if !missing.is_empty() {
+            let sample: Vec<&str> = missing.iter().take(5).copied().collect();
+            tracing::warn!("has_kudgivt not applied: {} unko_no(s)", missing.len());
+            tracing::warn!("has_kudgivt not applied sample={sample:?}");
         }
+        tracing::info!("has_kudgivt updated: {} operations", kudgivt_unko_nos.len());
     }
 
     let msg = format!(
@@ -969,7 +1051,7 @@ pub(crate) async fn split_csv_from_r2(
         csv_count, upload_id, tenant_id
     );
     tracing::info!("{msg}");
-    Ok(())
+    Ok(put_failed)
 }
 
 /// R2 に保存済みの ZIP をダウンロード
@@ -1080,13 +1162,14 @@ async fn internal_rerun(
                 .await
                 .map_err(internal_err)?;
 
-            // CSV split (non-blocking)
-            try_split_csv(&state, upload_id).await;
+            // CSV split (non-blocking): 失敗件数を split_failed として応答に載せる
+            let split_failed = try_split_csv(&state, upload_id).await;
 
             Ok(Json(UploadResponse {
                 upload_id,
                 operations_count: count,
                 status: "completed".to_string(),
+                split_failed,
             }))
         }
         Err(e) => {
@@ -1596,12 +1679,12 @@ async fn split_csv_handler(
     tracing::info!("split-csv (auth) called: upload_id={}", upload_id);
 
     // 生の anyhow エラー (内部パス / SQL 片等) を 500 body に echo しない (Refs #393 M-1)
-    split_csv_from_r2(&state, upload_id)
+    let split_failed = split_csv_from_r2(&state, upload_id)
         .await
         .map_err(internal_err)?;
 
     Ok(Json(
-        serde_json::json!({ "status": "ok", "upload_id": upload_id }),
+        serde_json::json!({ "status": "ok", "upload_id": upload_id, "split_failed": split_failed }),
     ))
 }
 
@@ -1654,7 +1737,7 @@ pub async fn split_csv_all_core(
                 let f = failed.clone();
                 async move {
                     match split_csv_from_r2(&st, uid).await {
-                        Ok(()) => {
+                        Ok(_) => {
                             s.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         }
                         Err(e) => {
