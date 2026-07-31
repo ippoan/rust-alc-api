@@ -11,6 +11,10 @@ pub struct MockStorage {
     pub fail_upload: std::sync::atomic::AtomicBool,
     /// `list()` だけを失敗させる (R2 LIST がエラーになるケースの単体テスト用)。
     pub fail_list: std::sync::atomic::AtomicBool,
+    /// `list()` に渡された `prefix` を呼ばれた順に記録する。「LIST が本当に絞られて
+    /// いるか」(呼び出し回数・prefix そのもの) をテストから検査するためのもの
+    /// (Refs ohishi-exp/rust-ichibanboshi#205 comment 205-22)。
+    list_calls: Mutex<Vec<String>>,
 }
 
 impl MockStorage {
@@ -20,7 +24,13 @@ impl MockStorage {
             files: Mutex::new(HashMap::new()),
             fail_upload: std::sync::atomic::AtomicBool::new(false),
             fail_list: std::sync::atomic::AtomicBool::new(false),
+            list_calls: Mutex::new(Vec::new()),
         }
+    }
+
+    /// `list()` が呼ばれた prefix を呼び出し順に返す。
+    pub fn list_calls(&self) -> Vec<String> {
+        self.list_calls.lock().unwrap().clone()
     }
 
     /// Pre-populate a file in the mock storage (for download tests).
@@ -92,6 +102,7 @@ impl StorageBackend for MockStorage {
     }
 
     async fn list(&self, prefix: &str) -> Result<Vec<ListedObject>, StorageError> {
+        self.list_calls.lock().unwrap().push(prefix.to_string());
         if self.fail_list.load(std::sync::atomic::Ordering::Relaxed) {
             return Err(StorageError::Upload("mock list failure".to_string()));
         }

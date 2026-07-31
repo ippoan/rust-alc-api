@@ -767,6 +767,7 @@ async fn etags_returns_500_when_list_operations_db_error() {
 
 #[tokio::test]
 async fn etags_returns_500_when_r2_list_fails() {
+    // unko_no が非数字 (安全弁フォールバック) 経路での LIST 失敗。
     let mock_storage = Arc::new(crate::common::mock_storage::MockStorage::new(
         "dtako-bucket",
     ));
@@ -779,6 +780,36 @@ async fn etags_returns_500_when_r2_list_fails() {
         MockDtakoYTimeExportRepository::default()
             .with_drivers(vec![driver_ref(a, "D001", "テスト 一郎")])
             .with_driver_operations(vec![driver_op(a, "U001", 1, 9)]),
+    );
+
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let res = reqwest::Client::new()
+        .get(format!(
+            "{base_url}/api/dtako/events/etags?date_from=2026-06-01&date_to=2026-06-30"
+        ))
+        .header("Authorization", test_auth_header())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 500);
+}
+
+#[tokio::test]
+async fn etags_returns_500_when_scoped_month_list_fails() {
+    // unko_no が数字 (月で絞る通常経路) での LIST 失敗。安全弁フォールバックの
+    // エラー経路と production コード上は別の `map_err` なので、別に検査する。
+    let mock_storage = Arc::new(crate::common::mock_storage::MockStorage::new(
+        "dtako-bucket",
+    ));
+    mock_storage.fail_list.store(true, Ordering::SeqCst);
+
+    let mut state = setup_mock_app_state();
+    state.dtako_storage = Some(mock_storage);
+    let a = uuid::Uuid::new_v4();
+    state.dtako_y_time_export = Arc::new(
+        MockDtakoYTimeExportRepository::default()
+            .with_drivers(vec![driver_ref(a, "D001", "テスト 一郎")])
+            .with_driver_operations(vec![driver_op(a, "260601090000001", 1, 9)]),
     );
 
     let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
@@ -871,7 +902,11 @@ async fn etags_intersects_db_and_r2_list_and_ignores_sibling_csv_types() {
 
 #[tokio::test]
 async fn etags_returns_empty_items_when_no_operation_matches() {
+    let mock_storage = Arc::new(crate::common::mock_storage::MockStorage::new(
+        "dtako-bucket",
+    ));
     let mut state = setup_mock_app_state();
+    state.dtako_storage = Some(mock_storage.clone());
     state.dtako_y_time_export =
         Arc::new(MockDtakoYTimeExportRepository::default().with_drivers(vec![]));
 
@@ -888,6 +923,194 @@ async fn etags_returns_empty_items_when_no_operation_matches() {
         .await
         .unwrap();
     assert!(body["items"].as_array().unwrap().is_empty());
+    // 突き合わせる db_unko_no が無いので R2 の LIST は 1 回も呼ばれない。
+    assert!(
+        mock_storage.list_calls().is_empty(),
+        "{:?}",
+        mock_storage.list_calls()
+    );
+}
+
+#[tokio::test]
+async fn etags_scopes_r2_list_to_distinct_yymm_month_prefixes() {
+    // db_unko_nos が 2606 (6月) と 2607 (7月、翌月またぎ先読み分) にまたがるケース。
+    // 検査するのは 2 点:
+    // (1) 応答 (unko_no ごとの etag) が「全部を LIST した場合」と完全に一致すること
+    // (2) LIST が tenant 全体の裸 prefix ではなく、distinct な YYMM の数だけ
+    //     月で絞った prefix で呼ばれていること
+    let mock_storage = Arc::new(crate::common::mock_storage::MockStorage::new(
+        "dtako-bucket",
+    ));
+    let mut state = setup_mock_app_state();
+    state.dtako_storage = Some(mock_storage.clone());
+    let tenant_id = test_tenant_id();
+    let a = uuid::Uuid::new_v4();
+    let b = uuid::Uuid::new_v4();
+    let c = uuid::Uuid::new_v4();
+
+    // 6月、R2 にもある → etag が付く
+    upload_kudgivt(
+        mock_storage.as_ref(),
+        &tenant_id,
+        "260601090000001",
+        KUDGIVT_CSV,
+    )
+    .await;
+    // 7月、R2 にもある → etag が付く
+    upload_kudgivt(
+        mock_storage.as_ref(),
+        &tenant_id,
+        "260701090000002",
+        KUDGIVT_CSV,
+    )
+    .await;
+    // 対象月の外 (5月)。DB には無いキー。月で絞れていれば LIST 呼び出しの対象にすら
+    // 入らない (呼び出し回数・prefix の assertion で検査する)。
+    upload_kudgivt(
+        mock_storage.as_ref(),
+        &tenant_id,
+        "260501090000009",
+        KUDGIVT_CSV,
+    )
+    .await;
+    // 7月だが DB にはあるが R2 にはまだ無い運行 (split 未完了想定) → etag: null
+    // (upload しない)
+
+    state.dtako_y_time_export = Arc::new(
+        MockDtakoYTimeExportRepository::default()
+            .with_drivers(vec![
+                driver_ref(a, "D001", "テスト 一郎"),
+                driver_ref(b, "D002", "テスト 二郎"),
+                driver_ref(c, "D003", "テスト 三郎"),
+            ])
+            .with_driver_operations(vec![
+                driver_op(a, "260601090000001", 1, 9),
+                driver_op(b, "260701090000002", 1, 10),
+                driver_op(c, "260701090000003", 1, 11),
+            ]),
+    );
+
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let body: serde_json::Value = reqwest::Client::new()
+        .get(format!(
+            "{base_url}/api/dtako/events/etags?date_from=2026-06-01&date_to=2026-07-01"
+        ))
+        .header("Authorization", test_auth_header())
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let items = body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 3, "{items:?}");
+    let find = |unko_no: &str| items.iter().find(|i| i["unko_no"] == unko_no).unwrap();
+    assert!(find("260601090000001")["etag"].is_string(), "{items:?}");
+    assert!(find("260701090000002")["etag"].is_string(), "{items:?}");
+    assert!(
+        find("260701090000003")["etag"].is_null(),
+        "R2 にまだ現れていない運行は etag: null のはず: {items:?}"
+    );
+
+    let calls = mock_storage.list_calls();
+    let bare_prefix = format!("{tenant_id}/unko/");
+    assert_eq!(
+        calls.len(),
+        2,
+        "distinct な YYMM (2606, 2607) の数だけ呼ばれるはず: {calls:?}"
+    );
+    assert!(calls.contains(&format!("{bare_prefix}2606")), "{calls:?}");
+    assert!(calls.contains(&format!("{bare_prefix}2607")), "{calls:?}");
+    assert!(
+        !calls.contains(&bare_prefix),
+        "tenant 全体の裸 prefix では呼ばれていないはず: {calls:?}"
+    );
+}
+
+#[tokio::test]
+async fn etags_falls_back_to_full_list_when_unko_no_yymm_is_non_numeric() {
+    // db_unko_nos の 1 件でも先頭 4 文字が数字でなければ、月で絞る前提が崩れるので
+    // 速さより正しさを優先し、tenant 全体の裸 prefix で全 LIST に倒す。
+    let mock_storage = Arc::new(crate::common::mock_storage::MockStorage::new(
+        "dtako-bucket",
+    ));
+    let mut state = setup_mock_app_state();
+    state.dtako_storage = Some(mock_storage.clone());
+    let tenant_id = test_tenant_id();
+    let a = uuid::Uuid::new_v4();
+    let b = uuid::Uuid::new_v4();
+
+    upload_kudgivt(
+        mock_storage.as_ref(),
+        &tenant_id,
+        "260601090000001",
+        KUDGIVT_CSV,
+    )
+    .await;
+
+    state.dtako_y_time_export = Arc::new(
+        MockDtakoYTimeExportRepository::default()
+            .with_drivers(vec![
+                driver_ref(a, "D001", "テスト 一郎"),
+                driver_ref(b, "D002", "テスト 二郎"),
+            ])
+            .with_driver_operations(vec![
+                driver_op(a, "260601090000001", 1, 9),
+                // 何らかの理由で YYMM 部分が数字でない unko_no が紛れ込んだケース
+                driver_op(b, "26X601090000002", 1, 10),
+            ]),
+    );
+
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let res = reqwest::Client::new()
+        .get(format!(
+            "{base_url}/api/dtako/events/etags?date_from=2026-06-01&date_to=2026-06-30"
+        ))
+        .header("Authorization", test_auth_header())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["items"].as_array().unwrap().len(), 2);
+
+    let calls = mock_storage.list_calls();
+    let bare_prefix = format!("{tenant_id}/unko/");
+    assert_eq!(calls, vec![bare_prefix], "{calls:?}");
+}
+
+#[tokio::test]
+async fn etags_falls_back_to_full_list_when_unko_no_is_too_short() {
+    // 先頭 4 文字すら取れない (3 文字しかない) 壊れた unko_no のケース。
+    let mock_storage = Arc::new(crate::common::mock_storage::MockStorage::new(
+        "dtako-bucket",
+    ));
+    let mut state = setup_mock_app_state();
+    state.dtako_storage = Some(mock_storage.clone());
+    let tenant_id = test_tenant_id();
+    let a = uuid::Uuid::new_v4();
+
+    state.dtako_y_time_export = Arc::new(
+        MockDtakoYTimeExportRepository::default()
+            .with_drivers(vec![driver_ref(a, "D001", "テスト 一郎")])
+            .with_driver_operations(vec![driver_op(a, "260", 1, 9)]),
+    );
+
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let res = reqwest::Client::new()
+        .get(format!(
+            "{base_url}/api/dtako/events/etags?date_from=2026-06-01&date_to=2026-06-30"
+        ))
+        .header("Authorization", test_auth_header())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+
+    let calls = mock_storage.list_calls();
+    let bare_prefix = format!("{tenant_id}/unko/");
+    assert_eq!(calls, vec![bare_prefix], "{calls:?}");
 }
 
 #[tokio::test]
