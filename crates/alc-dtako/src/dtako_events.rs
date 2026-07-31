@@ -460,26 +460,53 @@ pub async fn collect_dtako_events_etags(
     db_unko_nos.sort();
     db_unko_nos.dedup();
 
-    // 2. R2 側: LIST 1 回だけ。.download()/.get() は一切呼ばない。
-    let prefix = format!("{tenant_id}/unko/");
-    let listed = storage.list(&prefix).await.map_err(|e| {
-        tracing::error!(prefix = %prefix, error = %e, "dtako-events-etags R2 list error");
-        ComputeError::Internal("internal error".to_string())
-    })?;
-
-    // 3. key → unko_no。`{prefix}{unko_no}/KUDGIVT.csv` の形のみ拾う。
-    // LIST は `prefix` に一致する key しか返さない (S3 系 API の保証) ので
-    // `strip_prefix` 失敗は起こり得ないが、`unwrap_or_default` で 1 行に畳んで
-    // 保険にしておく。KUDGURI.csv 等の兄弟ファイルは `strip_suffix` で弾く
-    // (同じ unko_no ディレクトリに同居するため、prefix だけでは絞れない)。
+    // 2. R2 側: LIST を「対象月」まで絞る。db_unko_nos の先頭 4 文字 (YYMM) が
+    // distinct でだいたい 1〜2 個 (対象月 + 翌月またぎ 1 日ぶんの先読み) にしかならない
+    // ことを使い、tenant 全体ではなく月ごとに LIST する (Refs
+    // ohishi-exp/rust-ichibanboshi#205 comment 205-22)。db_unko_nos が空なら
+    // 突き合わせる相手が無いので LIST を 1 回も呼ばない。
+    let base_prefix = format!("{tenant_id}/unko/");
     let mut r2_etags: HashMap<String, String> = HashMap::new();
-    for obj in listed {
-        let rest = obj.key.strip_prefix(&prefix).unwrap_or_default();
-        let Some(unko_no) = rest.strip_suffix("/KUDGIVT.csv") else {
-            continue;
+    if !db_unko_nos.is_empty() {
+        let listed = match derive_yymm_prefixes(&db_unko_nos) {
+            Some(yymms) => {
+                let mut all = Vec::new();
+                for yymm in yymms {
+                    let prefix = format!("{base_prefix}{yymm}");
+                    let page = storage.list(&prefix).await.map_err(|e| {
+                        tracing::error!(prefix = %prefix, error = %e, "dtako-events-etags R2 list error");
+                        ComputeError::Internal("internal error".to_string())
+                    })?;
+                    all.extend(page);
+                }
+                all
+            }
+            None => {
+                // 安全弁: unko_no の先頭 4 文字が数字として取れない要素が 1 つでもあれば
+                // 月で絞る前提が崩れるので、速さより正しさを優先して全 LIST に倒す。
+                tracing::warn!(
+                    "dtako-events-etags: unko_no から YYMM prefix を導けず全 LIST にフォールバック"
+                );
+                storage.list(&base_prefix).await.map_err(|e| {
+                    tracing::error!(prefix = %base_prefix, error = %e, "dtako-events-etags R2 list error");
+                    ComputeError::Internal("internal error".to_string())
+                })?
+            }
         };
-        if let Some(etag) = obj.etag {
-            r2_etags.insert(unko_no.to_string(), etag);
+
+        // 3. key → unko_no。`{base_prefix}{unko_no}/KUDGIVT.csv` の形のみ拾う。
+        // LIST は要求した prefix に一致する key しか返さない (S3 系 API の保証) ので
+        // `strip_prefix` 失敗は起こり得ないが、`unwrap_or_default` で 1 行に畳んで
+        // 保険にしておく。KUDGURI.csv 等の兄弟ファイルは `strip_suffix` で弾く
+        // (同じ unko_no ディレクトリに同居するため、prefix だけでは絞れない)。
+        for obj in listed {
+            let rest = obj.key.strip_prefix(&base_prefix).unwrap_or_default();
+            let Some(unko_no) = rest.strip_suffix("/KUDGIVT.csv") else {
+                continue;
+            };
+            if let Some(etag) = obj.etag {
+                r2_etags.insert(unko_no.to_string(), etag);
+            }
         }
     }
 
@@ -500,6 +527,27 @@ pub async fn collect_dtako_events_etags(
         items,
         warnings: Vec::new(),
     })
+}
+
+/// `db_unko_nos` の先頭 4 文字 (YYMM、`unko_no` の先頭 6 桁 `YYMMDD` の月部分) から
+/// distinct な R2 LIST 用 prefix 候補を作る。1 件でも「先頭 4 文字が取れない / 数字で
+/// ない」要素があれば `None` を返し、呼び出し側は安全側 (tenant 全体の LIST) に倒す。
+///
+/// 6 桁 (`YYMMDD`) ではなく 4 桁 (`YYMM`) を使うのは往復回数のため: 6 桁だと月あたり
+/// 約 30 prefix (= LIST 30 往復) になるが、4 桁なら 1 か月ぶんの key が 1 prefix に
+/// 収まり LIST は数ページで済む。
+fn derive_yymm_prefixes(db_unko_nos: &[String]) -> Option<Vec<String>> {
+    let mut yymms: Vec<&str> = Vec::with_capacity(db_unko_nos.len());
+    for unko_no in db_unko_nos {
+        let yymm = unko_no.get(0..4)?;
+        if !yymm.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        yymms.push(yymm);
+    }
+    yymms.sort_unstable();
+    yymms.dedup();
+    Some(yymms.into_iter().map(str::to_string).collect())
 }
 
 /// R2 key の重複排除つき採番。同じ KUDGIVT.csv を 2 回落とさないため。
