@@ -65,7 +65,7 @@ use crate::dtako_y_time_export::{compute_error_to_response, ComputeError};
 use crate::DtakoState;
 use alc_core::auth_middleware::TenantId;
 use alc_core::repository::dtako_y_time_export::{DtakoDriverOperation, YTimeExportOperation};
-use alc_core::storage::StorageBackend;
+use alc_core::storage::{ListedObject, StorageBackend};
 use alc_csv_parser::decode_shift_jis;
 use axum::{
     extract::{Query, State},
@@ -370,7 +370,8 @@ async fn collect_all_drivers(
 //    1 回で列挙する。ページングは無し — `list_drivers_with_operations` に事実上無制限の
 //    limit を渡して 1 クエリで全乗務員を取り、`list_operations_for_drivers` で運行を引く。
 //    `MAX_RANGE_DAYS_ALL` (31 日) で範囲を縛っているので結果セットは月次の規模に収まる。
-// 2. R2 に `{tenant_id}/unko/` prefix で LIST を 1 回投げる (`.download()` は一切呼ばない)。
+// 2. R2 に `{tenant_id}/unko/{YYMMDD}` prefix で **日ごとに並列** LIST を投げる
+//    (`.download()` は一切呼ばない)。
 // 3. LIST で返った key を `/KUDGIVT.csv` で終わるものだけに絞り、
 //    `{tenant_id}/unko/{unko_no}/KUDGIVT.csv` の `{unko_no}` 部分を取り出す
 //    (同じ unko_no 配下の KUDGURI.csv 等は無視する)。
@@ -387,6 +388,11 @@ async fn collect_all_drivers(
 /// この endpoint にページングの概念は無い (呼び出し側は月まるごとの指紋が欲しい) — 実際の
 /// 結果セットは `MAX_RANGE_DAYS_ALL` (31 日) の DB クエリで既に月次規模に絞られている。
 const ALL_DRIVERS_UNLIMITED: i64 = i64::MAX;
+
+/// R2 LIST を並列に投げるときの同時実行数。根拠は `R2_FETCH_CONCURRENCY` と同じ
+/// (R2 の rate limit 安全圏)。日 prefix は 1 か月ぶんでも 30 個台にしかならないので、
+/// これで 2〜3 波で終わる (Refs ohishi-exp/rust-ichibanboshi#205 comment 205-27)。
+const R2_LIST_CONCURRENCY: usize = 16;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct DtakoEventsEtagsQuery {
@@ -437,6 +443,7 @@ pub async fn collect_dtako_events_etags(
         .clone();
 
     // 1. DB 側: 期間内に運行のある unko_no 集合を全乗務員 1 クエリで列挙する。
+    let started_drivers = std::time::Instant::now();
     let drivers = state
         .dtako_y_time_export
         .list_drivers_with_operations(
@@ -448,51 +455,34 @@ pub async fn collect_dtako_events_etags(
         )
         .await
         .map_err(|e| internal("list_drivers_with_operations", e))?;
+    let ms_drv = started_drivers.elapsed().as_millis();
 
+    let started_ops = std::time::Instant::now();
     let driver_ids: Vec<Uuid> = drivers.iter().map(|d| d.driver_id).collect();
     let rows = state
         .dtako_y_time_export
         .list_operations_for_drivers(tenant_id, &driver_ids, q.date_from, q.date_to)
         .await
         .map_err(|e| internal("list_operations_for_drivers", e))?;
+    let ms_ops = started_ops.elapsed().as_millis();
 
     let mut db_unko_nos: Vec<String> = rows.into_iter().map(|r| r.unko_no).collect();
     db_unko_nos.sort();
     db_unko_nos.dedup();
 
-    // 2. R2 側: LIST を「対象月」まで絞る。db_unko_nos の先頭 4 文字 (YYMM) が
-    // distinct でだいたい 1〜2 個 (対象月 + 翌月またぎ 1 日ぶんの先読み) にしかならない
-    // ことを使い、tenant 全体ではなく月ごとに LIST する (Refs
-    // ohishi-exp/rust-ichibanboshi#205 comment 205-22)。db_unko_nos が空なら
+    // 2. R2 側: LIST を「対象日」まで絞り、日ごとに並列で投げる (Refs
+    // ohishi-exp/rust-ichibanboshi#205 comment 205-27)。db_unko_nos が空なら
     // 突き合わせる相手が無いので LIST を 1 回も呼ばない。
     let base_prefix = format!("{tenant_id}/unko/");
+    let started_list = std::time::Instant::now();
     let mut r2_etags: HashMap<String, String> = HashMap::new();
+    let mut prefixes = 0usize;
+    let mut keys = 0usize;
     if !db_unko_nos.is_empty() {
-        let listed = match derive_yymm_prefixes(&db_unko_nos) {
-            Some(yymms) => {
-                let mut all = Vec::new();
-                for yymm in yymms {
-                    let prefix = format!("{base_prefix}{yymm}");
-                    let page = storage.list(&prefix).await.map_err(|e| {
-                        tracing::error!(prefix = %prefix, error = %e, "dtako-events-etags R2 list error");
-                        ComputeError::Internal("internal error".to_string())
-                    })?;
-                    all.extend(page);
-                }
-                all
-            }
-            None => {
-                // 安全弁: unko_no の先頭 4 文字が数字として取れない要素が 1 つでもあれば
-                // 月で絞る前提が崩れるので、速さより正しさを優先して全 LIST に倒す。
-                tracing::warn!(
-                    "dtako-events-etags: unko_no から YYMM prefix を導けず全 LIST にフォールバック"
-                );
-                storage.list(&base_prefix).await.map_err(|e| {
-                    tracing::error!(prefix = %base_prefix, error = %e, "dtako-events-etags R2 list error");
-                    ComputeError::Internal("internal error".to_string())
-                })?
-            }
-        };
+        let targets = list_targets(&base_prefix, &db_unko_nos);
+        prefixes = targets.len();
+        let listed = list_prefixes(&storage, targets).await?;
+        keys = listed.len();
 
         // 3. key → unko_no。`{base_prefix}{unko_no}/KUDGIVT.csv` の形のみ拾う。
         // LIST は要求した prefix に一致する key しか返さない (S3 系 API の保証) ので
@@ -509,6 +499,14 @@ pub async fn collect_dtako_events_etags(
             }
         }
     }
+    let ms_list = started_list.elapsed().as_millis();
+    let unko = db_unko_nos.len();
+    let drivers = driver_ids.len();
+    // 内訳を本番ログで確定させるための計測 (Refs #205 comment 205-27)。1 行に収めるのは
+    // llvm-cov の 100% gate 対策 — 折り返すと継続行が未カバー扱いになる。rustfmt の
+    // fn_call_width (60) に収まらないので、件数と所要時間で 2 行に割ってある。
+    tracing::info!(drivers, unko, prefixes, keys, "dtako-etags counts");
+    tracing::info!(ms_drv, ms_ops, ms_list, "dtako-etags ms");
 
     // 4. 突き合わせ: DB にある unko_no だけを、R2 の etag (無ければ null) と組にして返す。
     let items = db_unko_nos
@@ -529,25 +527,103 @@ pub async fn collect_dtako_events_etags(
     })
 }
 
-/// `db_unko_nos` の先頭 4 文字 (YYMM、`unko_no` の先頭 6 桁 `YYMMDD` の月部分) から
-/// distinct な R2 LIST 用 prefix 候補を作る。1 件でも「先頭 4 文字が取れない / 数字で
+/// `db_unko_nos` の先頭 6 文字 (`YYMMDD`、`unko_no` の先頭 12 桁 = 運行開始日時の日付部分)
+/// から distinct な R2 LIST 用 prefix 候補を作る。1 件でも「先頭 6 文字が取れない / 数字で
 /// ない」要素があれば `None` を返し、呼び出し側は安全側 (tenant 全体の LIST) に倒す。
 ///
-/// 6 桁 (`YYMMDD`) ではなく 4 桁 (`YYMM`) を使うのは往復回数のため: 6 桁だと月あたり
-/// 約 30 prefix (= LIST 30 往復) になるが、4 桁なら 1 か月ぶんの key が 1 prefix に
-/// 収まり LIST は数ページで済む。
-fn derive_yymm_prefixes(db_unko_nos: &[String]) -> Option<Vec<String>> {
-    let mut yymms: Vec<&str> = Vec::with_capacity(db_unko_nos.len());
+/// ## なぜ 4 桁 (YYMM) から 6 桁 (YYMMDD) に変えたか
+///
+/// #205-22 で最初に入れたときは 4 桁 (月) だった。理由は「6 桁だと月あたり約 30 prefix =
+/// LIST 30 往復になる」で、**これは LIST を直列に投げる前提の判断**だった。本番実測
+/// (2026-07-31、`GET /api/dtako/events/etags` が 17 秒) の内訳を取ったところ、4 桁には
+/// 2 つの問題があった (Refs ohishi-exp/rust-ichibanboshi#205 comment 205-27):
+///
+/// 1. **隣接月を丸ごと舐めてしまう**。運行の列挙は `reading_date ± 1 日` に広がるので、
+///    暦月 1 か月を要求しても unko_no の YYMM は `{前月, 当月, 翌月}` の 3 個になる。
+///    前月・翌月は 1 日ぶんしか要らないのに、その月の key を全部 LIST していた
+///    (= 必要な量の約 3 倍)。
+/// 2. **直列 × 直列**だった。prefix ループも直列、rust-s3 の `Bucket::list` も
+///    continuation token を直列に辿る (1000 key/ページ)。月あたり数千 key = 数ページ
+///    あるので、3 か月ぶんで往復 20 回前後が一列に並んでいた。
+///
+/// 日 (6 桁) にすると 1 prefix あたりの key が 1 ページに収まり (1 日 ≒ 40 運行 ×
+/// 同居 CSV 数)、prefix 数は 30 個台で頭打ちになる。これを `R2_LIST_CONCURRENCY` で
+/// 並列に投げるので **往復の総数は増えても待ち時間は 2〜3 波ぶん**にしかならない。
+/// 「往復回数が少ない方が速い」は直列前提でのみ正しく、並列にすると逆転する。
+///
+/// 応答は prefix の切り方に依存しない: prefix は R2 ではなく **DB が返した `unko_no` から**
+/// 作るので、どの粒度でも `db_unko_nos` を必ず覆う。突き合わせ (手順 4) は
+/// `db_unko_nos` 側を基準に回すので、余分に舐めた key は無視されるだけ。
+///
+/// 4 桁 → 6 桁で安全弁の発動条件がわずかに厳しくなる (先頭 4 文字までしか数字が無い
+/// unko_no は、以前は日で絞れていたが今は全 LIST に倒れる)。倒れた先は正しい結果を返す
+/// 経路なので、壊れるのは速さだけ。
+fn derive_day_prefixes(db_unko_nos: &[String]) -> Option<Vec<String>> {
+    let mut days: Vec<&str> = Vec::with_capacity(db_unko_nos.len());
     for unko_no in db_unko_nos {
-        let yymm = unko_no.get(0..4)?;
-        if !yymm.bytes().all(|b| b.is_ascii_digit()) {
+        let day = unko_no.get(0..6)?;
+        if !day.bytes().all(|b| b.is_ascii_digit()) {
             return None;
         }
-        yymms.push(yymm);
+        days.push(day);
     }
-    yymms.sort_unstable();
-    yymms.dedup();
-    Some(yymms.into_iter().map(str::to_string).collect())
+    days.sort_unstable();
+    days.dedup();
+    Some(days.into_iter().map(str::to_string).collect())
+}
+
+/// LIST を投げる prefix を決める。通常は日ごとの `{base_prefix}{YYMMDD}`。
+///
+/// 安全弁: unko_no の先頭 6 文字が数字として取れない要素が 1 つでもあれば日で絞る
+/// 前提が崩れるので、速さより正しさを優先して `base_prefix` の全 LIST 1 本に倒す。
+fn list_targets(base_prefix: &str, db_unko_nos: &[String]) -> Vec<String> {
+    match derive_day_prefixes(db_unko_nos) {
+        Some(days) => days
+            .into_iter()
+            .map(|day| format!("{base_prefix}{day}"))
+            .collect(),
+        None => {
+            tracing::warn!("dtako-events-etags: 日 prefix を導けず全 LIST にフォールバック");
+            vec![base_prefix.to_string()]
+        }
+    }
+}
+
+/// 複数 prefix の LIST を `R2_LIST_CONCURRENCY` 並列で投げ、全 key を 1 本にまとめる。
+/// 1 つでも失敗したら loud log + 汎用 500 (部分的な結果を返すと呼び出し側の月ゲートが
+/// 「消えた運行」を検出して誤爆するため、握り潰しは禁物)。
+///
+/// Cloud Run handler 内なので fire-and-forget な `tokio::spawn` は使わず、
+/// `buffer_unordered` で await しきる (`fetch_all` と同じ)。
+async fn list_prefixes(
+    storage: &Arc<dyn StorageBackend>,
+    prefixes: Vec<String>,
+) -> Result<Vec<ListedObject>, ComputeError> {
+    let pages: Vec<Result<Vec<ListedObject>, (String, String)>> =
+        futures::stream::iter(prefixes.into_iter().map(|prefix| {
+            let storage = storage.clone();
+            async move {
+                storage
+                    .list(&prefix)
+                    .await
+                    .map_err(|e| (prefix, e.to_string()))
+            }
+        }))
+        .buffer_unordered(R2_LIST_CONCURRENCY)
+        .collect()
+        .await;
+
+    let mut all = Vec::new();
+    for page in pages {
+        match page {
+            Ok(objects) => all.extend(objects),
+            Err((prefix, e)) => {
+                tracing::error!(prefix = %prefix, error = %e, "dtako-events-etags R2 list error");
+                return Err(ComputeError::Internal("internal error".to_string()));
+            }
+        }
+    }
+    Ok(all)
 }
 
 /// R2 key の重複排除つき採番。同じ KUDGIVT.csv を 2 回落とさないため。
