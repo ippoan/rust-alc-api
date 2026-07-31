@@ -2458,7 +2458,9 @@ async fn test_dtako_upload_with_event_classifications_from_db() {
 }
 
 // =========================================================================
-// Split CSV with update_has_kudgivt failure → covers line 941 (error log path)
+// Split CSV with update_has_kudgivt failure → error propagates (Refs
+// ohishi-exp/rust-ichibanboshi#205 の 31: 「R2 は書けたが DB を更新しなかった」は
+// 握り潰さず伝播させる)
 // =========================================================================
 
 #[tokio::test]
@@ -2491,8 +2493,219 @@ async fn test_dtako_split_csv_update_has_kudgivt_failure() {
         .await
         .unwrap();
 
-    // update_has_kudgivt failure is logged but doesn't block → still 200
+    // update_has_kudgivt failure は握り潰さず伝播する → direct split-csv endpoint は 500
+    assert_eq!(res.status(), 500);
+}
+
+// =========================================================================
+// POST /api/internal/rerun/{id} — update_has_kudgivt failure doesn't block the
+// upload API (status は "completed" のまま) が split_failed で気づける
+// (Refs ohishi-exp/rust-ichibanboshi#205 の 31)
+// =========================================================================
+
+#[tokio::test]
+async fn test_dtako_rerun_reports_split_failed_on_has_kudgivt_failure() {
+    let tenant_id = Uuid::new_v4();
+    let upload_id = Uuid::new_v4();
+    let zip_key = format!("{}/uploads/{}/rich.zip", tenant_id, upload_id);
+
+    let mock = MockDtakoUploadRepository::default();
+    *mock.upload_history.lock().unwrap() = Some(UploadHistoryRecord {
+        tenant_id,
+        r2_zip_key: zip_key.clone(),
+        filename: "rich.zip".to_string(),
+    });
+    *mock.tenant_and_key.lock().unwrap() = Some(UploadTenantAndKey {
+        tenant_id,
+        r2_zip_key: zip_key.clone(),
+    });
+    mock.fail_update_has_kudgivt.store(true, Ordering::SeqCst);
+
+    let dtako_storage = Arc::new(MockStorage::new("dtako-bucket"));
+    let zip_bytes = crate::common::create_test_dtako_zip_rich();
+    dtako_storage.insert_file(&zip_key, zip_bytes);
+
+    let state = setup_with_storage_and_mock(mock, dtako_storage);
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+    let client = reqwest::Client::new();
+
+    let res = client
+        .post(format!("{base_url}/api/internal/rerun/{upload_id}"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .send()
+        .await
+        .unwrap();
+
+    // try_split_csv 経由なので upload API は非ブロッキング: 200 completed のまま
     assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["status"], "completed");
+    // だが split_failed で失敗を握り潰さず呼び手に伝える
+    assert!(body["split_failed"].as_u64().unwrap() > 0, "{body:?}");
+}
+
+// =========================================================================
+// Split CSV — 一部の CSV PUT だけ失敗すると、その unko_no は has_kudgivt 更新から
+// 除外される (成功として数えない)。csv_count/split_failed も PUT の実結果を反映する
+// (Refs ohishi-exp/rust-ichibanboshi#205 の 31)
+// =========================================================================
+
+#[tokio::test]
+async fn test_dtako_split_csv_partial_put_failure_excludes_unko_no_from_has_kudgivt() {
+    let tenant_id = Uuid::new_v4();
+    let upload_id = Uuid::new_v4();
+    let zip_key = format!("{}/uploads/{}/rich.zip", tenant_id, upload_id);
+
+    let mock = MockDtakoUploadRepository::default();
+    *mock.tenant_and_key.lock().unwrap() = Some(UploadTenantAndKey {
+        tenant_id,
+        r2_zip_key: zip_key.clone(),
+    });
+
+    let dtako_storage = Arc::new(MockStorage::new("dtako-bucket"));
+    let zip_bytes = crate::common::create_test_dtako_zip_rich();
+    dtako_storage.insert_file(&zip_key, zip_bytes);
+    // 3 運行 (1001/1002/1003) のうち 1002 の KUDGIVT.csv PUT だけ失敗させる
+    dtako_storage.fail_upload_for(&format!("{tenant_id}/unko/1002/KUDGIVT.csv"));
+
+    // last_update_has_kudgivt_unko_nos をテストから読むため Arc を手元にも残す
+    // (setup_with_storage_and_mock は mock の所有権ごと Arc::new するので使えない)。
+    let mock = Arc::new(mock);
+    let mut state = setup_mock_app_state();
+    state.dtako_upload = mock.clone();
+    state.dtako_storage = Some(dtako_storage);
+
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+    let client = reqwest::Client::new();
+
+    let res = client
+        .post(format!("{base_url}/api/split-csv/{upload_id}"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["split_failed"].as_u64().unwrap(), 1, "{body:?}");
+
+    let called_unko_nos = mock
+        .last_update_has_kudgivt_unko_nos
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("update_has_kudgivt should have been called");
+    assert!(
+        called_unko_nos.contains(&"1001".to_string()),
+        "{called_unko_nos:?}"
+    );
+    assert!(
+        called_unko_nos.contains(&"1003".to_string()),
+        "{called_unko_nos:?}"
+    );
+    assert!(
+        !called_unko_nos.contains(&"1002".to_string()),
+        "1002 の PUT は失敗したので has_kudgivt 更新対象から除外されるはず: {called_unko_nos:?}"
+    );
+}
+
+// =========================================================================
+// Split CSV — update_has_kudgivt が一部の unko_no を当てられなくても (突合キーの
+// ずれ想定) request 自体は失敗させない。警告のみ
+// (Refs ohishi-exp/rust-ichibanboshi#205 の 31)
+// =========================================================================
+
+#[tokio::test]
+async fn test_dtako_split_csv_unko_no_not_matched_does_not_fail_request() {
+    let tenant_id = Uuid::new_v4();
+    let upload_id = Uuid::new_v4();
+    let zip_key = format!("{}/uploads/{}/rich.zip", tenant_id, upload_id);
+
+    let mock = MockDtakoUploadRepository::default();
+    *mock.tenant_and_key.lock().unwrap() = Some(UploadTenantAndKey {
+        tenant_id,
+        r2_zip_key: zip_key.clone(),
+    });
+    // rich zip は 3 運行 (1001/1002/1003) だが 1002 だけ UPDATE が当たらない、を模す
+    *mock.update_has_kudgivt_missing_unko_nos.lock().unwrap() = vec!["1002".to_string()];
+
+    let dtako_storage = Arc::new(MockStorage::new("dtako-bucket"));
+    let zip_bytes = crate::common::create_test_dtako_zip_rich();
+    dtako_storage.insert_file(&zip_key, zip_bytes);
+
+    let state = setup_with_storage_and_mock(mock, dtako_storage);
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+    let client = reqwest::Client::new();
+
+    let res = client
+        .post(format!("{base_url}/api/split-csv/{upload_id}"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .send()
+        .await
+        .unwrap();
+
+    // 一部が当たらなくても警告のみ — split-csv 自体は成功のまま
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["status"], "ok");
+}
+
+// =========================================================================
+// Split CSV — 全 unko_no が当たっていれば (crew_role 分の複数行が RETURNING で
+// 返っても集合なら 1 件に畳まれるので) 誤検知しない
+// (Refs ohishi-exp/rust-ichibanboshi#205 の 31)
+// =========================================================================
+
+#[tokio::test]
+async fn test_dtako_split_csv_all_unko_no_matched_no_false_positive() {
+    let tenant_id = Uuid::new_v4();
+    let upload_id = Uuid::new_v4();
+    let zip_key = format!("{}/uploads/{}/rich.zip", tenant_id, upload_id);
+
+    let mock = MockDtakoUploadRepository::default();
+    *mock.tenant_and_key.lock().unwrap() = Some(UploadTenantAndKey {
+        tenant_id,
+        r2_zip_key: zip_key.clone(),
+    });
+    // update_has_kudgivt_missing_unko_nos は空 (デフォルト) = 渡された unko_nos は
+    // 全部当たったことにする。運転手/副運転手で 2 行返っても mock は集合として返す
+    // ので、ここでの「全部当たる」は実 DB の RETURNING dedup と同じ意味を持つ。
+
+    let dtako_storage = Arc::new(MockStorage::new("dtako-bucket"));
+    let zip_bytes = crate::common::create_test_dtako_zip_rich();
+    dtako_storage.insert_file(&zip_key, zip_bytes);
+
+    let mock = Arc::new(mock);
+    let mut state = setup_mock_app_state();
+    state.dtako_upload = mock.clone();
+    state.dtako_storage = Some(dtako_storage);
+
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+    let client = reqwest::Client::new();
+
+    let res = client
+        .post(format!("{base_url}/api/split-csv/{upload_id}"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["status"], "ok");
+
+    // 3 運行とも update_has_kudgivt に渡っている (＝全部当たった扱いで警告なし)
+    let called_unko_nos = mock
+        .last_update_has_kudgivt_unko_nos
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("update_has_kudgivt should have been called");
+    assert_eq!(called_unko_nos.len(), 3, "{called_unko_nos:?}");
 }
 
 // =========================================================================

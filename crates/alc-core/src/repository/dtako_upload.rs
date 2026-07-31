@@ -203,11 +203,17 @@ pub trait DtakoUploadRepository: Send + Sync {
         params: &InsertOperationParams,
     ) -> Result<(), sqlx::Error>;
 
+    /// 戻り値は実際に `has_kudgivt = TRUE` に更新された `unko_no` の集合 (`RETURNING`
+    /// を `unko_no` で dedup したもの)。`dtako_operations` は `unko_no` が運転手/副運転手の
+    /// 2 行を持つことがあるため、件数 (rows_affected) ではなく集合で返す — 件数比較だと
+    /// 「A が 2 行・B が 0 行」で合計が一致し見逃す一方、複数行が正常な unko_no を
+    /// 誤検知してしまう。呼び手は `unko_nos` との差分から当たらなかったものを特定できる
+    /// (Refs ohishi-exp/rust-ichibanboshi#205 の 31)。
     async fn update_has_kudgivt(
         &self,
         tenant_id: Uuid,
         unko_nos: &[String],
-    ) -> Result<(), sqlx::Error>;
+    ) -> Result<std::collections::HashSet<String>, sqlx::Error>;
 
     // --- event classifications ---
     async fn load_event_classifications(
