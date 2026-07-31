@@ -131,4 +131,33 @@ impl DtakoYTimeExportRepository for PgDtakoYTimeExportRepository {
         .fetch_all(&mut *tc.conn)
         .await
     }
+
+    async fn list_unsplit_operations(
+        &self,
+        tenant_id: Uuid,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> Result<Vec<UnsplitOperation>, sqlx::Error> {
+        // 他 3 クエリと同じ ±1 日広げ (暦日跨ぎの運行取りこぼし防止)
+        let from_widened = from - chrono::Duration::days(1);
+        let to_widened = to + chrono::Duration::days(1);
+        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
+        // has_kudgivt だけ他 3 クエリと反転。employees の join は
+        // list_drivers_with_operations と同じ経路 (driver_id = employees.id)。
+        sqlx::query_as::<_, UnsplitOperation>(
+            "SELECT o.unko_no, d.driver_cd, o.reading_date \
+             FROM alc_api.dtako_operations o \
+             JOIN alc_api.employees d ON o.driver_id = d.id \
+             WHERE o.tenant_id = $1 \
+               AND o.reading_date BETWEEN $2 AND $3 \
+               AND o.has_kudgivt = FALSE \
+               AND d.driver_cd IS NOT NULL \
+             ORDER BY o.unko_no",
+        )
+        .bind(tenant_id)
+        .bind(from_widened)
+        .bind(to_widened)
+        .fetch_all(&mut *tc.conn)
+        .await
+    }
 }
