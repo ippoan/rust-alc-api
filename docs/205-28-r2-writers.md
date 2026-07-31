@@ -302,6 +302,119 @@ R2 の CSV は `unko_no` 単位なので、指紋列は `has_kudgivt` と同じ�
 
 ---
 
+## 追記: etags は R2 に無い運行をどう扱うか (142 行差との関係)
+
+親からの追加依頼 (#205 の「142 行差」が D1 で説明できるか) への回答。**結論 3 行**:
+
+1. **突合は DB 基準の左外部結合 = (あ)**。R2 に無い運行は `etag: null` の item として残り、脱落しない
+   ([dtako_events.rs:513-520](crates/alc-dtako/src/dtako_events.rs:513))。「LIST に在るものだけ返す (い)」ではない。
+2. **D1 (PUT 握り潰し) は 142 行差を説明できない**。`has_kudgivt` は ZIP のパース結果から立てており
+   PUT の成否を見ないので、**PUT が全滅しても `has_kudgivt = TRUE` になる** → item は残り `etag: null` →
+   #205-21 の `no_etag > 0` が鳴る。鳴っていない以上この経路ではない。
+3. **ただし別の「静かに減る」経路が在る**: `has_kudgivt = FALSE` の運行は **DB 列挙の時点で消える**。
+   items にも `/api/dtako/events` のデータにも現れず、**warning も鳴らない**。
+   しかも `has_kudgivt` は**再アップロードのたびに FALSE にリセットされる**ので、
+   「前は見えていた運行が、再アップロード + split 失敗で消える」が成立する。**142 行差の症状と一致**。
+
+### 1. 突合の向き — DB 基準 (あ)
+
+```rust
+// 4. 突き合わせ: DB にある unko_no だけを、R2 の etag (無ければ null) と組にして返す。
+let items = db_unko_nos.into_iter()
+    .map(|unko_no| { let etag = r2_etags.get(&unko_no).cloned(); DtakoEventsEtagItem { unko_no, etag } })
+    .collect();
+```
+[crates/alc-dtako/src/dtako_events.rs:513-520](crates/alc-dtako/src/dtako_events.rs:513)。
+R2 の LIST 結果 (`r2_etags`) は `HashMap` の**引き当て先**にしかならず、
+item の集合を決めるのは `db_unko_nos` 側。したがって
+**「DB に `has_kudgivt=TRUE` の行があるのに R2 にオブジェクトが無い」運行は `etag: null` で必ず現れます**。
+
+なお `warnings` はこの endpoint では**常に空**です
+([dtako_events.rs:528](crates/alc-dtako/src/dtako_events.rs:528) が `Vec::new()` 固定)。
+異常の通知経路は `etag: null` の 1 本だけ、という前提で消費側を作る必要があります。
+
+### 2. PUT 全滅でも `has_kudgivt` は立つ (= D1 は検知される)
+
+`kudgivt_unko_nos` は **アップロード前の準備ループ**で ZIP のパース結果から積まれます
+([dtako_upload.rs:931-933](crates/alc-dtako/src/dtako_upload.rs:931))。
+その後の PUT ループは `Result` を捨てており ([:950-951](crates/alc-dtako/src/dtako_upload.rs:950))、
+`update_has_kudgivt` は**アップロード結果を一切参照せず**無条件に呼ばれます
+([:955-965](crates/alc-dtako/src/dtako_upload.rs:955))。
+
+→ **PUT が 1 件も成功しなくても `has_kudgivt = TRUE` になる。**
+→ その運行は etags の items に `etag: null` で載る → #205-21 が拾う。
+→ **D1 単独では「静かに減る」を作れません。** (D1 は案 C を採る場合のリスクとしては依然として必修)
+
+### 3. 静かに減る本命 — `has_kudgivt = FALSE` で列挙から落ちる
+
+読み取り側の 3 クエリすべてが `has_kudgivt = TRUE` で絞っています
+([repo/dtako_y_time_export.rs:61](crates/alc-dtako/src/repo/dtako_y_time_export.rs:61) /
+[:90](crates/alc-dtako/src/repo/dtako_y_time_export.rs:90) /
+[:124](crates/alc-dtako/src/repo/dtako_y_time_export.rs:124))。
+これは etags だけでなく **`GET /api/dtako/events` (データ本体) も同じ repo を使う**ため、
+`has_kudgivt = FALSE` の運行は **etags の items からも events の行からも同時に消えます**。
+items に現れないので `no_etag` では**原理的に数えられません**。
+
+そして `has_kudgivt` は片道の TRUE ではなく、**再アップロードのたびに FALSE に戻ります**:
+
+- `process_zip` は `delete_operation` + `insert_operation` で行を作り直す
+  ([dtako_upload.rs:194-230](crates/alc-dtako/src/dtako_upload.rs:194))
+- `insert_operation` の列リストに `has_kudgivt` は**含まれていない**
+  ([repo/dtako_upload.rs:343-359](crates/alc-dtako/src/repo/dtako_upload.rs:343)) →
+  `DEFAULT FALSE` ([migrations/054_dtako_tables.sql:76](migrations/054_dtako_tables.sql:76)) に戻る
+- `has_kudgivt` を TRUE にするのは `update_has_kudgivt` の 1 箇所だけ
+  ([repo/dtako_upload.rs:405](crates/alc-dtako/src/repo/dtako_upload.rs:405))
+
+したがって次のシナリオが成立します:
+
+> 1. ある運行は既に split 済みで `has_kudgivt = TRUE`、R2 にも CSV がある (正常に見えている)
+> 2. 同じ `unko_no` を含む ZIP が再アップロードされる (cron の再走 / 手動の範囲重ね / rerun)
+> 3. `process_zip` が成功 → **行が作り直され `has_kudgivt = FALSE` に戻る**
+> 4. その直後の `try_split_csv` が失敗する ([:868-872](crates/alc-dtako/src/dtako_upload.rs:868) で
+>    `tracing::warn!` のみ、**upload API は 200 completed を返す**)
+> 5. → `has_kudgivt` は FALSE のまま。**R2 には CSV が残っているのに、DB 側の列挙から消える**
+> 6. → etags の items にも `/events` の行にも出ない。`no_etag` は 0 のまま。**warning は 1 つも鳴らない**
+
+**症状の一致**: 入力が静かに減る / `no_etag` が鳴らない / 欠けが月の内側なら末尾 gap も動かない /
+DB の状態が変わらないので**畳み直しても数字が動かない**。#205 の 142 行差の記述と全部合います。
+
+失敗しうる箇所は PUT だけではありません。`split_csv_from_r2` の前半
+(ZIP の `download` / `extract_zip` / `decode_shift_jis`) のどこで落ちても同じ結果になりますし、
+`update_has_kudgivt` 自体が失敗しても `tracing::error!` を出すだけで
+**`split_csv_from_r2` は `Ok(())` を返します** ([:956-965](crates/alc-dtako/src/dtako_upload.rs:956))。
+この最後のケースは文字通り「**R2 は書けたが DB を更新しなかった**」であり、
+**現行の LIST 方式でも救えません** (突合が DB 基準なので、DB に居ない運行は最初から見えない)。
+
+### 4. 確認方法 (DB 1 クエリ、コード変更不要)
+
+```sql
+SET search_path TO alc_api;
+SELECT set_config('app.current_tenant_id', '<tenant_id>', false);
+SELECT has_kudgivt, count(*)
+  FROM alc_api.dtako_operations
+ WHERE tenant_id = '<tenant_id>'
+   AND reading_date BETWEEN '<month_start>' AND '<month_end>'
+ GROUP BY has_kudgivt;
+```
+`has_kudgivt = FALSE` が非ゼロなら本命。その `unko_no` について R2 に
+`{tenant_id}/unko/{unko_no}/KUDGIVT.csv` が在るかを見れば、
+「split が走らなかった」のか「そもそも KUDGIVT が ZIP に無い運行」なのかが切り分けられます。
+**前者なら `POST /api/split-csv-all` を叩き直すだけで復活します** (R2 の ZIP は残っているため)。
+
+### 5. この追記から出る示唆
+
+- **`has_kudgivt` は「gate に載せるか」を決める事実上のスイッチなのに、落ちても誰も気づけない。**
+  案 C の指紋列を足すかどうかとは別に、**`has_kudgivt = FALSE` の件数を可観測にする**べき
+  (etags の `warnings` に「期間内で `has_kudgivt=FALSE` の運行が N 件」を載せるのが最小の手)。
+- `try_split_csv` の握り潰し ([:868](crates/alc-dtako/src/dtako_upload.rs:868)) と
+  `update_has_kudgivt` の握り潰し ([:961](crates/alc-dtako/src/dtako_upload.rs:961)) は、
+  D1 (PUT の握り潰し) と**同じ性質の 3 件目・2 件目**です。まとめて直すのが筋。
+- 案 C の評価は変わりません (**条件付きで進める**)。ただし
+  「gate の入力集合が DB のフラグ 1 本に依存していて、そのフラグが静かに落ちる」ことが分かったので、
+  **drift 検知 (M5) の対象は指紋列だけでなく `has_kudgivt` も含めるべき**です。
+
+---
+
 ## 7. 親への [質問] (Cloudflare connector が必要)
 
 1. **`ohishi-dtako` と `dtako-uploads` は別バケットか。**
