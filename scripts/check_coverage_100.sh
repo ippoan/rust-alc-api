@@ -87,9 +87,16 @@ fi
 
 # --- --text 出力から全ファイルの Lines/Miss を awk で集計 ---
 # 結果を一時ファイルに出力: "ファイル名 total miss"
+#
+# ファイル見出し行の判定は「絶対パス (先頭 /) + '.rs:' で終わる」でのみ行う。
+# 以前は ^/home 決め打ちだったため、CI (/home/runner/...) 以外の場所
+# (例: /tmp 配下に worktree を作るローカル運用) では 1 行もマッチせず、
+# 登録簿の全ファイルが「見つからない」= 全 FAIL に見えていた。
+# `/src/` を必須にしないのも意図的: 将来 src/ 以外に登録ファイルが増えたときに
+# 静かに取りこぼさないため (この gate は取りこぼしたら fail、握り潰さない設計)
 SUMMARY_FILE=$(mktemp)
 awk '
-/^\/home.*\/src\/.*\.rs:$/ {
+/^\/.*\.rs:$/ {
     if (file != "") {
         total = covered + uncovered
         printf "%s %d %d\n", file, total, uncovered
@@ -114,6 +121,18 @@ END {
     }
 }
 ' "$CACHE_FILE" > "$SUMMARY_FILE"
+
+# 登録簿の全ファイルが "not found" になるのは大抵「カバレッジ不足」ではなく
+# 「このスクリプトが --text の出力を 1 行も読めていない」。区別できるよう、
+# ファイル見出しが 1 件も拾えていない場合は先に ERROR を出す
+if [ ! -s "$SUMMARY_FILE" ]; then
+  echo "ERROR: cargo llvm-cov --text の出力からファイル見出し行を 1 件も拾えませんでした。" >&2
+  echo "       これから登録簿の全ファイルが FAIL しますが、原因はカバレッジ不足ではなく" >&2
+  echo "       このスクリプトが出力形式を読めていないことです。" >&2
+  echo "       考えられる原因: cargo-llvm-cov のバージョン差で --text の書式が変わった / $CACHE_FILE が空・壊れている" >&2
+  echo "       $CACHE_FILE の中身を確認してください" >&2
+  echo "" >&2
+fi
 
 # --- Check each file ---
 FAILED=0
