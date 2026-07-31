@@ -379,6 +379,10 @@ jobs:
           - { name: db-trouble, target: "//:trouble_test", coverage: "cov-db-trouble" }
           - { name: db-archive, target: "//:archive_repo_test", coverage: "cov-db-archive" }
           - { name: db-hub-measurements, target: "//:hub_measurements_test" }
+          # Refs ohishi-exp/rust-ichibanboshi#205 の 38: 運行列挙の期間条件
+          # (読取日 OR 運行日) を実 DB で固定する。SQL は実行時クエリなので
+          # コンパイル時検査が効かず、窓が縮む退行は静かにデータが減る形で出る
+          - { name: db-dtako-operation-window, target: "//:dtako_operation_window_test" }
     services:
       postgres:
         image: postgres:16

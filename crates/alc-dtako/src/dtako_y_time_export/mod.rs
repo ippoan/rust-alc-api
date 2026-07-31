@@ -3,7 +3,8 @@
 //! `GET /api/dtako/y-time-export?driver_cd=X&from=YYYY-MM-DD&to=YYYY-MM-DD`
 //!
 //! 1. driver_cd → employees.id を解決
-//! 2. dtako_operations から期間内 (`reading_date ± 1 day`) の運行を列挙
+//! 2. dtako_operations から期間内 (`reading_date` **または** `operation_date` が
+//!    `± 1 day` 広げた範囲に入る) の運行を列挙
 //! 3. 各 unko_no について R2 から KUDGIVT.csv を **並列 fetch** (buffer_unordered 16)
 //! 4. `split_by_rest` で segment 化、event_cd=301 を sum して rest_minutes 算出
 //! 5. 1 暦日 2 始業 ルールで bucketing

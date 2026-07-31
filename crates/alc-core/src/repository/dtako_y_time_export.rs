@@ -40,6 +40,13 @@ pub struct UnsplitOperation {
     pub reading_date: NaiveDate,
 }
 
+/// `dtako_operations` を期間で列挙する読み取り口。
+///
+/// **列挙系 4 メソッドの期間条件は共通で「読取日 (`reading_date`) と
+/// 運行日 (`operation_date`) の OR」** — どちらかが `[from-1, to+1]` に入れば拾う
+/// (Refs ohishi-exp/rust-ichibanboshi#205 の 38)。読取日だけだと月末の運行
+/// (読まれるのが翌月上旬) が構造的に落ち、運行日だけだと `operation_date` が NULL の行が
+/// 落ちる。実測の根拠は `alc-dtako` 側の `repo::dtako_y_time_export` の module docs 参照。
 #[async_trait]
 pub trait DtakoYTimeExportRepository: Send + Sync {
     /// `(tenant_id, driver_cd)` から `(driver_id, driver_name)` を返す。
@@ -50,8 +57,8 @@ pub trait DtakoYTimeExportRepository: Send + Sync {
         driver_cd: &str,
     ) -> Result<Option<(Uuid, String)>, sqlx::Error>;
 
-    /// 期間内 (`reading_date` が `[from-1, to+1]` と重なる) の運行を列挙。
-    /// `has_kudgivt = true` でフィルタ済み。
+    /// 期間内 (`reading_date` **または** `operation_date` が `[from-1, to+1]` に入る)
+    /// の運行を列挙。`has_kudgivt = true` でフィルタ済み。
     async fn list_operations(
         &self,
         tenant_id: Uuid,
@@ -75,7 +82,7 @@ pub trait DtakoYTimeExportRepository: Send + Sync {
     ) -> Result<Vec<DtakoDriverRef>, sqlx::Error>;
 
     /// 複数乗務員分の運行を 1 クエリで列挙。フィルタ条件は `list_operations` と同じ
-    /// (`reading_date` ±1 日、`has_kudgivt = TRUE`、`(driver_id, unko_no)` で dedup)。
+    /// (読取日/運行日 の OR を ±1 日、`has_kudgivt = TRUE`、`(driver_id, unko_no)` で dedup)。
     async fn list_operations_for_drivers(
         &self,
         tenant_id: Uuid,
@@ -84,7 +91,7 @@ pub trait DtakoYTimeExportRepository: Send + Sync {
         to: NaiveDate,
     ) -> Result<Vec<DtakoDriverOperation>, sqlx::Error>;
 
-    /// 期間内 (`reading_date` ±1 日、他 3 クエリと同じ広げ方) に `has_kudgivt = FALSE` の
+    /// 期間内 (読取日/運行日 の OR を ±1 日、他 3 クエリと同じ広げ方) に `has_kudgivt = FALSE` の
     /// 運行を `unko_no` 昇順で列挙する。上限は掛けない — 表示件数の絞り込みと総数の算出は
     /// 呼び出し側 (`unsplit_total` = `len()`) に委ねる。
     async fn list_unsplit_operations(
