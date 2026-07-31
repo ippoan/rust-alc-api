@@ -1605,26 +1605,41 @@ async fn split_csv_handler(
     ))
 }
 
+/// 1 リクエストあたりに実際に split する upload 数の上限。
+///
+/// list_uploads_needing_split は upload 単位で絞り込めず (#205-34 参照)、テナント内に
+/// has_kudgivt=FALSE の運行が 1 件でもあれば completed upload を全部候補にするため、
+/// filename dedup を撤廃すると運用月数ぶんの ZIP をまとめて download/extract/split
+/// しにいく (数十〜数百本になり得る)。1 回で回りきらせようとせず、直近データ
+/// (list_uploads_needing_split が created_at DESC で返す) から確実に処理し、
+/// 残りは応答の `skipped` を見て再実行してもらう前提の値。
+const SPLIT_CSV_ALL_LIMIT: usize = 50;
+
 /// CSV 一括分割コアロジック (テスト可能)
+///
+/// 戻り値は (candidates, success, failed)。candidates はテナント全体の候補総数
+/// (SPLIT_CSV_ALL_LIMIT を適用する前)。実際に処理するのは新しい方から
+/// 最大 SPLIT_CSV_ALL_LIMIT 件で、残り (candidates - success - failed) は
+/// 呼び出し側 (SSE `done` イベント) の `skipped` として可視化する。
+///
+/// upload は id で一意なので、候補に挙がった upload は同名ファイルが複数あっても
+/// dedup せず全件処理対象にする (#205-34: 旧実装は filename で dedup していたため、
+/// 日次 cron が固定ファイル名 "csvdata.zip" で毎日アップロードするケースで
+/// 実質 1 本しか split されていなかった)。
 pub async fn split_csv_all_core(
     state: &DtakoState,
     tenant_id: Uuid,
-) -> Result<(usize, usize), anyhow::Error> {
+) -> Result<(usize, usize, usize), anyhow::Error> {
     let uploads = state
         .dtako_upload
         .list_uploads_needing_split(tenant_id)
         .await?;
 
-    let mut seen_filenames = std::collections::HashSet::new();
-    let uploads: Vec<_> = uploads
-        .into_iter()
-        .filter(|(_, f)| seen_filenames.insert(f.clone()))
-        .collect();
-
-    let total = uploads.len();
-    if total == 0 {
-        return Ok((0, 0));
+    let candidates = uploads.len();
+    if candidates == 0 {
+        return Ok((0, 0, 0));
     }
+    let uploads: Vec<_> = uploads.into_iter().take(SPLIT_CSV_ALL_LIMIT).collect();
 
     let success = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let failed = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -1654,6 +1669,7 @@ pub async fn split_csv_all_core(
     }
 
     Ok((
+        candidates,
         success.load(std::sync::atomic::Ordering::Relaxed),
         failed.load(std::sync::atomic::Ordering::Relaxed),
     ))
@@ -1679,8 +1695,18 @@ async fn split_csv_all_handler(
         };
 
         match split_csv_all_core(&state, tenant_id).await {
-            Ok((success, failed)) => {
-                send(serde_json::json!({"event":"done","total":success+failed,"success":success,"failed":failed})).await;
+            Ok((candidates, success, failed)) => {
+                // candidates (候補総数) と skipped (SPLIT_CSV_ALL_LIMIT で今回処理
+                // されなかった残り) を出す。#205-34 以前は filename dedup で候補が
+                // 黙って減っていたため、「候補に対して何本処理し何本残ったか」を
+                // 呼び手が見て再実行できるようにする。
+                let processed = success + failed;
+                let skipped = candidates.saturating_sub(processed);
+                let done = serde_json::json!({
+                    "event": "done", "candidates": candidates, "total": processed,
+                    "success": success, "failed": failed, "skipped": skipped
+                });
+                send(done).await;
             }
             Err(e) => {
                 send(serde_json::json!({"event":"error","message": e.to_string()})).await;
