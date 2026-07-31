@@ -1,13 +1,16 @@
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::sync::Mutex;
 
-use rust_alc_api::storage::{StorageBackend, StorageError};
+use rust_alc_api::storage::{ListedObject, StorageBackend, StorageError};
 
 /// テスト用インメモリストレージ
 pub struct MockStorage {
     bucket_name: String,
     files: Mutex<HashMap<String, Vec<u8>>>,
     pub fail_upload: std::sync::atomic::AtomicBool,
+    /// `list()` だけを失敗させる (R2 LIST がエラーになるケースの単体テスト用)。
+    pub fail_list: std::sync::atomic::AtomicBool,
 }
 
 impl MockStorage {
@@ -16,6 +19,7 @@ impl MockStorage {
             bucket_name: bucket_name.to_string(),
             files: Mutex::new(HashMap::new()),
             fail_upload: std::sync::atomic::AtomicBool::new(false),
+            fail_list: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -85,5 +89,28 @@ impl StorageBackend for MockStorage {
             "https://mock-storage/{}/{}?expires={}",
             self.bucket_name, key, expiry_seconds
         ))
+    }
+
+    async fn list(&self, prefix: &str) -> Result<Vec<ListedObject>, StorageError> {
+        if self.fail_list.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(StorageError::Upload("mock list failure".to_string()));
+        }
+        // R2 の LIST は content を返さないので、テストでも決定的な擬似 ETag を
+        // content から導く (中身が変われば ETag も変わる、が本物の MD5 である必要は無い)。
+        Ok(self
+            .files
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(key, _)| key.starts_with(prefix))
+            .map(|(key, data)| {
+                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                data.hash(&mut hasher);
+                ListedObject {
+                    key: key.clone(),
+                    etag: Some(format!("mock-etag-{:016x}", hasher.finish())),
+                }
+            })
+            .collect())
     }
 }
