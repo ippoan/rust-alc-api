@@ -2664,6 +2664,50 @@ async fn test_dtako_split_csv_all_no_candidates() {
 }
 
 // =========================================================================
+// POST /api/split-csv-all — 候補が SPLIT_CSV_ALL_LIMIT (50) を超えるとき、
+// 上限ぶんだけ処理され、応答に skipped が出る
+// (#205-34: filename dedup 撤廃で「テナント内に FALSE が 1 件でもあれば
+// completed upload を全部候補にする」が丸ごと処理対象になり得るため、
+// 1 リクエストで無制限に download/extract/split しないための上限)
+// =========================================================================
+
+#[tokio::test]
+async fn test_dtako_split_csv_all_over_limit_reports_skipped() {
+    let tenant_id = Uuid::new_v4();
+
+    let mock = MockDtakoUploadRepository::default();
+    let uploads: Vec<_> = (0..55)
+        .map(|i| (Uuid::new_v4(), format!("file{i}.zip")))
+        .collect();
+    *mock.uploads_needing_split.lock().unwrap() = uploads;
+    // tenant_and_key is None → 処理される分はすべて "upload not found" で failed になる
+    // (実際に R2 まで叩かず高速に上限の効果だけを検証する)
+
+    let state = setup_with_mock(mock);
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+    let client = reqwest::Client::new();
+
+    let res = client
+        .post(format!("{base_url}/api/split-csv-all"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    let body = res.text().await.unwrap();
+    assert!(body.contains("done"));
+    let json = parse_sse_json(&body);
+    assert_eq!(json["candidates"], 55);
+    // 上限 (50) ぶんだけ処理され、成功 0 / 失敗 50 (tenant_and_key 無しで全滅)
+    assert_eq!(json["total"], 50);
+    assert_eq!(json["failed"], 50);
+    assert_eq!(json["success"], 0);
+    assert_eq!(json["skipped"], 5);
+}
+
+// =========================================================================
 // Recalculate with per-unko KUDGIVT.csv that has parse errors → covers line 1152
 // (KUDGIVT parse error in recalculate_all_core batch download path)
 // =========================================================================

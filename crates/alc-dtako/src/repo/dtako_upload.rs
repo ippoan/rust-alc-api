@@ -200,7 +200,10 @@ impl DtakoUploadRepository for PgDtakoUploadRepository {
         // tenant_id だけでの絞り込みは維持 (テナント内に has_kudgivt=FALSE が 1 件でもあれば
         // completed upload を全部候補にする)。運行と upload を実際に関係づけるには migration で
         // dtako_operations.upload_id を足す必要がある (#205 監督へ確認済み)。
-        // 同名ファイルが並んだときに順序が不定にならないよう created_at で安定ソート
+        // 新しい upload から処理されるよう created_at DESC で安定ソート (呼び出し側
+        // split_csv_all_core が 1 リクエストあたりの処理数に上限を設けるため、途中で
+        // 打ち切られても復旧したい直近データ側から埋まるようにする。同名ファイルが
+        // 並んだときに順序が不定にならない効果もある)。
         // (SELECT DISTINCT では ORDER BY 列が select list に無いと Postgres がエラーにするため
         // created_at も一緒に選択し、呼び出し側の戻り値型はそのまま (Uuid, String) に絞る)。
         let rows: Vec<(Uuid, String, chrono::DateTime<chrono::Utc>)> = sqlx::query_as(
@@ -210,7 +213,7 @@ impl DtakoUploadRepository for PgDtakoUploadRepository {
                WHERE o.tenant_id = $1 AND o.has_kudgivt = FALSE
                  AND uh.status = 'completed'
                  AND uh.r2_zip_key IS NOT NULL
-               ORDER BY uh.created_at, uh.id"#,
+               ORDER BY uh.created_at DESC, uh.id DESC"#,
         )
         .bind(tenant_id)
         .fetch_all(&mut *tc.conn)
