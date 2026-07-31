@@ -767,7 +767,9 @@ async fn etags_returns_500_when_list_operations_db_error() {
 
 #[tokio::test]
 async fn etags_returns_500_when_r2_list_fails() {
-    let mock_storage = Arc::new(crate::common::mock_storage::MockStorage::new("dtako-bucket"));
+    let mock_storage = Arc::new(crate::common::mock_storage::MockStorage::new(
+        "dtako-bucket",
+    ));
     mock_storage.fail_list.store(true, Ordering::SeqCst);
 
     let mut state = setup_mock_app_state();
