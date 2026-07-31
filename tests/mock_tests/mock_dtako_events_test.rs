@@ -665,6 +665,229 @@ async fn returns_500_when_dtako_storage_not_configured() {
     assert!(res.text().await.unwrap().contains("storage not configured"));
 }
 
+// =============================================================================
+// GET /api/dtako/events/etags (Refs ohishi-exp/rust-ichibanboshi#205 実装計画 13)
+// =============================================================================
+
+#[tokio::test]
+async fn etags_returns_400_when_range_exceeds_limit() {
+    // etags 専用の上限 (40日) は既存の全乗務員版 (31日) より広い。
+    // 45 日は etags の上限すら超える。
+    let state = setup_mock_app_state();
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let res = reqwest::Client::new()
+        .get(format!(
+            "{base_url}/api/dtako/events/etags?date_from=2026-06-01&date_to=2026-07-15"
+        ))
+        .header("Authorization", test_auth_header())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 400);
+    assert!(res.text().await.unwrap().contains("range too wide"));
+}
+
+#[tokio::test]
+async fn etags_accepts_range_wider_than_all_drivers_cap() {
+    // 32 日 (暦月 31 日 + 翌月またぎ 1 日) は既存の全乗務員版 (31日上限) だと
+    // 400 になるが、etags は R2 GET を伴わないのでここを通せる必要がある。
+    let mut state = setup_mock_app_state();
+    state.dtako_y_time_export = Arc::new(MockDtakoYTimeExportRepository::default());
+
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let res = reqwest::Client::new()
+        .get(format!(
+            "{base_url}/api/dtako/events/etags?date_from=2026-07-01&date_to=2026-08-01"
+        ))
+        .header("Authorization", test_auth_header())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+}
+
+#[tokio::test]
+async fn etags_returns_500_when_dtako_storage_not_configured() {
+    let mut state = setup_mock_app_state();
+    state.dtako_storage = None;
+
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let res = reqwest::Client::new()
+        .get(format!(
+            "{base_url}/api/dtako/events/etags?date_from=2026-06-01&date_to=2026-06-30"
+        ))
+        .header("Authorization", test_auth_header())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 500);
+    assert!(res.text().await.unwrap().contains("storage not configured"));
+}
+
+#[tokio::test]
+async fn etags_returns_500_when_list_drivers_db_error() {
+    let mut state = setup_mock_app_state();
+    let mock = Arc::new(MockDtakoYTimeExportRepository::default());
+    mock.fail_next.store(true, Ordering::SeqCst);
+    state.dtako_y_time_export = mock;
+
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let res = reqwest::Client::new()
+        .get(format!(
+            "{base_url}/api/dtako/events/etags?date_from=2026-06-01&date_to=2026-06-30"
+        ))
+        .header("Authorization", test_auth_header())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 500);
+}
+
+#[tokio::test]
+async fn etags_returns_500_when_list_operations_db_error() {
+    let mut state = setup_mock_app_state();
+    let a = uuid::Uuid::new_v4();
+    state.dtako_y_time_export = Arc::new(
+        MockDtakoYTimeExportRepository::default()
+            .with_drivers(vec![driver_ref(a, "D001", "テスト 一郎")])
+            .failing_operations(),
+    );
+
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let res = reqwest::Client::new()
+        .get(format!(
+            "{base_url}/api/dtako/events/etags?date_from=2026-06-01&date_to=2026-06-30"
+        ))
+        .header("Authorization", test_auth_header())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 500);
+}
+
+#[tokio::test]
+async fn etags_returns_500_when_r2_list_fails() {
+    let mock_storage = Arc::new(crate::common::mock_storage::MockStorage::new("dtako-bucket"));
+    mock_storage.fail_list.store(true, Ordering::SeqCst);
+
+    let mut state = setup_mock_app_state();
+    state.dtako_storage = Some(mock_storage);
+    let a = uuid::Uuid::new_v4();
+    state.dtako_y_time_export = Arc::new(
+        MockDtakoYTimeExportRepository::default()
+            .with_drivers(vec![driver_ref(a, "D001", "テスト 一郎")])
+            .with_driver_operations(vec![driver_op(a, "U001", 1, 9)]),
+    );
+
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let res = reqwest::Client::new()
+        .get(format!(
+            "{base_url}/api/dtako/events/etags?date_from=2026-06-01&date_to=2026-06-30"
+        ))
+        .header("Authorization", test_auth_header())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 500);
+}
+
+#[tokio::test]
+async fn etags_intersects_db_and_r2_list_and_ignores_sibling_csv_types() {
+    let mut state = setup_mock_app_state();
+    let tenant_id = test_tenant_id();
+    let a = uuid::Uuid::new_v4();
+    let b = uuid::Uuid::new_v4();
+
+    // U001: DB にも R2 にもある → etag が付く
+    upload_kudgivt(
+        state.dtako_storage.as_ref().unwrap().as_ref(),
+        &tenant_id,
+        "U001",
+        KUDGIVT_CSV,
+    )
+    .await;
+    // 同じ運行ディレクトリの KUDGURI.csv (sibling)。unko_no の抽出を誤ってこちらを
+    // 拾わないこと (別項目や重複が出ないこと) を確認する。
+    state
+        .dtako_storage
+        .as_ref()
+        .unwrap()
+        .upload(
+            &format!("{}/unko/U001/KUDGURI.csv", tenant_id),
+            b"dummy",
+            "text/csv",
+        )
+        .await
+        .unwrap();
+
+    state.dtako_y_time_export = Arc::new(
+        MockDtakoYTimeExportRepository::default()
+            .with_drivers(vec![
+                driver_ref(a, "D001", "テスト 一郎"),
+                driver_ref(b, "D002", "テスト 二郎"),
+            ])
+            .with_driver_operations(vec![
+                driver_op(a, "U001", 1, 9),
+                // U002: DB にはあるが R2 の LIST にはまだ現れない (split 未完了想定)
+                driver_op(b, "U002", 1, 15),
+            ]),
+    );
+
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let body: serde_json::Value = reqwest::Client::new()
+        .get(format!(
+            "{base_url}/api/dtako/events/etags?date_from=2026-06-01&date_to=2026-06-30"
+        ))
+        .header("Authorization", test_auth_header())
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(body["period"]["date_from"], "2026-06-01");
+    assert_eq!(body["period"]["date_to"], "2026-06-30");
+    assert!(body["warnings"].as_array().unwrap().is_empty());
+
+    let items = body["items"].as_array().unwrap();
+    // U001, U002 のみ (KUDGURI.csv からは項目が作られない)
+    assert_eq!(items.len(), 2, "{items:?}");
+
+    let u001 = items.iter().find(|i| i["unko_no"] == "U001").unwrap();
+    assert!(
+        u001["etag"].is_string(),
+        "U001 は R2 に KUDGIVT.csv があるので etag が付く: {u001:?}"
+    );
+
+    let u002 = items.iter().find(|i| i["unko_no"] == "U002").unwrap();
+    assert!(
+        u002["etag"].is_null(),
+        "U002 はまだ R2 の LIST に現れていないので etag: null: {u002:?}"
+    );
+}
+
+#[tokio::test]
+async fn etags_returns_empty_items_when_no_operation_matches() {
+    let mut state = setup_mock_app_state();
+    state.dtako_y_time_export =
+        Arc::new(MockDtakoYTimeExportRepository::default().with_drivers(vec![]));
+
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let body: serde_json::Value = reqwest::Client::new()
+        .get(format!(
+            "{base_url}/api/dtako/events/etags?date_from=2026-06-01&date_to=2026-06-30"
+        ))
+        .header("Authorization", test_auth_header())
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(body["items"].as_array().unwrap().is_empty());
+}
+
 #[tokio::test]
 async fn decodes_shift_jis_kudgivt_for_legacy_objects() {
     // R2 に Shift-JIS のまま置かれた古いデータ (split 前) のフォールバック経路。

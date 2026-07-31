@@ -96,12 +96,23 @@ const MAX_RANGE_DAYS_ALL: i64 = 31;
 const DEFAULT_PAGE_SIZE: i64 = 25;
 const MAX_PAGE_SIZE: i64 = 50;
 
+/// `GET /api/dtako/events/etags` 専用の期間上限 (日)。
+/// `MAX_RANGE_DAYS_ALL` (31) は CSV ダウンロード枚数 (R2 GET 回数・JSON 応答サイズ) が
+/// 根拠だが、この endpoint は R2 LIST 1 回だけで GET を一切行わず、LIST のコストは
+/// `date_from`/`date_to` に依存しない (フィルタは DB 側で掛ける)。よってその根拠は
+/// 転用できず、別の定数にしてある。呼び出し側 (rust-ichibanboshi) の
+/// `month_range(month)` は暦月 31 日 + 翌月またぎ猶予 1 日 = 最大 32 日なので、
+/// それに余裕を持たせた値にする。
+const MAX_RANGE_DAYS_ETAGS: i64 = 40;
+
 pub fn tenant_router<S>() -> Router<S>
 where
     DtakoState: axum::extract::FromRef<S>,
     S: Clone + Send + Sync + 'static,
 {
-    Router::new().route("/dtako/events", get(get_dtako_events))
+    Router::new()
+        .route("/dtako/events", get(get_dtako_events))
+        .route("/dtako/events/etags", get(get_dtako_events_etags))
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -342,6 +353,152 @@ async fn collect_all_drivers(
         drivers: groups,
         next_after_driver_cd,
         warnings,
+    })
+}
+
+// =============================================================================
+// GET /api/dtako/events/etags (Refs ohishi-exp/rust-ichibanboshi#205 実装計画 13)
+// =============================================================================
+//
+// `GET /api/dtako/events` の sibling。CSV を一切ダウンロードせず、R2 の LIST 1 回
+// (`StorageBackend::list`) だけで「テナントの当月分に変化があったか」の指紋を作る。
+// `driver_cd` は無い — 呼び出し側 (rust-ichibanboshi の recalc) が欲しいのは
+// 「その月まるごと」の指紋であって乗務員単位ではないため。
+//
+// 手順:
+// 1. DB から期間内 (`collect_all_drivers` と同じ ±1 日広げ) の unko_no 集合を全乗務員分
+//    1 回で列挙する。ページングは無し — `list_drivers_with_operations` に事実上無制限の
+//    limit を渡して 1 クエリで全乗務員を取り、`list_operations_for_drivers` で運行を引く。
+//    `MAX_RANGE_DAYS_ALL` (31 日) で範囲を縛っているので結果セットは月次の規模に収まる。
+// 2. R2 に `{tenant_id}/unko/` prefix で LIST を 1 回投げる (`.download()` は一切呼ばない)。
+// 3. LIST で返った key を `/KUDGIVT.csv` で終わるものだけに絞り、
+//    `{tenant_id}/unko/{unko_no}/KUDGIVT.csv` の `{unko_no}` 部分を取り出す
+//    (同じ unko_no 配下の KUDGURI.csv 等は無視する)。
+// 4. DB 側の unko_no 集合と R2 側の unko_no→etag を突き合わせ、両方にある unko_no だけ
+//    採用する。DB にはあるが R2 の LIST にまだ現れない unko_no (split がまだ終わっていない
+//    等) は **etag: null で残す** (黙って落とすと「無かったこと」と区別が付かず、呼び出し側
+//    はそのアップロードが安定するまで指紋に含めない、という判断ができなくなるため)。
+//
+// ETag が「内容が変わったか」の指紋として使える前提 (単一パート PUT の ETag = content MD5)
+// については `alc_core::storage::ListedObject` の doc コメント参照。dtako CSV の upload 経路
+// (`dtako_upload.rs`) はこの前提を満たす (`multipart: None` の単発 PUT のみ)。
+
+/// 全乗務員版 `list_drivers_with_operations` を 1 ページで使い切るための limit。
+/// この endpoint にページングの概念は無い (呼び出し側は月まるごとの指紋が欲しい) — 実際の
+/// 結果セットは `MAX_RANGE_DAYS_ALL` (31 日) の DB クエリで既に月次規模に絞られている。
+const ALL_DRIVERS_UNLIMITED: i64 = i64::MAX;
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DtakoEventsEtagsQuery {
+    pub date_from: NaiveDate,
+    pub date_to: NaiveDate,
+}
+
+/// 1 運行分の R2 指紋。`etag` が `null` は「DB にはあるが R2 の LIST にまだ現れていない」
+/// ことを表す (アップロード直後の split 未完了など)。呼び出し側は `null` の unko_no を
+/// 「まだ安定していない」として指紋のゲートに使わないことを想定している。
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct DtakoEventsEtagItem {
+    pub unko_no: String,
+    pub etag: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct DtakoEventsEtagsResponse {
+    pub period: DtakoEventsPeriod,
+    pub items: Vec<DtakoEventsEtagItem>,
+    pub warnings: Vec<String>,
+}
+
+async fn get_dtako_events_etags(
+    State(state): State<DtakoState>,
+    tenant: axum::Extension<TenantId>,
+    Query(q): Query<DtakoEventsEtagsQuery>,
+) -> Result<Json<DtakoEventsEtagsResponse>, (StatusCode, String)> {
+    let tenant_id = tenant.0 .0;
+    let resp = collect_dtako_events_etags(&state, tenant_id, q)
+        .await
+        .map_err(compute_error_to_response)?;
+    Ok(Json(resp))
+}
+
+/// 共通 compute コア。handler と分離してテストしやすくしてある。
+pub async fn collect_dtako_events_etags(
+    state: &DtakoState,
+    tenant_id: Uuid,
+    q: DtakoEventsEtagsQuery,
+) -> Result<DtakoEventsEtagsResponse, ComputeError> {
+    validate_range(q.date_from, q.date_to, MAX_RANGE_DAYS_ETAGS)?;
+
+    let storage: Arc<dyn StorageBackend> = state
+        .dtako_storage
+        .as_ref()
+        .ok_or_else(|| ComputeError::Internal("dtako storage not configured".to_string()))?
+        .clone();
+
+    // 1. DB 側: 期間内に運行のある unko_no 集合を全乗務員 1 クエリで列挙する。
+    let drivers = state
+        .dtako_y_time_export
+        .list_drivers_with_operations(
+            tenant_id,
+            q.date_from,
+            q.date_to,
+            None,
+            ALL_DRIVERS_UNLIMITED,
+        )
+        .await
+        .map_err(|e| internal("list_drivers_with_operations", e))?;
+
+    let driver_ids: Vec<Uuid> = drivers.iter().map(|d| d.driver_id).collect();
+    let rows = state
+        .dtako_y_time_export
+        .list_operations_for_drivers(tenant_id, &driver_ids, q.date_from, q.date_to)
+        .await
+        .map_err(|e| internal("list_operations_for_drivers", e))?;
+
+    let mut db_unko_nos: Vec<String> = rows.into_iter().map(|r| r.unko_no).collect();
+    db_unko_nos.sort();
+    db_unko_nos.dedup();
+
+    // 2. R2 側: LIST 1 回だけ。.download()/.get() は一切呼ばない。
+    let prefix = format!("{tenant_id}/unko/");
+    let listed = storage.list(&prefix).await.map_err(|e| {
+        tracing::error!(prefix = %prefix, error = %e, "dtako-events-etags R2 list error");
+        ComputeError::Internal("internal error".to_string())
+    })?;
+
+    // 3. key → unko_no。`{prefix}{unko_no}/KUDGIVT.csv` の形のみ拾う。
+    // LIST は `prefix` に一致する key しか返さない (S3 系 API の保証) ので
+    // `strip_prefix` 失敗は起こり得ないが、`unwrap_or_default` で 1 行に畳んで
+    // 保険にしておく。KUDGURI.csv 等の兄弟ファイルは `strip_suffix` で弾く
+    // (同じ unko_no ディレクトリに同居するため、prefix だけでは絞れない)。
+    let mut r2_etags: HashMap<String, String> = HashMap::new();
+    for obj in listed {
+        let rest = obj.key.strip_prefix(&prefix).unwrap_or_default();
+        let Some(unko_no) = rest.strip_suffix("/KUDGIVT.csv") else {
+            continue;
+        };
+        if let Some(etag) = obj.etag {
+            r2_etags.insert(unko_no.to_string(), etag);
+        }
+    }
+
+    // 4. 突き合わせ: DB にある unko_no だけを、R2 の etag (無ければ null) と組にして返す。
+    let items = db_unko_nos
+        .into_iter()
+        .map(|unko_no| {
+            let etag = r2_etags.get(&unko_no).cloned();
+            DtakoEventsEtagItem { unko_no, etag }
+        })
+        .collect();
+
+    Ok(DtakoEventsEtagsResponse {
+        period: DtakoEventsPeriod {
+            date_from: q.date_from,
+            date_to: q.date_to,
+        },
+        items,
+        warnings: Vec::new(),
     })
 }
 
@@ -688,5 +845,14 @@ mod tests {
         assert!(MAX_PAGE_SIZE <= 50);
         // 全乗務員版は単一乗務員版より必ず狭い
         assert!(MAX_RANGE_DAYS_ALL < MAX_RANGE_DAYS_SINGLE);
+    }
+
+    #[test]
+    fn etags_range_cap_covers_month_range_with_next_month_lookahead() {
+        // rust-ichibanboshi 側の month_range(month) は暦月 (最大 31 日) + 翌月またぎ
+        // 猶予 1 日 = 最大 32 日。R2 GET を伴わない LIST 専用 endpoint なので
+        // MAX_RANGE_DAYS_ALL (CSV ダウンロード枚数根拠) より広く取ってよい。
+        assert!(MAX_RANGE_DAYS_ETAGS >= 32);
+        assert!(validate_range(d(2026, 7, 1), d(2026, 8, 1), MAX_RANGE_DAYS_ETAGS).is_ok());
     }
 }
