@@ -1606,24 +1606,24 @@ async fn split_csv_handler(
 }
 
 /// CSV 一括分割コアロジック (テスト可能)
+///
+/// 戻り値は (candidates, success, failed)。
+/// upload は id で一意なので、候補 (candidates) に挙がった upload は同名ファイルが
+/// 複数あっても全件処理する (#205-34: 旧実装は filename で dedup していたため、
+/// 日次 cron が固定ファイル名 "csvdata.zip" で毎日アップロードするケースで
+/// 実質 1 本しか split されていなかった)。
 pub async fn split_csv_all_core(
     state: &DtakoState,
     tenant_id: Uuid,
-) -> Result<(usize, usize), anyhow::Error> {
+) -> Result<(usize, usize, usize), anyhow::Error> {
     let uploads = state
         .dtako_upload
         .list_uploads_needing_split(tenant_id)
         .await?;
 
-    let mut seen_filenames = std::collections::HashSet::new();
-    let uploads: Vec<_> = uploads
-        .into_iter()
-        .filter(|(_, f)| seen_filenames.insert(f.clone()))
-        .collect();
-
-    let total = uploads.len();
-    if total == 0 {
-        return Ok((0, 0));
+    let candidates = uploads.len();
+    if candidates == 0 {
+        return Ok((0, 0, 0));
     }
 
     let success = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -1654,6 +1654,7 @@ pub async fn split_csv_all_core(
     }
 
     Ok((
+        candidates,
         success.load(std::sync::atomic::Ordering::Relaxed),
         failed.load(std::sync::atomic::Ordering::Relaxed),
     ))
@@ -1679,8 +1680,17 @@ async fn split_csv_all_handler(
         };
 
         match split_csv_all_core(&state, tenant_id).await {
-            Ok((success, failed)) => {
-                send(serde_json::json!({"event":"done","total":success+failed,"success":success,"failed":failed})).await;
+            Ok((candidates, success, failed)) => {
+                // 候補総数 (candidates) と、うち処理されなかった数 (skipped) を残す。
+                // #205-34 以前は filename dedup で候補が黙って減っていたため、
+                // 「候補に挙がったのに処理されていない」が起きたら見えるようにする。
+                let processed = success + failed;
+                let skipped = candidates.saturating_sub(processed);
+                let done = serde_json::json!({
+                    "event": "done", "candidates": candidates, "total": processed,
+                    "success": success, "failed": failed, "skipped": skipped
+                });
+                send(done).await;
             }
             Err(e) => {
                 send(serde_json::json!({"event":"error","message": e.to_string()})).await;

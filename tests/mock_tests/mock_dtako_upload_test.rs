@@ -738,6 +738,16 @@ fn setup_with_storage_and_mock(
     state
 }
 
+/// Helper: pull the `done`/`error` event JSON out of an SSE response body
+/// (single "data: {...}\n\n" frame, as emitted by split_csv_all_handler etc.)
+fn parse_sse_json(body: &str) -> serde_json::Value {
+    let line = body
+        .lines()
+        .find(|l| l.starts_with("data: "))
+        .expect("no data: line in SSE body");
+    serde_json::from_str(line.trim_start_matches("data: ")).unwrap()
+}
+
 // =========================================================================
 // POST /api/upload — rich ZIP with multiple operations, events, rest, break
 // =========================================================================
@@ -2559,6 +2569,98 @@ async fn test_dtako_split_csv_all_with_failures() {
     let body = res.text().await.unwrap();
     // Should contain done with failed > 0
     assert!(body.contains("done"));
+    let json = parse_sse_json(&body);
+    assert_eq!(json["candidates"], 2);
+    assert_eq!(json["failed"], 2);
+    assert_eq!(json["success"], 0);
+    assert_eq!(json["skipped"], 0);
+}
+
+// =========================================================================
+// POST /api/split-csv-all — same filename, 2 uploads → BOTH processed
+// (#205-34: 旧実装は filename で dedup していたため、日次 cron が固定ファイル名
+// "csvdata.zip" で毎日アップロードするケースで実質 1 本しか split されなかった)
+// =========================================================================
+
+#[tokio::test]
+async fn test_dtako_split_csv_all_duplicate_filename_both_processed() {
+    let tenant_id = Uuid::new_v4();
+    let upload_id1 = Uuid::new_v4();
+    let upload_id2 = Uuid::new_v4();
+    let zip_key = format!("{}/uploads/{}/csvdata.zip", tenant_id, upload_id1);
+
+    let mock = MockDtakoUploadRepository::default();
+    *mock.uploads_needing_split.lock().unwrap() = vec![
+        (upload_id1, "csvdata.zip".to_string()),
+        (upload_id2, "csvdata.zip".to_string()),
+    ];
+    // get_upload_tenant_and_key はどちらの upload_id でも同じ zip_key を返す mock
+    // (r2_zip_key で判定していないことを示すため、あえて同名 zip を共有させる)
+    *mock.tenant_and_key.lock().unwrap() = Some(UploadTenantAndKey {
+        tenant_id,
+        r2_zip_key: zip_key.clone(),
+    });
+
+    let dtako_storage = Arc::new(MockStorage::new("dtako-bucket"));
+    let zip_bytes = crate::common::create_test_dtako_zip();
+    dtako_storage.insert_file(&zip_key, zip_bytes);
+
+    let state = setup_with_storage_and_mock(mock, dtako_storage);
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+    let client = reqwest::Client::new();
+
+    let res = client
+        .post(format!("{base_url}/api/split-csv-all"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    let body = res.text().await.unwrap();
+    assert!(body.contains("done"));
+    let json = parse_sse_json(&body);
+    // filename dedup があれば candidates/success は 1 に落ちる → 2 であることを確認
+    assert_eq!(json["candidates"], 2);
+    assert_eq!(json["success"], 2);
+    assert_eq!(json["failed"], 0);
+    assert_eq!(json["skipped"], 0);
+}
+
+// =========================================================================
+// POST /api/split-csv-all — 未split の運行が 0 件なら候補も 0 件
+// =========================================================================
+
+#[tokio::test]
+async fn test_dtako_split_csv_all_no_candidates() {
+    let tenant_id = Uuid::new_v4();
+
+    let mock = MockDtakoUploadRepository::default();
+    // uploads_needing_split はデフォルトで空 (has_kudgivt=FALSE の運行が無い)
+    assert!(mock.uploads_needing_split.lock().unwrap().is_empty());
+
+    let state = setup_with_mock(mock);
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+    let client = reqwest::Client::new();
+
+    let res = client
+        .post(format!("{base_url}/api/split-csv-all"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    let body = res.text().await.unwrap();
+    assert!(body.contains("done"));
+    let json = parse_sse_json(&body);
+    assert_eq!(json["candidates"], 0);
+    assert_eq!(json["success"], 0);
+    assert_eq!(json["failed"], 0);
+    assert_eq!(json["skipped"], 0);
+    assert_eq!(json["total"], 0);
 }
 
 // =========================================================================
