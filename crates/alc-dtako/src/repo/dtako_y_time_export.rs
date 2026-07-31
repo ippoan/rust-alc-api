@@ -1,3 +1,44 @@
+//! `DtakoYTimeExportRepository` の Pg 実装。
+//!
+//! ## 期間の絞り込みは 読取日 **と** 運行日 の OR (Refs ohishi-exp/rust-ichibanboshi#205 の 38)
+//!
+//! この 4 つの列挙クエリは全部同じ期間条件を共有する:
+//!
+//! ```sql
+//! (reading_date BETWEEN $from AND $to OR operation_date BETWEEN $from AND $to)
+//! ```
+//!
+//! **`reading_date` (読取日) だけで絞ると月末の運行が構造的に落ちる。** 読取日は
+//! 「デジタコのカードを読ませた日」なので、月末に走った運行ほど読まれるのが遅い。
+//! 2026-06 の勤怠を畳んだとき、オンプレ基準より 142 行少ない day_summaries しか
+//! 出なかった原因がこれ。名指しできた 29 件を `GET /api/operations/{unko_no}` で
+//! 1 件ずつ引いた結果は **29/29 で反例ゼロ**だった:
+//!
+//! - 29 件とも alc に存在する (見つからない 0 件)
+//! - 29 件とも読取日が窓の上端 (2026-07-02) より後 (07-03 〜 07-13)
+//! - 29 件とも **運行日は 06-24 〜 07-01** = 窓の中。運行日で引けば全部拾える
+//!
+//! 対照として乗務員 1021 の最終運行 (`2606190748000000004286`、運行日 06-19 /
+//! 読取日 07-01) は読取日が窓の中なので欠落ゼロ。乗務員 1078 の
+//! `2606241140060000002302` (運行日 06-24 / 読取日 07-06) は `return_at` も走行距離も
+//! イベント 104 件も揃っていて**閉じている**のに、読取日しか見ていなかったため
+//! 「GCP に無い」ように見えていた。
+//!
+//! **`reading_date` 側の条件は消していない。** `operation_date` は NULL 可
+//! (`migrations/054_dtako_tables.sql`) で、KUDGURI の `運行日` 列が無い/空の取り込みでは
+//! 埋まらない。片方だけにすると別の取りこぼしが出るので、置き換えではなく **OR で追加**する。
+//!
+//! 同じ形は `repo/dtako_upload.rs` の `fetch_operations_for_recalc` /
+//! `load_driver_operations` が既に採っている。上下 1 日の広げ方 (暦日をまたぐ運行の
+//! 取りこぼし防止) は両方の列に同じく効かせる。
+//!
+//! ### 索引
+//!
+//! `idx_dtako_ops_reading_date (tenant_id, reading_date)` はあるが `operation_date` には
+//! 無い (`migrations/054_dtako_tables.sql`)。OR は BitmapOr になるので operation_date 側は
+//! 索引無しの走査になる。追加するかは本番の `dtako-etags ms` の `ms_drv` / `ms_ops` を
+//! 見てから決める (Refs #205 の 38)。
+
 use async_trait::async_trait;
 use chrono::NaiveDate;
 use sqlx::PgPool;
@@ -44,7 +85,7 @@ impl DtakoYTimeExportRepository for PgDtakoYTimeExportRepository {
         from: NaiveDate,
         to: NaiveDate,
     ) -> Result<Vec<YTimeExportOperation>, sqlx::Error> {
-        // reading_date を 1日広げて取り、暦日をまたぐ運行を取りこぼさない
+        // 読取日/運行日を 1日広げて取り、暦日をまたぐ運行を取りこぼさない
         let from_widened = from - chrono::Duration::days(1);
         let to_widened = to + chrono::Duration::days(1);
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
@@ -57,7 +98,8 @@ impl DtakoYTimeExportRepository for PgDtakoYTimeExportRepository {
              FROM alc_api.dtako_operations \
              WHERE tenant_id = $1 \
                AND driver_id = $2 \
-               AND reading_date BETWEEN $3 AND $4 \
+               AND (reading_date BETWEEN $3 AND $4 \
+                    OR operation_date BETWEEN $3 AND $4) \
                AND has_kudgivt = TRUE \
              ORDER BY unko_no, crew_role ASC, departure_at NULLS LAST",
         )
@@ -86,7 +128,8 @@ impl DtakoYTimeExportRepository for PgDtakoYTimeExportRepository {
              FROM alc_api.dtako_operations o \
              JOIN alc_api.employees d ON o.driver_id = d.id \
              WHERE o.tenant_id = $1 \
-               AND o.reading_date BETWEEN $2 AND $3 \
+               AND (o.reading_date BETWEEN $2 AND $3 \
+                    OR o.operation_date BETWEEN $2 AND $3) \
                AND o.has_kudgivt = TRUE \
                AND d.deleted_at IS NULL \
                AND d.driver_cd IS NOT NULL \
@@ -120,7 +163,8 @@ impl DtakoYTimeExportRepository for PgDtakoYTimeExportRepository {
              FROM alc_api.dtako_operations \
              WHERE tenant_id = $1 \
                AND driver_id = ANY($2) \
-               AND reading_date BETWEEN $3 AND $4 \
+               AND (reading_date BETWEEN $3 AND $4 \
+                    OR operation_date BETWEEN $3 AND $4) \
                AND has_kudgivt = TRUE \
              ORDER BY driver_id, unko_no, crew_role ASC, departure_at NULLS LAST",
         )
@@ -149,7 +193,8 @@ impl DtakoYTimeExportRepository for PgDtakoYTimeExportRepository {
              FROM alc_api.dtako_operations o \
              JOIN alc_api.employees d ON o.driver_id = d.id \
              WHERE o.tenant_id = $1 \
-               AND o.reading_date BETWEEN $2 AND $3 \
+               AND (o.reading_date BETWEEN $2 AND $3 \
+                    OR o.operation_date BETWEEN $2 AND $3) \
                AND o.has_kudgivt = FALSE \
                AND d.driver_cd IS NOT NULL \
              ORDER BY o.unko_no",
