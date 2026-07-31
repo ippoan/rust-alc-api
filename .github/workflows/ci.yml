@@ -3,12 +3,35 @@ name: CI
 # CI パフォーマンス (job 時間の実測ベースライン・改善履歴・実測済み失敗パターン) は
 # docs/ci-speed-tracking.md に記録している。CI 高速化の施策を追加/revert する前に必読、
 # 実施後は同 doc に実測を追記すること。
+#
+# feature branch への push でも走らせる (Refs: spawn_task 子セッション運用)。
+# 子セッションは「push までが仕事、PR は親が作る」ので、PR を作らないと CI が
+# 1 つも走らない状態だと「PR 前に確認したい」を満たすためにローカルで全体
+# テストを回すことになり、並行セッションが ~/.cargo/registry のロックと I/O を
+# 取り合って詰まる。特にこの repo は auto merge + auto tag + auto flip なので
+# 「PR を作る = 本番に出す判断」であり、テスト目的の PR を作れない。
+#
+# branch push で走るのは軽量な 3 job (Format & Lint / Dep Check / Tests (lib))
+# だけ。Bazel 系・build-image・staging-db・docker-*・deploy 以降は job 側の
+# if 条件が pull_request か tags/v を要求しているので発火しない。
+# **デプロイ経路 (deploy → report-* → drift-check → auto-merge) を branch push
+# で発火させないこと** — 条件を緩める変更を入れる時は必ず確認する。
 on:
   push:
-    branches: [main]
+    branches: [main, 'fix/**', 'feat/**', 'perf/**', 'docs/**', 'chore/**', 'claude/**']
     tags: ['v*']
   pull_request:
     branches: [main]
+
+# 連続 push のたびに古い run が走り続けて runner を食い潰すのを防ぐ。
+# main と tag は途中でキャンセルするとデプロイ経路 (deploy → flip) が切れるので
+# 絶対に止めない。`github.ref != 'refs/heads/main'` だけだと tag push の ref は
+# refs/tags/v* なので式が true になってしまう (group が tag ごとに別なので実害は
+# 出にくいが、同一 tag の再 push で走行中の production deploy が cancel される)。
+# tags/ を明示的に除外して「main と tag で false」を式そのもので保証する。
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
 
 env:
   CARGO_TERM_COLOR: always
