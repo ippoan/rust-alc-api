@@ -415,6 +415,129 @@ SELECT has_kudgivt, count(*)
 
 ---
 
+## 追記 2: `has_kudgivt = FALSE` は本番に残りうるか (機序の可否)
+
+**この節は「機序が成立するか」だけを扱います。142 行差の原因だと結論づけるものではありません** —
+突き合わせデータが無いため断定できません。
+
+**結論 3 行**:
+
+1. **残りうる。** 作られ方は `INSERT` の `DEFAULT FALSE` で、TRUE にするのは split の
+   `update_has_kudgivt` **1 箇所だけ**。しかも**再アップロードのたびに FALSE に戻る**ので
+   「一度 TRUE になれば安全」ではありません。
+2. **`POST /api/split-csv-all` を回しても必ず TRUE になるとは限りません。**
+   候補列挙が「どの upload が未 split か」を特定しておらず
+   ([repo/dtako_upload.rs:194-210](crates/alc-dtako/src/repo/dtako_upload.rs:194))、
+   さらに **filename の重複排除**があるため
+   ([dtako_upload.rs:1618-1622](crates/alc-dtako/src/dtako_upload.rs:1618))、
+   cron が毎日**固定名 `csvdata.zip`** で上げている以上 **同名 upload は 1 本しか split されません**。
+3. **突合キーの作り方が 2 系統あり、ずれると「R2 には CSV があるのに DB は FALSE」**になります。
+   しかも `UPDATE` の `rows_affected` を見ていないので、**0 行でも成功ログが出ます**
+   ([repo/dtako_upload.rs:412](crates/alc-dtako/src/repo/dtako_upload.rs:412) /
+   [dtako_upload.rs:963](crates/alc-dtako/src/dtako_upload.rs:963))。
+
+### Q1-a. `has_kudgivt = FALSE` はどう作られるか
+
+- **作る**: `insert_operation` の列リストに `has_kudgivt` が無い
+  ([repo/dtako_upload.rs:343-359](crates/alc-dtako/src/repo/dtako_upload.rs:343)) →
+  `DEFAULT FALSE` ([migrations/054_dtako_tables.sql:76](migrations/054_dtako_tables.sql:76))。
+  `process_zip` は毎回 `delete_operation` + `insert_operation` で行を作り直すので
+  ([dtako_upload.rs:194-230](crates/alc-dtako/src/dtako_upload.rs:194))、
+  **再アップロードのたびに TRUE → FALSE に戻ります**。
+- **TRUE にする**: `update_has_kudgivt` の 1 箇所だけ
+  ([repo/dtako_upload.rs:405](crates/alc-dtako/src/repo/dtako_upload.rs:405))。
+  repo 全体で他に `has_kudgivt` を書く SQL はありません。
+
+**FALSE のまま残る運行の類型** (機序として成立するもの):
+
+| # | 類型 | 何が起きるか |
+|---|---|---|
+| (a) | split が走らなかった / 前半 (`download` / `extract_zip` / `decode_shift_jis`) で落ちた upload | その ZIP 由来の**全運行**が FALSE。`try_split_csv` は `warn` のみで upload API は 200 ([:868-872](crates/alc-dtako/src/dtako_upload.rs:868)) |
+| (b) | `update_has_kudgivt` 自体が失敗 | 同上。`tracing::error!` を出すだけで `split_csv_from_r2` は `Ok(())` を返す ([:956-965](crates/alc-dtako/src/dtako_upload.rs:956))。**R2 には CSV がある** |
+| (c) | 突合キーがずれた (下記 Q2) | `UPDATE` が 0 行。**成功ログが出るので気づけない**。R2 には CSV がある |
+| (d) | その ZIP の KUDGIVT.csv に 1 行も出てこない運行 | KUDGURI に居てイベントが 0 件の運行。**別の ZIP に KUDGIVT 行が現れない限り永久に FALSE** |
+| (e) | 上記のいずれかの後で再アップロードされた運行 | 一度 TRUE でも FALSE に戻り、再 split が失敗すればそのまま |
+
+なお **「ZIP に KUDGIVT.csv 自体が無い」ケースは存在しません** — `process_zip` が
+`KUDGIVT.csv not found in ZIP` で `Err` を返し upload ごと失敗するので
+([dtako_upload.rs:157-161](crates/alc-dtako/src/dtako_upload.rs:157))、運行行そのものが作られません。
+
+### Q1-b. 誰が解消するのか
+
+- **確実**: `POST /api/split-csv/{upload_id}` — 対象の upload を名指しできる
+  ([dtako_upload.rs:1591-1606](crates/alc-dtako/src/dtako_upload.rs:1591))。
+  R2 の ZIP は消えないので、いつでも再実行できます。
+- **確実ではない**: `POST /api/split-csv-all`。理由は 2 つ。
+  1. **候補列挙が運行と upload を結び付けていない** — `list_uploads_needing_split` の JOIN 条件は
+     `uh.tenant_id = o.tenant_id` **だけ**で、`o` と `uh` の対応関係がありません
+     ([repo/dtako_upload.rs:194-210](crates/alc-dtako/src/repo/dtako_upload.rs:194))。
+     実質「テナント内に `has_kudgivt = FALSE` の運行が 1 件でもあれば、
+     そのテナントの completed upload を**全部**候補にする / 0 件なら**空**」という挙動です。
+  2. **filename で重複排除している** — `seen_filenames.insert(f.clone())` で
+     同名の upload は先頭 1 本だけ残ります
+     ([dtako_upload.rs:1618-1622](crates/alc-dtako/src/dtako_upload.rs:1618))。
+     cron の自動アップロードは **filename が固定文字列 `"csvdata.zip"`**
+     (`nuxt-dtako-admin/workers/dtako-scraper-relay/src/dtako-scraper-relay-do.ts:844`)、
+     VPS 側 `dtako-scraper` もサイトが吐く `csvdata.zip` をそのまま送ります。
+     → **毎日ぶんの upload が 1 本に潰れ、残りは `split-csv-all` では永久に再 split されません。**
+     しかも `ORDER BY uh.filename` は同名同士の順序を決めないため、**どの 1 本が残るかは不定**です。
+- **副次的**: あとから同じ `unko_no` の KUDGIVT 行を含む別の ZIP が上がって split が成功すれば TRUE になります。
+
+### Q2. `kudgivt_unko_nos` に何が入るか
+
+**「その ZIP の `KUDGIVT.csv` を `group_csv_by_unko_no` に通した結果のキー集合」**です。
+つまり **ZIP 内 KUDGIVT.csv に 1 行以上出てくる運行だけ**が入ります
+([dtako_upload.rs:909-934](crates/alc-dtako/src/dtako_upload.rs:909))。
+→ **親の理解 (「ZIP 内に KUDGIVT.csv が無い運行は入らない」) で合っています。**
+より正確には「**KUDGIVT.csv に自分の行が無い運行は入らない**」で、
+ファイル自体の有無ではなく**行の有無**で決まります (ファイルが無ければ upload ごと失敗するため)。
+
+**★ ここに 2 系統の不一致リスクがあります**:
+
+| | R2 key / `kudgivt_unko_nos` 側 | `dtako_operations.unko_no` 側 |
+|---|---|---|
+| 取り方 | `line.split(',').next()` = **1 列目の生文字列** ([alc-csv-parser/src/lib.rs:43-46](crates/alc-csv-parser/src/lib.rs:43)) | ヘッダー名 `運行NO` で**列位置を引き**、値を `.trim()` ([kudguri.rs:74](crates/alc-csv-parser/src/kudguri.rs:74) / [:126](crates/alc-csv-parser/src/kudguri.rs:126)) |
+| 前後空白 | **trim しない** | **trim する** |
+| 列位置 | **常に 1 列目**と仮定 (コメント: 「運行NO is always the first column」) | ヘッダー名で解決 |
+
+同梱のテスト fixture では KUDGIVT の 1 列目が `運行NO` なので現状は一致しますが、
+**強制されている不変条件ではありません**。ずれた場合:
+
+- R2 には `{tenant}/unko/<ずれたキー>/KUDGIVT.csv` として**書かれてしまう**
+- `UPDATE ... WHERE unko_no IN (...)` は **0 行**
+- それでも `query.execute(...).await?` は `Ok` を返し
+  ([repo/dtako_upload.rs:412](crates/alc-dtako/src/repo/dtako_upload.rs:412) で `rows_affected` を捨てている)、
+  呼び出し側は `kudgivt_unko_nos.len()` を使って
+  **`has_kudgivt updated: N operations` という成功ログを出します**
+  ([dtako_upload.rs:963](crates/alc-dtako/src/dtako_upload.rs:963))
+- → **「R2 は書けたが DB を更新しなかった」が、ログ上は成功として残ります**
+
+### Q3 (再掲・確定). PUT が全部失敗しても `has_kudgivt` は立つ
+
+**立ちます。** `kudgivt_unko_nos` はアップロード**前**の準備ループで ZIP のパース結果から積まれ
+([dtako_upload.rs:931-933](crates/alc-dtako/src/dtako_upload.rs:931))、
+PUT ループは `Result` を捨て ([:950-951](crates/alc-dtako/src/dtako_upload.rs:950))、
+`update_has_kudgivt` は**アップロード結果を一切参照せず**無条件に呼ばれます
+([:955-965](crates/alc-dtako/src/dtako_upload.rs:955))。
+→ PUT が 1 件も成功しなくても `has_kudgivt = TRUE` → items に `etag: null` で載る →
+#205-21 が拾える。**D1 単独では「静かに減る」を作れません。**
+
+### この節から出る示唆
+
+- **`has_kudgivt` は gate の入力集合を決める事実上のスイッチなのに、落ちる経路が 5 つあり、
+  そのうち (b) (c) は「R2 は書けたが DB は FALSE」で、しかも (c) は成功ログを出します。**
+- **最小の可観測化**: `update_has_kudgivt` で `rows_affected` を返し、
+  `kudgivt_unko_nos.len()` と一致しなければ `warn` を出す。実装 1 行 + シグネチャ変更で、
+  (c) が即座に見えるようになります。
+- **`split-csv-all` の filename dedup ([:1618-1622](crates/alc-dtako/src/dtako_upload.rs:1618)) は、
+  cron の固定ファイル名と噛み合って「復旧手段が 1 日ぶんしか効かない」状態を作っています。**
+  取りこぼしを一括で直したい場合、現状は `upload_id` を列挙して
+  `POST /api/split-csv/{upload_id}` を個別に叩くしかありません。
+- 案 C の評価は変わりません (**条件付きで進める**)。drift 検知 (M5) の対象に
+  `has_kudgivt` を含めるべき、という追記 1 の示唆がさらに強まりました。
+
+---
+
 ## 7. 親への [質問] (Cloudflare connector が必要)
 
 1. **`ohishi-dtako` と `dtako-uploads` は別バケットか。**
