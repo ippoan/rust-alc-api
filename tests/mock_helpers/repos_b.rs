@@ -524,11 +524,22 @@ impl DtakoUploadRepository for MockDtakoUploadRepository {
 
     async fn update_upload_r2_key(
         &self,
-        _tenant_id: Uuid,
+        tenant_id: Uuid,
         _upload_id: Uuid,
-        _r2_zip_key: &str,
+        r2_zip_key: &str,
     ) -> Result<(), sqlx::Error> {
         check_fail!(self);
+        // 実 DB repo 相当: `POST /api/upload` は upload_id をハンドラ内で生成するため
+        // テストから事前に tenant_and_key を仕込めない。ここで一度も明示設定されていない
+        // 場合だけ、実際に呼ばれた tenant_id/r2_zip_key を反映する (明示設定したテストの
+        // 意図は上書きしない。Refs ohishi-exp/rust-ichibanboshi#205-46)。
+        let mut guard = self.tenant_and_key.lock().unwrap();
+        if guard.is_none() {
+            *guard = Some(UploadTenantAndKey {
+                tenant_id,
+                r2_zip_key: r2_zip_key.to_string(),
+            });
+        }
         Ok(())
     }
 

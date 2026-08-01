@@ -915,21 +915,47 @@ pub fn compute_month_range(
     Some((start, end))
 }
 
+/// split の 1 箇所あたりの最大試行回数 (初回 + リトライ)。ネットワーク瞬断からの回復を
+/// 狙ったもので、「R2 の書き込みが直後の読み取りに間に合わない」という遅延を待つ設計では
+/// ない — R2 は read-after-write の強一貫性を公式に謳っており、かつ `process_zip` の
+/// 運行ごとの逐次 DB upsert が ZIP の PUT (`process_zip` 冒頭) と split 側の GET
+/// (`split_csv_from_r2`) の間に既に数百ms〜の間隔を作っているため、秒単位の先行 wait は
+/// 不要と判断した。丸ごと失敗 (`split_csv_from_r2` の Err) と個別 CSV PUT 失敗の両方に
+/// 同じ回数・間隔を使う (Refs ohishi-exp/rust-ichibanboshi#205-46 [仮説])。
+const SPLIT_RETRY_ATTEMPTS: u32 = 3;
+/// リトライ間の待ち時間 (ms、試行間で指数的に増やす)。合計 sleep は 300+800=1.1s —
+/// Cloudflare proxy edge timeout 100s (`.claude/skills/rust-alc-api-map/SKILL.md`)
+/// に対し十分小さい。
+const SPLIT_RETRY_DELAYS_MS: [u64; 2] = [300, 800];
+
 /// CSV split を試行 (失敗してもブロックしない)。戻り値は失敗件数
-/// (`split_csv_from_r2` 自体が丸ごと失敗した場合は 1 を返す — 個別 CSV の件数は
-/// 分からないが、呼び手が split_failed の非ゼロで気づければ十分なため)。
+/// (`split_csv_from_r2` 自体が `SPLIT_RETRY_ATTEMPTS` 回とも丸ごと失敗した場合は 1 を返す
+/// — 個別 CSV の件数は分からないが、呼び手が split_failed の非ゼロで気づければ十分なため。
+/// 個別 CSV PUT のリトライは `split_csv_from_r2` 内で完結している)。
 pub(crate) async fn try_split_csv(state: &DtakoState, upload_id: Uuid) -> usize {
-    match split_csv_from_r2(state, upload_id).await {
-        Ok(put_failed) => put_failed,
-        Err(e) => {
-            tracing::warn!("CSV split failed (will not block): {e}");
-            1
+    for attempt in 1..=SPLIT_RETRY_ATTEMPTS {
+        match split_csv_from_r2(state, upload_id).await {
+            Ok(put_failed) => return put_failed,
+            Err(e) if attempt < SPLIT_RETRY_ATTEMPTS => {
+                tracing::warn!("CSV split retry {attempt}/{SPLIT_RETRY_ATTEMPTS}: {e}");
+                tokio::time::sleep(std::time::Duration::from_millis(
+                    SPLIT_RETRY_DELAYS_MS[(attempt - 1) as usize],
+                ))
+                .await;
+            }
+            Err(e) => {
+                tracing::warn!("CSV split failed (will not block): {e}");
+            }
         }
     }
+    1
 }
 
 /// R2 から ZIP をダウンロードして CSV を unko_no 別に分割アップロード。
-/// 戻り値は個別 CSV PUT の失敗件数 (0 なら全件成功)。
+/// 戻り値は個別 CSV PUT の失敗件数 (0 なら全件成功、失敗した item は
+/// `SPLIT_RETRY_ATTEMPTS` 回まで再試行した上での最終件数)。この関数自体が丸ごと失敗
+/// (ダウンロード/解凍/DB エラーなど) した場合は呼び手 (`try_split_csv`) 側で
+/// 関数ごとリトライする。
 pub(crate) async fn split_csv_from_r2(
     state: &DtakoState,
     upload_id: Uuid,
@@ -993,32 +1019,53 @@ pub(crate) async fn split_csv_from_r2(
     // から除外する — 失敗も成功として数えると、R2 に CSV が無いのに DB 上は
     // split 済み扱いになり、欠け検知の母集団からも消えて気づけなくなる
     // (Refs ohishi-exp/rust-ichibanboshi#205 の 31)。csv_count は成功数のみ。
+    //
+    // 失敗した item だけを SPLIT_RETRY_ATTEMPTS 回まで再試行する (成功済みの item を
+    // 再送しない — R2 PUT 自体は上書きで冪等だが、無駄な往復を避ける)。
     let batch_size = 20;
     let mut csv_count = 0usize;
-    let mut put_failed = 0usize;
-    for chunk in upload_items.chunks(batch_size) {
-        let futures: Vec<_> = chunk
-            .iter()
-            .map(|(key, content, _, _)| {
-                let storage = state.dtako_storage.as_ref().unwrap().clone();
-                let k = key.clone();
-                let c = content.clone();
-                async move { storage.upload(&k, &c, "text/csv").await }
-            })
-            .collect();
-        let results = futures::future::join_all(futures).await;
-        for ((_, _, is_kudgivt, unko_no), result) in chunk.iter().zip(results) {
-            match result {
-                Ok(_) => {
-                    csv_count += 1;
-                    if *is_kudgivt {
-                        kudgivt_unko_nos.push(unko_no.clone());
+    let mut pending = upload_items;
+    for attempt in 1..=SPLIT_RETRY_ATTEMPTS {
+        if pending.is_empty() {
+            break;
+        }
+        let mut still_failed = Vec::new();
+        for chunk in pending.chunks(batch_size) {
+            let futures: Vec<_> = chunk
+                .iter()
+                .map(|(key, content, _, _)| {
+                    let storage = state.dtako_storage.as_ref().unwrap().clone();
+                    let k = key.clone();
+                    let c = content.clone();
+                    async move { storage.upload(&k, &c, "text/csv").await }
+                })
+                .collect();
+            let results = futures::future::join_all(futures).await;
+            for (item, result) in chunk.iter().zip(results) {
+                match result {
+                    Ok(_) => {
+                        csv_count += 1;
+                        if item.2 {
+                            kudgivt_unko_nos.push(item.3.clone());
+                        }
                     }
+                    Err(_) => still_failed.push(item.clone()),
                 }
-                Err(_) => put_failed += 1,
             }
         }
+        let will_retry = !still_failed.is_empty() && attempt < SPLIT_RETRY_ATTEMPTS;
+        if will_retry {
+            tracing::warn!("CSV split: PUT failed for {} files, retrying (attempt {attempt}/{SPLIT_RETRY_ATTEMPTS}, upload_id={upload_id})", still_failed.len());
+        }
+        pending = still_failed;
+        if will_retry {
+            tokio::time::sleep(std::time::Duration::from_millis(
+                SPLIT_RETRY_DELAYS_MS[(attempt - 1) as usize],
+            ))
+            .await;
+        }
     }
+    let put_failed = pending.len();
 
     if put_failed > 0 {
         tracing::warn!("CSV split: PUT failed for {put_failed} files (upload_id={upload_id})");
