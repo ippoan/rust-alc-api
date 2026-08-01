@@ -2612,6 +2612,116 @@ async fn test_dtako_split_csv_partial_put_failure_excludes_unko_no_from_has_kudg
 }
 
 // =========================================================================
+// Split CSV — 個別 CSV PUT が一時的に失敗しても、リトライで回復すれば split_failed は
+// 0 のまま (SPLIT_RETRY_ATTEMPTS=3 のうち 2 回失敗・3 回目で成功するケース)。
+// (Refs ohishi-exp/rust-ichibanboshi#205-46)
+// =========================================================================
+
+#[tokio::test]
+async fn test_dtako_split_csv_put_retry_recovers_from_transient_failure() {
+    let tenant_id = Uuid::new_v4();
+    let upload_id = Uuid::new_v4();
+    let zip_key = format!("{}/uploads/{}/rich.zip", tenant_id, upload_id);
+
+    let mock = MockDtakoUploadRepository::default();
+    *mock.tenant_and_key.lock().unwrap() = Some(UploadTenantAndKey {
+        tenant_id,
+        r2_zip_key: zip_key.clone(),
+    });
+
+    let dtako_storage = Arc::new(MockStorage::new("dtako-bucket"));
+    let zip_bytes = crate::common::create_test_dtako_zip_rich();
+    dtako_storage.insert_file(&zip_key, zip_bytes);
+    // 1002 の KUDGIVT.csv PUT は最初の 2 回だけ失敗させ、3 回目 (最後のリトライ) は成功させる
+    dtako_storage.fail_upload_times_for(&format!("{tenant_id}/unko/1002/KUDGIVT.csv"), 2);
+
+    let mock = Arc::new(mock);
+    let mut state = setup_mock_app_state();
+    state.dtako_upload = mock.clone();
+    state.dtako_storage = Some(dtako_storage);
+
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+    let client = reqwest::Client::new();
+
+    let res = client
+        .post(format!("{base_url}/api/split-csv/{upload_id}"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(
+        body["split_failed"].as_u64().unwrap(),
+        0,
+        "リトライで回復すれば split_failed は 0 のはず: {body:?}"
+    );
+
+    let called_unko_nos = mock
+        .last_update_has_kudgivt_unko_nos
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("update_has_kudgivt should have been called");
+    assert!(
+        called_unko_nos.contains(&"1002".to_string()),
+        "リトライで PUT が成功したので 1002 も has_kudgivt 更新対象に入るはず: {called_unko_nos:?}"
+    );
+}
+
+// =========================================================================
+// POST /api/upload — split 側の R2 ZIP ダウンロードが一時的に失敗しても (丸ごと失敗)、
+// try_split_csv 側のリトライで回復すれば split_failed は 0 のまま。
+//
+// `/api/split-csv/{id}` (split_csv_handler) は try_split_csv を経由しないため丸ごと
+// 失敗のリトライは効かず (意図通り、受け入れ条件5: エンドポイントの口は変えない)、
+// `/api/internal/rerun/{id}` は split とは別に自前で同じ key を先に download するため
+// 失敗カウンタが split の前に消費されてしまう。丸ごと失敗のリトライを検証できるのは
+// `/api/upload` だけなのでこちらを使う (upload_id はリクエスト前に分からないため、
+// key を問わず失敗させる `fail_next_downloads` を使う。
+// Refs ohishi-exp/rust-ichibanboshi#205-46)
+// =========================================================================
+
+#[tokio::test]
+async fn test_dtako_upload_split_whole_failure_retry_recovers() {
+    let mut state = setup_mock_app_state();
+    let dtako_storage = Arc::new(MockStorage::new("dtako-bucket"));
+    // split_csv_from_r2 の ZIP GET を最初の 2 回だけ失敗させ、3 回目 (最後のリトライ) で
+    // 成功させる (SPLIT_RETRY_ATTEMPTS=3)。process_zip 側は upload (PUT) のみで
+    // download を呼ばないため、このカウンタは split の GET だけを消費する。
+    dtako_storage.fail_next_downloads(2);
+    state.dtako_storage = Some(dtako_storage);
+
+    let tenant_id = Uuid::new_v4();
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+    let client = reqwest::Client::new();
+
+    let zip_bytes = crate::common::create_test_dtako_zip_rich();
+    let part = reqwest::multipart::Part::bytes(zip_bytes).file_name("rich.zip");
+    let form = reqwest::multipart::Form::new().part("file", part);
+
+    let res = client
+        .post(format!("{base_url}/api/upload"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .multipart(form)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["status"], "completed");
+    assert_eq!(
+        body["split_failed"].as_u64().unwrap(),
+        0,
+        "丸ごと失敗もリトライで回復すれば split_failed は 0 のはず: {body:?}"
+    );
+}
+
+// =========================================================================
 // Split CSV — update_has_kudgivt が一部の unko_no を当てられなくても (突合キーの
 // ずれ想定) request 自体は失敗させない。警告のみ
 // (Refs ohishi-exp/rust-ichibanboshi#205 の 31)

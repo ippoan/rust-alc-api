@@ -18,6 +18,14 @@ pub struct MockStorage {
     /// この key への `upload()` だけを失敗させる (CSV split の一部 PUT だけが失敗する
     /// ケースの再現用。Refs ohishi-exp/rust-ichibanboshi#205 の 31)。
     fail_upload_keys: Mutex<HashSet<String>>,
+    /// この key への `upload()` を指定回数だけ失敗させ、以降は成功させる
+    /// (リトライすれば回復するケースの再現用。Refs ohishi-exp/rust-ichibanboshi#205-46)。
+    fail_upload_times: Mutex<HashMap<String, u32>>,
+    /// 次の `download()` を key に関わらず指定回数だけ失敗させ、以降は成功させる
+    /// (split の丸ごと失敗がリトライで回復するケースの再現用。`/api/upload` 経由では
+    /// upload_id がリクエスト前に分からず特定の key を事前登録できないため、
+    /// key を問わない形にしてある。Refs ohishi-exp/rust-ichibanboshi#205-46)。
+    fail_next_downloads: Mutex<u32>,
 }
 
 impl MockStorage {
@@ -29,6 +37,8 @@ impl MockStorage {
             fail_list: std::sync::atomic::AtomicBool::new(false),
             list_calls: Mutex::new(Vec::new()),
             fail_upload_keys: Mutex::new(HashSet::new()),
+            fail_upload_times: Mutex::new(HashMap::new()),
+            fail_next_downloads: Mutex::new(0),
         }
     }
 
@@ -43,6 +53,19 @@ impl MockStorage {
             .lock()
             .unwrap()
             .insert(key.to_string());
+    }
+
+    /// 指定した key への `upload()` を `times` 回だけ失敗させ、それ以降は成功させる。
+    pub fn fail_upload_times_for(&self, key: &str, times: u32) {
+        self.fail_upload_times
+            .lock()
+            .unwrap()
+            .insert(key.to_string(), times);
+    }
+
+    /// 次の `download()` を key に関わらず `times` 回だけ失敗させ、それ以降は成功させる。
+    pub fn fail_next_downloads(&self, times: u32) {
+        *self.fail_next_downloads.lock().unwrap() = times;
     }
 
     /// Pre-populate a file in the mock storage (for download tests).
@@ -67,6 +90,17 @@ impl StorageBackend for MockStorage {
         if self.fail_upload_keys.lock().unwrap().contains(key) {
             return Err(StorageError::Upload(format!("mock upload failure: {key}")));
         }
+        {
+            let mut times = self.fail_upload_times.lock().unwrap();
+            if let Some(remaining) = times.get_mut(key) {
+                if *remaining > 0 {
+                    *remaining -= 1;
+                    return Err(StorageError::Upload(format!(
+                        "mock upload failure (retry remaining): {key}"
+                    )));
+                }
+            }
+        }
         self.files
             .lock()
             .unwrap()
@@ -83,6 +117,15 @@ impl StorageBackend for MockStorage {
     }
 
     async fn download(&self, key: &str) -> Result<Vec<u8>, StorageError> {
+        {
+            let mut remaining = self.fail_next_downloads.lock().unwrap();
+            if *remaining > 0 {
+                *remaining -= 1;
+                return Err(StorageError::Upload(format!(
+                    "mock download failure (retry remaining): {key}"
+                )));
+            }
+        }
         self.files
             .lock()
             .unwrap()
