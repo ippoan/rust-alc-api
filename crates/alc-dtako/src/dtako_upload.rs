@@ -48,6 +48,36 @@ pub struct UploadResponse {
     /// 失敗を握り潰さず呼び手が気づけるようにする (Refs
     /// ohishi-exp/rust-ichibanboshi#205 の 31)。
     pub split_failed: usize,
+    /// 今回の CSV split で成功した運行NO (KUDGIVT CSV が R2 PUT 成功 = `has_kudgivt`
+    /// 更新対象になった運行)。`split_csv_from_r2` が既に持つ `kudgivt_unko_nos` を
+    /// そのまま使い、数え直さない。`SPLIT_UNKO_NOS_DISPLAY_LIMIT` 件で切る
+    /// (Refs ohishi-exp/rust-ichibanboshi#205 の 51)。
+    pub split_unko_nos: Vec<String>,
+    /// `split_unko_nos` の実総数 (上限を超えても切り捨てない。`_total` > 一覧件数 で
+    /// 上限到達が分かる — `dtako_events.rs` の `unsplit`/`unsplit_total` と同じ形)。
+    pub split_unko_nos_total: usize,
+    /// KUDGIVT CSV の PUT がリトライ後も最終的に失敗した運行NO。**`split_failed`
+    /// (CSV ファイル単位の失敗数、KUDGIVT 以外のファイルも含む) とは母数が異なる**
+    /// ので同一視しないこと。`split_csv_from_r2` がダウンロード/解凍エラー等で丸ごと
+    /// 失敗した場合は個別の運行NO が分からないため空になる (この場合は呼び手側
+    /// `try_split_csv` が返す sentinel `split_failed=1` だけが手がかり)。
+    pub split_failed_unko_nos: Vec<String>,
+    pub split_failed_unko_nos_total: usize,
+}
+
+/// `split_unko_nos` / `split_failed_unko_nos` に載せる運行NO 一覧の上限件数。
+/// 1 か月ぶんの取り込みで 1,100 件超になる実測があるため、応答サイズを抑えつつ
+/// 上限到達を黙って切り捨てない (`dtako_events.rs` の `UNSPLIT_DISPLAY_LIMIT` と同じ
+/// パターン、Refs ohishi-exp/rust-ichibanboshi#205 の 51)。
+const SPLIT_UNKO_NOS_DISPLAY_LIMIT: usize = 500;
+
+/// 運行NO 一覧をソートして `SPLIT_UNKO_NOS_DISPLAY_LIMIT` 件に切り、
+/// (切った一覧, 実総数) を返す。
+fn cap_unko_nos(mut list: Vec<String>) -> (Vec<String>, usize) {
+    list.sort();
+    let total = list.len();
+    list.truncate(SPLIT_UNKO_NOS_DISPLAY_LIMIT);
+    (list, total)
 }
 
 async fn upload_zip(
@@ -79,13 +109,21 @@ async fn upload_zip(
                 .map_err(internal_err)?;
 
             // CSV split (non-blocking): 失敗件数を split_failed として応答に載せる
-            let split_failed = try_split_csv(&state, upload_id).await;
+            let split_outcome = try_split_csv(&state, upload_id).await;
+            let (split_unko_nos, split_unko_nos_total) =
+                cap_unko_nos(split_outcome.succeeded_unko_nos);
+            let (split_failed_unko_nos, split_failed_unko_nos_total) =
+                cap_unko_nos(split_outcome.failed_unko_nos);
 
             Ok(Json(UploadResponse {
                 upload_id,
                 operations_count: count,
                 status: "completed".to_string(),
-                split_failed,
+                split_failed: split_outcome.put_failed,
+                split_unko_nos,
+                split_unko_nos_total,
+                split_failed_unko_nos,
+                split_failed_unko_nos_total,
             }))
         }
         Err(e) => {
@@ -928,14 +966,26 @@ const SPLIT_RETRY_ATTEMPTS: u32 = 3;
 /// に対し十分小さい。
 const SPLIT_RETRY_DELAYS_MS: [u64; 2] = [300, 800];
 
-/// CSV split を試行 (失敗してもブロックしない)。戻り値は失敗件数
-/// (`split_csv_from_r2` 自体が `SPLIT_RETRY_ATTEMPTS` 回とも丸ごと失敗した場合は 1 を返す
-/// — 個別 CSV の件数は分からないが、呼び手が split_failed の非ゼロで気づければ十分なため。
-/// 個別 CSV PUT のリトライは `split_csv_from_r2` 内で完結している)。
-pub(crate) async fn try_split_csv(state: &DtakoState, upload_id: Uuid) -> usize {
+/// `split_csv_from_r2` の結果。
+pub(crate) struct SplitCsvOutcome {
+    /// 個別 CSV PUT の失敗件数 (KUDGIVT 以外のファイルも含む、既存 `split_failed` 互換)。
+    pub put_failed: usize,
+    /// KUDGIVT CSV の PUT が成功した運行NO (`kudgivt_unko_nos` そのもの)。
+    pub succeeded_unko_nos: Vec<String>,
+    /// KUDGIVT CSV の PUT がリトライ後も失敗した運行NO。
+    pub failed_unko_nos: Vec<String>,
+}
+
+/// CSV split を試行 (失敗してもブロックしない)。
+/// `split_csv_from_r2` 自体が `SPLIT_RETRY_ATTEMPTS` 回とも丸ごと失敗した場合は
+/// `put_failed=1` の sentinel を返す — 個別の運行NO はこの経路では分からないため
+/// `succeeded_unko_nos` / `failed_unko_nos` は空のまま (捏造しない)。呼び手は
+/// split_failed の非ゼロで気づければ十分なため。個別 CSV PUT のリトライは
+/// `split_csv_from_r2` 内で完結している。
+pub(crate) async fn try_split_csv(state: &DtakoState, upload_id: Uuid) -> SplitCsvOutcome {
     for attempt in 1..=SPLIT_RETRY_ATTEMPTS {
         match split_csv_from_r2(state, upload_id).await {
-            Ok(put_failed) => return put_failed,
+            Ok(outcome) => return outcome,
             Err(e) if attempt < SPLIT_RETRY_ATTEMPTS => {
                 tracing::warn!("CSV split retry {attempt}/{SPLIT_RETRY_ATTEMPTS}: {e}");
                 tokio::time::sleep(std::time::Duration::from_millis(
@@ -948,18 +998,24 @@ pub(crate) async fn try_split_csv(state: &DtakoState, upload_id: Uuid) -> usize 
             }
         }
     }
-    1
+    SplitCsvOutcome {
+        put_failed: 1,
+        succeeded_unko_nos: Vec::new(),
+        failed_unko_nos: Vec::new(),
+    }
 }
 
 /// R2 から ZIP をダウンロードして CSV を unko_no 別に分割アップロード。
-/// 戻り値は個別 CSV PUT の失敗件数 (0 なら全件成功、失敗した item は
-/// `SPLIT_RETRY_ATTEMPTS` 回まで再試行した上での最終件数)。この関数自体が丸ごと失敗
+/// 戻り値は `SplitCsvOutcome` — `put_failed` は個別 CSV PUT の失敗件数 (0 なら全件成功、
+/// 失敗した item は `SPLIT_RETRY_ATTEMPTS` 回まで再試行した上での最終件数)、
+/// `succeeded_unko_nos`/`failed_unko_nos` は KUDGIVT CSV の PUT 成功/失敗 運行NO
+/// (Refs ohishi-exp/rust-ichibanboshi#205 の 51)。この関数自体が丸ごと失敗
 /// (ダウンロード/解凍/DB エラーなど) した場合は呼び手 (`try_split_csv`) 側で
 /// 関数ごとリトライする。
 pub(crate) async fn split_csv_from_r2(
     state: &DtakoState,
     upload_id: Uuid,
-) -> Result<usize, anyhow::Error> {
+) -> Result<SplitCsvOutcome, anyhow::Error> {
     let record = state
         .dtako_upload
         .get_upload_tenant_and_key(upload_id)
@@ -1067,6 +1123,15 @@ pub(crate) async fn split_csv_from_r2(
     }
     let put_failed = pending.len();
 
+    // `pending` はリトライを使い切っても PUT できなかった item の最終形。KUDGIVT の
+    // ものだけ絞れば「分割 (has_kudgivt 更新) が失敗した運行NO」が数え直しなしで
+    // 求まる (Refs ohishi-exp/rust-ichibanboshi#205 の 51)。
+    let failed_kudgivt_unko_nos: Vec<String> = pending
+        .iter()
+        .filter(|(_, _, is_kudgivt, _)| *is_kudgivt)
+        .map(|(_, _, _, unko_no)| unko_no.clone())
+        .collect();
+
     if put_failed > 0 {
         tracing::warn!("CSV split: PUT failed for {put_failed} files (upload_id={upload_id})");
     }
@@ -1098,7 +1163,11 @@ pub(crate) async fn split_csv_from_r2(
         csv_count, upload_id, tenant_id
     );
     tracing::info!("{msg}");
-    Ok(put_failed)
+    Ok(SplitCsvOutcome {
+        put_failed,
+        succeeded_unko_nos: kudgivt_unko_nos,
+        failed_unko_nos: failed_kudgivt_unko_nos,
+    })
 }
 
 /// R2 に保存済みの ZIP をダウンロード
@@ -1210,13 +1279,21 @@ async fn internal_rerun(
                 .map_err(internal_err)?;
 
             // CSV split (non-blocking): 失敗件数を split_failed として応答に載せる
-            let split_failed = try_split_csv(&state, upload_id).await;
+            let split_outcome = try_split_csv(&state, upload_id).await;
+            let (split_unko_nos, split_unko_nos_total) =
+                cap_unko_nos(split_outcome.succeeded_unko_nos);
+            let (split_failed_unko_nos, split_failed_unko_nos_total) =
+                cap_unko_nos(split_outcome.failed_unko_nos);
 
             Ok(Json(UploadResponse {
                 upload_id,
                 operations_count: count,
                 status: "completed".to_string(),
-                split_failed,
+                split_failed: split_outcome.put_failed,
+                split_unko_nos,
+                split_unko_nos_total,
+                split_failed_unko_nos,
+                split_failed_unko_nos_total,
             }))
         }
         Err(e) => {
@@ -1726,13 +1803,23 @@ async fn split_csv_handler(
     tracing::info!("split-csv (auth) called: upload_id={}", upload_id);
 
     // 生の anyhow エラー (内部パス / SQL 片等) を 500 body に echo しない (Refs #393 M-1)
-    let split_failed = split_csv_from_r2(&state, upload_id)
+    let outcome = split_csv_from_r2(&state, upload_id)
         .await
         .map_err(internal_err)?;
+    // POST /api/upload と同じキー名・同じ意味にする (Refs ohishi-exp/rust-ichibanboshi#205 の 51)。
+    let (split_unko_nos, split_unko_nos_total) = cap_unko_nos(outcome.succeeded_unko_nos);
+    let (split_failed_unko_nos, split_failed_unko_nos_total) =
+        cap_unko_nos(outcome.failed_unko_nos);
 
-    Ok(Json(
-        serde_json::json!({ "status": "ok", "upload_id": upload_id, "split_failed": split_failed }),
-    ))
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "upload_id": upload_id,
+        "split_failed": outcome.put_failed,
+        "split_unko_nos": split_unko_nos,
+        "split_unko_nos_total": split_unko_nos_total,
+        "split_failed_unko_nos": split_failed_unko_nos,
+        "split_failed_unko_nos_total": split_failed_unko_nos_total,
+    })))
 }
 
 /// 1 リクエストあたりに実際に split する upload 数の上限。
