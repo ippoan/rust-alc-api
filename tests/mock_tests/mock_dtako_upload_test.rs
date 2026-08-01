@@ -1210,6 +1210,107 @@ async fn test_dtako_split_csv_success() {
     assert_eq!(res.status(), 200);
     let body: serde_json::Value = res.json().await.unwrap();
     assert_eq!(body["status"], "ok");
+    // 分割に成功した運行NO 一覧が乗る (Refs ohishi-exp/rust-ichibanboshi#205 の 51)。
+    // split_csv_from_r2 が既に持つ kudgivt_unko_nos をそのまま使うため、数え直しが
+    // 混入していないことをここで確認する。
+    assert_eq!(body["split_failed"].as_u64().unwrap(), 0, "{body:?}");
+    let unko_nos: Vec<String> = body["split_unko_nos"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
+    for expected in ["1001", "1002", "1003"] {
+        assert!(
+            unko_nos.contains(&expected.to_string()),
+            "{unko_nos:?} should contain {expected}"
+        );
+    }
+    assert_eq!(
+        body["split_unko_nos_total"].as_u64().unwrap(),
+        3,
+        "{body:?}"
+    );
+    assert_eq!(
+        body["split_failed_unko_nos"].as_array().unwrap().len(),
+        0,
+        "{body:?}"
+    );
+    assert_eq!(
+        body["split_failed_unko_nos_total"].as_u64().unwrap(),
+        0,
+        "{body:?}"
+    );
+}
+
+/// KUDGIVT.csv だけを持つ ZIP を `n` 個の異なる運行NO で生成する (split_unko_nos の
+/// 上限テスト用、KUDGURI は split_csv_from_r2 が見ないので不要)。
+fn create_test_dtako_zip_many_unko(n: u32) -> Vec<u8> {
+    use std::io::Write;
+
+    let mut kudgivt_csv = String::from("運行NO,読取日,乗務員CD1\n");
+    for i in 0..n {
+        kudgivt_csv.push_str(&format!("U{i:05},2026/03/01,DR01\n"));
+    }
+    let (kudgivt_bytes, _, _) = encoding_rs::SHIFT_JIS.encode(&kudgivt_csv);
+
+    let mut buf = std::io::Cursor::new(Vec::new());
+    {
+        let mut zip = zip::ZipWriter::new(&mut buf);
+        let options = zip::write::SimpleFileOptions::default();
+        zip.start_file("KUDGIVT.csv", options).unwrap();
+        zip.write_all(&kudgivt_bytes).unwrap();
+        zip.finish().unwrap();
+    }
+    buf.into_inner()
+}
+
+// =========================================================================
+// POST /api/split-csv/{id} — 運行NO が SPLIT_UNKO_NOS_DISPLAY_LIMIT (500) を超えると
+// split_unko_nos は 500 件で切られるが、split_unko_nos_total には実数 (501) が入る
+// (Refs ohishi-exp/rust-ichibanboshi#205 の 51、`unsplit`/`unsplit_total` と同じ形)
+// =========================================================================
+
+#[tokio::test]
+async fn test_dtako_split_csv_success_caps_unko_nos_list_at_limit() {
+    let tenant_id = Uuid::new_v4();
+    let upload_id = Uuid::new_v4();
+    let zip_key = format!("{}/uploads/{}/many.zip", tenant_id, upload_id);
+
+    let mock = MockDtakoUploadRepository::default();
+    *mock.tenant_and_key.lock().unwrap() = Some(UploadTenantAndKey {
+        tenant_id,
+        r2_zip_key: zip_key.clone(),
+    });
+
+    let dtako_storage = Arc::new(MockStorage::new("dtako-bucket"));
+    dtako_storage.insert_file(&zip_key, create_test_dtako_zip_many_unko(501));
+
+    let state = setup_with_storage_and_mock(mock, dtako_storage);
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+    let client = reqwest::Client::new();
+
+    let res = client
+        .post(format!("{base_url}/api/split-csv/{upload_id}"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["split_failed"].as_u64().unwrap(), 0, "{body:?}");
+    assert_eq!(
+        body["split_unko_nos"].as_array().unwrap().len(),
+        500,
+        "一覧は上限 500 件で切られるはず: {body:?}"
+    );
+    assert_eq!(
+        body["split_unko_nos_total"].as_u64().unwrap(),
+        501,
+        "実総数は切り捨てないはず: {body:?}"
+    );
 }
 
 // =========================================================================
@@ -2590,6 +2691,35 @@ async fn test_dtako_split_csv_partial_put_failure_excludes_unko_no_from_has_kudg
     assert_eq!(res.status(), 200);
     let body: serde_json::Value = res.json().await.unwrap();
     assert_eq!(body["split_failed"].as_u64().unwrap(), 1, "{body:?}");
+    // 1002 の KUDGIVT PUT だけ失敗したので、成功一覧には出ず失敗一覧に出る
+    // (Refs ohishi-exp/rust-ichibanboshi#205 の 51)。
+    let split_unko_nos: Vec<String> = body["split_unko_nos"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
+    assert!(
+        !split_unko_nos.contains(&"1002".to_string()),
+        "{split_unko_nos:?}"
+    );
+    assert!(
+        split_unko_nos.contains(&"1001".to_string())
+            && split_unko_nos.contains(&"1003".to_string()),
+        "{split_unko_nos:?}"
+    );
+    let split_failed_unko_nos: Vec<String> = body["split_failed_unko_nos"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(split_failed_unko_nos, vec!["1002".to_string()], "{body:?}");
+    assert_eq!(
+        body["split_failed_unko_nos_total"].as_u64().unwrap(),
+        1,
+        "{body:?}"
+    );
 
     let called_unko_nos = mock
         .last_update_has_kudgivt_unko_nos
