@@ -12,6 +12,13 @@ mod common;
 use serde_json::{json, Value};
 use uuid::Uuid;
 
+/// session_id 付き (1 回の点呼で束ねられる形、Refs ippoan/alc-app-s3#112)。
+fn measurement_in_session(device_id: &str, seq: i64, kind: &str, session_id: &str) -> Value {
+    let mut m = measurement(device_id, seq, kind);
+    m["session_id"] = json!(session_id);
+    m
+}
+
 fn measurement(device_id: &str, seq: i64, kind: &str) -> Value {
     json!({
         "device_id": device_id,
@@ -440,4 +447,75 @@ async fn test_hub_measurements_list_tenant_isolation() {
             assert_eq!(seqs(&body), Vec::<i64>::new());
         }
     );
+}
+
+#[tokio::test]
+async fn test_hub_measurements_session_id_roundtrip_and_filter() {
+    test_group!("hub measurements read");
+    test_case!("session_id で 1 回の点呼を束ねて引ける", {
+        let state = common::setup_app_state().await;
+        let base_url = common::spawn_test_server(state.clone()).await;
+        let tenant = common::create_test_tenant(state.pool(), "Hub Session A").await;
+        let client = reqwest::Client::new();
+
+        // 点呼 1 (s10) の 3 点 + 点呼 2 (s20) の 1 点 + 点呼外の単発 (session_id 無し)
+        let res = post_measurements(
+            &client,
+            &base_url,
+            tenant,
+            &json!([
+                measurement_in_session("hub-dev-1", 10, "alcohol", "s10"),
+                measurement_in_session("hub-dev-1", 11, "temperature", "s10"),
+                measurement_in_session("hub-dev-1", 12, "blood_pressure", "s10"),
+                measurement_in_session("hub-dev-1", 20, "alcohol", "s20"),
+                measurement("hub-dev-1", 30, "temperature"),
+            ]),
+        )
+        .await;
+        assert_eq!(res.status(), 201);
+        assert_eq!(res.json::<Value>().await.unwrap()["inserted"], 5);
+
+        // session_id は保存され、レスポンスに出る
+        let res = get_measurements(&client, &base_url, tenant, "session_id=s10").await;
+        assert_eq!(res.status(), 200);
+        let body: Value = res.json().await.unwrap();
+        assert_eq!(seqs(&body), vec![12, 11, 10]);
+        assert!(body["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|i| i["session_id"] == "s10"));
+
+        // 別セッションは混ざらない
+        let res = get_measurements(&client, &base_url, tenant, "session_id=s20").await;
+        let body: Value = res.json().await.unwrap();
+        assert_eq!(seqs(&body), vec![20]);
+
+        // 点呼外の単発は session_id = null (欠損ではなく「セッション不明」)
+        let res = get_measurements(&client, &base_url, tenant, "kind=temperature").await;
+        let body: Value = res.json().await.unwrap();
+        let single = body["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|i| i["seq"] == 30)
+            .expect("seq=30");
+        assert!(single["session_id"].is_null());
+
+        // 他の絞り込みと併用できる
+        let res = get_measurements(&client, &base_url, tenant, "session_id=s10&kind=alcohol").await;
+        let body: Value = res.json().await.unwrap();
+        assert_eq!(seqs(&body), vec![10]);
+
+        // 不正な session_id (記号混じり) は 400
+        let res = get_measurements(&client, &base_url, tenant, "session_id=s%2F10").await;
+        assert_eq!(res.status(), 400);
+
+        // ingest 側も同じ検証 — 不正な session_id は 400 で DB に入らない
+        let mut bad = measurement("hub-dev-9", 1, "alcohol");
+        bad["session_id"] = json!("bad id");
+        let res = post_measurements(&client, &base_url, tenant, &json!([bad])).await;
+        assert_eq!(res.status(), 400);
+        assert_eq!(count_rows(state.pool(), tenant).await, 5);
+    });
 }

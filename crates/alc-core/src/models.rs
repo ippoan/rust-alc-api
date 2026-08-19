@@ -1189,6 +1189,11 @@ pub struct HubMeasurementCreate {
     pub seq: i64,
     /// 端末計時 (unix ms)。時計未同期端末では null。
     pub recorded_at_ms: Option<i64>,
+    /// 1 回の点呼を束ねる端末発番の識別子 (Refs ippoan/alc-app-s3#112)。
+    /// 端末内でのみ一意で、グローバルには (tenant_id, device_id, session_id) の組。
+    /// 点呼外の単発計測と旧ファームでは null (= セッション不明、欠損ではない)。
+    #[serde(default)]
+    pub session_id: Option<String>,
     /// ble-medical-gateway 互換 JSON をそのまま格納。
     pub payload: serde_json::Value,
 }
@@ -1215,6 +1220,8 @@ pub struct HubMeasurement {
     pub kind: String,
     pub payload: serde_json::Value,
     pub seq: i64,
+    /// 1 回の点呼を束ねる端末発番の識別子。点呼外の単発計測と旧データでは null。
+    pub session_id: Option<String>,
     /// 端末計時。時計未同期端末では null。
     pub recorded_at: Option<DateTime<Utc>>,
     /// サーバ受信時刻。一覧の並び順・期間絞り込みはこの列が基準。
@@ -1231,6 +1238,8 @@ pub struct HubMeasurement {
 pub struct HubMeasurementFilter {
     pub device_id: Option<String>,
     pub kind: Option<String>,
+    /// 1 回の点呼で束ねて引くための識別子 (Refs ippoan/alc-app-s3#112)。
+    pub session_id: Option<String>,
     pub from: Option<DateTime<Utc>>,
     pub to: Option<DateTime<Utc>>,
     pub limit: Option<i64>,

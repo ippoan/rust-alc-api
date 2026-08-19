@@ -401,3 +401,100 @@ async fn test_hub_measurements_list_repo_error_is_500() {
         .unwrap();
     assert_eq!(res.status(), 500);
 }
+
+// ---------------------------------------------------------------------------
+// session_id (Refs ippoan/alc-app-s3#112)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_hub_measurements_session_id_ingest_and_filter() {
+    let mut state = setup_mock_app_state();
+    let repo = Arc::new(MockHubMeasurementsRepository::default());
+    state.hub_measurements = repo.clone();
+    let tenant_id = Uuid::new_v4();
+    seed(
+        &repo,
+        tenant_id,
+        vec![
+            serde_json::json!({"device_id":"hub-dev-1","kind":"alcohol","seq":1,"session_id":"s1","payload":{}}),
+            serde_json::json!({"device_id":"hub-dev-1","kind":"temperature","seq":2,"session_id":"s1","payload":{}}),
+            serde_json::json!({"device_id":"hub-dev-1","kind":"alcohol","seq":3,"session_id":"s2","payload":{}}),
+            // 点呼外の単発 (session_id 無し)
+            serde_json::json!({"device_id":"hub-dev-1","kind":"temperature","seq":4,"payload":{}}),
+        ],
+    )
+    .await;
+
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let client = reqwest::Client::new();
+    let get = |query: &str| {
+        client
+            .get(format!("{base_url}/api/hub/measurements?{query}"))
+            .header("X-Tenant-ID", tenant_id.to_string())
+            .send()
+    };
+
+    // session_id で束ねて引ける
+    let body: serde_json::Value = get("session_id=s1").await.unwrap().json().await.unwrap();
+    assert_eq!(seqs(&body), vec![2, 1]);
+
+    // session_id 無しの行は混ざらない
+    let body: serde_json::Value = get("session_id=s2").await.unwrap().json().await.unwrap();
+    assert_eq!(seqs(&body), vec![3]);
+
+    // 絞り込み無しなら全部返り、単発は null
+    let body: serde_json::Value = get("").await.unwrap().json().await.unwrap();
+    assert_eq!(seqs(&body), vec![4, 3, 2, 1]);
+    assert!(body["items"][0]["session_id"].is_null());
+    assert_eq!(body["items"][3]["session_id"], "s1");
+
+    // 不正な session_id は 400 (端末由来 = untrusted)
+    for bad in ["session_id=", "session_id=bad%20id", "session_id=a%2Fb"] {
+        let res = get(bad).await.unwrap();
+        assert_eq!(res.status(), 400, "query={bad}");
+    }
+}
+
+#[tokio::test]
+async fn test_hub_measurements_ingest_rejects_bad_session_id() {
+    let mut state = setup_mock_app_state();
+    let repo = Arc::new(MockHubMeasurementsRepository::default());
+    state.hub_measurements = repo.clone();
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let tenant_id = Uuid::new_v4();
+    let client = reqwest::Client::new();
+
+    let post = |session_id: serde_json::Value| {
+        client
+            .post(format!("{base_url}/api/hub/measurements"))
+            .header(
+                "X-Internal-Shared-Secret",
+                crate::common::TEST_INTERNAL_SHARED_SECRET,
+            )
+            .header("X-Tenant-ID", tenant_id.to_string())
+            .json(&serde_json::json!([{
+                "device_id": "hub-dev-1",
+                "kind": "alcohol",
+                "seq": 1,
+                "session_id": session_id,
+                "payload": {}
+            }]))
+            .send()
+    };
+
+    // 記号混じり / 空 / 長すぎ → 400
+    for bad in [
+        serde_json::json!("bad id"),
+        serde_json::json!(""),
+        serde_json::json!("x".repeat(65)),
+    ] {
+        let res = post(bad.clone()).await.unwrap();
+        assert_eq!(res.status(), 400, "session_id={bad}");
+    }
+
+    // 正常値 → 201 で repo にそのまま渡る
+    let res = post(serde_json::json!("s-42_7")).await.unwrap();
+    assert_eq!(res.status(), 201);
+    let inserted = repo.inserted.lock().unwrap();
+    assert_eq!(inserted[0].1.session_id.as_deref(), Some("s-42_7"));
+}

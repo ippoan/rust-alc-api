@@ -37,9 +37,9 @@ impl HubMeasurementsRepository for PgHubMeasurementsRepository {
             let res = sqlx::query(
                 r#"
                 INSERT INTO hub_measurements (
-                    tenant_id, device_id, kind, payload, seq, recorded_at
+                    tenant_id, device_id, kind, payload, seq, recorded_at, session_id
                 )
-                VALUES ($1, $2, $3, $4, $5, $6)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
                 ON CONFLICT (tenant_id, device_id, seq) DO NOTHING
                 "#,
             )
@@ -49,6 +49,7 @@ impl HubMeasurementsRepository for PgHubMeasurementsRepository {
             .bind(&item.payload)
             .bind(item.seq)
             .bind(recorded_at)
+            .bind(&item.session_id)
             .execute(&mut *tc.conn)
             .await?;
             inserted += res.rows_affected() as i64;
@@ -82,6 +83,10 @@ impl HubMeasurementsRepository for PgHubMeasurementsRepository {
             conditions.push(format!("kind = ${idx}"));
             idx += 1;
         }
+        if filter.session_id.is_some() {
+            conditions.push(format!("session_id = ${idx}"));
+            idx += 1;
+        }
         if filter.from.is_some() {
             conditions.push(format!("created_at >= ${idx}"));
             idx += 1;
@@ -95,7 +100,7 @@ impl HubMeasurementsRepository for PgHubMeasurementsRepository {
         // has_more 判定のため 1 件多く引く (COUNT(*) は張らない、models の
         // HubMeasurementsListResponse の doc コメント参照)。
         let sql = format!(
-            "SELECT id, tenant_id, device_id, kind, payload, seq, recorded_at, created_at
+            "SELECT id, tenant_id, device_id, kind, payload, seq, session_id, recorded_at, created_at
                FROM hub_measurements
               WHERE {where_clause}
               ORDER BY created_at DESC, id DESC
@@ -109,6 +114,9 @@ impl HubMeasurementsRepository for PgHubMeasurementsRepository {
         }
         if let Some(ref kind) = filter.kind {
             query = query.bind(kind);
+        }
+        if let Some(ref session_id) = filter.session_id {
+            query = query.bind(session_id);
         }
         if let Some(from) = filter.from {
             query = query.bind(from);

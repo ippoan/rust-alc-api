@@ -58,6 +58,10 @@ const MAX_BATCH_ITEMS: usize = 500;
 /// device_id の長さ上限 (auth-worker の device_id は URL-safe 短文字列)。
 const MAX_DEVICE_ID_LEN: usize = 128;
 
+/// session_id の長さ上限 (Refs ippoan/alc-app-s3#112)。端末が発番する短い文字列
+/// (実装はセッション開始時の seq) なので、この余裕で足りる。
+const MAX_SESSION_ID_LEN: usize = 64;
+
 /// 一覧の既定件数と上限 (Refs #592)。payload は JSONB 素通しで 1 行が数百 byte〜
 /// 数 KB になり得るので、上限は控えめに取る。
 const DEFAULT_LIST_LIMIT: i64 = 50;
@@ -94,12 +98,27 @@ impl IngestBody {
     }
 }
 
+/// session_id は端末由来 (untrusted) なので、長さと文字種を絞る。
+/// None (点呼外の単発計測・旧ファーム) は正常値として通す。
+fn valid_session_id(session_id: Option<&String>) -> bool {
+    match session_id {
+        None => true,
+        Some(v) => {
+            !v.is_empty()
+                && v.len() <= MAX_SESSION_ID_LEN
+                && v.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        }
+    }
+}
+
 /// item 単位の検証。エラーは詳細を返さず 400 に丸める (呼び出し元は内部 Worker のみ)。
 fn validate(item: &HubMeasurementCreate) -> bool {
     !item.device_id.trim().is_empty()
         && item.device_id.len() <= MAX_DEVICE_ID_LEN
         && HUB_MEASUREMENT_KINDS.contains(&item.kind.as_str())
         && item.seq >= 0
+        && valid_session_id(item.session_id.as_ref())
 }
 
 async fn ingest(
@@ -139,8 +158,9 @@ fn clamp_paging(filter: &HubMeasurementFilter) -> (i64, i64) {
 
 /// `GET /api/hub/measurements` — tenant スコープの一覧 (created_at DESC)。
 ///
-/// 絞り込みは device_id / kind / 期間 (from・to は created_at に対する閉区間)。
+/// 絞り込みは device_id / kind / session_id / 期間 (from・to は created_at に対する閉区間)。
 /// kind は allowlist 外を 400 で弾く (typo を無言の 0 件と区別できるようにする)。
+/// session_id は 1 回の点呼を束ねて引くためのもの (Refs ippoan/alc-app-s3#112)。
 async fn list(
     State(state): State<AppState>,
     tenant: Extension<TenantId>,
@@ -150,6 +170,9 @@ async fn list(
         if !HUB_MEASUREMENT_KINDS.contains(&kind.as_str()) {
             return Err(StatusCode::BAD_REQUEST);
         }
+    }
+    if !valid_session_id(filter.session_id.as_ref()) {
+        return Err(StatusCode::BAD_REQUEST);
     }
     if let (Some(from), Some(to)) = (filter.from, filter.to) {
         if from > to {
@@ -189,7 +212,15 @@ mod tests {
             kind: kind.to_string(),
             seq,
             recorded_at_ms: None,
+            session_id: None,
             payload: serde_json::json!({}),
+        }
+    }
+
+    fn item_with_session(session_id: Option<&str>) -> HubMeasurementCreate {
+        HubMeasurementCreate {
+            session_id: session_id.map(str::to_string),
+            ..item("alcohol", 1, "dev-1")
         }
     }
 
@@ -206,6 +237,19 @@ mod tests {
         assert!(!validate(&item("alcohol", 0, "  ")));
         assert!(!validate(&item("alcohol", -1, "dev-1")));
         assert!(!validate(&item("alcohol", 0, &"x".repeat(129))));
+    }
+
+    #[test]
+    fn validate_accepts_well_formed_session_id_and_rejects_junk() {
+        // None (点呼外の単発計測 / 旧ファーム) は正常値
+        assert!(validate(&item_with_session(None)));
+        assert!(validate(&item_with_session(Some("s42"))));
+        assert!(validate(&item_with_session(Some("boot-1234_7"))));
+        // 空・長すぎ・記号混じりは弾く (端末由来の untrusted 値)
+        assert!(!validate(&item_with_session(Some(""))));
+        assert!(!validate(&item_with_session(Some(&"x".repeat(65)))));
+        assert!(!validate(&item_with_session(Some("s 42"))));
+        assert!(!validate(&item_with_session(Some("s/42"))));
     }
 
     fn filter(limit: Option<i64>, offset: Option<i64>) -> HubMeasurementFilter {
