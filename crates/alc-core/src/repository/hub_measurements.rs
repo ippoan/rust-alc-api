@@ -1,12 +1,15 @@
 use async_trait::async_trait;
 use uuid::Uuid;
 
-use crate::models::{HubMeasurementCreate, HubMeasurementsIngestResponse};
+use crate::models::{
+    HubMeasurement, HubMeasurementCreate, HubMeasurementFilter, HubMeasurementsIngestResponse,
+};
 
-/// hub_measurements テーブルの抽象 (Refs #564)。
+/// hub_measurements テーブルの抽象 (Refs #564 / read は #592)。
 ///
-/// cf-alc-recorder Worker から internal shared-secret 経由で呼ばれる ingest 専用
-/// (tenant スコープは X-Tenant-ID で渡る)。read 経路は現時点では持たない。
+/// 書き込みは cf-alc-recorder Worker から internal shared-secret 経由で呼ばれる
+/// ingest (tenant スコープは X-Tenant-ID で渡る)。読み出しはテナント認証付き
+/// router の `GET /api/hub/measurements`。
 #[async_trait]
 pub trait HubMeasurementsRepository: Send + Sync {
     /// バッチ insert。`UNIQUE (tenant_id, device_id, seq)` の衝突 (再送重複) は
@@ -16,4 +19,15 @@ pub trait HubMeasurementsRepository: Send + Sync {
         tenant_id: Uuid,
         items: &[HubMeasurementCreate],
     ) -> Result<HubMeasurementsIngestResponse, sqlx::Error>;
+
+    /// tenant スコープの一覧 (`created_at DESC`)。`limit` は呼び出し側で clamp 済みの
+    /// 実効値、`offset` は 0 以上を渡す。次ページ有無の判定に使えるよう、実装は
+    /// **最大 `limit + 1` 件**を返してよい (切り詰めは呼び出し側)。
+    async fn list(
+        &self,
+        tenant_id: Uuid,
+        filter: &HubMeasurementFilter,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<HubMeasurement>, sqlx::Error>;
 }

@@ -135,6 +135,9 @@ pub fn router(
         .merge(upload::tenant_router())
         .merge(timecard::tenant_router())
         .merge(devices::tenant_router())
+        // CoreS3 ハブ測定の閲覧 (Refs #592)。ingest 側 (internal_router) は
+        // cf-alc-recorder 専用の shared-secret 経路なので混ぜない。
+        .merge(hub_measurements::tenant_router())
         .merge(car_inspections::tenant_router())
         .merge(car_inspection_files::tenant_router())
         .merge(carins_files::tenant_router())
