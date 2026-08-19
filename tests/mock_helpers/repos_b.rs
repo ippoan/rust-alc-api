@@ -1721,6 +1721,7 @@ impl HubMeasurementsRepository for MockHubMeasurementsRepository {
                     kind: item.kind.clone(),
                     payload: item.payload.clone(),
                     seq: item.seq,
+                    session_id: item.session_id.clone(),
                     recorded_at: item
                         .recorded_at_ms
                         .and_then(DateTime::from_timestamp_millis),
@@ -1749,6 +1750,12 @@ impl HubMeasurementsRepository for MockHubMeasurementsRepository {
             .filter(|r| r.tenant_id == tenant_id)
             .filter(|r| filter.device_id.as_ref().is_none_or(|d| *d == r.device_id))
             .filter(|r| filter.kind.as_ref().is_none_or(|k| *k == r.kind))
+            .filter(|r| {
+                filter
+                    .session_id
+                    .as_ref()
+                    .is_none_or(|sid| r.session_id.as_ref() == Some(sid))
+            })
             .filter(|r| filter.from.is_none_or(|f| r.created_at >= f))
             .filter(|r| filter.to.is_none_or(|t| r.created_at <= t))
             .cloned()
