@@ -1202,6 +1202,57 @@ pub struct HubMeasurementsIngestResponse {
     pub duplicates: i64,
 }
 
+/// `GET /api/hub/measurements` が返す 1 行 (Refs #592)。
+/// `payload` は migration 126 のとおり JSONB をそのまま素通しする
+/// (kind 別の型付けは別 issue)。
+#[derive(Debug, Clone, Serialize, FromRow, TS)]
+#[ts(export)]
+pub struct HubMeasurement {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub device_id: String,
+    /// temperature / blood_pressure / alcohol / fc1200_raw。
+    pub kind: String,
+    pub payload: serde_json::Value,
+    pub seq: i64,
+    /// 端末計時。時計未同期端末では null。
+    pub recorded_at: Option<DateTime<Utc>>,
+    /// サーバ受信時刻。一覧の並び順・期間絞り込みはこの列が基準。
+    pub created_at: DateTime<Utc>,
+}
+
+/// `GET /api/hub/measurements` のクエリ (Refs #592)。
+///
+/// `from` / `to` は **`created_at`** に対する閉区間。`recorded_at` は端末の時計
+/// 未同期で NULL / ずれた値になり得るのに対し、`created_at` は必ず入っていて
+/// 一覧の並び順とも一致するため、期間絞り込みの基準にはこちらを使う。
+#[derive(Debug, Clone, Default, Deserialize, TS)]
+#[ts(export)]
+pub struct HubMeasurementFilter {
+    pub device_id: Option<String>,
+    pub kind: Option<String>,
+    pub from: Option<DateTime<Utc>>,
+    pub to: Option<DateTime<Utc>>,
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+}
+
+/// `GET /api/hub/measurements` のレスポンス (Refs #592)。
+///
+/// 総件数 (COUNT(*)) は返さない。ingest テーブルは無制限に伸び続けるので
+/// 毎回の全件 COUNT は index-only にならず重くなる。代わりに `limit + 1` 件を
+/// 引いて `has_more` だけを返す (次ページの有無が分かれば UI は組める)。
+#[derive(Debug, Serialize, TS)]
+#[ts(export)]
+pub struct HubMeasurementsListResponse {
+    pub items: Vec<HubMeasurement>,
+    /// 実際に適用された limit (clamp 後)。
+    pub limit: i64,
+    pub offset: i64,
+    /// 次ページが存在するか。
+    pub has_more: bool,
+}
+
 #[cfg(test)]
 mod dtako_ticket_tests {
     use super::*;

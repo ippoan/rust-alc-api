@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use chrono::{NaiveDate, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use uuid::Uuid;
 
 use rust_alc_api::db::models::*;
@@ -1671,10 +1671,20 @@ impl MeasurementsRepository for MockMeasurementsRepository {
 
 /// insert された item を tenant ごとに記録し、(device_id, seq) 重複は本物の
 /// `ON CONFLICT (tenant_id, device_id, seq) DO NOTHING` と同じく duplicates に数える。
+/// `list` 用に行そのものも積む (Refs #592)。
 pub struct MockHubMeasurementsRepository {
     pub fail_next: AtomicBool,
     pub inserted: std::sync::Mutex<Vec<(Uuid, HubMeasurementCreate)>>,
+    /// `list` が返す行。created_at は insert 順に 1 秒ずつ進めるので、
+    /// created_at DESC = 挿入の逆順になり、順序をテストで固定できる。
+    rows: std::sync::Mutex<Vec<HubMeasurement>>,
     seen: std::sync::Mutex<std::collections::HashSet<(Uuid, String, i64)>>,
+}
+
+/// mock の created_at 起点 (2026-07-12T06:00:00Z 相当)。実 DB の now() と違い
+/// 決定的にしたいので固定値から 1 秒刻みで進める。
+fn mock_hub_created_at(nth: usize) -> DateTime<Utc> {
+    DateTime::from_timestamp(1_752_300_000 + nth as i64, 0).expect("valid timestamp")
 }
 
 impl Default for MockHubMeasurementsRepository {
@@ -1682,6 +1692,7 @@ impl Default for MockHubMeasurementsRepository {
         Self {
             fail_next: AtomicBool::new(false),
             inserted: std::sync::Mutex::new(vec![]),
+            rows: std::sync::Mutex::new(vec![]),
             seen: std::sync::Mutex::new(std::collections::HashSet::new()),
         }
     }
@@ -1697,10 +1708,24 @@ impl HubMeasurementsRepository for MockHubMeasurementsRepository {
         check_fail!(self);
         let mut seen = self.seen.lock().unwrap();
         let mut inserted_log = self.inserted.lock().unwrap();
+        let mut rows = self.rows.lock().unwrap();
         let mut inserted: i64 = 0;
         for item in items {
             if seen.insert((tenant_id, item.device_id.clone(), item.seq)) {
                 inserted_log.push((tenant_id, item.clone()));
+                let created_at = mock_hub_created_at(rows.len());
+                rows.push(HubMeasurement {
+                    id: Uuid::new_v4(),
+                    tenant_id,
+                    device_id: item.device_id.clone(),
+                    kind: item.kind.clone(),
+                    payload: item.payload.clone(),
+                    seq: item.seq,
+                    recorded_at: item
+                        .recorded_at_ms
+                        .and_then(DateTime::from_timestamp_millis),
+                    created_at,
+                });
                 inserted += 1;
             }
         }
@@ -1708,5 +1733,32 @@ impl HubMeasurementsRepository for MockHubMeasurementsRepository {
             inserted,
             duplicates: items.len() as i64 - inserted,
         })
+    }
+
+    async fn list(
+        &self,
+        tenant_id: Uuid,
+        filter: &HubMeasurementFilter,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<HubMeasurement>, sqlx::Error> {
+        check_fail!(self);
+        let rows = self.rows.lock().unwrap();
+        let mut matched: Vec<HubMeasurement> = rows
+            .iter()
+            .filter(|r| r.tenant_id == tenant_id)
+            .filter(|r| filter.device_id.as_ref().is_none_or(|d| *d == r.device_id))
+            .filter(|r| filter.kind.as_ref().is_none_or(|k| *k == r.kind))
+            .filter(|r| filter.from.is_none_or(|f| r.created_at >= f))
+            .filter(|r| filter.to.is_none_or(|t| r.created_at <= t))
+            .cloned()
+            .collect();
+        matched.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        // 本物の repo と同じく has_more 判定用に 1 件多く返す。
+        Ok(matched
+            .into_iter()
+            .skip(offset.max(0) as usize)
+            .take(limit as usize + 1)
+            .collect())
     }
 }

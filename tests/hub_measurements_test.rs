@@ -1,8 +1,10 @@
-//! POST /api/hub/measurements (CoreS3 ハブ ingest、Refs #564) の DB integration テスト。
+//! `/api/hub/measurements` (CoreS3 ハブ、Refs #564 ingest / #592 read) の DB integration テスト。
 //!
-//! 経路: cf-alc-recorder →(auth-worker /alc-internal-proxy)→ 本 API。
-//! `internal_shared_secret_router` 配下 (X-Internal-Shared-Secret + X-Tenant-ID) の
-//! 実 DB での冪等性 (UNIQUE (tenant_id, device_id, seq)) とテナント分離を固定する。
+//! - POST … cf-alc-recorder →(auth-worker /alc-internal-proxy)→ 本 API。
+//!   `internal_shared_secret_router` 配下 (X-Internal-Shared-Secret + X-Tenant-ID) の
+//!   実 DB での冪等性 (UNIQUE (tenant_id, device_id, seq)) とテナント分離を固定する。
+//! - GET … テナント認証付き router (X-Tenant-ID)。絞り込み・created_at DESC の
+//!   ページング・**テナント分離**を実 DB で固定する。
 
 #[macro_use]
 mod common;
@@ -216,6 +218,226 @@ async fn test_hub_measurements_auth_and_validation() {
             .await;
             assert_eq!(res.status(), 400);
             assert_eq!(count_rows(state.pool(), tenant).await, 0);
+        }
+    );
+}
+
+/// GET /api/hub/measurements (テナント認証付き router = X-Tenant-ID のみ)。
+async fn get_measurements(
+    client: &reqwest::Client,
+    base_url: &str,
+    tenant_id: Uuid,
+    query: &str,
+) -> reqwest::Response {
+    client
+        .get(format!("{base_url}/api/hub/measurements?{query}"))
+        .header("X-Tenant-ID", tenant_id.to_string())
+        .send()
+        .await
+        .unwrap()
+}
+
+/// created_at は now() 既定なので、期間絞り込み・並び順を決定的に検証するために
+/// 実 DB 側で明示的に上書きする。
+async fn set_created_at(pool: &sqlx::PgPool, tenant_id: Uuid, seq: i64, iso: &str) {
+    let ts: chrono::DateTime<chrono::Utc> = iso.parse().unwrap();
+    sqlx::query("UPDATE hub_measurements SET created_at = $1 WHERE tenant_id = $2 AND seq = $3")
+        .bind(ts)
+        .bind(tenant_id)
+        .bind(seq)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+fn seqs(body: &Value) -> Vec<i64> {
+    body["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["seq"].as_i64().unwrap())
+        .collect()
+}
+
+#[tokio::test]
+async fn test_hub_measurements_list_filters_and_paging() {
+    test_group!("hub measurements read");
+    test_case!(
+        "device_id / kind / 期間の絞り込みと created_at DESC ページング",
+        {
+            let state = common::setup_app_state().await;
+            let base_url = common::spawn_test_server(state.clone()).await;
+            let tenant = common::create_test_tenant(state.pool(), "Hub Read A").await;
+            let client = reqwest::Client::new();
+
+            let res = post_measurements(
+                &client,
+                &base_url,
+                tenant,
+                &json!([
+                    measurement("hub-dev-1", 1, "temperature"),
+                    measurement("hub-dev-1", 2, "alcohol"),
+                    measurement("hub-dev-1", 3, "alcohol"),
+                    measurement("hub-dev-2", 4, "temperature"),
+                ]),
+            )
+            .await;
+            assert_eq!(res.status(), 201);
+
+            // seq 1..4 を 1 日ずつずらす (created_at DESC = seq 降順になる)
+            for (seq, iso) in [
+                (1, "2026-08-01T00:00:00Z"),
+                (2, "2026-08-02T00:00:00Z"),
+                (3, "2026-08-03T00:00:00Z"),
+                (4, "2026-08-04T00:00:00Z"),
+            ] {
+                set_created_at(state.pool(), tenant, seq, iso).await;
+            }
+
+            // 絞り込みなし → 全件が created_at DESC
+            let res = get_measurements(&client, &base_url, tenant, "").await;
+            assert_eq!(res.status(), 200);
+            let body: Value = res.json().await.unwrap();
+            assert_eq!(seqs(&body), vec![4, 3, 2, 1]);
+            assert_eq!(body["limit"], 50);
+            assert_eq!(body["offset"], 0);
+            assert_eq!(body["has_more"], false);
+            // payload は JSONB 素通し、recorded_at は ingest 時の recorded_at_ms 由来
+            assert_eq!(body["items"][0]["payload"]["value"], 36.5);
+            assert_eq!(body["items"][0]["device_id"], "hub-dev-2");
+            assert!(body["items"][0]["recorded_at"].is_string());
+
+            // device_id 絞り込み
+            let res = get_measurements(&client, &base_url, tenant, "device_id=hub-dev-1").await;
+            let body: Value = res.json().await.unwrap();
+            assert_eq!(seqs(&body), vec![3, 2, 1]);
+
+            // kind 絞り込み
+            let res = get_measurements(&client, &base_url, tenant, "kind=alcohol").await;
+            let body: Value = res.json().await.unwrap();
+            assert_eq!(seqs(&body), vec![3, 2]);
+
+            // 期間 (created_at の閉区間)
+            let res = get_measurements(
+                &client,
+                &base_url,
+                tenant,
+                "from=2026-08-02T00:00:00Z&to=2026-08-03T00:00:00Z",
+            )
+            .await;
+            let body: Value = res.json().await.unwrap();
+            assert_eq!(seqs(&body), vec![3, 2]);
+
+            // 絞り込みの組み合わせ
+            let res = get_measurements(
+                &client,
+                &base_url,
+                tenant,
+                "device_id=hub-dev-1&kind=alcohol&from=2026-08-03T00:00:00Z",
+            )
+            .await;
+            let body: Value = res.json().await.unwrap();
+            assert_eq!(seqs(&body), vec![3]);
+
+            // ページング (limit + offset)。has_more は次ページの有無
+            let res = get_measurements(&client, &base_url, tenant, "limit=2").await;
+            let body: Value = res.json().await.unwrap();
+            assert_eq!(seqs(&body), vec![4, 3]);
+            assert_eq!(body["has_more"], true);
+
+            let res = get_measurements(&client, &base_url, tenant, "limit=2&offset=2").await;
+            let body: Value = res.json().await.unwrap();
+            assert_eq!(seqs(&body), vec![2, 1]);
+            assert_eq!(body["has_more"], false);
+            assert_eq!(body["offset"], 2);
+
+            // limit は上限で clamp される (実効値がレスポンスに出る)
+            let res = get_measurements(&client, &base_url, tenant, "limit=99999").await;
+            let body: Value = res.json().await.unwrap();
+            assert_eq!(body["limit"], 200);
+            assert_eq!(seqs(&body), vec![4, 3, 2, 1]);
+
+            // allowlist 外 kind / 逆転した期間は 400、X-Tenant-ID なしは 401
+            let res = get_measurements(&client, &base_url, tenant, "kind=not-a-kind").await;
+            assert_eq!(res.status(), 400);
+            let res = get_measurements(
+                &client,
+                &base_url,
+                tenant,
+                "from=2026-08-04T00:00:00Z&to=2026-08-01T00:00:00Z",
+            )
+            .await;
+            assert_eq!(res.status(), 400);
+            let res = client
+                .get(format!("{base_url}/api/hub/measurements"))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 401);
+        }
+    );
+}
+
+#[tokio::test]
+async fn test_hub_measurements_list_tenant_isolation() {
+    test_group!("hub measurements read");
+    test_case!(
+        "別テナントの行は一覧に出ない (RLS 任せにせずテストで固定)",
+        {
+            let state = common::setup_app_state().await;
+            let base_url = common::spawn_test_server(state.clone()).await;
+            let tenant_a = common::create_test_tenant(state.pool(), "Hub Read Iso A").await;
+            let tenant_b = common::create_test_tenant(state.pool(), "Hub Read Iso B").await;
+            let client = reqwest::Client::new();
+
+            // 同じ device_id / seq を両テナントに入れる (混ざれば必ず検知できる形)
+            for tenant in [tenant_a, tenant_b] {
+                let res = post_measurements(
+                    &client,
+                    &base_url,
+                    tenant,
+                    &json!([measurement("hub-dev-shared", 1, "alcohol")]),
+                )
+                .await;
+                assert_eq!(res.status(), 201);
+            }
+            // B にだけもう 1 件足しておく (件数でも区別できるようにする)
+            let res = post_measurements(
+                &client,
+                &base_url,
+                tenant_b,
+                &json!([measurement("hub-dev-shared", 2, "temperature")]),
+            )
+            .await;
+            assert_eq!(res.status(), 201);
+
+            // A から見えるのは A の 1 件だけ
+            let res = get_measurements(&client, &base_url, tenant_a, "").await;
+            assert_eq!(res.status(), 200);
+            let body: Value = res.json().await.unwrap();
+            assert_eq!(seqs(&body), vec![1]);
+            assert_eq!(body["items"][0]["tenant_id"], tenant_a.to_string());
+
+            // B から見えるのは B の 2 件だけ
+            let res = get_measurements(&client, &base_url, tenant_b, "").await;
+            let body: Value = res.json().await.unwrap();
+            assert_eq!(seqs(&body), vec![2, 1]);
+            assert!(body["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|i| i["tenant_id"] == tenant_b.to_string()));
+
+            // 絞り込みを付けても他テナントの行は漏れない
+            let res = get_measurements(
+                &client,
+                &base_url,
+                tenant_a,
+                "device_id=hub-dev-shared&kind=temperature",
+            )
+            .await;
+            let body: Value = res.json().await.unwrap();
+            assert_eq!(seqs(&body), Vec::<i64>::new());
         }
     );
 }

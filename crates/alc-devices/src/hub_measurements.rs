@@ -1,8 +1,16 @@
-use axum::{extract::State, http::StatusCode, routing::post, Extension, Json, Router};
+use axum::{
+    extract::{Query, State},
+    http::StatusCode,
+    routing::{get, post},
+    Extension, Json, Router,
+};
 use uuid::Uuid;
 
 use alc_core::auth_middleware::TenantId;
-use alc_core::models::{HubMeasurementCreate, HubMeasurementsIngestResponse};
+use alc_core::models::{
+    HubMeasurementCreate, HubMeasurementFilter, HubMeasurementsIngestResponse,
+    HubMeasurementsListResponse,
+};
 use alc_core::AppState;
 
 /// `STAGING_MODE=true` かどうか (alc-auth / alc-misc::staging と同判定)。
@@ -50,10 +58,23 @@ const MAX_BATCH_ITEMS: usize = 500;
 /// device_id の長さ上限 (auth-worker の device_id は URL-safe 短文字列)。
 const MAX_DEVICE_ID_LEN: usize = 128;
 
+/// 一覧の既定件数と上限 (Refs #592)。payload は JSONB 素通しで 1 行が数百 byte〜
+/// 数 KB になり得るので、上限は控えめに取る。
+const DEFAULT_LIST_LIMIT: i64 = 50;
+const MAX_LIST_LIMIT: i64 = 200;
+
 /// cf-alc-recorder Worker から INTERNAL_SHARED_SECRET + X-Tenant-ID で叩く ingest。
 /// `require_internal_shared_secret` middleware 配下に nest される想定。
 pub fn internal_router() -> Router<AppState> {
     Router::new().route("/hub/measurements", post(ingest))
+}
+
+/// テナント認証付き (X-Tenant-ID) の閲覧経路 (Refs #592)。
+///
+/// ingest 用の [`internal_router`] とは**別 router**。あちらは cf-alc-recorder 専用の
+/// shared-secret 経路なので、パスが同じでも混ぜない (認証方式が違う)。
+pub fn tenant_router() -> Router<AppState> {
+    Router::new().route("/hub/measurements", get(list))
 }
 
 /// バッチ (配列) と単発 (object) の両方を受ける。
@@ -105,6 +126,59 @@ async fn ingest(
     Ok((StatusCode::CREATED, Json(resp)))
 }
 
+/// clamp 済みの (limit, offset) を返す。負値・0・上限超えを安全側に丸める。
+/// 呼び出し側の入力ミスで全件スキャンにならないよう、ここが唯一の関門。
+fn clamp_paging(filter: &HubMeasurementFilter) -> (i64, i64) {
+    let limit = filter
+        .limit
+        .unwrap_or(DEFAULT_LIST_LIMIT)
+        .clamp(1, MAX_LIST_LIMIT);
+    let offset = filter.offset.unwrap_or(0).max(0);
+    (limit, offset)
+}
+
+/// `GET /api/hub/measurements` — tenant スコープの一覧 (created_at DESC)。
+///
+/// 絞り込みは device_id / kind / 期間 (from・to は created_at に対する閉区間)。
+/// kind は allowlist 外を 400 で弾く (typo を無言の 0 件と区別できるようにする)。
+async fn list(
+    State(state): State<AppState>,
+    tenant: Extension<TenantId>,
+    Query(filter): Query<HubMeasurementFilter>,
+) -> Result<Json<HubMeasurementsListResponse>, StatusCode> {
+    if let Some(ref kind) = filter.kind {
+        if !HUB_MEASUREMENT_KINDS.contains(&kind.as_str()) {
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    }
+    if let (Some(from), Some(to)) = (filter.from, filter.to) {
+        if from > to {
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    }
+    let (limit, offset) = clamp_paging(&filter);
+
+    let mut items = state
+        .hub_measurements
+        .list(tenant.0 .0, &filter, limit, offset)
+        .await
+        .map_err(|e| {
+            tracing::error!("hub_measurements.list error: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    // repo は has_more 判定用に limit + 1 件まで返す。溢れた分はここで落とす。
+    let has_more = items.len() as i64 > limit;
+    items.truncate(limit as usize);
+
+    Ok(Json(HubMeasurementsListResponse {
+        items,
+        limit,
+        offset,
+        has_more,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -132,6 +206,27 @@ mod tests {
         assert!(!validate(&item("alcohol", 0, "  ")));
         assert!(!validate(&item("alcohol", -1, "dev-1")));
         assert!(!validate(&item("alcohol", 0, &"x".repeat(129))));
+    }
+
+    fn filter(limit: Option<i64>, offset: Option<i64>) -> HubMeasurementFilter {
+        HubMeasurementFilter {
+            limit,
+            offset,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn clamp_paging_defaults_and_bounds() {
+        assert_eq!(clamp_paging(&filter(None, None)), (DEFAULT_LIST_LIMIT, 0));
+        assert_eq!(clamp_paging(&filter(Some(10), Some(20))), (10, 20));
+        // 0 / 負値 / 上限超えは安全側へ丸める
+        assert_eq!(clamp_paging(&filter(Some(0), Some(-5))), (1, 0));
+        assert_eq!(clamp_paging(&filter(Some(-1), None)), (1, 0));
+        assert_eq!(
+            clamp_paging(&filter(Some(MAX_LIST_LIMIT + 1), None)),
+            (MAX_LIST_LIMIT, 0)
+        );
     }
 
     #[test]
