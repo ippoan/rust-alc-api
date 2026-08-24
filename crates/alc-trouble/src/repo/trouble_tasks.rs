@@ -29,7 +29,9 @@ impl TroubleTasksRepository for PgTroubleTasksRepository {
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
         sqlx::query_as::<_, TroubleTask>(
             r#"INSERT INTO trouble_tasks (tenant_id, ticket_id, task_type, title, description, assigned_to, due_date, sort_order, created_by, next_action, next_action_detail, next_action_by, next_action_due, occurred_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8, 0), $9, COALESCE($10, ''), COALESCE($11, ''), $12, $13, $14)
+            VALUES ($1, $2, $3, $4, $5, $6, $7,
+                COALESCE($8, (SELECT COALESCE(MAX(sort_order) + 1, 0) FROM trouble_tasks WHERE tenant_id = $1 AND ticket_id = $2)),
+                $9, COALESCE($10, ''), COALESCE($11, ''), $12, $13, $14)
             RETURNING *"#,
         )
         .bind(tenant_id)
@@ -137,6 +139,48 @@ impl TroubleTasksRepository for PgTroubleTasksRepository {
             .execute(&mut *tc.conn)
             .await?;
         Ok(result.rows_affected() > 0)
+    }
+
+    async fn reorder(
+        &self,
+        tenant_id: Uuid,
+        ticket_id: Uuid,
+        task_ids: &[Uuid],
+    ) -> Result<Option<Vec<TroubleTask>>, sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
+        alc_core::tenant::set_current_tenant(&mut tx, &tenant_id.to_string()).await?;
+
+        // 渡された順 (ORDINALITY) をそのまま 0 起点の sort_order にする。
+        // 1 文で全行を更新するので、行ごとの PUT を並べる形の競合が起きない。
+        let res = sqlx::query(
+            r#"UPDATE trouble_tasks t
+               SET sort_order = (v.ord - 1)::INT, updated_at = now()
+               FROM unnest($3::uuid[]) WITH ORDINALITY AS v(id, ord)
+               WHERE t.id = v.id AND t.ticket_id = $1 AND t.tenant_id = $2"#,
+        )
+        .bind(ticket_id)
+        .bind(tenant_id)
+        .bind(task_ids)
+        .execute(&mut *tx)
+        .await?;
+
+        // このチケットに属さない id / 重複 id があると更新行数が足りない
+        // (重複は同一行を 2 回数えないため)。部分適用を残さず巻き戻す。
+        if res.rows_affected() != task_ids.len() as u64 {
+            tx.rollback().await?;
+            return Ok(None);
+        }
+
+        let tasks = sqlx::query_as::<_, TroubleTask>(
+            "SELECT * FROM trouble_tasks WHERE ticket_id = $1 AND tenant_id = $2 ORDER BY sort_order, created_at",
+        )
+        .bind(ticket_id)
+        .bind(tenant_id)
+        .fetch_all(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
+        Ok(Some(tasks))
     }
 
     async fn list_all(

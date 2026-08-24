@@ -970,6 +970,7 @@ impl TroubleSchedulesRepository for MockTroubleSchedulesRepository {
 pub struct MockTroubleTasksRepository {
     pub fail_next: AtomicBool,
     pub delete_returns_false: AtomicBool,
+    pub reorder_returns_none: AtomicBool,
 }
 
 impl Default for MockTroubleTasksRepository {
@@ -977,6 +978,7 @@ impl Default for MockTroubleTasksRepository {
         Self {
             fail_next: AtomicBool::new(false),
             delete_returns_false: AtomicBool::new(false),
+            reorder_returns_none: AtomicBool::new(false),
         }
     }
 }
@@ -1042,6 +1044,19 @@ impl TroubleTasksRepository for MockTroubleTasksRepository {
     async fn delete(&self, _tenant_id: Uuid, _id: Uuid) -> Result<bool, sqlx::Error> {
         check_fail!(self);
         Ok(!self.delete_returns_false.swap(false, Ordering::SeqCst))
+    }
+
+    async fn reorder(
+        &self,
+        _tenant_id: Uuid,
+        _ticket_id: Uuid,
+        _task_ids: &[Uuid],
+    ) -> Result<Option<Vec<TroubleTask>>, sqlx::Error> {
+        check_fail!(self);
+        if self.reorder_returns_none.swap(false, Ordering::SeqCst) {
+            return Ok(None);
+        }
+        Ok(Some(vec![]))
     }
 
     async fn list_all(
