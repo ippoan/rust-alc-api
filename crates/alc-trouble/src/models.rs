@@ -554,6 +554,16 @@ pub struct UpdateTroubleTask {
     pub print_page_break_before: Option<bool>,
 }
 
+/// 経過記録 (trouble_tasks) の並び替え要求。`task_ids` に並べたい順で id を
+/// 全件渡し、サーバが 0 起点で `sort_order` を採番し直す。隣接行の交換方式は
+/// 全行 sort_order=0 の既存データで無変化になるため採らない (Refs
+/// ippoan/nuxt-trouble#240)。
+#[derive(Debug, Deserialize, TS)]
+#[ts(export)]
+pub struct ReorderTroubleTasks {
+    pub task_ids: Vec<Uuid>,
+}
+
 #[cfg(test)]
 mod update_trouble_task_tests {
     use super::UpdateTroubleTask;

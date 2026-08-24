@@ -241,3 +241,181 @@ async fn test_list_all_tasks_cross_ticket() {
         }
     );
 }
+
+/// 経過記録 (trouble_tasks) の並び替え。全行 sort_order=0 の既存データでも
+/// 1 回で効くこと / 不正な id を弾くことを検証する (Refs ippoan/nuxt-trouble#240)。
+#[tokio::test]
+async fn test_reorder_tasks() {
+    test_group!("trouble tasks 並び替え");
+    test_case!(
+        "task_ids の順で 0 起点に採番され、リロード後も並びが保たれる",
+        {
+            let state = common::setup_app_state().await;
+            let base_url = common::spawn_test_server(state.clone()).await;
+            let tenant_id = common::create_test_tenant(state.pool(), "Tasks Reorder Tenant").await;
+            let jwt = common::create_test_jwt(tenant_id, "admin");
+            let client = reqwest::Client::new();
+            let auth = format!("Bearer {jwt}");
+
+            let res = client
+                .post(format!("{base_url}/api/trouble/workflow/setup"))
+                .header("Authorization", &auth)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 200);
+
+            let ticket = create_ticket(&base_url, &auth, "貨物事故", "ドライバーA").await;
+            let other_ticket = create_ticket(&base_url, &auth, "その他", "ドライバーB").await;
+
+            let t1 = create_task(
+                &base_url,
+                &auth,
+                &ticket,
+                serde_json::json!({"title": "1件目", "task_type": "連絡"}),
+            )
+            .await;
+            let t2 = create_task(
+                &base_url,
+                &auth,
+                &ticket,
+                serde_json::json!({"title": "2件目", "task_type": "連絡"}),
+            )
+            .await;
+            let t3 = create_task(
+                &base_url,
+                &auth,
+                &ticket,
+                serde_json::json!({"title": "3件目", "task_type": "報告"}),
+            )
+            .await;
+            let foreign = create_task(
+                &base_url,
+                &auth,
+                &other_ticket,
+                serde_json::json!({"title": "別チケット", "task_type": "連絡"}),
+            )
+            .await;
+
+            let (id1, id2, id3) = (
+                t1["id"].as_str().unwrap().to_string(),
+                t2["id"].as_str().unwrap().to_string(),
+                t3["id"].as_str().unwrap().to_string(),
+            );
+
+            // sort_order 未指定の作成は末尾採番 (0,1,2) になる
+            assert_eq!(t1["sort_order"].as_i64(), Some(0));
+            assert_eq!(t2["sort_order"].as_i64(), Some(1));
+            assert_eq!(t3["sort_order"].as_i64(), Some(2));
+
+            let reorder_url = format!("{base_url}/api/trouble/tickets/{ticket}/tasks/reorder");
+
+            // 3,1,2 の順に並べ替え
+            let res = client
+                .put(&reorder_url)
+                .header("Authorization", &auth)
+                .json(&serde_json::json!({"task_ids": [id3, id1, id2]}))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 200);
+            let body: Value = res.json().await.unwrap();
+            let titles: Vec<&str> = body
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v["title"].as_str().unwrap())
+                .collect();
+            assert_eq!(titles, vec!["3件目", "1件目", "2件目"]);
+            let orders: Vec<i64> = body
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v["sort_order"].as_i64().unwrap())
+                .collect();
+            assert_eq!(orders, vec![0, 1, 2]);
+
+            // 再取得しても並びが保たれる
+            let res = client
+                .get(format!("{base_url}/api/trouble/tickets/{ticket}/tasks"))
+                .header("Authorization", &auth)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 200);
+            let body: Value = res.json().await.unwrap();
+            let titles: Vec<&str> = body
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v["title"].as_str().unwrap())
+                .collect();
+            assert_eq!(titles, vec!["3件目", "1件目", "2件目"]);
+
+            // 新規追加は末尾に付く
+            let t4 = create_task(
+                &base_url,
+                &auth,
+                &ticket,
+                serde_json::json!({"title": "4件目", "task_type": "その他"}),
+            )
+            .await;
+            assert_eq!(t4["sort_order"].as_i64(), Some(3));
+
+            // 空配列 → 400
+            let res = client
+                .put(&reorder_url)
+                .header("Authorization", &auth)
+                .json(&serde_json::json!({"task_ids": []}))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 400);
+
+            // 重複 id → 400
+            let res = client
+                .put(&reorder_url)
+                .header("Authorization", &auth)
+                .json(&serde_json::json!({"task_ids": [id1, id1]}))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 400);
+
+            // 別チケットの task_id が混ざる → 404 かつ既存の並びは変わらない
+            let foreign_id = foreign["id"].as_str().unwrap().to_string();
+            let res = client
+                .put(&reorder_url)
+                .header("Authorization", &auth)
+                .json(&serde_json::json!({"task_ids": [id1, id2, foreign_id]}))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 404);
+
+            let res = client
+                .get(format!("{base_url}/api/trouble/tickets/{ticket}/tasks"))
+                .header("Authorization", &auth)
+                .send()
+                .await
+                .unwrap();
+            let body: Value = res.json().await.unwrap();
+            let titles: Vec<&str> = body
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v["title"].as_str().unwrap())
+                .collect();
+            assert_eq!(titles, vec!["3件目", "1件目", "2件目", "4件目"]);
+
+            // 認証なし → 401
+            let res = reqwest::Client::new()
+                .put(&reorder_url)
+                .json(&serde_json::json!({"task_ids": [id1]}))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 401);
+        }
+    );
+}

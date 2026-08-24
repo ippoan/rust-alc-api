@@ -6,7 +6,9 @@ use axum::{
 };
 use uuid::Uuid;
 
-use crate::models::{CreateTroubleTask, TroubleFile, TroubleTask, UpdateTroubleTask};
+use crate::models::{
+    CreateTroubleTask, ReorderTroubleTasks, TroubleFile, TroubleTask, UpdateTroubleTask,
+};
 use crate::repository::trouble_tasks::{TroubleTasksFilter, TroubleTasksSortBy};
 use crate::TroubleState;
 use alc_core::auth_middleware::TenantId;
@@ -21,6 +23,10 @@ where
         .route(
             "/trouble/tickets/{ticket_id}/tasks",
             post(create_task).get(list_tasks),
+        )
+        .route(
+            "/trouble/tickets/{ticket_id}/tasks/reorder",
+            axum::routing::put(reorder_tasks),
         )
         .route(
             "/trouble/tasks/{task_id}",
@@ -201,6 +207,39 @@ async fn list_tasks(
             tracing::error!("list_tasks error: {e}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
+    Ok(Json(tasks))
+}
+
+/// 経過記録の並び替え。`task_ids` に並べたい順で **そのチケットの全 task_id** を
+/// 渡すと、サーバが 0 起点で `sort_order` を採番し直し、更新後の一覧を返す。
+///
+/// 隣接行の `sort_order` を交換する方式は、既存データが全行 0 のときに
+/// 「0 と 0 の交換」= 無変化になって沈黙する。採番はサーバ側 1 文に寄せる
+/// (Refs ippoan/nuxt-trouble#240)。
+async fn reorder_tasks(
+    State(state): State<TroubleState>,
+    tenant: axum::Extension<TenantId>,
+    Path(ticket_id): Path<Uuid>,
+    Json(body): Json<ReorderTroubleTasks>,
+) -> Result<Json<Vec<TroubleTask>>, StatusCode> {
+    if body.task_ids.is_empty() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let unique: std::collections::HashSet<&Uuid> = body.task_ids.iter().collect();
+    if unique.len() != body.task_ids.len() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    let tasks = state
+        .trouble_tasks
+        .reorder(tenant.0 .0, ticket_id, &body.task_ids)
+        .await
+        .map_err(|e| {
+            tracing::error!("reorder_tasks error: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
     Ok(Json(tasks))
 }
 

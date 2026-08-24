@@ -65,6 +65,16 @@ pub trait TroubleTasksRepository: Send + Sync {
 
     async fn delete(&self, tenant_id: Uuid, id: Uuid) -> Result<bool, sqlx::Error>;
 
+    /// `task_ids` に並べた順で `sort_order` を 0 起点に採番し直し、更新後の
+    /// 一覧を返す。id が 1 つでもこのチケットに属さない (または重複している)
+    /// 場合は何も更新せず `None` (Refs ippoan/nuxt-trouble#240)。
+    async fn reorder(
+        &self,
+        tenant_id: Uuid,
+        ticket_id: Uuid,
+        task_ids: &[Uuid],
+    ) -> Result<Option<Vec<TroubleTask>>, sqlx::Error>;
+
     async fn list_all(
         &self,
         tenant_id: Uuid,
