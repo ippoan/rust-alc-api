@@ -31,6 +31,11 @@ pub trait LineworksChannelsRepository: Send + Sync {
     async fn get(&self, tenant_id: Uuid, id: Uuid)
         -> Result<Option<LineworksChannel>, sqlx::Error>;
 
+    /// internal 経路 (auth-worker 経由の無人送信) が channel 行 id だけから
+    /// tenant ごと解決するための RLS バイパス取得
+    /// (SECURITY DEFINER 関数 lookup_lineworks_channel_for_send を呼ぶ)
+    async fn get_for_send(&self, id: Uuid) -> Result<Option<LineworksChannel>, sqlx::Error>;
+
     /// webhook の `joined` イベントで呼ばれる upsert
     /// 既存行があれば active=TRUE + joined_at=NOW() に戻す
     async fn upsert_joined(
