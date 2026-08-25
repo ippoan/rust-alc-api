@@ -126,13 +126,28 @@ impl LineworksChannelsRepository for MockLineworksChannelsRepository {
 
 pub struct MockNotifyRecipientRepository {
     pub fail_next: AtomicBool,
+    /// `get_for_send` (internal 送信経路の RLS バイパス取得) の戻り値。
+    /// `None` にすると recipient_not_found 相当になる。
+    pub send_recipient: Mutex<Option<NotifyRecipient>>,
 }
 
 impl Default for MockNotifyRecipientRepository {
     fn default() -> Self {
         Self {
             fail_next: AtomicBool::new(false),
+            send_recipient: Mutex::new(Some(mock_lineworks_recipient(Uuid::new_v4()))),
         }
+    }
+}
+
+/// LINE WORKS 個人宛の recipient (internal 送信経路のデフォルト)。
+/// `mock_recipient` は provider = "line" なので送信テストには使えない。
+pub fn mock_lineworks_recipient(tenant_id: Uuid) -> NotifyRecipient {
+    NotifyRecipient {
+        provider: "lineworks".into(),
+        lineworks_user_id: Some("lw-user-1".into()),
+        line_user_id: None,
+        ..mock_recipient(tenant_id)
     }
 }
 
@@ -165,6 +180,10 @@ impl NotifyRecipientRepository for MockNotifyRecipientRepository {
     ) -> Result<Option<NotifyRecipient>, sqlx::Error> {
         check_fail!(self);
         Ok(Some(mock_recipient(tenant_id)))
+    }
+    async fn get_for_send(&self, _id: Uuid) -> Result<Option<NotifyRecipient>, sqlx::Error> {
+        check_fail!(self);
+        Ok(self.send_recipient.lock().unwrap().clone())
     }
     async fn create(
         &self,

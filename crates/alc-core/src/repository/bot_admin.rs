@@ -48,7 +48,7 @@ pub struct BotConfigExportRow {
 }
 
 /// bot_configs 行 (secret 列を除外した公開用)
-#[derive(Debug, sqlx::FromRow)]
+#[derive(Debug, Clone, sqlx::FromRow)]
 pub struct BotConfigRow {
     pub id: Uuid,
     pub provider: String,

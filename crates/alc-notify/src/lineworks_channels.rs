@@ -19,6 +19,7 @@ use alc_core::auth_lineworks::decrypt_secret;
 use alc_core::auth_middleware::TenantId;
 use alc_core::repository::bot_admin::BotAdminRepository;
 use alc_core::repository::lineworks_channels::LineworksChannel;
+use alc_core::repository::notify_recipients::NotifyRecipient;
 use alc_core::AppState;
 
 use crate::clients::lineworks::{LineworksBotClient, LineworksBotConfig};
@@ -41,7 +42,7 @@ pub fn tenant_router() -> Router<AppState> {
 ///
 /// - `GET  /api/internal/lineworks/bot-secret/{bot_id}` — bot_secret_encrypted を返す (復号は auth-worker)
 /// - `POST /api/internal/lineworks/event` — 検証済みイベントを受け取って upsert/mark_left
-/// - `POST /api/internal/lineworks/send` — 登録済み channel へテキスト送信 (無人 worker 用)
+/// - `POST /api/internal/lineworks/send` — 登録済み channel / recipient へテキスト送信 (無人 worker 用)
 pub fn internal_router() -> Router<AppState> {
     Router::new()
         .route(
@@ -76,23 +77,45 @@ fn channel_not_found() -> ApiError {
     )
 }
 
+fn recipient_not_found() -> ApiError {
+    (
+        StatusCode::NOT_FOUND,
+        Json(serde_json::json!({"error": "recipient_not_found"})),
+    )
+}
+
+fn bad_request(error: &str, message: &str) -> ApiError {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(serde_json::json!({"error": error, "message": message})),
+    )
+}
+
+fn upstream_error(e: impl std::fmt::Display) -> ApiError {
+    (
+        StatusCode::BAD_GATEWAY,
+        Json(serde_json::json!({"error": "upstream_error", "message": e.to_string()})),
+    )
+}
+
 // ---------- shared: 復号 + 送信 ----------
 
-/// channel 行が指す bot_config を復号して LINE WORKS へテキストを送る。
+/// bot_config を取得して秘密値を復号し、送信に使える設定にする。
 ///
-/// tenant 経路 (`test_send_channel`) と internal 経路 (`send_text_internal`) の
-/// 共通部。`tenant_id` は呼び出し側が解決したもの — tenant 経路は
-/// `X-Tenant-ID`、internal 経路は channel 行 (`row.tenant_id`) 由来で、
-/// **この関数は header を一切見ない**。
-async fn send_text_via_channel(
+/// channel 宛 (`send_text_via_channel`) と recipient 宛 (`send_text_to_lineworks_user`)
+/// の共通部。戻り値の `Uuid` は bot_config の id で、クライアント側の
+/// アクセストークンキャッシュのキーになる。
+///
+/// `tenant_id` は呼び出し側が解決したもの — tenant 経路は `X-Tenant-ID`、
+/// internal 経路は取得した行 (`row.tenant_id`) 由来で、**この関数は header を
+/// 一切見ない**。
+async fn resolve_bot_config(
     bot_admin: &Arc<dyn BotAdminRepository>,
-    lw_client: &LineworksBotClient,
     tenant_id: Uuid,
-    row: &LineworksChannel,
-    text: &str,
-) -> Result<(), ApiError> {
+    bot_config_id: Uuid,
+) -> Result<(Uuid, LineworksBotConfig), ApiError> {
     let full = bot_admin
-        .get_config_with_secrets(tenant_id, row.bot_config_id)
+        .get_config_with_secrets(tenant_id, bot_config_id)
         .await
         .map_err(|e| {
             tracing::error!("get_config_with_secrets: {e}");
@@ -113,23 +136,110 @@ async fn send_text_via_channel(
             },
         )?;
 
-    let config = LineworksBotConfig {
-        client_id: full.client_id.clone(),
-        client_secret,
-        service_account: full.service_account.clone(),
-        private_key,
-        bot_id: full.bot_id.clone(),
-    };
+    Ok((
+        full.id,
+        LineworksBotConfig {
+            client_id: full.client_id.clone(),
+            client_secret,
+            service_account: full.service_account.clone(),
+            private_key,
+            bot_id: full.bot_id.clone(),
+        },
+    ))
+}
+
+/// channel 行が指す bot_config を復号して LINE WORKS のトークルームへテキストを送る。
+///
+/// tenant 経路 (`test_send_channel`) と internal 経路 (`send_text_internal` の
+/// `channel_id` 指定) の共通部。
+async fn send_text_via_channel(
+    bot_admin: &Arc<dyn BotAdminRepository>,
+    lw_client: &LineworksBotClient,
+    tenant_id: Uuid,
+    row: &LineworksChannel,
+    text: &str,
+) -> Result<(), ApiError> {
+    let (config_id, config) = resolve_bot_config(bot_admin, tenant_id, row.bot_config_id).await?;
 
     lw_client
-        .send_text_to_channel(full.id, &config, &row.channel_id, text)
+        .send_text_to_channel(config_id, &config, &row.channel_id, text)
         .await
         .map_err(|e| {
             tracing::error!("send_text_to_channel: {e}");
-            (
-                StatusCode::BAD_GATEWAY,
-                Json(serde_json::json!({"error": "upstream_error", "message": e.to_string()})),
-            )
+            upstream_error(e)
+        })
+}
+
+/// recipient 行が LINE WORKS の個人宛先として使えるかを検証し、`lineworks_user_id` を返す。
+///
+/// `provider` が `lineworks` でない (= `lineworks_user_id` が NULL) 行は 400 で弾く。
+/// LINE 宛 (`provider = "line"`) は別の Messaging API 経路なのでここでは扱わない —
+/// 黙って何もしないと、呼び出し側は「送れた」と誤認したまま通知が消える。
+///
+/// `enabled = false` も **400 で弾く** (404 ではなく)。行自体は存在するので 404 に
+/// すると呼び出し側が「id が違う」と切り分けられなくなる。無効化は「この宛先には
+/// もう送るな」という運用の意思表示で、tenant 経路の配信 (`distribute` が
+/// `list_enabled` で引く) も無効な宛先には配らないため、internal 経路だけが
+/// 送ってしまうのを避ける。
+fn validate_lineworks_recipient(row: &NotifyRecipient) -> Result<&str, ApiError> {
+    if row.provider != "lineworks" {
+        return Err(bad_request(
+            "recipient_not_lineworks",
+            &format!("recipient provider is {}", row.provider),
+        ));
+    }
+    let user_id = row.lineworks_user_id.as_deref().ok_or_else(|| {
+        bad_request(
+            "recipient_not_lineworks",
+            "recipient has no lineworks_user_id",
+        )
+    })?;
+    if !row.enabled {
+        return Err(bad_request("recipient_disabled", "recipient is disabled"));
+    }
+    Ok(user_id)
+}
+
+/// tenant で有効な LINE WORKS bot config の id を選ぶ。
+///
+/// `notify_recipients` には `lineworks_channels.bot_config_id` に相当する列が無い
+/// (宛先は個人であって Bot に紐づかない) ため、配信オーケストレーター
+/// (`distribute::resolve_lineworks_config`) と同じく tenant で 1 つに決める。
+async fn pick_lineworks_bot_config_id(
+    bot_admin: &Arc<dyn BotAdminRepository>,
+    tenant_id: Uuid,
+) -> Result<Uuid, ApiError> {
+    let configs = bot_admin.list_configs(tenant_id).await.map_err(|e| {
+        tracing::error!("list_configs: {e}");
+        internal_error("list_bot_configs_failed")
+    })?;
+
+    configs
+        .iter()
+        .find(|c| c.provider == "lineworks" && c.enabled)
+        .map(|c| c.id)
+        .ok_or_else(|| internal_error("bot_config_not_found"))
+}
+
+/// recipient (個人) 宛に LINE WORKS のダイレクトメッセージを送る。
+///
+/// `tenant_id` は recipient 行由来 (internal 経路は header を見ない)。
+async fn send_text_to_lineworks_user(
+    bot_admin: &Arc<dyn BotAdminRepository>,
+    lw_client: &LineworksBotClient,
+    tenant_id: Uuid,
+    lineworks_user_id: &str,
+    text: &str,
+) -> Result<(), ApiError> {
+    let bot_config_id = pick_lineworks_bot_config_id(bot_admin, tenant_id).await?;
+    let (config_id, config) = resolve_bot_config(bot_admin, tenant_id, bot_config_id).await?;
+
+    lw_client
+        .send_text_to_user(config_id, &config, lineworks_user_id, text)
+        .await
+        .map_err(|e| {
+            tracing::error!("send_text_to_user: {e}");
+            upstream_error(e)
         })
 }
 
@@ -324,17 +434,54 @@ pub async fn process_internal_event(
 ///
 /// `channel_id` は **`lineworks_channels` の行 id (Uuid)** で、LINE WORKS 側の
 /// channel 文字列ではない (tenant 経路 `test-send` の `Path(id)` と同じもの)。
+/// `recipient_id` は **`notify_recipients` の行 id (Uuid)** で、個人宛の
+/// ダイレクトメッセージになる。
+///
+/// **どちらか一方が必須** — 両方指定・両方省略はどちらも 400 で弾く。宛先の
+/// 取り違えを黙って起こさないため (片方を優先する実装にすると、呼び出し側の
+/// 設定ミスが「意図しない相手に届いた」として現れる)。
 #[derive(Debug, Deserialize)]
 pub struct InternalSendBody {
-    pub channel_id: Uuid,
+    #[serde(default)]
+    pub channel_id: Option<Uuid>,
+    #[serde(default)]
+    pub recipient_id: Option<Uuid>,
     pub text: String,
+}
+
+/// `InternalSendBody` が指す宛先。
+#[derive(Debug, PartialEq, Eq)]
+enum SendTarget {
+    /// `lineworks_channels` の行 id (トークルーム宛)
+    Channel(Uuid),
+    /// `notify_recipients` の行 id (個人宛)
+    Recipient(Uuid),
+}
+
+/// body の宛先 2 択を検証する (pure)。
+fn resolve_send_target(
+    channel_id: Option<Uuid>,
+    recipient_id: Option<Uuid>,
+) -> Result<SendTarget, ApiError> {
+    match (channel_id, recipient_id) {
+        (Some(c), None) => Ok(SendTarget::Channel(c)),
+        (None, Some(r)) => Ok(SendTarget::Recipient(r)),
+        (Some(_), Some(_)) => Err(bad_request(
+            "target_ambiguous",
+            "specify exactly one of channel_id / recipient_id",
+        )),
+        (None, None) => Err(bad_request(
+            "target_required",
+            "channel_id or recipient_id is required",
+        )),
+    }
 }
 
 /// auth-worker 経由の無人送信 (dtako-scraper-relay の netprint cron 等)。
 ///
 /// internal 経路は `X-Tenant-ID` を honor しない (shared secret だけで tenant を
-/// 詐称できてしまうため — Refs #434)。tenant は channel 行の RLS バイパス取得
-/// (`get_for_send`) から解決する。
+/// 詐称できてしまうため — Refs #434)。tenant は channel 行 / recipient 行の
+/// RLS バイパス取得 (`get_for_send`) から解決する。
 async fn send_text_internal(
     State(state): State<AppState>,
     Json(body): Json<InternalSendBody>,
@@ -346,24 +493,52 @@ async fn send_text_internal(
         ));
     }
 
-    let row = state
-        .lineworks_channels
-        .get_for_send(body.channel_id)
-        .await
-        .map_err(|e| {
-            tracing::error!("get_for_send lineworks_channel: {e}");
-            internal_error("get_failed")
-        })?
-        .ok_or_else(channel_not_found)?;
+    let lw_client = LineworksBotClient::new();
 
-    send_text_via_channel(
-        &state.bot_admin,
-        &LineworksBotClient::new(),
-        row.tenant_id,
-        &row,
-        &body.text,
-    )
-    .await?;
+    match resolve_send_target(body.channel_id, body.recipient_id)? {
+        SendTarget::Channel(id) => {
+            let row = state
+                .lineworks_channels
+                .get_for_send(id)
+                .await
+                .map_err(|e| {
+                    tracing::error!("get_for_send lineworks_channel: {e}");
+                    internal_error("get_failed")
+                })?
+                .ok_or_else(channel_not_found)?;
+
+            send_text_via_channel(
+                &state.bot_admin,
+                &lw_client,
+                row.tenant_id,
+                &row,
+                &body.text,
+            )
+            .await?;
+        }
+        SendTarget::Recipient(id) => {
+            let row = state
+                .notify_recipients
+                .get_for_send(id)
+                .await
+                .map_err(|e| {
+                    tracing::error!("get_for_send notify_recipient: {e}");
+                    internal_error("get_failed")
+                })?
+                .ok_or_else(recipient_not_found)?;
+
+            let user_id = validate_lineworks_recipient(&row)?;
+
+            send_text_to_lineworks_user(
+                &state.bot_admin,
+                &lw_client,
+                row.tenant_id,
+                user_id,
+                &body.text,
+            )
+            .await?;
+        }
+    }
 
     Ok(Json(serde_json::json!({"ok": true})))
 }
@@ -402,16 +577,30 @@ mod tests {
         })
     }
 
-    /// `get_config_with_secrets` の戻り値だけを差し替えられる最小 stub。
-    /// 他メソッドは本 module から呼ばれないので `unimplemented!()`。
+    /// `get_config_with_secrets` / `list_configs` の戻り値だけを差し替えられる
+    /// 最小 stub。他メソッドは本 module から呼ばれないので `unimplemented!()`。
     struct StubBotAdmin {
         config: Mutex<Option<BotConfigWithSecrets>>,
+        /// `list_configs` (recipient 経路の bot 選択) が返す一覧
+        listed: Vec<BotConfigRow>,
         fail: bool,
     }
 
     impl StubBotAdmin {
         fn with_config(config: BotConfigWithSecrets) -> Arc<dyn BotAdminRepository> {
             Arc::new(Self {
+                listed: vec![listed_row(&config, "lineworks", true)],
+                config: Mutex::new(Some(config)),
+                fail: false,
+            })
+        }
+        /// `list_configs` だけを差し替える (recipient 経路の bot 選択テスト用)
+        fn with_listed(
+            config: BotConfigWithSecrets,
+            listed: Vec<BotConfigRow>,
+        ) -> Arc<dyn BotAdminRepository> {
+            Arc::new(Self {
+                listed,
                 config: Mutex::new(Some(config)),
                 fail: false,
             })
@@ -419,14 +608,30 @@ mod tests {
         fn missing() -> Arc<dyn BotAdminRepository> {
             Arc::new(Self {
                 config: Mutex::new(None),
+                listed: vec![],
                 fail: false,
             })
         }
         fn failing() -> Arc<dyn BotAdminRepository> {
             Arc::new(Self {
                 config: Mutex::new(None),
+                listed: vec![],
                 fail: true,
             })
+        }
+    }
+
+    fn listed_row(cfg: &BotConfigWithSecrets, provider: &str, enabled: bool) -> BotConfigRow {
+        BotConfigRow {
+            id: cfg.id,
+            provider: provider.into(),
+            name: cfg.name.clone(),
+            client_id: cfg.client_id.clone(),
+            service_account: cfg.service_account.clone(),
+            bot_id: cfg.bot_id.clone(),
+            enabled,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
         }
     }
 
@@ -443,7 +648,10 @@ mod tests {
             Ok(self.config.lock().unwrap().take())
         }
         async fn list_configs(&self, _t: Uuid) -> Result<Vec<BotConfigRow>, sqlx::Error> {
-            unimplemented!()
+            if self.fail {
+                return Err(sqlx::Error::RowNotFound);
+            }
+            Ok(self.listed.clone())
         }
         async fn update_client_secret(
             &self,
@@ -552,6 +760,13 @@ mod tests {
             .await;
         Mock::given(method("POST"))
             .and(path("/bots/bot-1/channels/ch-1/messages"))
+            .and(body_string_contains("予約番号"))
+            .respond_with(ResponseTemplate::new(send_status))
+            .mount(&server)
+            .await;
+        // recipient (個人) 宛は channels ではなく users パス
+        Mock::given(method("POST"))
+            .and(path("/bots/bot-1/users/lw-user-1/messages"))
             .and(body_string_contains("予約番号"))
             .respond_with(ResponseTemplate::new(send_status))
             .mount(&server)
@@ -680,5 +895,200 @@ mod tests {
         let (status, Json(body)) = channel_not_found();
         assert_eq!(status, StatusCode::NOT_FOUND);
         assert_eq!(body["error"], "channel_not_found");
+    }
+
+    #[test]
+    fn recipient_not_found_is_404() {
+        let (status, Json(body)) = recipient_not_found();
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(body["error"], "recipient_not_found");
+    }
+
+    // ---------- 宛先 2 択の検証 ----------
+
+    #[test]
+    fn resolve_send_target_picks_the_single_specified_target() {
+        let c = Uuid::new_v4();
+        let r = Uuid::new_v4();
+        assert_eq!(
+            resolve_send_target(Some(c), None).unwrap(),
+            SendTarget::Channel(c)
+        );
+        assert_eq!(
+            resolve_send_target(None, Some(r)).unwrap(),
+            SendTarget::Recipient(r)
+        );
+    }
+
+    #[test]
+    fn resolve_send_target_rejects_both_specified() {
+        let (status, Json(body)) =
+            resolve_send_target(Some(Uuid::new_v4()), Some(Uuid::new_v4())).unwrap_err();
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["error"], "target_ambiguous");
+    }
+
+    #[test]
+    fn resolve_send_target_rejects_neither_specified() {
+        let (status, Json(body)) = resolve_send_target(None, None).unwrap_err();
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["error"], "target_required");
+    }
+
+    // ---------- recipient 行の検証 ----------
+
+    fn sample_recipient() -> NotifyRecipient {
+        NotifyRecipient {
+            id: Uuid::new_v4(),
+            tenant_id: Uuid::new_v4(),
+            name: "本多 優鷹".into(),
+            provider: "lineworks".into(),
+            lineworks_user_id: Some("lw-user-1".into()),
+            line_user_id: None,
+            phone_number: None,
+            email: None,
+            enabled: true,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }
+    }
+
+    #[test]
+    fn validate_lineworks_recipient_returns_user_id() {
+        let row = sample_recipient();
+        assert_eq!(validate_lineworks_recipient(&row).unwrap(), "lw-user-1");
+    }
+
+    #[test]
+    fn validate_lineworks_recipient_rejects_line_provider() {
+        let mut row = sample_recipient();
+        row.provider = "line".into();
+        row.lineworks_user_id = None;
+        row.line_user_id = Some("U123".into());
+
+        let (status, Json(body)) = validate_lineworks_recipient(&row).unwrap_err();
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["error"], "recipient_not_lineworks");
+    }
+
+    /// provider だけ lineworks で user_id が入っていない不整合行も同じ 400。
+    #[test]
+    fn validate_lineworks_recipient_rejects_missing_user_id() {
+        let mut row = sample_recipient();
+        row.lineworks_user_id = None;
+
+        let (status, Json(body)) = validate_lineworks_recipient(&row).unwrap_err();
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["error"], "recipient_not_lineworks");
+    }
+
+    /// 無効化された宛先は 404 ではなく 400 — 行は在るので「id 違い」と混同させない。
+    #[test]
+    fn validate_lineworks_recipient_rejects_disabled() {
+        let mut row = sample_recipient();
+        row.enabled = false;
+
+        let (status, Json(body)) = validate_lineworks_recipient(&row).unwrap_err();
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["error"], "recipient_disabled");
+    }
+
+    // ---------- recipient 宛の bot 選択 + 送信 ----------
+
+    #[tokio::test]
+    async fn send_text_to_lineworks_user_posts_to_users_path() {
+        set_encryption_key();
+        let (_server, client) = mock_lineworks(200).await;
+
+        let res = send_text_to_lineworks_user(
+            &StubBotAdmin::with_config(sample_config()),
+            &client,
+            Uuid::new_v4(),
+            "lw-user-1",
+            "予約番号は J5JZPEQJ です",
+        )
+        .await;
+
+        assert!(res.is_ok(), "expected ok, got {:?}", res.err().map(|e| e.0));
+    }
+
+    #[tokio::test]
+    async fn send_text_to_lineworks_user_maps_upstream_failure_to_502() {
+        set_encryption_key();
+        let (_server, client) = mock_lineworks(500).await;
+
+        let (status, Json(body)) = send_text_to_lineworks_user(
+            &StubBotAdmin::with_config(sample_config()),
+            &client,
+            Uuid::new_v4(),
+            "lw-user-1",
+            "予約番号は J5JZPEQJ です",
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(status, StatusCode::BAD_GATEWAY);
+        assert_eq!(body["error"], "upstream_error");
+    }
+
+    #[tokio::test]
+    async fn pick_lineworks_bot_config_id_skips_disabled_and_other_providers() {
+        let cfg = sample_config();
+        let line_row = listed_row(&cfg, "line", true);
+        let disabled_row = listed_row(&cfg, "lineworks", false);
+        let mut wanted = listed_row(&cfg, "lineworks", true);
+        wanted.id = Uuid::new_v4();
+
+        let admin = StubBotAdmin::with_listed(cfg, vec![line_row, disabled_row, wanted.clone()]);
+        assert_eq!(
+            pick_lineworks_bot_config_id(&admin, Uuid::new_v4())
+                .await
+                .unwrap(),
+            wanted.id
+        );
+    }
+
+    #[tokio::test]
+    async fn pick_lineworks_bot_config_id_maps_empty_list_to_500() {
+        let (status, Json(body)) =
+            pick_lineworks_bot_config_id(&StubBotAdmin::missing(), Uuid::new_v4())
+                .await
+                .unwrap_err();
+
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(body["message"], "bot_config_not_found");
+    }
+
+    #[tokio::test]
+    async fn pick_lineworks_bot_config_id_maps_repo_error_to_500() {
+        let (status, Json(body)) =
+            pick_lineworks_bot_config_id(&StubBotAdmin::failing(), Uuid::new_v4())
+                .await
+                .unwrap_err();
+
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(body["message"], "list_bot_configs_failed");
+    }
+
+    // ---------- body の後方互換 ----------
+
+    /// #596 が確定させた `{channel_id, text}` はそのまま deserialize できること
+    /// (relay 側は当面この形のまま送ってくる)。
+    #[test]
+    fn internal_send_body_accepts_legacy_channel_only_shape() {
+        let id = Uuid::new_v4();
+        let body: InternalSendBody =
+            serde_json::from_value(serde_json::json!({"channel_id": id, "text": "hi"})).unwrap();
+        assert_eq!(body.channel_id, Some(id));
+        assert_eq!(body.recipient_id, None);
+    }
+
+    #[test]
+    fn internal_send_body_accepts_recipient_only_shape() {
+        let id = Uuid::new_v4();
+        let body: InternalSendBody =
+            serde_json::from_value(serde_json::json!({"recipient_id": id, "text": "hi"})).unwrap();
+        assert_eq!(body.recipient_id, Some(id));
+        assert_eq!(body.channel_id, None);
     }
 }

@@ -32,6 +32,17 @@ impl NotifyRecipientRepository for PgNotifyRecipientRepository {
             .await
     }
 
+    async fn get_for_send(&self, id: Uuid) -> Result<Option<NotifyRecipient>, sqlx::Error> {
+        // SECURITY DEFINER 関数経由で RLS バイパス (migration 130)。
+        // internal 経路は X-Tenant-ID を honor しないため、tenant は行から解決する。
+        sqlx::query_as::<_, NotifyRecipient>(
+            "SELECT * FROM alc_api.lookup_notify_recipient_for_send($1)",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
     async fn create(
         &self,
         tenant_id: Uuid,

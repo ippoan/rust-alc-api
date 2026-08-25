@@ -7,7 +7,7 @@ use uuid::Uuid;
 use rust_alc_api::db::repository::lineworks_channels::BotConfigForWebhook;
 
 use crate::mock_helpers::app_state::setup_mock_app_state;
-use crate::mock_helpers::MockLineworksChannelsRepository;
+use crate::mock_helpers::{MockLineworksChannelsRepository, MockNotifyRecipientRepository};
 
 fn install_mock(
     state: &mut rust_alc_api::AppState,
@@ -16,6 +16,15 @@ fn install_mock(
     let mock = Arc::new(MockLineworksChannelsRepository::default());
     *mock.bot_config.lock().unwrap() = cfg;
     state.lineworks_channels = mock.clone();
+    mock
+}
+
+/// recipient 宛 (`recipient_id`) 経路用の mock を差し込む。
+fn install_recipient_mock(
+    state: &mut rust_alc_api::AppState,
+) -> Arc<MockNotifyRecipientRepository> {
+    let mock = Arc::new(MockNotifyRecipientRepository::default());
+    state.notify_recipients = mock.clone();
     mock
 }
 
@@ -499,5 +508,185 @@ async fn test_send_user_jwt_rejected() {
         let user_jwt = crate::common::create_test_jwt(Uuid::new_v4(), "admin");
         let res = post_send(&base_url, &user_jwt, send_body("hello")).await;
         assert_eq!(res.status(), 401);
+    });
+}
+
+// ============================================================
+// POST /api/internal/lineworks/send — recipient (個人) 宛
+// ============================================================
+
+fn recipient_body(text: &str) -> Value {
+    serde_json::json!({ "recipient_id": Uuid::new_v4(), "text": text })
+}
+
+#[tokio::test]
+async fn test_send_recipient_reaches_bot_config_lookup() {
+    test_group!("Internal: send to recipient");
+    test_case!(
+        "recipient は id 引きで tenant ごと解決され、bot_config 不在なら 500",
+        {
+            let _guard = crate::common::ENV_LOCK.lock().unwrap();
+            std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+            let mut state = setup_mock_app_state();
+            let _mock = install_mock(&mut state, Some(sample_bot_cfg()));
+            let _recipients = install_recipient_mock(&mut state);
+            let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+
+            let jwt = crate::common::create_test_internal_jwt();
+            let res = post_send(&base_url, &jwt, recipient_body("予約番号は J5JZPEQJ です")).await;
+            // mock の list_configs は空なので bot 選択で止まる = ここまで到達した証拠
+            assert_eq!(res.status(), 500);
+            let body: Value = res.json().await.unwrap();
+            assert_eq!(body["message"], "bot_config_not_found");
+        }
+    );
+}
+
+#[tokio::test]
+async fn test_send_recipient_not_found() {
+    test_group!("Internal: send recipient not found");
+    test_case!("未登録 recipient id は 404", {
+        let _guard = crate::common::ENV_LOCK.lock().unwrap();
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+        let mut state = setup_mock_app_state();
+        let _mock = install_mock(&mut state, Some(sample_bot_cfg()));
+        let recipients = install_recipient_mock(&mut state);
+        *recipients.send_recipient.lock().unwrap() = None;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+
+        let jwt = crate::common::create_test_internal_jwt();
+        let res = post_send(&base_url, &jwt, recipient_body("hello")).await;
+        assert_eq!(res.status(), 404);
+        let body: Value = res.json().await.unwrap();
+        assert_eq!(body["error"], "recipient_not_found");
+    });
+}
+
+#[tokio::test]
+async fn test_send_recipient_not_lineworks() {
+    test_group!("Internal: send recipient not lineworks");
+    test_case!(
+        "LINE 宛の recipient は 400 (黙って握り潰さない)",
+        {
+            let _guard = crate::common::ENV_LOCK.lock().unwrap();
+            std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+            let mut state = setup_mock_app_state();
+            let _mock = install_mock(&mut state, Some(sample_bot_cfg()));
+            let recipients = install_recipient_mock(&mut state);
+            {
+                let mut row = recipients.send_recipient.lock().unwrap();
+                let r = row.as_mut().unwrap();
+                r.provider = "line".into();
+                r.lineworks_user_id = None;
+                r.line_user_id = Some("U1234567890".into());
+            }
+            let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+
+            let jwt = crate::common::create_test_internal_jwt();
+            let res = post_send(&base_url, &jwt, recipient_body("hello")).await;
+            assert_eq!(res.status(), 400);
+            let body: Value = res.json().await.unwrap();
+            assert_eq!(body["error"], "recipient_not_lineworks");
+        }
+    );
+}
+
+#[tokio::test]
+async fn test_send_recipient_disabled() {
+    test_group!("Internal: send recipient disabled");
+    test_case!(
+        "無効化された recipient は 400 (404 と区別できる形)",
+        {
+            let _guard = crate::common::ENV_LOCK.lock().unwrap();
+            std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+            let mut state = setup_mock_app_state();
+            let _mock = install_mock(&mut state, Some(sample_bot_cfg()));
+            let recipients = install_recipient_mock(&mut state);
+            recipients
+                .send_recipient
+                .lock()
+                .unwrap()
+                .as_mut()
+                .unwrap()
+                .enabled = false;
+            let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+
+            let jwt = crate::common::create_test_internal_jwt();
+            let res = post_send(&base_url, &jwt, recipient_body("hello")).await;
+            assert_eq!(res.status(), 400);
+            let body: Value = res.json().await.unwrap();
+            assert_eq!(body["error"], "recipient_disabled");
+        }
+    );
+}
+
+#[tokio::test]
+async fn test_send_recipient_db_error() {
+    test_group!("Internal: send recipient DB error");
+    test_case!("recipient 取得失敗は 500", {
+        let _guard = crate::common::ENV_LOCK.lock().unwrap();
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+        let mut state = setup_mock_app_state();
+        let _mock = install_mock(&mut state, Some(sample_bot_cfg()));
+        let recipients = install_recipient_mock(&mut state);
+        recipients.fail_next.store(true, Ordering::SeqCst);
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+
+        let jwt = crate::common::create_test_internal_jwt();
+        let res = post_send(&base_url, &jwt, recipient_body("hello")).await;
+        assert_eq!(res.status(), 500);
+        let body: Value = res.json().await.unwrap();
+        assert_eq!(body["message"], "get_failed");
+    });
+}
+
+// ============================================================
+// POST /api/internal/lineworks/send — 宛先 2 択の検証
+// ============================================================
+
+#[tokio::test]
+async fn test_send_rejects_both_targets() {
+    test_group!("Internal: send both targets");
+    test_case!("channel_id と recipient_id の両方指定は 400", {
+        let _guard = crate::common::ENV_LOCK.lock().unwrap();
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+        let mut state = setup_mock_app_state();
+        let _mock = install_mock(&mut state, Some(sample_bot_cfg()));
+        let _recipients = install_recipient_mock(&mut state);
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+
+        let jwt = crate::common::create_test_internal_jwt();
+        let res = post_send(
+            &base_url,
+            &jwt,
+            serde_json::json!({
+                "channel_id": Uuid::new_v4(),
+                "recipient_id": Uuid::new_v4(),
+                "text": "hello"
+            }),
+        )
+        .await;
+        assert_eq!(res.status(), 400);
+        let body: Value = res.json().await.unwrap();
+        assert_eq!(body["error"], "target_ambiguous");
+    });
+}
+
+#[tokio::test]
+async fn test_send_rejects_no_target() {
+    test_group!("Internal: send no target");
+    test_case!("宛先をどちらも省略すると 400", {
+        let _guard = crate::common::ENV_LOCK.lock().unwrap();
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+        let mut state = setup_mock_app_state();
+        let _mock = install_mock(&mut state, Some(sample_bot_cfg()));
+        let _recipients = install_recipient_mock(&mut state);
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+
+        let jwt = crate::common::create_test_internal_jwt();
+        let res = post_send(&base_url, &jwt, serde_json::json!({ "text": "hello" })).await;
+        assert_eq!(res.status(), 400);
+        let body: Value = res.json().await.unwrap();
+        assert_eq!(body["error"], "target_required");
     });
 }
