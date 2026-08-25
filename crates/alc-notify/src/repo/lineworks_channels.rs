@@ -38,6 +38,17 @@ impl LineworksChannelsRepository for PgLineworksChannelsRepository {
             .await
     }
 
+    async fn get_for_send(&self, id: Uuid) -> Result<Option<LineworksChannel>, sqlx::Error> {
+        // SECURITY DEFINER 関数経由で RLS バイパス (migration 129)。
+        // internal 経路は X-Tenant-ID を honor しないため、tenant は行から解決する。
+        sqlx::query_as::<_, LineworksChannel>(
+            "SELECT * FROM alc_api.lookup_lineworks_channel_for_send($1)",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
     async fn upsert_joined(
         &self,
         tenant_id: Uuid,

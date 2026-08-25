@@ -364,3 +364,140 @@ async fn test_event_lookup_db_error() {
         assert_eq!(res.status(), 500);
     });
 }
+
+// ============================================================
+// POST /api/internal/lineworks/send
+// ============================================================
+
+async fn post_send(base_url: &str, jwt: &str, body: Value) -> reqwest::Response {
+    reqwest::Client::new()
+        .post(format!("{base_url}/api/internal/lineworks/send"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .json(&body)
+        .send()
+        .await
+        .unwrap()
+}
+
+fn send_body(text: &str) -> Value {
+    serde_json::json!({ "channel_id": Uuid::new_v4(), "text": text })
+}
+
+#[tokio::test]
+async fn test_send_reaches_bot_config_lookup() {
+    test_group!("Internal: send reaches bot config");
+    test_case!(
+        "channel は id 引きで tenant ごと解決され、bot_config 不在なら 500",
+        {
+            let _guard = crate::common::ENV_LOCK.lock().unwrap();
+            std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+            let mut state = setup_mock_app_state();
+            let _mock = install_mock(&mut state, Some(sample_bot_cfg()));
+            let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+
+            let jwt = crate::common::create_test_internal_jwt();
+            let res = post_send(&base_url, &jwt, send_body("予約番号は J5JZPEQJ です")).await;
+            assert_eq!(res.status(), 500);
+            let body: Value = res.json().await.unwrap();
+            assert_eq!(body["message"], "bot_config_not_found");
+        }
+    );
+}
+
+#[tokio::test]
+async fn test_send_channel_not_found() {
+    test_group!("Internal: send channel not found");
+    test_case!("未登録 channel id は 404", {
+        let _guard = crate::common::ENV_LOCK.lock().unwrap();
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+        let mut state = setup_mock_app_state();
+        let mock = install_mock(&mut state, Some(sample_bot_cfg()));
+        *mock.send_channel.lock().unwrap() = None;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+
+        let jwt = crate::common::create_test_internal_jwt();
+        let res = post_send(&base_url, &jwt, send_body("hello")).await;
+        assert_eq!(res.status(), 404);
+        let body: Value = res.json().await.unwrap();
+        assert_eq!(body["error"], "channel_not_found");
+    });
+}
+
+#[tokio::test]
+async fn test_send_empty_text_rejected() {
+    test_group!("Internal: send empty text");
+    test_case!(
+        "空文字 / 空白のみの text は 400 (channel も引かない)",
+        {
+            let _guard = crate::common::ENV_LOCK.lock().unwrap();
+            std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+            let mut state = setup_mock_app_state();
+            let _mock = install_mock(&mut state, Some(sample_bot_cfg()));
+            let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+
+            let jwt = crate::common::create_test_internal_jwt();
+            for text in ["", "   "] {
+                let res = post_send(&base_url, &jwt, send_body(text)).await;
+                assert_eq!(res.status(), 400, "text={text:?}");
+                let body: Value = res.json().await.unwrap();
+                assert_eq!(body["error"], "text_required");
+            }
+        }
+    );
+}
+
+#[tokio::test]
+async fn test_send_db_error() {
+    test_group!("Internal: send DB error");
+    test_case!("channel 取得失敗は 500", {
+        let _guard = crate::common::ENV_LOCK.lock().unwrap();
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+        let mut state = setup_mock_app_state();
+        let mock = install_mock(&mut state, Some(sample_bot_cfg()));
+        mock.fail_next.store(true, Ordering::SeqCst);
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+
+        let jwt = crate::common::create_test_internal_jwt();
+        let res = post_send(&base_url, &jwt, send_body("hello")).await;
+        assert_eq!(res.status(), 500);
+        let body: Value = res.json().await.unwrap();
+        assert_eq!(body["message"], "get_failed");
+    });
+}
+
+#[tokio::test]
+async fn test_send_unauthorized() {
+    test_group!("Internal: send unauthorized");
+    test_case!("JWT 無しは 401 (tenant header では通らない)", {
+        let _guard = crate::common::ENV_LOCK.lock().unwrap();
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+        let mut state = setup_mock_app_state();
+        let _mock = install_mock(&mut state, Some(sample_bot_cfg()));
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+
+        let res = reqwest::Client::new()
+            .post(format!("{base_url}/api/internal/lineworks/send"))
+            .header("X-Tenant-ID", Uuid::new_v4().to_string())
+            .json(&send_body("hello"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 401);
+    });
+}
+
+#[tokio::test]
+async fn test_send_user_jwt_rejected() {
+    test_group!("Internal: send user JWT");
+    test_case!("ユーザー JWT (aud 無し) は 401", {
+        let _guard = crate::common::ENV_LOCK.lock().unwrap();
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+        let mut state = setup_mock_app_state();
+        let _mock = install_mock(&mut state, Some(sample_bot_cfg()));
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+
+        let user_jwt = crate::common::create_test_jwt(Uuid::new_v4(), "admin");
+        let res = post_send(&base_url, &user_jwt, send_body("hello")).await;
+        assert_eq!(res.status(), 401);
+    });
+}

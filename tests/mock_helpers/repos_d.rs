@@ -33,6 +33,9 @@ pub struct MockLineworksChannelsRepository {
     pub upsert_joined_calls: std::sync::atomic::AtomicUsize,
     /// `mark_left` の呼び出し回数 (テスト assertion 用)
     pub mark_left_calls: std::sync::atomic::AtomicUsize,
+    /// `get_for_send` (internal 送信経路の RLS バイパス取得) の戻り値。
+    /// `None` にすると channel_not_found 相当になる。
+    pub send_channel: Mutex<Option<LineworksChannel>>,
 }
 
 impl Default for MockLineworksChannelsRepository {
@@ -42,6 +45,7 @@ impl Default for MockLineworksChannelsRepository {
             bot_config: Mutex::new(None),
             upsert_joined_calls: std::sync::atomic::AtomicUsize::new(0),
             mark_left_calls: std::sync::atomic::AtomicUsize::new(0),
+            send_channel: Mutex::new(Some(mock_lineworks_channel(Uuid::new_v4()))),
         }
     }
 }
@@ -74,6 +78,10 @@ impl LineworksChannelsRepository for MockLineworksChannelsRepository {
     ) -> Result<Option<LineworksChannel>, sqlx::Error> {
         check_fail!(self);
         Ok(Some(mock_lineworks_channel(tenant_id)))
+    }
+    async fn get_for_send(&self, _id: Uuid) -> Result<Option<LineworksChannel>, sqlx::Error> {
+        check_fail!(self);
+        Ok(self.send_channel.lock().unwrap().clone())
     }
     async fn upsert_joined(
         &self,
