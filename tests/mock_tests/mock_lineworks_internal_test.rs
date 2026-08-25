@@ -690,3 +690,47 @@ async fn test_send_rejects_no_target() {
         assert_eq!(body["error"], "target_required");
     });
 }
+
+#[tokio::test]
+async fn test_send_explicit_null_target_is_unspecified() {
+    test_group!("Internal: send explicit null target");
+    test_case!(
+        "キー有り値 null は「未指定」— もう片方だけ指定と同じに通る",
+        {
+            let _guard = crate::common::ENV_LOCK.lock().unwrap();
+            std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+            let mut state = setup_mock_app_state();
+            let _mock = install_mock(&mut state, Some(sample_bot_cfg()));
+            let _recipients = install_recipient_mock(&mut state);
+            let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+
+            let jwt = crate::common::create_test_internal_jwt();
+            // channel_id: null + recipient_id 指定 → recipient 経路へ進む
+            // (400 target_ambiguous にならず、bot 選択まで到達する)
+            let res = post_send(
+                &base_url,
+                &jwt,
+                serde_json::json!({
+                    "channel_id": null,
+                    "recipient_id": Uuid::new_v4(),
+                    "text": "hello"
+                }),
+            )
+            .await;
+            assert_eq!(res.status(), 500);
+            let body: Value = res.json().await.unwrap();
+            assert_eq!(body["message"], "bot_config_not_found");
+
+            // 両方 null は「両方省略」と同じ 400 target_required
+            let res = post_send(
+                &base_url,
+                &jwt,
+                serde_json::json!({ "channel_id": null, "recipient_id": null, "text": "hello" }),
+            )
+            .await;
+            assert_eq!(res.status(), 400);
+            let body: Value = res.json().await.unwrap();
+            assert_eq!(body["error"], "target_required");
+        }
+    );
+}

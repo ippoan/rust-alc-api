@@ -205,6 +205,16 @@ fn validate_lineworks_recipient(row: &NotifyRecipient) -> Result<&str, ApiError>
 /// `notify_recipients` には `lineworks_channels.bot_config_id` に相当する列が無い
 /// (宛先は個人であって Bot に紐づかない) ため、配信オーケストレーター
 /// (`distribute::resolve_lineworks_config`) と同じく tenant で 1 つに決める。
+///
+/// 件数ごとの挙動 (distribute と完全に同じ選び方):
+/// - **0 件** (`lineworks` が無い / あるが全て `enabled = false`) → 500
+///   `bot_config_not_found`。channel 経路が bot_config を引けなかったときと同じ
+///   エラーに倒す (呼び出し側から見ればどちらも「Bot 設定が無い」)。
+/// - **複数件** → `list_configs` が返す順 (repo 側 `ORDER BY name`) の最初の 1 件。
+///   tenant が LINE WORKS Bot を複数持つ運用は想定していないが、持ったときに
+///   internal 経路と `distribute` が別の Bot から送るとログの追跡が壊れるため、
+///   **選び方を揃えること自体が契約**。宛先を Bot ごとに分けたくなったら
+///   `notify_recipients` に bot_config_id を足す (ここで別ルールを足さない)。
 async fn pick_lineworks_bot_config_id(
     bot_admin: &Arc<dyn BotAdminRepository>,
     tenant_id: Uuid,
@@ -1090,5 +1100,45 @@ mod tests {
             serde_json::from_value(serde_json::json!({"recipient_id": id, "text": "hi"})).unwrap();
         assert_eq!(body.recipient_id, Some(id));
         assert_eq!(body.channel_id, None);
+    }
+
+    /// **キー無しと明示 null は同じ「未指定」**。caller が
+    /// `{channel_id: null, recipient_id: "…"}` と書いても 400 にしない
+    /// (relay 側がどちらの書き方でも安全に通るように)。
+    #[test]
+    fn internal_send_body_treats_explicit_null_as_unspecified() {
+        let id = Uuid::new_v4();
+        let body: InternalSendBody = serde_json::from_value(
+            serde_json::json!({"channel_id": null, "recipient_id": id, "text": "hi"}),
+        )
+        .unwrap();
+        assert_eq!(body.channel_id, None);
+        assert_eq!(
+            resolve_send_target(body.channel_id, body.recipient_id).unwrap(),
+            SendTarget::Recipient(id)
+        );
+
+        let body: InternalSendBody = serde_json::from_value(
+            serde_json::json!({"channel_id": id, "recipient_id": null, "text": "hi"}),
+        )
+        .unwrap();
+        assert_eq!(body.recipient_id, None);
+        assert_eq!(
+            resolve_send_target(body.channel_id, body.recipient_id).unwrap(),
+            SendTarget::Channel(id)
+        );
+    }
+
+    /// 両方 null は「両方省略」と同じ 400 `target_required`。
+    #[test]
+    fn internal_send_body_treats_both_null_as_target_required() {
+        let body: InternalSendBody = serde_json::from_value(
+            serde_json::json!({"channel_id": null, "recipient_id": null, "text": "hi"}),
+        )
+        .unwrap();
+        let (status, Json(err)) =
+            resolve_send_target(body.channel_id, body.recipient_id).unwrap_err();
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(err["error"], "target_required");
     }
 }
