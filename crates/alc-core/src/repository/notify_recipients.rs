@@ -43,6 +43,12 @@ pub trait NotifyRecipientRepository: Send + Sync {
 
     async fn get(&self, tenant_id: Uuid, id: Uuid) -> Result<Option<NotifyRecipient>, sqlx::Error>;
 
+    /// internal 経路 (X-Tenant-ID を honor しない) 用に、id だけで 1 行取る。
+    /// RLS をバイパスするので **tenant スコープの CRUD には使わないこと** —
+    /// 呼び出し側は返った `tenant_id` を以降の取得に明示すること。
+    /// (SECURITY DEFINER 関数 lookup_notify_recipient_for_send を呼ぶ)
+    async fn get_for_send(&self, id: Uuid) -> Result<Option<NotifyRecipient>, sqlx::Error>;
+
     async fn create(
         &self,
         tenant_id: Uuid,
