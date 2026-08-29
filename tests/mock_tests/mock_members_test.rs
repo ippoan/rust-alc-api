@@ -448,3 +448,31 @@ async fn test_delete_member_db_error() {
         .unwrap();
     assert_eq!(res.status(), 500);
 }
+
+#[tokio::test]
+async fn test_invite_member_payroll_role() {
+    let (base_url, auth) = setup_admin().await;
+    let client = reqwest::Client::new();
+    let res = client
+        .post(format!("{base_url}/api/members"))
+        .header("Authorization", &auth)
+        .json(&json!({ "email": "x@example.com", "role": "payroll" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+}
+
+#[tokio::test]
+async fn test_update_role_payroll() {
+    let (base_url, auth) = setup_admin().await;
+    let client = reqwest::Client::new();
+    let res = client
+        .patch(format!("{base_url}/api/members/foo@example.com"))
+        .header("Authorization", &auth)
+        .json(&json!({ "role": "payroll" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 204);
+}

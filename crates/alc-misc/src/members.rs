@@ -39,7 +39,7 @@ struct UpdateRoleRequest {
 /// frontend から送られてくる role を受け付ける集合。
 /// DB 側は text でゆるいので、`member` などの frontend 固有値もそのまま保存する。
 fn is_allowed_role(role: &str) -> bool {
-    matches!(role, "admin" | "viewer" | "member")
+    matches!(role, "admin" | "viewer" | "member" | "payroll")
 }
 
 pub fn router() -> Router<AppState> {

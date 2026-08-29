@@ -1,6 +1,6 @@
 ---
 name: rust-alc-api-map
-generated-from: rust-alc-api:5df8b032
+generated-from: rust-alc-api:e31d4c59
 paths: [crates/, src/, migrations/]
 description: rust-alc-api (アルコールチェッカー基盤の Rust/Axum Cargo workspace — domain crate 群 + monolith 単一バイナリ、PostgreSQL+RLS、Cloud Run) の構造ナビゲーション。どの crate に何のルートがあるか / monolith (rust-alc-api) 一本化 (gateway + per-domain は #556 で廃止) / RLS・migration・deploy/release 分離の gotcha を 1 枚にまとめる。トリガー:「rust-alc-api」「alc-api」「alc-notify」「alc-tenko」「alc-trouble」「alc-carins」「alc-dtako」「gateway」「tenko-api」「carins-api」「dtako-api」「trouble-api」「RLS テナント」「sqlx migration」「ts-rs」「Release Wave」「Bazel」等。
 ---
@@ -259,7 +259,7 @@ psql "$DB_BASE" -c "VACUUM FULL alc_api.<table_name>;"
   "email": "user@example.com",
   "name": "ユーザー名",
   "tenant_id": "UUID (テナントID)",
-  "role": "admin | viewer",
+  "role": "admin | viewer | payroll",
   "iat": 1234567890,
   "exp": 1234571490
 }
@@ -287,6 +287,7 @@ psql "$DB_BASE" -c "VACUUM FULL alc_api.<table_name>;"
 - HMAC-SHA256 state パラメータで CSRF 防止（`OAUTH_STATE_SECRET` 環境変数）
 - 実装: `src/auth/lineworks.rs`, `src/routes/auth.rs`
 - **新規ユーザーの `role` は `'viewer'`** (`crates/alc-core/src/repo/auth.rs` の `create_user_lineworks`、Refs #599。旧 `'admin'` リテラル)。経路別: Google = 招待 (`tenant_allowed_emails.role`) を bind / LINE WORKS = `'viewer'` / LINE = `'viewer'`。この INSERT は `upsert_lineworks_user` が `find_user_by_lineworks_id` で既存行を引けなかった時だけ走る (= 既存ユーザーの role は動かない)。`users.role` の DB 既定値は `'admin'` (`migrations/003_create_users.sql`) なので退行は静かに管理者が増える形でしか出ず、mock は SQL を通らないため実 DB テスト `tests/auth_user_role_test.rs` (bazel-test-db の `db-auth-user-role` shard) で 3 経路とも縛っている
+- **`role` の取りうる値は `'admin'` / `'viewer'` / `'payroll'`** (`migrations/131_add_payroll_role.sql` で `users.role` と `tenant_allowed_emails.role` の CHECK を同時に広げた)。**招待側 (`tenant_allowed_emails`) とログイン本体 (`users`) は必ず同じ集合にする** — 片方だけ広げると「招待は通るのにログインで CHECK 違反」になる。`'payroll'` は給与の閲覧可否を決める独立した軸で、上流 (rust-ichibanboshi) の email allowlist と **AND** で効く (role が allowlist を上書きすることはない)。**テナント管理系の権限判定 (`role != "admin"` の 22 か所: `access_requests.rs` / `api_tokens.rs` / `bot_admin.rs` / `members.rs` / `sso_admin.rs` / `tenant_users.rs`) は従来どおりで、`'payroll'` はそこでは 403 のまま** — 給与専用 role が SSO 設定 / API トークン / bot 設定 / メンバー管理 / 参加リクエストに触れないのが正しい状態なので緩めない。受け付ける側は `tenant_users::invite_user` の allowlist と `members::is_allowed_role` の 2 か所 (後者は frontend 固有の `'member'` も許す)。**`employees.role` (`migrations/024` / `028`、driver / manager / admin) は別テーブル・別ドメイン**で、同名の `'admin'` が出てくるが無関係
 
 ### ミドルウェア
 
