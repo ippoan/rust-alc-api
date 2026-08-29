@@ -383,6 +383,10 @@ jobs:
           # (読取日 OR 運行日) を実 DB で固定する。SQL は実行時クエリなので
           # コンパイル時検査が効かず、窓が縮む退行は静かにデータが減る形で出る
           - { name: db-dtako-operation-window, target: "//:dtako_operation_window_test" }
+          # Refs #599: ログイン経路ごとの新規ユーザーの role (LINE WORKS = viewer)
+          # を実 DB で固定する。role は実行時 SQL のリテラル / bind で決まり、
+          # users.role の DB 既定値が 'admin' なので退行は静かに管理者を増やす
+          - { name: db-auth-user-role, target: "//:auth_user_role_test" }
     services:
       postgres:
         image: postgres:16

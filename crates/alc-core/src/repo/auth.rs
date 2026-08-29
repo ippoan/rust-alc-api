@@ -161,6 +161,15 @@ impl AuthRepository for PgAuthRepository {
         .await
     }
 
+    /// LINE WORKS ログインで **新規に** user 行を作る (既存ヒット時は
+    /// `upsert_lineworks_user` 側が `find_user_by_lineworks_id` の結果を返すため
+    /// ここには来ない = 既存ユーザーの role はこの SQL では変わらない)。
+    ///
+    /// role は `'viewer'` 固定 (Refs #599)。以前は `'admin'` リテラルだったため、
+    /// LINE WORKS でログインできる人が全員自動で管理者になっていた。昇格は既存の
+    /// 管理 UI (招待 / 権限変更) 経由に寄せる。LINE 経路 (`create_user_line`) と
+    /// 揃った形で、招待の role を bind する Google 経路 (`create_user_google`) は
+    /// これまでどおり。
     async fn create_user_lineworks(
         &self,
         tenant_id: Uuid,
@@ -170,7 +179,7 @@ impl AuthRepository for PgAuthRepository {
     ) -> Result<User, sqlx::Error> {
         sqlx::query_as::<_, User>(
             r#"INSERT INTO users (tenant_id, lineworks_id, email, name, role)
-               VALUES ($1, $2, $3, $4, 'admin') RETURNING *"#,
+               VALUES ($1, $2, $3, $4, 'viewer') RETURNING *"#,
         )
         .bind(tenant_id)
         .bind(lineworks_id)

@@ -172,6 +172,10 @@ jobs:
           # (読取日 OR 運行日) を実 DB で固定する。ci.yml の bazel-test-db と
           # 同じ内容にすること (check_bazel_test_matrix.sh が pair 一致を検査する)
           - { name: db-dtako-operation-window, target: "//:dtako_operation_window_test" }
+          # Refs #599: 新規ユーザーの role を実 DB で固定する。ci.yml の
+          # bazel-test-db と同じ内容にすること
+          # (check_bazel_test_matrix.sh が pair 一致を検査する)
+          - { name: db-auth-user-role, target: "//:auth_user_role_test" }
     services:
       postgres:
         image: postgres:16
