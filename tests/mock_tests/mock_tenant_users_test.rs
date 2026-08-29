@@ -523,3 +523,24 @@ async fn test_list_users_with_data() {
     assert_eq!(users.len(), 1);
     assert_eq!(users[0]["email"], "test@example.com");
 }
+
+#[tokio::test]
+async fn test_invite_user_success_payroll_role() {
+    let (base_url, auth_header, _, _) = setup().await;
+    let client = reqwest::Client::new();
+
+    let res = client
+        .post(format!("{base_url}/api/admin/users/invite"))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({
+            "email": "payroll@example.com",
+            "role": "payroll"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["email"], "payroll@example.com");
+    assert_eq!(body["role"], "payroll");
+}

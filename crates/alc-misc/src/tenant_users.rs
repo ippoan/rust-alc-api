@@ -117,7 +117,9 @@ async fn invite_user(
     }
 
     let role = body.role.unwrap_or_else(|| "admin".to_string());
-    if role != "admin" && role != "viewer" {
+    // 'payroll' は給与閲覧用の role。テナント管理の権限判定 (role != "admin") は
+    // 従来どおりなので、招待で受け付けても管理系は 403 のまま。
+    if !matches!(role.as_str(), "admin" | "viewer" | "payroll") {
         return Err(StatusCode::BAD_REQUEST);
     }
 
