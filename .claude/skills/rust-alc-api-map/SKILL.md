@@ -286,10 +286,7 @@ psql "$DB_BASE" -c "VACUUM FULL alc_api.<table_name>;"
 - `resolve_sso_config()` は SECURITY DEFINER 関数（認証前アクセス用）
 - HMAC-SHA256 state パラメータで CSRF 防止（`OAUTH_STATE_SECRET` 環境変数）
 - 実装: `src/auth/lineworks.rs`, `src/routes/auth.rs`
-- **新規ユーザーの `role` は `'viewer'`** (`crates/alc-core/src/repo/auth.rs` の `create_user_lineworks`、Refs #599)。以前は `'admin'` リテラルで、LINE WORKS で ログインできる人が全員自動で管理者になっていた (`role == "admin"` は `crates/alc-misc/src/{tenant_users,access_requests,api_tokens,bot_admin,members,sso_admin}.rs` の 403 判定そのもの)。昇格は既存の管理 UI (招待 / 権限変更) 経由。
-  **経路ごとの決まり方**: Google = 招待 (`tenant_allowed_emails.role`) を bind (可変) / LINE WORKS = `'viewer'` / LINE = `'viewer'`。
-  この INSERT は `upsert_lineworks_user` (`crates/alc-auth/src/internal.rs`) が `find_user_by_lineworks_id` で既存行を引けなかったときだけ走る ⇒ **既存ユーザーの role は動かない** (既に admin で作られた人の是正は別件)。
-  `users.role` の DB 既定値は `'admin'` (`migrations/003_create_users.sql`) なので、リテラルを戻しても列を落としても退行は「静かに管理者が増える」形でしか出ない。実 DB テスト `tests/auth_user_role_test.rs` (bazel-test-db の `db-auth-user-role` shard) が 3 経路とも縛っている — mock (`tests/mock_helpers/repos_a.rs`) は SQL を通らないのでここは実 DB でしか測れない。
+- **新規ユーザーの `role` は `'viewer'`** (`crates/alc-core/src/repo/auth.rs` の `create_user_lineworks`、Refs #599。旧 `'admin'` リテラル)。経路別: Google = 招待 (`tenant_allowed_emails.role`) を bind / LINE WORKS = `'viewer'` / LINE = `'viewer'`。この INSERT は `upsert_lineworks_user` が `find_user_by_lineworks_id` で既存行を引けなかった時だけ走る (= 既存ユーザーの role は動かない)。`users.role` の DB 既定値は `'admin'` (`migrations/003_create_users.sql`) なので退行は静かに管理者が増える形でしか出ず、mock は SQL を通らないため実 DB テスト `tests/auth_user_role_test.rs` (bazel-test-db の `db-auth-user-role` shard) で 3 経路とも縛っている
 
 ### ミドルウェア
 
