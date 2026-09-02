@@ -909,6 +909,95 @@ async fn bulk_upsert_by_code_rejects_15_digit_nfc_id() {
     assert_eq!(res.status(), 400);
 }
 
+#[tokio::test]
+async fn bulk_upsert_by_code_rejects_empty_code() {
+    let (base, auth) = setup().await;
+    let res = client()
+        .put(format!("{base}/api/employees/bulk-by-code"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "items": [{"code": "", "name": "X"}]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 400);
+    let body = res.text().await.unwrap();
+    assert!(body.contains("items[0].code"), "body={body}");
+}
+
+#[tokio::test]
+async fn bulk_upsert_by_code_rejects_65_char_code() {
+    let (base, auth) = setup().await;
+    let long_code = "x".repeat(65);
+    let res = client()
+        .put(format!("{base}/api/employees/bulk-by-code"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "items": [{"code": long_code, "name": "X"}]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 400);
+    let body = res.text().await.unwrap();
+    assert!(body.contains("items[0].code"), "body={body}");
+}
+
+#[tokio::test]
+async fn bulk_upsert_by_code_rejects_empty_name() {
+    let (base, auth) = setup().await;
+    let res = client()
+        .put(format!("{base}/api/employees/bulk-by-code"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "items": [{"code": "E1", "name": ""}]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 400);
+    let body = res.text().await.unwrap();
+    assert!(body.contains("items[0].name"), "body={body}");
+}
+
+#[tokio::test]
+async fn bulk_upsert_by_code_rejects_201_char_name() {
+    let (base, auth) = setup().await;
+    let long_name = "x".repeat(201);
+    let res = client()
+        .put(format!("{base}/api/employees/bulk-by-code"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "items": [{"code": "E1", "name": long_name}]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 400);
+    let body = res.text().await.unwrap();
+    assert!(body.contains("items[0].name"), "body={body}");
+}
+
+#[tokio::test]
+async fn bulk_upsert_by_code_repo_error_returns_500() {
+    let mock = Arc::new(MockEmployeeRepository::default());
+    mock.fail_next.store(true, Ordering::SeqCst);
+    let (base, auth) = setup_with_mock(mock).await;
+    let res = client()
+        .put(format!("{base}/api/employees/bulk-by-code"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "items": [{"code": "E1", "name": "X"}]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 500);
+    let body = res.text().await.unwrap();
+    assert_eq!(body, "internal error");
+}
+
 // ===========================================================================
 // Unauthorized — no JWT → 401
 // ===========================================================================
