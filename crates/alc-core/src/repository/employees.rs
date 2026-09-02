@@ -1,7 +1,10 @@
 use async_trait::async_trait;
 use uuid::Uuid;
 
-use crate::models::{CreateEmployee, Employee, FaceDataEntry, UpdateEmployee, UpdateFace};
+use crate::models::{
+    CreateEmployee, Employee, EmployeeUpsertItem, EmployeeUpsertSummary, FaceDataEntry,
+    UpdateEmployee, UpdateFace,
+};
 
 #[async_trait]
 pub trait EmployeeRepository: Send + Sync {
@@ -60,6 +63,14 @@ pub trait EmployeeRepository: Send + Sync {
         id: Uuid,
         nfc_id: &str,
     ) -> Result<Option<Employee>, sqlx::Error>;
+
+    /// 乗務員CD (code) キーの一括 upsert (Refs ippoan/alc-app-s3#125)。
+    /// 1 トランザクションで items を順に処理する。
+    async fn upsert_by_code(
+        &self,
+        tenant_id: Uuid,
+        items: &[EmployeeUpsertItem],
+    ) -> Result<EmployeeUpsertSummary, sqlx::Error>;
 
     async fn approve_face(
         &self,

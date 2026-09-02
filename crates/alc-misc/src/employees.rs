@@ -8,9 +8,17 @@ use uuid::Uuid;
 
 use alc_core::auth_middleware::TenantId;
 use alc_core::models::{
-    CreateEmployee, Employee, FaceDataEntry, UpdateEmployee, UpdateFace, UpdateLicense, UpdateNfcId,
+    CreateEmployee, Employee, EmployeeBulkUpsert, EmployeeUpsertItem, EmployeeUpsertSummary,
+    FaceDataEntry, UpdateEmployee, UpdateFace, UpdateLicense, UpdateNfcId,
 };
 use alc_core::AppState;
+
+/// `PUT /employees/bulk-by-code` で 1 リクエストに詰められる items の上限。
+const MAX_BULK_UPSERT_ITEMS: usize = 500;
+
+/// code / name の長さ上限、nfc_id は「交付日8桁+有効期限8桁」の固定 16 桁。
+const MAX_CODE_LEN: usize = 64;
+const MAX_NAME_LEN: usize = 200;
 
 /// テナント対応ルート (JWT or X-Tenant-ID)
 pub fn tenant_router() -> Router<AppState> {
@@ -30,6 +38,7 @@ pub fn tenant_router() -> Router<AppState> {
         .route("/employees/{id}/face/reject", put(reject_face))
         .route("/employees/by-nfc/{nfc_id}", get(get_employee_by_nfc))
         .route("/employees/by-code/{code}", get(get_employee_by_code))
+        .route("/employees/bulk-by-code", put(bulk_upsert_by_code))
 }
 
 async fn create_employee(
@@ -262,4 +271,55 @@ async fn reject_face(
         .ok_or(StatusCode::NOT_FOUND)?;
 
     Ok(Json(employee))
+}
+
+/// nfc_id は運転免許証 IC の「交付日8桁+有効期限8桁」= 固定16桁の数字。
+fn valid_bulk_nfc_id(nfc_id: &str) -> bool {
+    nfc_id.len() == 16 && nfc_id.chars().all(|c| c.is_ascii_digit())
+}
+
+/// items 1 件の検証。不正なら失敗理由 (index 込み) を返す。
+fn validate_bulk_item(idx: usize, item: &EmployeeUpsertItem) -> Result<(), String> {
+    if item.code.is_empty() || item.code.chars().count() > MAX_CODE_LEN {
+        return Err(format!("items[{idx}].code が不正です"));
+    }
+    if item.name.is_empty() || item.name.chars().count() > MAX_NAME_LEN {
+        return Err(format!("items[{idx}].name が不正です"));
+    }
+    if let Some(nfc_id) = &item.nfc_id {
+        if !valid_bulk_nfc_id(nfc_id) {
+            return Err(format!("items[{idx}].nfc_id が不正です"));
+        }
+    }
+    Ok(())
+}
+
+/// `PUT /employees/bulk-by-code` — 乗務員CD (code) キーの一括 upsert
+/// (Refs ippoan/alc-app-s3#125)。theearth の乗務員マスタを relay 経由で
+/// 1 日 5 回取り込む用途で、1 リクエストで最大 500 件をまとめて処理する。
+async fn bulk_upsert_by_code(
+    State(state): State<AppState>,
+    tenant: axum::Extension<TenantId>,
+    Json(body): Json<EmployeeBulkUpsert>,
+) -> Result<(StatusCode, Json<EmployeeUpsertSummary>), (StatusCode, String)> {
+    if body.items.is_empty() || body.items.len() > MAX_BULK_UPSERT_ITEMS {
+        return Err((StatusCode::BAD_REQUEST, "items が不正です".to_string()));
+    }
+    for (idx, item) in body.items.iter().enumerate() {
+        validate_bulk_item(idx, item).map_err(|msg| (StatusCode::BAD_REQUEST, msg))?;
+    }
+
+    let summary = state
+        .employees
+        .upsert_by_code(tenant.0 .0, &body.items)
+        .await
+        .map_err(|e| {
+            tracing::error!("upsert_by_code error: {e}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal error".to_string(),
+            )
+        })?;
+
+    Ok((StatusCode::OK, Json(summary)))
 }

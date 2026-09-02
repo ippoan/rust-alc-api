@@ -1020,6 +1020,9 @@ pub struct MockEmployeeRepository {
     pub return_some: AtomicBool,
     pub return_deleted: AtomicBool,
     pub return_conflict: AtomicBool,
+    /// upsert_by_code 専用の in-memory store (Refs ippoan/alc-app-s3#125)。
+    /// 他のメソッドはフラグ方式 (sample_employee) のままなので混ぜない。
+    pub store: std::sync::Mutex<Vec<Employee>>,
 }
 
 impl Default for MockEmployeeRepository {
@@ -1029,6 +1032,7 @@ impl Default for MockEmployeeRepository {
             return_some: AtomicBool::new(false),
             return_deleted: AtomicBool::new(false),
             return_conflict: AtomicBool::new(false),
+            store: std::sync::Mutex::new(vec![]),
         }
     }
 }
@@ -1199,6 +1203,107 @@ impl EmployeeRepository for MockEmployeeRepository {
             return Ok(Some(self.sample_employee()));
         }
         Ok(None)
+    }
+
+    async fn upsert_by_code(
+        &self,
+        tenant_id: Uuid,
+        items: &[EmployeeUpsertItem],
+    ) -> Result<EmployeeUpsertSummary, sqlx::Error> {
+        check_fail!(self);
+        let mut store = self.store.lock().unwrap();
+        let mut created = 0usize;
+        let mut updated = 0usize;
+        let mut skipped: Vec<EmployeeUpsertSkipped> = Vec::new();
+
+        for item in items {
+            // (a) code 一致 (deleted_at は問わない)。
+            let by_code = store.iter().position(|e| {
+                e.tenant_id == tenant_id && e.code.as_deref() == Some(item.code.as_str())
+            });
+
+            if let Some(idx) = by_code {
+                let emp = &mut store[idx];
+                emp.name = item.name.clone();
+                emp.nfc_id = item.nfc_id.clone();
+                emp.license_issue_date = item.license_issue_date;
+                emp.license_expiry_date = item.license_expiry_date;
+                emp.deleted_at = None;
+                emp.updated_at = Utc::now();
+                updated += 1;
+                continue;
+            }
+
+            // (b) nfc_id 一致 (deleted_at IS NULL)。
+            if let Some(nfc_id) = &item.nfc_id {
+                let matches: Vec<usize> = store
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, e)| {
+                        e.tenant_id == tenant_id
+                            && e.nfc_id.as_deref() == Some(nfc_id.as_str())
+                            && e.deleted_at.is_none()
+                    })
+                    .map(|(i, _)| i)
+                    .collect();
+
+                if matches.len() == 1 {
+                    let idx = matches[0];
+                    let assignable = store[idx].code.is_none()
+                        || store[idx].code.as_deref() == Some(item.code.as_str());
+                    if assignable {
+                        let emp = &mut store[idx];
+                        emp.code = Some(item.code.clone());
+                        emp.name = item.name.clone();
+                        emp.license_issue_date = item.license_issue_date;
+                        emp.license_expiry_date = item.license_expiry_date;
+                        emp.updated_at = Utc::now();
+                        updated += 1;
+                        continue;
+                    }
+                    skipped.push(EmployeeUpsertSkipped {
+                        code: item.code.clone(),
+                        reason: "nfc_id_conflict".to_string(),
+                    });
+                    continue;
+                } else if matches.len() > 1 {
+                    skipped.push(EmployeeUpsertSkipped {
+                        code: item.code.clone(),
+                        reason: "nfc_id_conflict".to_string(),
+                    });
+                    continue;
+                }
+            }
+
+            // (c) 新規作成。
+            store.push(Employee {
+                id: Uuid::new_v4(),
+                tenant_id,
+                code: Some(item.code.clone()),
+                nfc_id: item.nfc_id.clone(),
+                name: item.name.clone(),
+                face_photo_url: None,
+                face_embedding: None,
+                face_embedding_at: None,
+                face_model_version: None,
+                face_approval_status: "pending".to_string(),
+                face_approved_by: None,
+                face_approved_at: None,
+                license_issue_date: item.license_issue_date,
+                license_expiry_date: item.license_expiry_date,
+                role: vec!["driver".to_string()],
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+                deleted_at: None,
+            });
+            created += 1;
+        }
+
+        Ok(EmployeeUpsertSummary {
+            created,
+            updated,
+            skipped,
+        })
     }
 }
 

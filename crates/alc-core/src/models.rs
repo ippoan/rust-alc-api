@@ -94,6 +94,37 @@ pub struct UpdateNfcId {
     pub nfc_id: String,
 }
 
+/// `PUT /api/employees/bulk-by-code` の 1 件分 (Refs ippoan/alc-app-s3#125)。
+/// theearth の乗務員マスタを relay 経由で取り込む用途で、乗務員CD (code) を
+/// キーに upsert する。
+#[derive(Debug, Deserialize)]
+pub struct EmployeeUpsertItem {
+    pub code: String,
+    pub name: String,
+    pub nfc_id: Option<String>,
+    pub license_issue_date: Option<chrono::NaiveDate>,
+    pub license_expiry_date: Option<chrono::NaiveDate>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct EmployeeBulkUpsert {
+    pub items: Vec<EmployeeUpsertItem>,
+}
+
+/// upsert できなかった 1 件 (nfc_id 衝突 / INSERT 時の unique 違反)。
+#[derive(Debug, Serialize)]
+pub struct EmployeeUpsertSkipped {
+    pub code: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct EmployeeUpsertSummary {
+    pub created: usize,
+    pub updated: usize,
+    pub skipped: Vec<EmployeeUpsertSkipped>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct UpdateEmployee {
     pub name: String,

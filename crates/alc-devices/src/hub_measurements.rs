@@ -46,11 +46,18 @@ async fn ensure_tenant_for_staging(state: &AppState, tenant_id: Uuid) -> Result<
 /// - temperature / blood_pressure … ble-medical-gateway 互換 JSON
 /// - alcohol … CoreS3 が fc1200 プロトコルを端末上で解釈したパース済み測定値
 /// - fc1200_raw … パース失敗時の hex パススルー fallback
+/// - license … CoreS3 が点呼開始時に読み取る免許証 IC (Refs ippoan/alc-app-s3#125)。
+///   同じ session_id で測定と束ねて送られる。
 ///
 /// 将来の拡張 (timecard イベント等) はここに足す。DB 側に CHECK は張っていない
 /// (migration 126 参照) ため、拡張はコード変更のみで済む。
-pub const HUB_MEASUREMENT_KINDS: &[&str] =
-    &["temperature", "blood_pressure", "alcohol", "fc1200_raw"];
+pub const HUB_MEASUREMENT_KINDS: &[&str] = &[
+    "temperature",
+    "blood_pressure",
+    "alcohol",
+    "fc1200_raw",
+    "license",
+];
 
 /// 1 リクエストで受けるバッチの上限 (再送スパイクからの防御)。
 const MAX_BATCH_ITEMS: usize = 500;
@@ -229,6 +236,11 @@ mod tests {
         for kind in HUB_MEASUREMENT_KINDS {
             assert!(validate(&item(kind, 0, "dev-1")), "kind={kind}");
         }
+    }
+
+    #[test]
+    fn validate_accepts_license_kind() {
+        assert!(validate(&item("license", 0, "dev-1")));
     }
 
     #[test]
