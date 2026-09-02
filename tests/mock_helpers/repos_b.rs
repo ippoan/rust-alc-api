@@ -1223,14 +1223,31 @@ impl EmployeeRepository for MockEmployeeRepository {
             });
 
             if let Some(idx) = by_code {
+                // 実 DB は `UNIQUE (tenant_id, nfc_id)`。他の乗務員が同じ nfc_id を
+                // 持っていたら nfc_id は据え置き、skipped に残す (repo と同じ規則)。
+                let conflicting = item.nfc_id.as_ref().is_some_and(|nfc_id| {
+                    store.iter().enumerate().any(|(i, e)| {
+                        i != idx
+                            && e.tenant_id == tenant_id
+                            && e.nfc_id.as_deref() == Some(nfc_id.as_str())
+                    })
+                });
                 let emp = &mut store[idx];
                 emp.name = item.name.clone();
-                emp.nfc_id = item.nfc_id.clone();
+                if !conflicting {
+                    emp.nfc_id = item.nfc_id.clone();
+                }
                 emp.license_issue_date = item.license_issue_date;
                 emp.license_expiry_date = item.license_expiry_date;
                 emp.deleted_at = None;
                 emp.updated_at = Utc::now();
                 updated += 1;
+                if conflicting {
+                    skipped.push(EmployeeUpsertSkipped {
+                        code: item.code.clone(),
+                        reason: "nfc_id_conflict".to_string(),
+                    });
+                }
                 continue;
             }
 

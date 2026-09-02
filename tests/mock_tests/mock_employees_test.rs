@@ -865,6 +865,59 @@ async fn bulk_upsert_by_code_skips_on_nfc_id_conflict_multiple_rows() {
     assert_eq!(skipped[0]["reason"], "nfc_id_conflict");
 }
 
+/// ★ code は一致するが nfc_id を**別の乗務員が既に持っている**ケース。
+///
+/// 実 DB は `UNIQUE (tenant_id, nfc_id)` なので、そのまま UPDATE すると
+/// トランザクションごと 500 になり **1 人のせいで全員分が落ちる**
+/// (2026-09-02 本番、退職者を含めた 242 件で実際に発生した)。
+/// nfc_id だけ据え置いて残りは更新し、skipped に名指しで残す。
+#[tokio::test]
+async fn bulk_upsert_by_code_keeps_nfc_id_when_another_employee_owns_it() {
+    let tenant_id = Uuid::new_v4();
+    let mock = Arc::new(MockEmployeeRepository::default());
+    {
+        let mut store = mock.store.lock().unwrap();
+        // 先に同じ nfc_id を持っている別の乗務員
+        store.push(seed_employee(
+            tenant_id,
+            Some("E100"),
+            Some("1234567820260101"),
+            false,
+        ));
+        // 更新対象 (code 一致、nfc_id はまだ無い)
+        store.push(seed_employee(tenant_id, Some("E101"), None, false));
+    }
+    let (base, auth) = setup_with_mock_tenant(mock.clone(), tenant_id).await;
+
+    let res = client()
+        .put(format!("{base}/api/employees/bulk-by-code"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "items": [{"code": "E101", "name": "Renamed", "nfc_id": "1234567820260101"}]
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    // 500 にならず、他の項目は入る
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["updated"], 1);
+    let skipped = body["skipped"].as_array().unwrap();
+    assert_eq!(skipped.len(), 1);
+    assert_eq!(skipped[0]["code"], "E101");
+    assert_eq!(skipped[0]["reason"], "nfc_id_conflict");
+
+    let store = mock.store.lock().unwrap();
+    let target = store
+        .iter()
+        .find(|e| e.code.as_deref() == Some("E101"))
+        .unwrap();
+    assert_eq!(target.name, "Renamed");
+    // ★ nfc_id は奪わない (先に持っている乗務員が正)
+    assert_eq!(target.nfc_id, None);
+}
+
 #[tokio::test]
 async fn bulk_upsert_by_code_rejects_empty_items() {
     let (base, auth) = setup().await;
