@@ -2,7 +2,10 @@ use async_trait::async_trait;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use alc_core::models::{CreateEmployee, Employee, FaceDataEntry, UpdateEmployee, UpdateFace};
+use alc_core::models::{
+    CreateEmployee, Employee, EmployeeUpsertItem, EmployeeUpsertSkipped, EmployeeUpsertSummary,
+    FaceDataEntry, UpdateEmployee, UpdateFace,
+};
 
 use alc_core::tenant::TenantConn;
 
@@ -220,6 +223,134 @@ impl EmployeeRepository for PgEmployeeRepository {
         .bind(tenant_id)
         .fetch_optional(&mut *tc.conn)
         .await
+    }
+
+    async fn upsert_by_code(
+        &self,
+        tenant_id: Uuid,
+        items: &[EmployeeUpsertItem],
+    ) -> Result<EmployeeUpsertSummary, sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
+        alc_core::tenant::set_current_tenant(&mut tx, &tenant_id.to_string()).await?;
+
+        let mut created = 0usize;
+        let mut updated = 0usize;
+        let mut skipped: Vec<EmployeeUpsertSkipped> = Vec::new();
+
+        for item in items {
+            // (a) code 一致 (deleted_at は問わない。idx_employees_code は
+            // deleted_at を見ない一意制約なので、削除済み行を無視すると INSERT が衝突する)。
+            let by_code: Option<(Uuid,)> =
+                sqlx::query_as("SELECT id FROM employees WHERE tenant_id = $1 AND code = $2")
+                    .bind(tenant_id)
+                    .bind(&item.code)
+                    .fetch_optional(&mut *tx)
+                    .await?;
+
+            if let Some((id,)) = by_code {
+                sqlx::query(
+                    r#"
+                    UPDATE employees SET
+                        name = $1, nfc_id = $2,
+                        license_issue_date = $3, license_expiry_date = $4,
+                        deleted_at = NULL, updated_at = NOW()
+                    WHERE id = $5
+                    "#,
+                )
+                .bind(&item.name)
+                .bind(&item.nfc_id)
+                .bind(item.license_issue_date)
+                .bind(item.license_expiry_date)
+                .bind(id)
+                .execute(&mut *tx)
+                .await?;
+                updated += 1;
+                continue;
+            }
+
+            // (b) code 未登録なら nfc_id (交付日+期限16桁) で引く。
+            if let Some(nfc_id) = &item.nfc_id {
+                let by_nfc: Vec<(Uuid, Option<String>)> = sqlx::query_as(
+                    "SELECT id, code FROM employees WHERE tenant_id = $1 AND nfc_id = $2 AND deleted_at IS NULL",
+                )
+                .bind(tenant_id)
+                .bind(nfc_id)
+                .fetch_all(&mut *tx)
+                .await?;
+
+                if by_nfc.len() == 1 {
+                    let (id, existing_code) = &by_nfc[0];
+                    let assignable = existing_code.is_none()
+                        || existing_code.as_deref() == Some(item.code.as_str());
+                    if assignable {
+                        sqlx::query(
+                            r#"
+                            UPDATE employees SET
+                                code = $1, name = $2,
+                                license_issue_date = $3, license_expiry_date = $4,
+                                updated_at = NOW()
+                            WHERE id = $5
+                            "#,
+                        )
+                        .bind(&item.code)
+                        .bind(&item.name)
+                        .bind(item.license_issue_date)
+                        .bind(item.license_expiry_date)
+                        .bind(id)
+                        .execute(&mut *tx)
+                        .await?;
+                        updated += 1;
+                        continue;
+                    }
+                    skipped.push(EmployeeUpsertSkipped {
+                        code: item.code.clone(),
+                        reason: "nfc_id_conflict".to_string(),
+                    });
+                    continue;
+                } else if by_nfc.len() > 1 {
+                    skipped.push(EmployeeUpsertSkipped {
+                        code: item.code.clone(),
+                        reason: "nfc_id_conflict".to_string(),
+                    });
+                    continue;
+                }
+            }
+
+            // (c) 新規作成。(a)(b) で code / nfc_id の衝突は見ているが、念のため
+            // ON CONFLICT DO NOTHING で残る unique 違反を検出して skip する。
+            let inserted: Option<(Uuid,)> = sqlx::query_as(
+                r#"
+                INSERT INTO employees (tenant_id, code, nfc_id, name, role, license_issue_date, license_expiry_date)
+                VALUES ($1, $2, $3, $4, ARRAY['driver'], $5, $6)
+                ON CONFLICT DO NOTHING
+                RETURNING id
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(&item.code)
+            .bind(&item.nfc_id)
+            .bind(&item.name)
+            .bind(item.license_issue_date)
+            .bind(item.license_expiry_date)
+            .fetch_optional(&mut *tx)
+            .await?;
+
+            if inserted.is_some() {
+                created += 1;
+            } else {
+                skipped.push(EmployeeUpsertSkipped {
+                    code: item.code.clone(),
+                    reason: "unique_violation".to_string(),
+                });
+            }
+        }
+
+        tx.commit().await?;
+        Ok(EmployeeUpsertSummary {
+            created,
+            updated,
+            skipped,
+        })
     }
 
     async fn approve_face(
