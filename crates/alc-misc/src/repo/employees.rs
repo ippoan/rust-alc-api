@@ -248,6 +248,50 @@ impl EmployeeRepository for PgEmployeeRepository {
                     .await?;
 
             if let Some((id,)) = by_code {
+                // ★ `nfc_id` は `UNIQUE (tenant_id, nfc_id)` (001_create_tables.sql)。
+                // **他の乗務員が同じ nfc_id を持っていると、その 1 行のせいで
+                // トランザクションごと 500 になる** (2026-09-02 本番、退職者を含めた
+                // 242 件で発生。免許の交付日+期限が同じ乗務員が居ると起きる)。
+                // 衝突しているときは **nfc_id だけ据え置いて残りを更新**し、
+                // `skipped` に名指しで残す — 1 人のせいで全員分を落とさない。
+                let conflicting: Option<(Uuid,)> = match &item.nfc_id {
+                    Some(nfc_id) => {
+                        sqlx::query_as(
+                            "SELECT id FROM employees WHERE tenant_id = $1 AND nfc_id = $2 AND id <> $3",
+                        )
+                        .bind(tenant_id)
+                        .bind(nfc_id)
+                        .bind(id)
+                        .fetch_optional(&mut *tx)
+                        .await?
+                    }
+                    None => None,
+                };
+
+                if conflicting.is_some() {
+                    sqlx::query(
+                        r#"
+                        UPDATE employees SET
+                            name = $1,
+                            license_issue_date = $2, license_expiry_date = $3,
+                            deleted_at = NULL, updated_at = NOW()
+                        WHERE id = $4
+                        "#,
+                    )
+                    .bind(&item.name)
+                    .bind(item.license_issue_date)
+                    .bind(item.license_expiry_date)
+                    .bind(id)
+                    .execute(&mut *tx)
+                    .await?;
+                    updated += 1;
+                    skipped.push(EmployeeUpsertSkipped {
+                        code: item.code.clone(),
+                        reason: "nfc_id_conflict".to_string(),
+                    });
+                    continue;
+                }
+
                 sqlx::query(
                     r#"
                     UPDATE employees SET
