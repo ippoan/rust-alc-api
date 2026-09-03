@@ -18,9 +18,15 @@
 # 1 件でも漏れると cutover が `Permission denied on secret: <NAME>` で落ちる
 # ため (Refs #391 で実際に踏んだ失敗)。
 #
-# やらないこと (T-B の実測が要るので別途手動):
-#   - 別 project alc-fcm 側の FCM 送信 role (末尾に手順を出力する)
-#   - service の run.invoker binding (compute SA が bind されていれば維持。T-E 担当)
+# やらないこと:
+#   - rust-alc-api service の run.invoker binding。compute SA は **サービス単位で
+#     明示 bind** されており (T-B 実測: 747065218280-compute@ と
+#     alc-api-proxy-invoker@)、editor 由来ではないので T-E の editor 剥奪では
+#     壊れない。呼び出し側 (rust-ichibanboshi) の SA 移行は T-E の担当で、
+#     その際は **新 SA を invoker に足してから compute SA を外す** こと。
+#   - compute SA からの accessor 剥奪。rust-alc-api を移しても compute SA は
+#     kintai-push-database-url / rust-logi-* / RELEASE_WAVE_GCP_API_KEY 等を
+#     他 service のために使い続ける (T-B 実測: accessor 41 件、実使用 27 件)。
 set -euo pipefail
 
 ENV="${1:?Usage: provision-runtime-sa.sh <staging|production> [--apply]}"
@@ -47,6 +53,13 @@ FCM_PROJECT="alc-fcm"
 PROJECT_ROLES=(
   roles/logging.logWriter
 )
+
+# 別 project alc-fcm 側の role。T-B 実測で compute SA の alc-fcm binding は
+# roles/firebase.sdkAdminServiceAgent の 1 本のみ。prod / staging 双方の新 SA に
+# 同じものを付ける (FCM_PROJECT_ID=alc-fcm は render.sh が env 分岐の外で
+# 無条件に出しており、staging でも FcmSender が生きているため)。
+# 実行者が alc-fcm 側にも IAM 編集権限を持っている必要がある。
+FCM_ROLE="roles/firebase.sdkAdminServiceAgent"
 
 # ---------------------------------------------------------------------------
 # render.sh から runtime SA と secret 一覧を取り出す (single source of truth)
@@ -123,6 +136,10 @@ done
 # 4. deployer に actAs。DEPLOYER_SA は GCP_SA_KEY の client_email。
 #    これが無いと `gcloud run services replace` が
 #    "Permission 'iam.serviceaccounts.actAs' denied" で落ちる。
+#    T-B 実測では GCP_SA_KEY = staging-deploy@ で、この SA は既に **project
+#    レベルで** roles/iam.serviceAccountUser を持っているため要件は充足済み。
+#    以下は SA 単位で明示的に付け直す冪等な念押し (project レベルの grant を
+#    将来絞った時に落ちないようにする) なので、任意。
 if [[ -n "${DEPLOYER_SA:-}" ]]; then
   run gcloud iam service-accounts add-iam-policy-binding "$RUNTIME_SA" \
     --project "$PROJECT" \
@@ -130,25 +147,24 @@ if [[ -n "${DEPLOYER_SA:-}" ]]; then
     --role roles/iam.serviceAccountUser \
     --condition=None
 else
-  cat <<MSG
-
-!! DEPLOYER_SA 未設定 — actAs の grant を skip した。
-   GCP_SA_KEY の client_email を渡して再実行すること:
-     DEPLOYER_SA=<ci-deployer>@${PROJECT}.iam.gserviceaccount.com \\
-       bash scripts/provision-runtime-sa.sh $ENV --apply
-MSG
+  echo
+  echo "DEPLOYER_SA 未設定 — SA 単位の actAs grant は skip (staging-deploy@ が"
+  echo "project レベルで iam.serviceAccountUser を持つため要件自体は充足済み)。"
 fi
+
+# 5. 別 project alc-fcm 側の FCM 送信 role
+run gcloud projects add-iam-policy-binding "$FCM_PROJECT" \
+  --member "serviceAccount:${RUNTIME_SA}" \
+  --role "$FCM_ROLE" \
+  --condition=None
 
 cat <<MSG
 
---- 手動で残っているもの ---
-1) 別 project ${FCM_PROJECT} の FCM 送信 role。T-B が確認した compute SA と
-   **同じ role** を付けること (推測で firebasemessaging.admin 等を付けない):
-     gcloud projects add-iam-policy-binding ${FCM_PROJECT} \\
-       --member serviceAccount:${RUNTIME_SA} \\
-       --role <T-B で確認した role> --condition=None
-   FCM は失敗しても push が届かないだけでエラーが目立たない。flip 後に
-   実機で push 到達を明示的に確認すること。
-2) run.invoker: T-B で rust-alc-api service の invoker に compute SA が
-   bind されていた場合はそのまま維持 (ichibanboshi 側の移行は T-E)。
+--- 手作業で残っているもの ---
+- FCM は送信に失敗しても push が届かないだけでエラーが目立たない。cutover 後に
+  実機で push 到達を明示的に確認すること。
+- rust-alc-api service の run.invoker binding はこの script では触らない。
+  compute SA はサービス単位で明示 bind されており editor 剥奪では壊れないが、
+  **この binding を消すと即死する**。呼び出し側の SA 移行 (T-E) では新 SA を
+  invoker に足してから compute SA を外すこと。
 MSG
