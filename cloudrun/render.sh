@@ -40,8 +40,28 @@ while [[ $# -gt 0 ]]; do
 done
 
 REPO="ghcr.io/ippoan/rust-alc-api"
-AR_PREFIX="asia-northeast1-docker.pkg.dev/cloudsql-sv/ghcr"
+PROJECT="cloudsql-sv"
+AR_PREFIX="asia-northeast1-docker.pkg.dev/${PROJECT}/ghcr"
 REGION="asia-northeast1"
+
+# ---------------------------------------------------------------------------
+# Runtime service account (Refs #606)
+# ---------------------------------------------------------------------------
+# 以前は serviceAccountName を一切書かず、Cloud Run 既定の Compute SA
+# (747065218280-compute@developer.gserviceaccount.com、roles/editor 保持) が
+# 暗黙で runtime SA になっていた。専用 SA に移して editor の巻き添え権限を切る。
+#
+# NOTE: rust-alc-api だけ ci-workflows の reusable deploy を経由せず
+# `gcloud run services replace` で service YAML を丸ごと置き換えるため
+# (.github/workflows/deploy.yml)、reusable 側の runtime_service_account
+# enforce が効かない。したがって runtime SA の指定はこの render.sh が
+# single source of truth になる。reusable に寄せる話は #556 の monolith 化とは
+# 別軸で、YAML replace をやめない限り成立しない。
+if [[ "$ENV" == "staging" ]]; then
+  RUNTIME_SA="alc-api-runtime-staging@${PROJECT}.iam.gserviceaccount.com"
+else
+  RUNTIME_SA="alc-api-runtime@${PROJECT}.iam.gserviceaccount.com"
+fi
 
 # ---------------------------------------------------------------------------
 # Service name and image
@@ -362,6 +382,7 @@ spec:
         autoscaling.knative.dev/maxScale: "${MAX_SCALE}"
         autoscaling.knative.dev/minScale: "${MIN_SCALE}"
     spec:
+      serviceAccountName: ${RUNTIME_SA}
       containerConcurrency: 80
       timeoutSeconds: 300
       containers:

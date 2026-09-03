@@ -23,18 +23,31 @@ else
   GCLOUD_ARGS="$COMMAND"
 fi
 
+# runtime SA は cloudrun/render.sh が single source of truth (Refs #606)。
+# ここで値を再掲すると render.sh と drift するので production 出力から読む
+# (image_sha は SA 選択に影響しないので dummy)。
+RUNTIME_SA=$(bash "$(dirname "$0")/cloudrun/render.sh" backend production dummy \
+               | awk '/serviceAccountName:/{print $2; exit}')
+if [ -z "$RUNTIME_SA" ]; then
+  echo "failed to resolve runtime service account from cloudrun/render.sh" >&2
+  exit 1
+fi
+echo "runtime SA: $RUNTIME_SA"
+
 # Create or update the job
 if gcloud run jobs describe $ARCHIVE_JOB_NAME --region $REGION --project $PROJECT_ID &>/dev/null; then
   gcloud run jobs update $ARCHIVE_JOB_NAME \
     --region $REGION \
     --project $PROJECT_ID \
     --image $IMAGE:latest \
+    --service-account "$RUNTIME_SA" \
     --args "$GCLOUD_ARGS"
 else
   gcloud run jobs create $ARCHIVE_JOB_NAME \
     --region $REGION \
     --project $PROJECT_ID \
     --image $IMAGE:latest \
+    --service-account "$RUNTIME_SA" \
     --set-secrets "DATABASE_URL=alc-app-database-url:latest,DTAKO_R2_ACCESS_KEY=dtako-r2-access-key:latest,DTAKO_R2_SECRET_KEY=dtako-r2-secret-key:latest" \
     --set-env-vars "R2_ACCOUNT_ID=24b45709d060d957340180e995f0d373,DTAKO_R2_BUCKET=ohishi-dtako" \
     --command "archive" \

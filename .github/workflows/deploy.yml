@@ -84,6 +84,19 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
+      # runtime SA は cloudrun/render.sh が single source of truth (Refs #606)。
+      # ここで値を再掲すると render.sh と drift し、T-E で compute SA から
+      # roles/editor を剥がした時に job だけ黙って動かなくなるので、render.sh の
+      # production 出力から読み出す (image_sha は SA 選択に影響しないので dummy)。
+      - name: Resolve runtime service account
+        run: |
+          set -euo pipefail
+          SA=$(bash cloudrun/render.sh backend production dummy \
+                 | awk '/serviceAccountName:/{print $2; exit}')
+          test -n "$SA"
+          echo "RUNTIME_SA=$SA" >> "$GITHUB_ENV"
+          echo "::notice ::runtime SA for Cloud Run jobs: $SA"
+
       - name: Run migrations
         run: |
           AR_IMAGE="${{ env.AR_PREFIX }}/${{ env.REPO }}:${{ inputs.image_sha }}"
@@ -92,11 +105,13 @@ jobs:
           if gcloud run jobs describe $JOB_NAME --region ${{ env.REGION }} --project ${{ env.PROJECT }} &>/dev/null; then
             gcloud run jobs update $JOB_NAME \
               --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
-              --image "$AR_IMAGE"
+              --image "$AR_IMAGE" \
+              --service-account "$RUNTIME_SA"
           else
             gcloud run jobs create $JOB_NAME \
               --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
               --image "$AR_IMAGE" \
+              --service-account "$RUNTIME_SA" \
               --set-secrets "DATABASE_URL=alc-app-database-url:latest" \
               --command "migrate" \
               --memory 512Mi --task-timeout 120s --max-retries 0
@@ -358,6 +373,8 @@ jobs:
     needs: [migrate]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
         with:
@@ -366,13 +383,27 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
+      # runtime SA は cloudrun/render.sh が single source of truth (Refs #606)。
+      # ここで値を再掲すると render.sh と drift し、T-E で compute SA から
+      # roles/editor を剥がした時に job だけ黙って動かなくなるので、render.sh の
+      # production 出力から読み出す (image_sha は SA 選択に影響しないので dummy)。
+      - name: Resolve runtime service account
+        run: |
+          set -euo pipefail
+          SA=$(bash cloudrun/render.sh backend production dummy \
+                 | awk '/serviceAccountName:/{print $2; exit}')
+          test -n "$SA"
+          echo "RUNTIME_SA=$SA" >> "$GITHUB_ENV"
+          echo "::notice ::runtime SA for Cloud Run jobs: $SA"
+
       - name: Update archive Job image
         run: |
           AR_IMAGE="${{ env.AR_PREFIX }}/${{ env.REPO }}:${{ inputs.image_sha }}"
           gcloud run jobs update rust-alc-api-archive \
             --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
-            --image "$AR_IMAGE"
-          echo "::notice ::Archive Job updated"
+            --image "$AR_IMAGE" \
+            --service-account "$RUNTIME_SA"
+          echo "::notice ::Archive Job updated (runtime SA: $RUNTIME_SA)"
 
   # ---------------------------------------------------------------------------
   # Production: verify the tag release did NOT flip traffic

@@ -8,6 +8,17 @@ REPOSITORY="alc-app"
 IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/$SERVICE_NAME"
 MIGRATION_JOB_NAME="rust-alc-api-migrate"
 
+# runtime SA は cloudrun/render.sh が single source of truth (Refs #606)。
+# ここで指定を落とすと、手動 deploy を 1 回流しただけで runtime SA が既定の
+# Compute SA に黙って巻き戻る (= T-D の cutover が無音で剥がれる)。
+RUNTIME_SA=$(bash "$(dirname "$0")/cloudrun/render.sh" backend production dummy \
+               | awk '/serviceAccountName:/{print $2; exit}')
+if [ -z "$RUNTIME_SA" ]; then
+  echo "failed to resolve runtime service account from cloudrun/render.sh" >&2
+  exit 1
+fi
+echo "runtime SA: $RUNTIME_SA"
+
 echo "=== Building Docker image ==="
 docker build -t $IMAGE:latest .
 
@@ -19,12 +30,14 @@ if gcloud run jobs describe $MIGRATION_JOB_NAME --region $REGION --project $PROJ
   gcloud run jobs update $MIGRATION_JOB_NAME \
     --region $REGION \
     --project $PROJECT_ID \
-    --image $IMAGE:latest
+    --image $IMAGE:latest \
+    --service-account "$RUNTIME_SA"
 else
   gcloud run jobs create $MIGRATION_JOB_NAME \
     --region $REGION \
     --project $PROJECT_ID \
     --image $IMAGE:latest \
+    --service-account "$RUNTIME_SA" \
     --set-secrets "DATABASE_URL=alc-app-database-url:latest" \
     --command "migrate" \
     --memory 512Mi \
@@ -43,6 +56,7 @@ gcloud run deploy $SERVICE_NAME \
   --region $REGION \
   --platform managed \
   --allow-unauthenticated \
+  --service-account "$RUNTIME_SA" \
   --set-secrets "DATABASE_URL=alc-app-database-url:latest,GOOGLE_CLIENT_ID=GOOGLE_CLIENT_ID:latest,GOOGLE_DEVICE_CLIENT_ID=GOOGLE_DEVICE_CLIENT_ID:latest,R2_ACCESS_KEY=alc-r2-access-key:latest,R2_SECRET_KEY=alc-r2-secret-key:latest,OAUTH_STATE_SECRET=alc-oauth-state-secret:latest,CARINS_R2_ACCESS_KEY=carins-r2-access-key:latest,CARINS_R2_SECRET_KEY=carins-r2-secret-key:latest,DTAKO_R2_ACCESS_KEY=dtako-r2-access-key:latest,DTAKO_R2_SECRET_KEY=dtako-r2-secret-key:latest,NOTIFY_R2_ACCESS_KEY=carins-r2-access-key:latest,NOTIFY_R2_SECRET_KEY=carins-r2-secret-key:latest,LINE_LOGIN_CHANNEL_ID=line-login-channel-id:latest,LINE_LOGIN_CHANNEL_SECRET=line-login-channel-secret:latest,NOTIFY_WORKER_SECRET=notify-worker-secret:latest,NOTIFY_REDACT_BROADCAST_SECRET=notify-redact-broadcast-secret:latest,GEMINI_API_KEY=gemini-api-key:latest" \
   --set-env-vars "STORAGE_BACKEND=r2,R2_BUCKET=alc-face-photos,R2_ACCOUNT_ID=24b45709d060d957340180e995f0d373,FCM_PROJECT_ID=alc-fcm,API_ORIGIN=https://alc-api.ippoan.org,CARINS_R2_BUCKET=carins-files,DTAKO_R2_BUCKET=ohishi-dtako,NOTIFY_R2_BUCKET=notify-files,NOTIFY_REDACT_BROADCAST_URL=https://realtime.notify.ippoan.org/broadcast,NOTIFY_REDACT_2STAGE=1,RUST_LOG=info,rust_alc_api=info,alc_notify=info" \
   --port 8080 \
