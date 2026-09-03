@@ -127,8 +127,14 @@ emit_env_backend() {
               value: "info"
 YAML
   # staging のみ: export/import の opt-in 認証 key を注入 (Refs #391)。runtime SA
-  # 747065218280-compute@ は project-level secretAccessor で ALC_STAGING_API_KEY も
-  # 解決できる前提 (既存 GOOGLE_CLIENT_ID 等と同経路)。新 revision 起動で X-Staging-Key 必須化。
+  # 747065218280-compute@ の secretmanager.secretAccessor は **project レベルではなく
+  # per-secret grant** なので、secretKeyRef で参照する新 secret ごとに 1 回
+  #   gcloud secrets add-iam-policy-binding <NAME> --project=cloudsql-sv \
+  #     --member="serviceAccount:747065218280-compute@developer.gserviceaccount.com" \
+  #     --role="roles/secretmanager.secretAccessor"
+  # が必要。漏れると cutover が `Permission denied on secret: <NAME>` で fail する
+  # (ALC_STAGING_API_KEY 自体がその実事例 = #391)。
+  # 詳細: .claude/skills/rust-alc-api-map/SKILL.md:1119。新 revision 起動で X-Staging-Key 必須化。
   if [[ "$ENV" == "staging" ]]; then
     cat <<YAML
             - name: DATABASE_URL
