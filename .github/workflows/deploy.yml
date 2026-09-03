@@ -35,43 +35,11 @@ jobs:
   # gateway + per-domain は #556 で廃止し、deploy は monolith (backend) 1 本のみ。
   # ---------------------------------------------------------------------------
   # ---------------------------------------------------------------------------
-  # Production: promote dev → version tag
-  # ---------------------------------------------------------------------------
-  promote-images:
-    name: "Promote images"
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    permissions:
-      packages: write
-    steps:
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Promote dev → version + sha (all images)
-        run: |
-          REPO="${{ env.REPO }}"
-          TAG="${{ inputs.ref_name }}"
-          SHA="${{ inputs.image_sha }}"
-          # gateway + per-domain 廃止で monolith (backend) の 1 image のみ (Refs #556)。
-          for suffix in ""; do
-            docker pull "${REPO}${suffix}:dev"
-            docker tag "${REPO}${suffix}:dev" "${REPO}${suffix}:${TAG}"
-            docker tag "${REPO}${suffix}:dev" "${REPO}${suffix}:${SHA}"
-            docker push "${REPO}${suffix}:${TAG}"
-            docker push "${REPO}${suffix}:${SHA}"
-          done
-
-  # ---------------------------------------------------------------------------
   # Production: run migrations
   # ---------------------------------------------------------------------------
   migrate:
     name: "Run DB migrations"
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [promote-images]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -112,7 +80,7 @@ jobs:
     name: "Deploy ${{ matrix.service }}"
     # PR (staging): staging image 群は ci.yml (build-image / staging-db) で
     # push 済みなので待つものが無く、即 deploy に入る (Refs #482)。
-    needs: [promote-images, migrate]
+    needs: [migrate]
     if: >-
       always() && (
         github.event_name == 'pull_request' ||
@@ -159,6 +127,19 @@ jobs:
           echo "ROLLBACK_SVC=$SVC" >> "$GITHUB_ENV"
           echo "PREV_REVISION=$PREV" >> "$GITHUB_ENV"
           echo "captured serving revision for rollback: ${PREV:-<none>} (svc=$SVC)"
+
+      # 本番に出る image が「タグ対象の commit のビルド」であることを、image に
+      # 刻まれた revision label (ci.yml build-image が付ける) で検算する。
+      # promote-images (:dev の貼り直し) が、マージしていない PR のビルドを本番へ
+      # 出していた事故の再発検知 (Refs #609)。ghcr は public なので login 不要。
+      - name: Verify image revision == tagged commit (Refs #609)
+        if: github.event_name != 'pull_request'
+        run: |
+          set -euo pipefail
+          IMG="ghcr.io/ippoan/rust-alc-api:${{ inputs.image_sha }}"
+          docker pull -q "$IMG"
+          REV=$(docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$IMG")
+          [ "$REV" = "${{ inputs.image_sha }}" ] || { echo "::error::image $IMG was built from '${REV:-<no label>}', not ${{ inputs.image_sha }}"; exit 1; }
 
       - name: Render and deploy
         id: deploy

@@ -140,7 +140,11 @@ jobs:
   build-image:
     name: "Build ${{ matrix.name }}"
     needs: [pr-limit]
-    if: "always() && github.event_name == 'pull_request' && (needs.pr-limit.result == 'success' || needs.pr-limit.result == 'skipped')"
+    # v* tag push でも走る: 本番 image は「タグ対象の commit をこの job がビルド
+    # したもの」でなければならない。以前は deploy.yml の promote-images が :dev を
+    # 貼り直すだけだったため、マージしていない PR のビルドが本番に出ていた
+    # (Refs #609)。
+    if: "always() && (github.event_name == 'pull_request' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))) && (needs.pr-limit.result == 'success' || needs.pr-limit.result == 'skipped')"
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -214,7 +218,16 @@ jobs:
         with:
           context: ctx
           push: true
-          tags: "ghcr.io/${{ github.repository }}${{ matrix.tag-suffix }}:${{ github.sha }}"
+          # tag push のときだけ :${ref_name} も貼る (旧 promote-images の置き換え、
+          # Refs #609)。PR run では 2 行目が空行になるが、build-push-action の
+          # tags は skipEmptyLines + 空要素 filter で空行を落とすため 1 本のまま。
+          tags: |
+            ghcr.io/${{ github.repository }}${{ matrix.tag-suffix }}:${{ github.sha }}
+            ${{ startsWith(github.ref, 'refs/tags/v') && format('ghcr.io/{0}{1}:{2}', github.repository, matrix.tag-suffix, github.ref_name) || '' }}
+          # どの commit から作った image かを image 自身に刻む。deploy.yml の
+          # "Verify image revision == tagged commit" がこれを読んで、本番に出る
+          # image が tag 対象 commit のビルドであることを検算する (Refs #609)。
+          labels: "org.opencontainers.image.revision=${{ github.sha }}"
           cache-from: "type=gha,scope=${{ matrix.name }}"
           cache-to: "type=gha,mode=max,scope=${{ matrix.name }}"
 
@@ -222,7 +235,9 @@ jobs:
       # 旧 staging-images job (deploy.yml) からの移設 (Refs #482)。バイナリは
       # bazel-bin から直接取る (prod image からの docker create/cp 再抽出を廃止)。
       - name: Prepare staging context
-        if: matrix.staging-bin != ''
+        # staging image は PR run 専用。tag push でこの job が走るようになった
+        # (Refs #609) が、production は staging image を使わない。
+        if: matrix.staging-bin != '' && github.event_name == 'pull_request'
         run: |
           mkdir -p ctx-staging/staging
           cp "ctx/${{ matrix.staging-bin }}" ctx-staging/
@@ -234,7 +249,7 @@ jobs:
           cp staging/entrypoint.sh ctx-staging/staging/
 
       - name: Build and push staging image
-        if: matrix.staging-bin != ''
+        if: matrix.staging-bin != '' && github.event_name == 'pull_request'
         uses: docker/build-push-action@v6
         with:
           context: ctx-staging
@@ -540,43 +555,13 @@ jobs:
             docker push "${REPO}${suffix}:dev"
           done
 
-  docker-latest:
-    name: Tag latest
-    # NOTE: main push では check も bazel gate も走らない (coverage-check 時代から
-    # 恒常 skip = 挙動不変)。coverage-check 退役に伴う参照差し替えのみ。
-    if: "always() && github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.check.result == 'success' && needs.bazel-coverage-gate.result == 'success'"
-    needs: [check, bazel-coverage-gate]
-    runs-on: ubuntu-latest
-    permissions:
-      packages: write
-    steps:
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Retag dev → sha + latest (all images)
-        run: |
-          REPO="ghcr.io/${{ github.repository }}"
-          SHA="${{ github.sha }}"
-          # gateway + per-domain 廃止で monolith 1 image のみ (Refs #556)。
-          for suffix in ""; do
-            docker pull "${REPO}${suffix}:dev"
-            docker tag "${REPO}${suffix}:dev" "${REPO}${suffix}:${SHA}"
-            docker tag "${REPO}${suffix}:dev" "${REPO}${suffix}:latest"
-            docker push "${REPO}${suffix}:${SHA}"
-            docker push "${REPO}${suffix}:latest"
-          done
-
   deploy:
     name: Deploy
     needs: [build-image, staging-db, bazel-tests-ok, bazel-coverage-gate]
     if: >-
       always() &&
       (github.event_name == 'pull_request' || (startsWith(github.ref, 'refs/tags/v') && github.event_name == 'push')) &&
-      (needs.build-image.result == 'success' || needs.build-image.result == 'skipped') &&
+      needs.build-image.result == 'success' &&
       (needs.staging-db.result == 'success' || needs.staging-db.result == 'skipped') &&
       needs.bazel-tests-ok.result == 'success' &&
       needs.bazel-coverage-gate.result == 'success'
@@ -782,10 +767,10 @@ jobs:
     # 防ぐ (Refs #405、#391 で 2 回実害)。drift-check 失敗時も merge を止めて
     # cross-store drift を可視化する (Refs #424)。トレードオフとして staging
     # 障害時は全 PR が merge 不能になる。
-    # docker-dev (Tag dev) も needs に含める: merge → branch 削除で :dev への
-    # copy が cancel されると、main push の Tag latest / release の Promote images
-    # が前 PR の :dev image を無音で promote する (同 #405 と同クラスの穴)。
-    needs: [check, bazel-tests-ok, bazel-coverage-gate, build-image, docker-dev, deploy, drift-check-staging]
+    # docker-dev (Tag dev) は needs に入れない: :dev は front repo の
+    # docker-compose.test.yml 用の可変タグでしかなく、本番 image は tag push の
+    # build-image が作る (Refs #609)。したがって :dev の上書き競合は無害。
+    needs: [check, bazel-tests-ok, bazel-coverage-gate, build-image, deploy, drift-check-staging]
     if: >-
       always() &&
       github.event_name == 'pull_request' &&
@@ -793,7 +778,6 @@ jobs:
       needs.bazel-tests-ok.result == 'success' &&
       needs.bazel-coverage-gate.result == 'success' &&
       needs.build-image.result == 'success' &&
-      needs.docker-dev.result == 'success' &&
       needs.deploy.result == 'success' &&
       needs.drift-check-staging.result == 'success'
     uses: ippoan/ci-workflows/.github/workflows/auto-merge.yml@main
