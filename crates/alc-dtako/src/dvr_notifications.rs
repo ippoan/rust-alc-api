@@ -46,6 +46,20 @@ const MAX_FILE_NAME_LEN: usize = 128;
 /// キーではないので文字種は縛らないが、長さだけは切る。
 const MAX_TEXT_FIELD_LEN: usize = 256;
 
+/// `source_url` の長さ上限。
+///
+/// この欄は **provenance 専用**で、意味を持たせない — 重複判定には一切使わず
+/// (それは自然キーの仕事)、URL としての検証もしない (URL の形をしていない値が
+/// 正常に入る)。relay が入れるのは theearth の通知行が持つ source 側パスで、
+/// 取れなければ null が来る。実体が取れる URL は 1 件ずつ問い合わせて初めて分かる
+/// サーバー生成の一時パスなので、保存しても後から死ぬ = 「あとで開けるリンク」
+/// としては使えない (廃止元の pipeline はこれを重複判定キーにしていた)。
+///
+/// したがって上限は「無制限を避ける」ためだけのもので、表示用フィールドの 256 より
+/// 大きく取る。ここで弾くと **意味を持たない欄のせいでバッチ全体が 400 になり、
+/// 正常な通知まで落ちる**ため、実運用で当たらない値にしてある。
+const MAX_SOURCE_URL_LEN: usize = 2048;
+
 /// 実体取得を諦めるまでの試行回数。
 ///
 /// これ以上 `attempts` が進んだ行は ingest 応答の `pending` に載せない = relay が
@@ -83,7 +97,8 @@ pub struct DvrNotificationCreate {
     pub event_type: Option<String>,
     /// theearth が示す録画日時 (RFC3339)。欠ける / パースできない場合は省略する。
     pub dvr_datetime: Option<DateTime<Utc>>,
-    /// relay が組み立てた動画 URL。記録用で、重複判定には使わない。
+    /// theearth の通知行が持つ source 側パス。**provenance 専用**で、
+    /// 重複判定にも表示リンクにも使わない (取れなければ null)。
     pub source_url: Option<String>,
 }
 
@@ -145,7 +160,11 @@ fn validate(item: &DvrNotificationCreate) -> bool {
         && valid_text_field(item.vehicle_name.as_ref())
         && valid_text_field(item.driver_name.as_ref())
         && valid_text_field(item.event_type.as_ref())
-        && valid_text_field(item.source_url.as_ref())
+        && item
+            .source_url
+            .as_ref()
+            .map(|u| u.chars().count() <= MAX_SOURCE_URL_LEN)
+            .unwrap_or(true)
 }
 
 /// R2 key。既存 dtako の prefix 規約 (`{tenant_id}/uploads/...` /
@@ -452,6 +471,29 @@ mod tests {
         assert!(!validate(&item("sn/..", "a.vdf")));
         assert!(!validate(&item("sn", "a b.vdf")));
         assert!(!validate(&item("sn", "a%00.vdf")));
+    }
+
+    #[test]
+    fn validate_accepts_non_url_and_long_source_url() {
+        // provenance 専用なので URL の形をしていなくても通す
+        let mut path_like = item("sn", "a.vdf");
+        path_like.source_url = Some("/dvr/2026/09/03/SN-1/a.vdf".to_string());
+        assert!(validate(&path_like));
+
+        // 表示用フィールドの上限 (256) では弾かない — 意味を持たない欄のせいで
+        // バッチ全体が 400 になるのを避ける
+        let mut long = item("sn", "a.vdf");
+        long.source_url = Some("x".repeat(MAX_TEXT_FIELD_LEN + 1));
+        assert!(validate(&long));
+
+        let mut at_cap = item("sn", "a.vdf");
+        at_cap.source_url = Some("x".repeat(MAX_SOURCE_URL_LEN));
+        assert!(validate(&at_cap));
+
+        // ただし無制限ではない
+        let mut over = item("sn", "a.vdf");
+        over.source_url = Some("x".repeat(MAX_SOURCE_URL_LEN + 1));
+        assert!(!validate(&over));
     }
 
     #[test]
