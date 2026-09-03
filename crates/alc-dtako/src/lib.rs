@@ -20,6 +20,7 @@ pub mod dtako_upload;
 pub mod dtako_vehicles;
 pub mod dtako_work_times;
 pub mod dtako_y_time_export;
+pub mod dvr_notifications;
 pub mod vehicle_settings_dumps;
 
 use std::sync::Arc;

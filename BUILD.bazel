@@ -136,6 +136,21 @@ rust_test(
 )
 
 rust_test(
+    name = "dvr_notifications_test",
+    srcs = ["tests/dvr_notifications_test.rs"] + glob(["tests/common/**/*.rs"]),
+    crate_root = "tests/dvr_notifications_test.rs",
+    compile_data = glob(["migrations/**"]),
+    deps = [":rust_alc_api_lib"] + all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ) + _WORKSPACE_CRATES,
+    proc_macro_deps = all_crate_deps(
+        proc_macro = True,
+        proc_macro_dev = True,
+    ),
+)
+
+rust_test(
     name = "dtako_operation_window_test",
     srcs = ["tests/dtako_operation_window_test.rs"] + glob(["tests/common/**/*.rs"]),
     crate_root = "tests/dtako_operation_window_test.rs",
