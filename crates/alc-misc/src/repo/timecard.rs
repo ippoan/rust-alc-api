@@ -254,11 +254,15 @@ impl TimecardRepository for PgTimecardRepository {
         employee_id: Uuid,
     ) -> Result<Vec<TimePunch>, sqlx::Error> {
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
+        // **「今日」は JST で切る。** `CURRENT_DATE` はサーバ TZ (Cloud Run は UTC) の
+        // 日付なので、JST の 0 時〜9 時に打刻すると「昨日」に落ちて当日一覧から消える。
+        // 表示側 (CSV / 画面) は既に JST 固定なので、境界だけ UTC のままだった。
         sqlx::query_as::<_, TimePunch>(
             r#"
             SELECT * FROM time_punches
             WHERE tenant_id = $1 AND employee_id = $2
-              AND punched_at >= CURRENT_DATE
+              AND punched_at >= ((now() AT TIME ZONE 'Asia/Tokyo')::date::timestamp
+                                 AT TIME ZONE 'Asia/Tokyo')
             ORDER BY punched_at
             "#,
         )

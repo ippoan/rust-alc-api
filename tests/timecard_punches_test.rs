@@ -220,3 +220,76 @@ async fn test_punches_are_tenant_isolated() {
         assert_eq!(body["total"], 0);
     });
 }
+
+/// ブラウザ版 punch の応答に付く「当日の打刻」は **JST で切る**。
+///
+/// `CURRENT_DATE` はサーバ TZ (Cloud Run は UTC) の日付なので、JST 09:00〜24:00 の
+/// あいだは閾値が JST 09:00 になり、**00:00〜09:00 JST の打刻が「今日」から落ちる**
+/// (早朝の出勤打刻がまさにその時間帯)。逆に JST 00:00〜09:00 は前日ぶんを拾う。
+#[tokio::test]
+async fn test_today_punches_use_jst_day_boundary() {
+    test_group!("timecard punches (当日一覧の日付境界)");
+
+    test_case!("JST の 0 時で切る", {
+        let state = common::setup_app_state().await;
+        let base_url = common::spawn_test_server(state.clone()).await;
+        let tenant = common::create_test_tenant(state.pool(), "Punch Today JST").await;
+        let auth = format!("Bearer {}", common::create_test_jwt(tenant, "admin"));
+        let client = reqwest::Client::new();
+
+        let emp =
+            common::create_test_employee(&client, &base_url, &auth, "当日 花子", "E010").await;
+        let employee_id = emp["id"].as_str().unwrap().to_string();
+        let res = client
+            .post(format!("{base_url}/api/timecard/cards"))
+            .header("Authorization", &auth)
+            .json(&json!({ "employee_id": employee_id, "card_id": "CAFEBABECAFEBABE" }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 201);
+
+        // **2 行仕込むのは、旧実装 (CURRENT_DATE) が時間帯によって過剰にも過少にも
+        // 外れるから。** 片方だけだと「いま何時か」でテストが素通りする:
+        //   JST 09:00〜24:00 … 閾値が JST 09:00 になり、今日 00:30 の行が落ちる (過少)
+        //   JST 00:00〜09:00 … 閾値が前日 09:00 になり、昨日 23:30 の行を拾う (過剰)
+        // 両方入れておけば、どちらの時間帯でも件数が 2 からずれて落ちる。
+        for (label, expr) in [
+            // JST の今日 00:30 → 含まれるべき
+            ("today", "(d + interval '30 minutes')"),
+            // JST の昨日 23:30 → 含まれてはいけない
+            ("yesterday", "(d - interval '30 minutes')"),
+        ] {
+            sqlx::query(&format!(
+                r#"INSERT INTO time_punches (tenant_id, employee_id, punched_at)
+                   SELECT $1, $2, {expr} AT TIME ZONE 'Asia/Tokyo'
+                   FROM (SELECT (now() AT TIME ZONE 'Asia/Tokyo')::date::timestamp AS d) t"#
+            ))
+            .bind(tenant)
+            .bind(Uuid::parse_str(&employee_id).unwrap())
+            .execute(state.pool())
+            .await
+            .unwrap_or_else(|e| panic!("{label} の打刻を入れられない: {e}"));
+        }
+
+        // punch すると応答に当日一覧が付く
+        let res = client
+            .post(format!("{base_url}/api/timecard/punch"))
+            .header("Authorization", &auth)
+            .json(&json!({ "card_id": "CAFEBABECAFEBABE" }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 201);
+        let body: Value = res.json().await.unwrap();
+
+        // JST 今日 00:30 + いま打った行 = 2 件。昨日 23:30 は入らない。
+        // 旧実装だと時間帯に応じて 1 件 (今日 00:30 が落ちる) か
+        // 3 件 (昨日 23:30 を拾う) になる
+        assert_eq!(
+            body["today_punches"].as_array().unwrap().len(),
+            2,
+            "当日一覧が JST の 0 時で切れていない: {body}"
+        );
+    });
+}
