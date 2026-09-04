@@ -48,15 +48,25 @@ async fn ensure_tenant_for_staging(state: &AppState, tenant_id: Uuid) -> Result<
 /// - fc1200_raw … パース失敗時の hex パススルー fallback
 /// - license … CoreS3 が点呼開始時に読み取る免許証 IC (Refs ippoan/alc-app-s3#125)。
 ///   同じ session_id で測定と束ねて送られる。
+/// - timecard … NFC タイムカード端末の打刻イベント (Refs ippoan/alc-app-s3#134)。
+///   payload は `{"card_id": "...", "card_kind": "felica_idm"|"license"}`。
+///   `card_id` は端末が読んだ**生値** (接頭辞を付けない — punch のカード照合が
+///   完全一致 SQL のため、付けると必ず外れる)。session_id は載らない (点呼では
+///   ないため)。
 ///
-/// 将来の拡張 (timecard イベント等) はここに足す。DB 側に CHECK は張っていない
-/// (migration 126 参照) ため、拡張はコード変更のみで済む。
+/// DB 側に CHECK は張っていない (migration 126 参照) ため、拡張はコード変更のみで済む。
+///
+/// **端末側の壊れ方**: allowlist に無い kind を送ると ingest が 400 を返し、
+/// cf-alc-recorder が `{type:"error",seq}` を返して端末は ack を受け取れない。
+/// 端末 (hub-core/src/uplink.rs) は ack されるまで再送し続け、送信キュー
+/// (MAX_QUEUE=20) が押し出しで溢れる。**新 kind は端末より先にここへ足すこと。**
 pub const HUB_MEASUREMENT_KINDS: &[&str] = &[
     "temperature",
     "blood_pressure",
     "alcohol",
     "fc1200_raw",
     "license",
+    "timecard",
 ];
 
 /// 1 リクエストで受けるバッチの上限 (再送スパイクからの防御)。
@@ -241,6 +251,13 @@ mod tests {
     #[test]
     fn validate_accepts_license_kind() {
         assert!(validate(&item("license", 0, "dev-1")));
+    }
+
+    /// NFC タイムカード端末 (ippoan/alc-app-s3#134) の打刻イベント。
+    /// これが allowlist から漏れると端末が無限再送に入る (定数の doc 参照)
+    #[test]
+    fn validate_accepts_timecard_kind() {
+        assert!(validate(&item("timecard", 0, "dev-timecard-1")));
     }
 
     #[test]
