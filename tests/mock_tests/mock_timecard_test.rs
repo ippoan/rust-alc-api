@@ -896,7 +896,9 @@ async fn test_create_card_success() {
     assert_eq!(res.status(), 201);
 
     let body: Value = res.json().await.unwrap();
-    assert_eq!(body["card_id"], "NFC-001");
+    // 登録は正規化形 (小文字) で入る — 照合と同じ形にしないと引けない
+    // (Refs ippoan/alc-app-s3#134)
+    assert_eq!(body["card_id"], "nfc-001");
     assert_eq!(body["label"], "Main Card");
     assert_eq!(body["employee_id"], employee_id.to_string());
 }
@@ -1672,4 +1674,92 @@ async fn test_no_auth_returns_401() {
         .await
         .unwrap();
     assert_eq!(res.status(), 401);
+}
+
+// ============================================================
+// card_id の正規化 (Refs ippoan/alc-app-s3#134)
+//
+// 同じ物理カードでも読み取り側で表記が揺れる (端末は %02X の大文字 IDm、
+// ローカル NFC ブリッジは小文字、`AA:BB:..` と区切る実装もある)。照合は
+// 完全一致なので、登録・照合・登録照会の 3 経路すべてを同じ正規化形に
+// 揃えないと「タップしても登録されていません」になる。
+// ============================================================
+
+#[tokio::test]
+async fn test_create_card_normalizes_separators_and_case() {
+    let mock = Arc::new(crate::mock_helpers::MockTimecardRepository::default());
+    let (base_url, jwt) = spawn_with_mock(mock).await;
+    let client = reqwest::Client::new();
+
+    let res = client
+        .post(format!("{base_url}/api/timecard/cards"))
+        .header("Authorization", auth(&jwt))
+        .json(&serde_json::json!({
+            "employee_id": Uuid::new_v4(),
+            "card_id": "  AA:BB:CC:DD  "
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 201);
+
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(body["card_id"], "aabbccdd");
+}
+
+#[tokio::test]
+async fn test_punch_normalizes_card_id_before_lookup() {
+    let tenant_id = Uuid::new_v4();
+    let employee_id = Uuid::new_v4();
+    let mock = Arc::new(crate::mock_helpers::MockTimecardRepository::default());
+    *mock.find_card_data.lock().unwrap() =
+        Some(make_card(tenant_id, employee_id, "0123456789abcdef"));
+    *mock.employee_name.lock().unwrap() = "Taro Yamada".to_string();
+
+    let (base_url, jwt) = spawn_with_mock(mock.clone()).await;
+    let client = reqwest::Client::new();
+
+    // 端末が送る生値は大文字 IDm
+    let res = client
+        .post(format!("{base_url}/api/timecard/punch"))
+        .header("Authorization", auth(&jwt))
+        .json(&serde_json::json!({
+            "card_id": "0123456789ABCDEF"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 201);
+
+    // 引いた値が正規化形になっていること (repo には小文字で届く)
+    assert_eq!(
+        mock.card_lookups.lock().unwrap().as_slice(),
+        ["0123456789abcdef"]
+    );
+}
+
+#[tokio::test]
+async fn test_get_card_by_card_id_normalizes_path_param() {
+    let tenant_id = Uuid::new_v4();
+    let employee_id = Uuid::new_v4();
+    let mock = Arc::new(crate::mock_helpers::MockTimecardRepository::default());
+    *mock.card_data.lock().unwrap() = Some(make_card(tenant_id, employee_id, "0123456789abcdef"));
+
+    let (base_url, jwt) = spawn_with_mock(mock).await;
+    let client = reqwest::Client::new();
+
+    // 登録照会は punch と同じ choke point を通らない 3 本目の経路。
+    // ここが漏れると「登録済みなのに管理画面で引けない」になる
+    let res = client
+        .get(format!(
+            "{base_url}/api/timecard/cards/by-card/0123456789ABCDEF"
+        ))
+        .header("Authorization", auth(&jwt))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(body["card_id"], "0123456789abcdef");
 }

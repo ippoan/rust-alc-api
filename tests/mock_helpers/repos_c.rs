@@ -1451,6 +1451,10 @@ pub struct MockTimecardRepository {
     /// hub_measurements の打刻中継 (Refs ippoan/alc-app-s3#134) が
     /// 「新規に入った行のときだけ 1 回」打刻することを固定するために使う
     pub punches: std::sync::Mutex<Vec<(Uuid, Uuid, Option<Uuid>)>>,
+    /// find_card_by_card_id が実際に引いた card_id の記録。
+    /// 照合の手前で正規化が 1 回だけ効いていること (Refs ippoan/alc-app-s3#134) を
+    /// ブラウザ版と端末中継の両経路で固定するために使う
+    pub card_lookups: std::sync::Mutex<Vec<String>>,
 }
 
 impl Default for MockTimecardRepository {
@@ -1466,6 +1470,7 @@ impl Default for MockTimecardRepository {
             csv_rows: std::sync::Mutex::new(vec![]),
             cards_list: std::sync::Mutex::new(vec![]),
             punches: std::sync::Mutex::new(vec![]),
+            card_lookups: std::sync::Mutex::new(vec![]),
         }
     }
 }
@@ -1531,8 +1536,9 @@ impl TimecardRepository for MockTimecardRepository {
     async fn find_card_by_card_id(
         &self,
         _tenant_id: Uuid,
-        _card_id: &str,
+        card_id: &str,
     ) -> Result<Option<TimecardCard>, sqlx::Error> {
+        self.card_lookups.lock().unwrap().push(card_id.to_string());
         check_fail!(self);
         Ok(self.find_card_data.lock().unwrap().clone())
     }

@@ -119,15 +119,68 @@ pub trait TimecardRepository: Send + Sync {
 /// 2 つあるが、照合はこの 1 か所に閉じる。** 2 実装目を作ると、どちらか片方だけに
 /// フォールバックを足す/外すといったズレが必ず出る。
 ///
-/// 照合は**完全一致**なので、呼び出し側は `card_id` を加工せずに渡すこと
-/// (端末は読み取った生値を送る。接頭辞や正規化を挟むと必ず外れる)。
+/// 照合は**完全一致**だが、その手前で `normalize_card_id` を 1 回だけ通す。
+/// **呼び出し側は読み取った生値をそのまま渡すこと** — 接頭辞を付けたり、
+/// 呼び出し側ごとに別の加工を挟んだりすると、経路ごとに違う値で引くことになる。
 pub async fn resolve_employee_by_card(
     repo: &dyn TimecardRepository,
     tenant_id: Uuid,
     card_id: &str,
 ) -> Result<Option<Uuid>, sqlx::Error> {
-    if let Some(card) = repo.find_card_by_card_id(tenant_id, card_id).await? {
+    let card_id = normalize_card_id(card_id);
+    if let Some(card) = repo.find_card_by_card_id(tenant_id, &card_id).await? {
         return Ok(Some(card.employee_id));
     }
-    repo.find_employee_id_by_nfc(tenant_id, card_id).await
+    repo.find_employee_id_by_nfc(tenant_id, &card_id).await
+}
+
+/// カード ID の正規化。**`timecard_cards` の登録も照合もこの結果で行う。**
+///
+/// 同じ物理カードでも読み取り側で表記が揺れる (IDm を大文字で出す端末、小文字で
+/// 出すローカル NFC ブリッジ、`AA:BB:..` と区切る実装) ため、生値のまま完全一致で
+/// 引くと同じカードが別カードとして扱われる。**小文字**なのは `alc-carins` の
+/// `normalize_nfc_uuid` (車検証 NFC タグ) と規約を揃えるため — 1 つの repo に
+/// NFC ID の正規化規約を 2 つ並べない。
+///
+/// **読み側だけ正規化してはいけない。** `ABC` と `abc` の 2 行が同時に存在し得ると
+/// 打刻が別人に着く。登録側も同じ関数を通し、DB 側の CHECK 制約
+/// (`timecard_cards_card_id_normalized`、migration 134) で書き忘れを loud fail させる。
+///
+/// `employees.nfc_id` フォールバック (免許証の交付日 8 桁 + 有効期限 8 桁 = 16 桁の
+/// 数字) に対しては no-op なので、本番で動いている免許証経路の挙動は変わらない。
+pub fn normalize_card_id(card_id: &str) -> String {
+    card_id.trim().to_lowercase().replace(':', "")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_card_id;
+
+    #[test]
+    fn felica_idm_uppercase_becomes_lowercase() {
+        // 端末は %02X (大文字) で IDm を送る
+        assert_eq!(normalize_card_id("0123456789ABCDEF"), "0123456789abcdef");
+    }
+
+    #[test]
+    fn separators_and_surrounding_space_are_dropped() {
+        assert_eq!(normalize_card_id("  AA:BB:CC:DD  "), "aabbccdd");
+    }
+
+    #[test]
+    fn already_normalized_value_is_unchanged() {
+        assert_eq!(normalize_card_id("0123456789abcdef"), "0123456789abcdef");
+    }
+
+    #[test]
+    fn license_nfc_id_is_untouched() {
+        // employees.nfc_id は交付日 8 桁 + 有効期限 8 桁の数字。
+        // 本番で動いている免許証経路の挙動を変えないことを固定する
+        assert_eq!(normalize_card_id("2023040120280331"), "2023040120280331");
+    }
+
+    #[test]
+    fn empty_input_stays_empty() {
+        assert_eq!(normalize_card_id("   "), "");
+    }
 }
