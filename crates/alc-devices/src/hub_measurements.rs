@@ -191,8 +191,19 @@ async fn ingest(
 /// **失敗しても ingest は失敗させない (ログのみ)。** 500 を返すと端末は ack を
 /// 受け取れず同じ seq を再送するが、測定行は既に入っているので再送は
 /// 「新規でない」と判定され、**二度と打刻されないまま無限再送になる**。
-/// 未登録カードや DB 障害は「測定は残り打刻だけ落ちる」に倒す方が回復可能
-/// (行が残っているので後から手で打刻し直せる)。
+///
+/// # 握り潰した打刻は後から復旧できる (再送機構を足さないこと)
+///
+/// ここで落とした打刻は**端末の再送では戻ってこない** (行が既にあるため)。
+/// にもかかわらず握り潰してよいのは、**`hub_measurements` に
+/// `kind='timecard'` の行がそのまま残る**からで、
+/// 「timecard 行はあるが対応する `time_punches` が無い」を引く backfill を
+/// 後から書けば取り戻せる (payload に `card_id` と `recorded_at` があり、
+/// device_id + seq で一意)。
+/// **この性質があるので、ここに独自の再送・キュー・リトライ機構を足さないこと。**
+///
+/// ログの出し分け: **未登録カードは `warn`** (バグではなく「登録が漏れている」
+/// という運用事象。`error` にすると本物の障害に埋もれる)、**DB 障害は `error`**。
 async fn relay_timecard_punch(state: &AppState, tenant_id: Uuid, item: &HubMeasurementCreate) {
     let Some(card_id) = item.payload.get("card_id").and_then(|v| v.as_str()) else {
         tracing::warn!(
@@ -208,11 +219,15 @@ async fn relay_timecard_punch(state: &AppState, tenant_id: Uuid, item: &HubMeasu
         match resolve_employee_by_card(state.timecard.as_ref(), tenant_id, card_id).await {
             Ok(Some(id)) => id,
             Ok(None) => {
-                // 未登録カード。ブラウザ版なら 404 を返す分岐で、ここでは記録だけ残す
+                // 未登録カード。ブラウザ版なら 404 を返す分岐だが、これは**運用事象**
+                // (そのカードが timecard_cards にも employees.nfc_id にも無い) なので
+                // warn に留める。card_id を出して「誰の登録が漏れているか」を追えるように
+                // する — card_id は社員識別子であって秘密ではない (管理画面に平文で出る)
                 tracing::warn!(
-                    "timecard relay: 未登録カード (device_id={} seq={} card_kind={:?})",
+                    "timecard relay: 未登録カード (device_id={} seq={} card_id={} card_kind={:?})",
                     item.device_id,
                     item.seq,
+                    card_id,
                     item.payload.get("card_kind").and_then(|v| v.as_str()),
                 );
                 return;
