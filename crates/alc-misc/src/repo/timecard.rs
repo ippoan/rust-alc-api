@@ -223,18 +223,32 @@ impl TimecardRepository for PgTimecardRepository {
         tenant_id: Uuid,
         employee_id: Uuid,
         device_id: Option<Uuid>,
+        card_id: &str,
     ) -> Result<TimePunch, sqlx::Error> {
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
+        // device_id は hub_measurements では TEXT NOT NULL。キオスクの UUID が
+        // 無ければ 'browser' に倒す (端末の device_id とは名前空間が衝突しない)
+        let hub_device_id = device_id
+            .map(|d| d.to_string())
+            .unwrap_or_else(|| "browser".to_string());
+        // employee_id は payload に凍結する (端末側 freeze_employee_id と同じ)。
+        // recorded_at は now() — ブラウザは自前の計時を送ってこない
         sqlx::query_as::<_, TimePunch>(
             r#"
-            INSERT INTO time_punches (tenant_id, employee_id, device_id)
-            VALUES ($1, $2, $3)
-            RETURNING *
+            INSERT INTO hub_measurements (tenant_id, device_id, kind, payload, seq, recorded_at)
+            VALUES (
+                $1, $2, 'timecard',
+                jsonb_build_object('card_id', $4::text, 'employee_id', $3::text),
+                nextval('hub_measurements_browser_seq'), now()
+            )
+            RETURNING id, tenant_id, $3::uuid AS employee_id, NULL::uuid AS device_id,
+                      recorded_at AS punched_at, created_at
             "#,
         )
         .bind(tenant_id)
+        .bind(&hub_device_id)
         .bind(employee_id)
-        .bind(device_id)
+        .bind(card_id)
         .fetch_one(&mut *tc.conn)
         .await
     }
@@ -258,22 +272,29 @@ impl TimecardRepository for PgTimecardRepository {
         employee_id: Uuid,
     ) -> Result<Vec<TimePunch>, sqlx::Error> {
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
+        // 打刻の一次表は hub_measurements (Refs ippoan/alc-app-s3#134)。一覧と
+        // 同じ CTE を使う — ここだけ time_punches を読むと、ブラウザで打った
+        // 直後の応答にその打刻が出ない (書き込み先が違うため)。
+        //
         // **「今日」は JST で切る。** `CURRENT_DATE` はサーバ TZ (Cloud Run は UTC) の
         // 日付なので、JST の 0 時〜9 時に打刻すると「昨日」に落ちて当日一覧から消える。
         // 表示側 (CSV / 画面) は既に JST 固定なので、境界だけ UTC のままだった。
-        sqlx::query_as::<_, TimePunch>(
-            r#"
-            SELECT * FROM time_punches
-            WHERE tenant_id = $1 AND employee_id = $2
-              AND punched_at >= ((now() AT TIME ZONE 'Asia/Tokyo')::date::timestamp
-                                 AT TIME ZONE 'Asia/Tokyo')
-            ORDER BY punched_at
-            "#,
-        )
-        .bind(tenant_id)
-        .bind(employee_id)
-        .fetch_all(&mut *tc.conn)
-        .await
+        let sql = format!(
+            r#"{PUNCHES_CTE}
+            SELECT p.id, p.tenant_id, p.employee_id, NULL::uuid AS device_id,
+                   p.punched_at, p.created_at
+            FROM p
+            WHERE p.tenant_id = $1 AND p.employee_id = $2
+              AND p.punched_at >= ((now() AT TIME ZONE 'Asia/Tokyo')::date::timestamp
+                                   AT TIME ZONE 'Asia/Tokyo')
+            ORDER BY p.punched_at
+            "#
+        );
+        sqlx::query_as::<_, TimePunch>(&sql)
+            .bind(tenant_id)
+            .bind(employee_id)
+            .fetch_all(&mut *tc.conn)
+            .await
     }
 
     async fn count_punches(
