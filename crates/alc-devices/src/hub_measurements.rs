@@ -42,8 +42,17 @@ async fn ensure_tenant_for_staging(state: &AppState, tenant_id: Uuid) -> Result<
         })
 }
 
-/// 打刻中継の対象 kind (Refs ippoan/alc-app-s3#134)。文字列の直書きを避ける。
+/// 打刻の kind (Refs ippoan/alc-app-s3#134)。文字列の直書きを避ける。
 pub const KIND_TIMECARD: &str = "timecard";
+
+/// 打刻 payload のカード生値のキー。
+const FIELD_CARD_ID: &str = "card_id";
+
+/// ingest 時に凍結する「解決済み社員」のキー (Refs ippoan/alc-app-s3#134)。
+///
+/// **この値はサーバが書く。端末が名乗ったものは kind に関わらず必ず捨てる**
+/// (`strip_client_employee_id`)。
+const FIELD_EMPLOYEE_ID: &str = "employee_id";
 
 /// 受理する測定種別の allowlist (Refs #564 設計レビュー 2026-07-12)。
 ///
@@ -147,7 +156,7 @@ async fn ingest(
     tenant: Extension<TenantId>,
     Json(body): Json<IngestBody>,
 ) -> Result<(StatusCode, Json<HubMeasurementsIngestResponse>), StatusCode> {
-    let items = body.into_items();
+    let mut items = body.into_items();
     if items.is_empty() || items.len() > MAX_BATCH_ITEMS {
         return Err(StatusCode::BAD_REQUEST);
     }
@@ -155,7 +164,15 @@ async fn ingest(
         return Err(StatusCode::BAD_REQUEST);
     }
     ensure_tenant_for_staging(&state, tenant.0 .0).await?;
-    let inserted_flags = state
+
+    // **insert の前に**社員を解決して payload に凍結する (Refs ippoan/alc-app-s3#134)。
+    // 順序が逆だと凍結できない — 再送は ON CONFLICT DO NOTHING で弾かれ、
+    // 最初に入った payload が残る (それが「凍結」の実体)。
+    for item in items.iter_mut() {
+        freeze_employee_id(&state, tenant.0 .0, item).await;
+    }
+
+    let res = state
         .hub_measurements
         .insert_batch(tenant.0 .0, &items)
         .await
@@ -163,76 +180,76 @@ async fn ingest(
             tracing::error!("hub_measurements.insert_batch error: {e}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
-    // 下の zip は「items と同順同長」が前提。短い Vec を返す実装があると
-    // **zip が黙って打ち切られ、打刻だけが落ちる** (測定は入っているので
-    // 気付けない)。trait の doc で約束している不変条件をここでも押さえる
-    debug_assert_eq!(
-        inserted_flags.len(),
-        items.len(),
-        "insert_batch は items と同順同長の Vec<bool> を返すこと"
-    );
-    let inserted = inserted_flags.iter().filter(|new| **new).count() as i64;
 
-    // NFC タイムカード端末の打刻中継 (Refs ippoan/alc-app-s3#134)。
-    // **新規に入った行だけ**を打刻する — 端末は ack されるまで同じ seq を再送し、
-    // 再送は ON CONFLICT DO NOTHING で弾かれて flag が false になるので、
-    // ここが二重打刻を防ぐ関門になる。
-    for (item, _) in items
-        .iter()
-        .zip(inserted_flags.iter())
-        .filter(|(item, new)| **new && item.kind == KIND_TIMECARD)
-    {
-        relay_timecard_punch(&state, tenant.0 .0, item).await;
-    }
-
-    Ok((
-        StatusCode::CREATED,
-        Json(HubMeasurementsIngestResponse {
-            inserted,
-            duplicates: items.len() as i64 - inserted,
-        }),
-    ))
+    Ok((StatusCode::CREATED, Json(res)))
 }
 
-/// `kind="timecard"` の 1 行を打刻 (`time_punches`) に変換する。
+/// 端末が名乗った `employee_id` を payload から落とす。
 ///
-/// **失敗しても ingest は失敗させない (ログのみ)。** 500 を返すと端末は ack を
-/// 受け取れず同じ seq を再送するが、測定行は既に入っているので再送は
-/// 「新規でない」と判定され、**二度と打刻されないまま無限再送になる**。
+/// **kind を問わず必ず落とす。** 打刻履歴はこのキーを「サーバが解決した社員」と
+/// して読むので、端末の申告を残すと **端末が任意の社員に打刻を付けられる**。
+/// device JWT は tenant しか名乗れず、tenant すら introspect 結果から解決する、
+/// という既存の不変条件 (plan/standing-devices.md §3.3) が payload 経由で破れる。
 ///
-/// # 握り潰した打刻は後から復旧できる (再送機構を足さないこと)
+/// `timecard` だけを対象にしないのは、将来 `license` など別の kind でも同じ
+/// キーを読むようになったときに、そこだけ素通しになる穴を残さないため。
+/// 現状どの kind もこのキーを使っていないので、落として失うものは無い。
+fn strip_client_employee_id(item: &mut HubMeasurementCreate) {
+    if let Some(obj) = item.payload.as_object_mut() {
+        obj.remove(FIELD_EMPLOYEE_ID);
+    }
+}
+
+/// `kind="timecard"` の payload に「解決済み社員」を凍結する
+/// (Refs ippoan/alc-app-s3#134)。
 ///
-/// ここで落とした打刻は**端末の再送では戻ってこない** (行が既にあるため)。
-/// にもかかわらず握り潰してよいのは、**`hub_measurements` に
-/// `kind='timecard'` の行がそのまま残る**からで、
-/// 「timecard 行はあるが対応する `time_punches` が無い」を引く backfill を
-/// 後から書けば取り戻せる (payload に `card_id` と `recorded_at` があり、
-/// device_id + seq で一意)。
+/// # なぜ読み出し時ではなく ingest 時なのか
+///
+/// `timecard_cards` は hard DELETE + `UNIQUE (tenant_id, card_id)` なので、
+/// カードの付け替えは「削除 → 再登録」になる。読み出しのたびに解決すると、
+/// **退職者のカードを新人に回した瞬間に、退職者の過去の打刻が全部新人に付く**。
+/// タップの時点で解決して凍結すれば、後からカードを付け替えても過去は動かない。
+///
+/// # 解決できなくても行は作る
+///
+/// 未登録カードでも DB 障害でも、**`employee_id` を入れずに測定行はそのまま入れる**
+/// (ここで握り潰さない)。行さえ残っていれば `employee_id` が無いものだけを
+/// 埋め直す backfill を後から書ける。**そのとき既存値は絶対に上書きしないこと** —
+/// 上書きすると「凍結」が意味を失う。
+///
 /// **この性質があるので、ここに独自の再送・キュー・リトライ機構を足さないこと。**
 ///
 /// ログの出し分け: **未登録カードは `warn`** (バグではなく「登録が漏れている」
 /// という運用事象。`error` にすると本物の障害に埋もれる)、**DB 障害は `error`**。
-async fn relay_timecard_punch(state: &AppState, tenant_id: Uuid, item: &HubMeasurementCreate) {
-    let Some(card_id) = item.payload.get("card_id").and_then(|v| v.as_str()) else {
+async fn freeze_employee_id(state: &AppState, tenant_id: Uuid, item: &mut HubMeasurementCreate) {
+    strip_client_employee_id(item);
+    if item.kind != KIND_TIMECARD {
+        return;
+    }
+    let card_id = item
+        .payload
+        .get(FIELD_CARD_ID)
+        .and_then(|v| v.as_str())
+        .map(str::to_owned);
+    let Some(card_id) = card_id else {
         tracing::warn!(
-            "timecard relay: payload に card_id が無い (device_id={} seq={})",
+            "timecard: payload に card_id が無い (device_id={} seq={})",
             item.device_id,
             item.seq
         );
         return;
     };
     // 照合はブラウザ版の punch と同じ 1 か所 (alc_core::repository::timecard)。
-    // card_id は端末が読んだ生値のまま渡す (完全一致 SQL のため加工しない)
+    // card_id は端末が読んだ生値のまま渡す (正規化は resolve 側が 1 回だけ行う)
     let employee_id =
-        match resolve_employee_by_card(state.timecard.as_ref(), tenant_id, card_id).await {
+        match resolve_employee_by_card(state.timecard.as_ref(), tenant_id, &card_id).await {
             Ok(Some(id)) => id,
             Ok(None) => {
-                // 未登録カード。ブラウザ版なら 404 を返す分岐だが、これは**運用事象**
-                // (そのカードが timecard_cards にも employees.nfc_id にも無い) なので
-                // warn に留める。card_id を出して「誰の登録が漏れているか」を追えるように
-                // する — card_id は社員識別子であって秘密ではない (管理画面に平文で出る)
+                // 未登録カード。**運用事象**なので warn に留める。card_id を出して
+                // 「誰の登録が漏れているか」を追えるようにする — card_id は社員識別子
+                // であって秘密ではない (管理画面に平文で出る)
                 tracing::warn!(
-                    "timecard relay: 未登録カード (device_id={} seq={} card_id={} card_kind={:?})",
+                    "timecard: 未登録カード (device_id={} seq={} card_id={} card_kind={:?})",
                     item.device_id,
                     item.seq,
                     card_id,
@@ -241,19 +258,15 @@ async fn relay_timecard_punch(state: &AppState, tenant_id: Uuid, item: &HubMeasu
                 return;
             }
             Err(e) => {
-                tracing::error!("timecard relay: カード照合に失敗: {e}");
+                tracing::error!("timecard: カード照合に失敗: {e}");
                 return;
             }
         };
-    // device_id は NULL。time_punches.device_id は devices(id) への UUID FK だが
-    // hub 側の device_id は auth-worker 発行の短い文字列で入らない。どの端末かは
-    // hub_measurements.device_id で追える (plan/standing-devices.md §3.3)
-    if let Err(e) = state
-        .timecard
-        .create_punch(tenant_id, employee_id, None)
-        .await
-    {
-        tracing::error!("timecard relay: 打刻の記録に失敗: {e}");
+    if let Some(obj) = item.payload.as_object_mut() {
+        obj.insert(
+            FIELD_EMPLOYEE_ID.to_string(),
+            serde_json::Value::String(employee_id.to_string()),
+        );
     }
 }
 
