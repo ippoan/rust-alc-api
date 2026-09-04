@@ -262,7 +262,7 @@ async fn export_csv(
         wtr.write_record([
             r.id.to_string(),
             r.employee_code.clone().unwrap_or_default(),
-            r.employee_name.clone(),
+            r.employee_name.clone().unwrap_or_default(),
             r.punched_at
                 .with_timezone(&chrono::FixedOffset::east_opt(9 * 3600).unwrap())
                 .format("%Y-%m-%d %H:%M:%S")

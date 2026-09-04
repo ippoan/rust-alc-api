@@ -1,0 +1,222 @@
+//! 打刻一覧 (`/api/timecard/punches` と `/punches/csv`) の DB integration テスト。
+//!
+//! **このファイルが無いと、打刻の読み出し SQL は 1 度も実行されないまま出ます。**
+//! mock テスト (`tests/mock_tests/mock_timecard_test.rs`) は repository を丸ごと
+//! 差し替えるので SQL を通りません。打刻一覧は #134 で `time_punches` の読み出しから
+//! `hub_measurements` の導出 (CTE + 3 段の COALESCE + 2 本の LEFT JOIN) に変わり、
+//! **SQL 側だけで壊れうる範囲が一気に増えた**ので、実 DB で固定します。
+
+#[macro_use]
+mod common;
+
+use serde_json::{json, Value};
+use uuid::Uuid;
+
+/// 端末の打刻を ingest 経路 (cf-alc-recorder → 内部 proxy) で入れる。
+/// 直接 INSERT せず本番と同じ口を通すのは、**ingest 時の凍結
+/// (`freeze_employee_id`) と読み出しの噛み合わせ**まで含めて固定するため。
+async fn post_timecard(
+    client: &reqwest::Client,
+    base_url: &str,
+    tenant_id: Uuid,
+    seq: i64,
+    card_id: &str,
+    recorded_at_ms: Option<i64>,
+) -> reqwest::Response {
+    let mut item = json!({
+        "device_id": "timecard-dev-1",
+        "kind": "timecard",
+        "seq": seq,
+        "payload": { "card_id": card_id, "card_kind": "felica_idm" }
+    });
+    if let Some(ms) = recorded_at_ms {
+        item["recorded_at_ms"] = json!(ms);
+    }
+    client
+        .post(format!("{base_url}/api/hub/measurements"))
+        .header(
+            "X-Internal-Shared-Secret",
+            common::TEST_INTERNAL_SHARED_SECRET,
+        )
+        .header("X-Tenant-ID", tenant_id.to_string())
+        .json(&json!([item]))
+        .send()
+        .await
+        .unwrap()
+}
+
+async fn list_punches(client: &reqwest::Client, base_url: &str, auth: &str) -> Value {
+    let res = client
+        .get(format!("{base_url}/api/timecard/punches"))
+        .header("Authorization", auth)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200, "GET /api/timecard/punches");
+    res.json().await.unwrap()
+}
+
+#[tokio::test]
+async fn test_punches_are_derived_from_hub_measurements() {
+    test_group!("timecard punches (derived)");
+
+    test_case!(
+        "登録カード → 社員が解決され、未登録カードも行として出る",
+        {
+            let state = common::setup_app_state().await;
+            let base_url = common::spawn_test_server(state.clone()).await;
+            let tenant = common::create_test_tenant(state.pool(), "Punch Derive A").await;
+            let auth = format!("Bearer {}", common::create_test_jwt(tenant, "admin"));
+            let client = reqwest::Client::new();
+
+            let emp =
+                common::create_test_employee(&client, &base_url, &auth, "打刻 太郎", "E001").await;
+            let employee_id = emp["id"].as_str().unwrap().to_string();
+
+            // カード登録は**大文字**で投げる (端末が送る IDm の生形)。
+            // サーバが小文字へ正規化して保存する (migration 134)
+            let res = client
+                .post(format!("{base_url}/api/timecard/cards"))
+                .header("Authorization", &auth)
+                .json(&json!({ "employee_id": employee_id, "card_id": "01401D0B1D37B660" }))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 201);
+
+            // 登録済みカードのタップ + 未登録カードのタップ
+            assert_eq!(
+                post_timecard(&client, &base_url, tenant, 1, "01401D0B1D37B660", None)
+                    .await
+                    .status(),
+                201
+            );
+            assert_eq!(
+                post_timecard(&client, &base_url, tenant, 2, "DEADBEEFDEADBEEF", None)
+                    .await
+                    .status(),
+                201
+            );
+
+            let body = list_punches(&client, &base_url, &auth).await;
+            let punches = body["punches"].as_array().unwrap();
+            assert_eq!(punches.len(), 2, "2 タップとも一覧に出る: {body}");
+            assert_eq!(body["total"], 2);
+
+            // 登録済みカードは社員に解決されている
+            let resolved = punches
+                .iter()
+                .find(|p| p["employee_id"].as_str() == Some(employee_id.as_str()))
+                .unwrap_or_else(|| panic!("解決済みの打刻が無い: {body}"));
+            assert_eq!(resolved["employee_name"], "打刻 太郎");
+            // 端末は device_name に入る (device_id は UUID FK なので常に null)
+            assert_eq!(resolved["device_name"], "timecard-dev-1");
+            assert!(resolved["device_id"].is_null());
+
+            // 未登録カードは employee_id が null。**行ごと落とさない** —
+            // 落とすと「タップしたのに履歴に出ない」で登録漏れに気付けなくなる
+            let unresolved = punches
+                .iter()
+                .find(|p| p["employee_id"].is_null())
+                .unwrap_or_else(|| panic!("未解決の打刻が無い: {body}"));
+            assert!(unresolved["employee_name"].is_null());
+        }
+    );
+}
+
+#[tokio::test]
+async fn test_punched_at_uses_terminal_time_not_arrival_time() {
+    test_group!("timecard punches (時刻)");
+
+    test_case!("recorded_at があればそれ、無ければ created_at", {
+        let state = common::setup_app_state().await;
+        let base_url = common::spawn_test_server(state.clone()).await;
+        let tenant = common::create_test_tenant(state.pool(), "Punch Derive B").await;
+        let auth = format!("Bearer {}", common::create_test_jwt(tenant, "admin"));
+        let client = reqwest::Client::new();
+
+        // 端末計時あり (回線断のあいだ溜めて後から送られた打刻を模す)
+        let tapped_ms = 1_752_300_000_000i64; // 2025-07-12T06:00:00Z
+        post_timecard(&client, &base_url, tenant, 1, "AAAA", Some(tapped_ms)).await;
+        // 端末計時なし (時計未同期 → recorded_at が NULL)
+        post_timecard(&client, &base_url, tenant, 2, "BBBB", None).await;
+
+        let body = list_punches(&client, &base_url, &auth).await;
+        let punches = body["punches"].as_array().unwrap();
+        assert_eq!(punches.len(), 2, "{body}");
+
+        // 端末計時のある行は**届いた時刻ではなくタップ時刻**で出る
+        assert!(
+            punches.iter().any(|p| p["punched_at"]
+                .as_str()
+                .unwrap()
+                .starts_with("2025-07-12T06:00:00")),
+            "recorded_at がそのまま punched_at にならない: {body}"
+        );
+        // recorded_at が NULL の行も落ちない (created_at に倒れる)
+        assert_eq!(
+            punches
+                .iter()
+                .filter(|p| !p["punched_at"].is_null())
+                .count(),
+            2,
+            "punched_at が NULL の行がある: {body}"
+        );
+    });
+}
+
+#[tokio::test]
+async fn test_punches_csv_keeps_unresolved_rows() {
+    test_group!("timecard punches (CSV)");
+
+    test_case!(
+        "未登録カードも行として出る (社員名は空欄)",
+        {
+            let state = common::setup_app_state().await;
+            let base_url = common::spawn_test_server(state.clone()).await;
+            let tenant = common::create_test_tenant(state.pool(), "Punch Derive C").await;
+            let auth = format!("Bearer {}", common::create_test_jwt(tenant, "admin"));
+            let client = reqwest::Client::new();
+
+            post_timecard(&client, &base_url, tenant, 1, "DEADBEEFDEADBEEF", None).await;
+
+            let res = client
+                .get(format!("{base_url}/api/timecard/punches/csv"))
+                .header("Authorization", &auth)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 200);
+            let bytes = res.bytes().await.unwrap();
+            let csv = std::str::from_utf8(&bytes[3..]).unwrap();
+
+            // ヘッダ + 1 行。端末 ID は残る
+            assert_eq!(
+                csv.lines().filter(|l| !l.trim().is_empty()).count(),
+                2,
+                "{csv}"
+            );
+            assert!(csv.contains("timecard-dev-1"), "{csv}");
+        }
+    );
+}
+
+#[tokio::test]
+async fn test_punches_are_tenant_isolated() {
+    test_group!("timecard punches (テナント分離)");
+
+    test_case!("別テナントの打刻は見えない", {
+        let state = common::setup_app_state().await;
+        let base_url = common::spawn_test_server(state.clone()).await;
+        let tenant_a = common::create_test_tenant(state.pool(), "Punch Derive D1").await;
+        let tenant_b = common::create_test_tenant(state.pool(), "Punch Derive D2").await;
+        let client = reqwest::Client::new();
+
+        post_timecard(&client, &base_url, tenant_a, 1, "AAAA", None).await;
+
+        let auth_b = format!("Bearer {}", common::create_test_jwt(tenant_b, "admin"));
+        let body = list_punches(&client, &base_url, &auth_b).await;
+        assert_eq!(body["punches"].as_array().unwrap().len(), 0, "{body}");
+        assert_eq!(body["total"], 0);
+    });
+}
