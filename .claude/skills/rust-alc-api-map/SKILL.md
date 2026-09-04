@@ -531,7 +531,8 @@ rust-logi から移行。nuxt-pwa-carins フロントエンドが使用。
 ## タイムカード機能
 
 - **テーブル**: `timecard_cards` (カード:社員 = 多:1) + `time_punches` (打刻記録)
-- **マイグレーション**: `migrations/034_create_timecard.sql`
+- **マイグレーション**: `migrations/034_create_timecard.sql` + `migrations/134_timecard_cards_normalize_card_id.sql` (card_id の正規化移行 + CHECK 制約)
+- **card_id の正規化 (Refs ippoan/alc-app-s3#134)**: `alc_core::repository::timecard::normalize_card_id` = `trim` + **小文字** + `':'` 除去。同じ物理カードでも読み取り側で表記が揺れる (NFC タイムカード端末は `%02X` の大文字 IDm、ローカル NFC ブリッジは小文字、`AA:BB:..` と区切る実装もある) のに照合は完全一致なので、**登録・照合・登録照会の 3 経路すべて**を同じ形に揃える: 登録 = `create_card`、照合 = `resolve_employee_by_card` (ブラウザ版 punch と端末中継の共有 choke point)、登録照会 = `get_card_by_card_id` (choke point を通らない 3 本目)。**小文字**なのは `alc-carins` の `normalize_nfc_uuid` (車検証 NFC タグ) と規約を揃えるため — 1 repo に NFC ID の正規化規約を 2 つ並べない。**読み側だけ正規化してはいけない**: `ABC` と `abc` の 2 行が同時に存在し得ると正規化後の値がどちらにも一致して**打刻が別人に着く**。migration 134 が既存行を移行し、CHECK 制約 `timecard_cards_card_id_normalized` が書き忘れを loud fail させる (既存の `idx_timecard_cards_unique (tenant_id, card_id)` がそのまま正規化後の一意性を保証するので index は増やさない)。`employees.nfc_id` フォールバック (免許証 16 桁の数字) に対しては no-op
 - **バックエンド**: `src/routes/timecard.rs`
   - カード CRUD: `POST/GET /api/timecard/cards`, `DELETE /api/timecard/cards/{id}`, `GET /api/timecard/cards/by-card/{card_id}`
   - 打刻: `POST /api/timecard/punch` (card_id → 社員特定 → 打刻 + 当日一覧返却)

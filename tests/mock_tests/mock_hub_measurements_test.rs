@@ -579,6 +579,39 @@ async fn test_timecard_relay_punches_when_card_is_registered() {
     assert_eq!(punches[0], (tenant_id, employee_id, None));
 }
 
+/// 端末が送る大文字 IDm は、照合の手前で正規化されてから引かれる
+/// (Refs ippoan/alc-app-s3#134)。ブラウザ版 punch と同じ choke point
+/// (`resolve_employee_by_card`) を通るので、片方だけ正規化が外れることはない
+#[tokio::test]
+async fn test_timecard_relay_normalizes_card_id_before_lookup() {
+    let (state, _hub, tc) = timecard_state();
+    let tenant_id = Uuid::new_v4();
+    let employee_id = Uuid::new_v4();
+    *tc.find_card_data.lock().unwrap() = Some(rust_alc_api::db::models::TimecardCard {
+        id: Uuid::new_v4(),
+        tenant_id,
+        employee_id,
+        card_id: "01401d0b1d37b660".to_string(),
+        label: None,
+        created_at: chrono::Utc::now(),
+    });
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+
+    let res = post_timecard(
+        &base_url,
+        tenant_id,
+        vec![timecard_item(1, "01401D0B1D37B660")],
+    )
+    .await;
+    assert_eq!(res.status(), 201);
+
+    assert_eq!(
+        tc.card_lookups.lock().unwrap().as_slice(),
+        ["01401d0b1d37b660"]
+    );
+    assert_eq!(tc.punches.lock().unwrap().len(), 1);
+}
+
 /// カード未登録でも employees.nfc_id にあれば打刻される (免許証 16 桁の経路)
 #[tokio::test]
 async fn test_timecard_relay_falls_back_to_employee_nfc_id() {

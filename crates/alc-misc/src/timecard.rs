@@ -12,6 +12,7 @@ use alc_core::models::{
     CreateTimePunchByCard, CreateTimecardCard, TimePunchFilter, TimePunchWithEmployee,
     TimePunchesResponse, TimecardCard,
 };
+use alc_core::repository::timecard::normalize_card_id;
 use alc_core::AppState;
 
 pub fn tenant_router() -> Router<AppState> {
@@ -41,7 +42,9 @@ async fn create_card(
         .create_card(
             tenant_id,
             body.employee_id,
-            &body.card_id,
+            // 登録も照合と同じ正規化形で入れる。読み側だけ正規化すると
+            // `ABC` と `abc` が同時に一致し得て打刻が別人に着く
+            &normalize_card_id(&body.card_id),
             body.label.as_deref(),
         )
         .await
@@ -103,7 +106,7 @@ async fn get_card_by_card_id(
 
     let card = state
         .timecard
-        .get_card_by_card_id(tenant_id, &card_id)
+        .get_card_by_card_id(tenant_id, &normalize_card_id(&card_id))
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
