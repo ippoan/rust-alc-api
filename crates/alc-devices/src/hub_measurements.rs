@@ -11,6 +11,7 @@ use alc_core::models::{
     HubMeasurementCreate, HubMeasurementFilter, HubMeasurementsIngestResponse,
     HubMeasurementsListResponse,
 };
+use alc_core::repository::timecard::resolve_employee_by_card;
 use alc_core::AppState;
 
 /// `STAGING_MODE=true` かどうか (alc-auth / alc-misc::staging と同判定)。
@@ -41,6 +42,9 @@ async fn ensure_tenant_for_staging(state: &AppState, tenant_id: Uuid) -> Result<
         })
 }
 
+/// 打刻中継の対象 kind (Refs ippoan/alc-app-s3#134)。文字列の直書きを避ける。
+pub const KIND_TIMECARD: &str = "timecard";
+
 /// 受理する測定種別の allowlist (Refs #564 設計レビュー 2026-07-12)。
 ///
 /// - temperature / blood_pressure … ble-medical-gateway 互換 JSON
@@ -66,7 +70,7 @@ pub const HUB_MEASUREMENT_KINDS: &[&str] = &[
     "alcohol",
     "fc1200_raw",
     "license",
-    "timecard",
+    KIND_TIMECARD,
 ];
 
 /// 1 リクエストで受けるバッチの上限 (再送スパイクからの防御)。
@@ -151,7 +155,7 @@ async fn ingest(
         return Err(StatusCode::BAD_REQUEST);
     }
     ensure_tenant_for_staging(&state, tenant.0 .0).await?;
-    let resp = state
+    let inserted_flags = state
         .hub_measurements
         .insert_batch(tenant.0 .0, &items)
         .await
@@ -159,7 +163,98 @@ async fn ingest(
             tracing::error!("hub_measurements.insert_batch error: {e}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
-    Ok((StatusCode::CREATED, Json(resp)))
+    // 下の zip は「items と同順同長」が前提。短い Vec を返す実装があると
+    // **zip が黙って打ち切られ、打刻だけが落ちる** (測定は入っているので
+    // 気付けない)。trait の doc で約束している不変条件をここでも押さえる
+    debug_assert_eq!(
+        inserted_flags.len(),
+        items.len(),
+        "insert_batch は items と同順同長の Vec<bool> を返すこと"
+    );
+    let inserted = inserted_flags.iter().filter(|new| **new).count() as i64;
+
+    // NFC タイムカード端末の打刻中継 (Refs ippoan/alc-app-s3#134)。
+    // **新規に入った行だけ**を打刻する — 端末は ack されるまで同じ seq を再送し、
+    // 再送は ON CONFLICT DO NOTHING で弾かれて flag が false になるので、
+    // ここが二重打刻を防ぐ関門になる。
+    for (item, _) in items
+        .iter()
+        .zip(inserted_flags.iter())
+        .filter(|(item, new)| **new && item.kind == KIND_TIMECARD)
+    {
+        relay_timecard_punch(&state, tenant.0 .0, item).await;
+    }
+
+    Ok((
+        StatusCode::CREATED,
+        Json(HubMeasurementsIngestResponse {
+            inserted,
+            duplicates: items.len() as i64 - inserted,
+        }),
+    ))
+}
+
+/// `kind="timecard"` の 1 行を打刻 (`time_punches`) に変換する。
+///
+/// **失敗しても ingest は失敗させない (ログのみ)。** 500 を返すと端末は ack を
+/// 受け取れず同じ seq を再送するが、測定行は既に入っているので再送は
+/// 「新規でない」と判定され、**二度と打刻されないまま無限再送になる**。
+///
+/// # 握り潰した打刻は後から復旧できる (再送機構を足さないこと)
+///
+/// ここで落とした打刻は**端末の再送では戻ってこない** (行が既にあるため)。
+/// にもかかわらず握り潰してよいのは、**`hub_measurements` に
+/// `kind='timecard'` の行がそのまま残る**からで、
+/// 「timecard 行はあるが対応する `time_punches` が無い」を引く backfill を
+/// 後から書けば取り戻せる (payload に `card_id` と `recorded_at` があり、
+/// device_id + seq で一意)。
+/// **この性質があるので、ここに独自の再送・キュー・リトライ機構を足さないこと。**
+///
+/// ログの出し分け: **未登録カードは `warn`** (バグではなく「登録が漏れている」
+/// という運用事象。`error` にすると本物の障害に埋もれる)、**DB 障害は `error`**。
+async fn relay_timecard_punch(state: &AppState, tenant_id: Uuid, item: &HubMeasurementCreate) {
+    let Some(card_id) = item.payload.get("card_id").and_then(|v| v.as_str()) else {
+        tracing::warn!(
+            "timecard relay: payload に card_id が無い (device_id={} seq={})",
+            item.device_id,
+            item.seq
+        );
+        return;
+    };
+    // 照合はブラウザ版の punch と同じ 1 か所 (alc_core::repository::timecard)。
+    // card_id は端末が読んだ生値のまま渡す (完全一致 SQL のため加工しない)
+    let employee_id =
+        match resolve_employee_by_card(state.timecard.as_ref(), tenant_id, card_id).await {
+            Ok(Some(id)) => id,
+            Ok(None) => {
+                // 未登録カード。ブラウザ版なら 404 を返す分岐だが、これは**運用事象**
+                // (そのカードが timecard_cards にも employees.nfc_id にも無い) なので
+                // warn に留める。card_id を出して「誰の登録が漏れているか」を追えるように
+                // する — card_id は社員識別子であって秘密ではない (管理画面に平文で出る)
+                tracing::warn!(
+                    "timecard relay: 未登録カード (device_id={} seq={} card_id={} card_kind={:?})",
+                    item.device_id,
+                    item.seq,
+                    card_id,
+                    item.payload.get("card_kind").and_then(|v| v.as_str()),
+                );
+                return;
+            }
+            Err(e) => {
+                tracing::error!("timecard relay: カード照合に失敗: {e}");
+                return;
+            }
+        };
+    // device_id は NULL。time_punches.device_id は devices(id) への UUID FK だが
+    // hub 側の device_id は auth-worker 発行の短い文字列で入らない。どの端末かは
+    // hub_measurements.device_id で追える (plan/standing-devices.md §3.3)
+    if let Err(e) = state
+        .timecard
+        .create_punch(tenant_id, employee_id, None)
+        .await
+    {
+        tracing::error!("timecard relay: 打刻の記録に失敗: {e}");
+    }
 }
 
 /// clamp 済みの (limit, offset) を返す。負値・0・上限超えを安全側に丸める。

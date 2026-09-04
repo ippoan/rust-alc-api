@@ -140,23 +140,18 @@ async fn punch(
 ) -> Result<(StatusCode, Json<TimePunchWithEmployee>), StatusCode> {
     let tenant_id = tenant.0 .0;
 
-    // カードIDから社員を特定 (timecard_cards -> employees.nfc_id フォールバック)
-    let employee_id = if let Some(card) = state
-        .timecard
-        .find_card_by_card_id(tenant_id, &body.card_id)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-    {
-        card.employee_id
-    } else {
-        // フォールバック: employees.nfc_id で検索
-        state
-            .timecard
-            .find_employee_id_by_nfc(tenant_id, &body.card_id)
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-            .ok_or(StatusCode::NOT_FOUND)?
-    };
+    // カードIDから社員を特定 (timecard_cards -> employees.nfc_id フォールバック)。
+    // 照合は NFC タイムカード端末の打刻中継 (alc-devices の hub_measurements、
+    // Refs ippoan/alc-app-s3#134) と**同じ 1 か所**を使う — 2 実装目を作ると
+    // どちらか片方だけフォールバックがズレる
+    let employee_id = alc_core::repository::timecard::resolve_employee_by_card(
+        state.timecard.as_ref(),
+        tenant_id,
+        &body.card_id,
+    )
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    .ok_or(StatusCode::NOT_FOUND)?;
 
     // 打刻記録
     let punch = state

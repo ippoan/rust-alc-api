@@ -1447,6 +1447,10 @@ pub struct MockTimecardRepository {
     pub csv_rows: std::sync::Mutex<Vec<TimePunchCsvRow>>,
     /// Cards returned by list_cards
     pub cards_list: std::sync::Mutex<Vec<TimecardCard>>,
+    /// create_punch の呼び出し記録 (tenant_id, employee_id, device_id)。
+    /// hub_measurements の打刻中継 (Refs ippoan/alc-app-s3#134) が
+    /// 「新規に入った行のときだけ 1 回」打刻することを固定するために使う
+    pub punches: std::sync::Mutex<Vec<(Uuid, Uuid, Option<Uuid>)>>,
 }
 
 impl Default for MockTimecardRepository {
@@ -1461,6 +1465,7 @@ impl Default for MockTimecardRepository {
             employee_name: std::sync::Mutex::new(String::new()),
             csv_rows: std::sync::Mutex::new(vec![]),
             cards_list: std::sync::Mutex::new(vec![]),
+            punches: std::sync::Mutex::new(vec![]),
         }
     }
 }
@@ -1548,6 +1553,10 @@ impl TimecardRepository for MockTimecardRepository {
         device_id: Option<Uuid>,
     ) -> Result<TimePunch, sqlx::Error> {
         check_fail!(self);
+        self.punches
+            .lock()
+            .unwrap()
+            .push((tenant_id, employee_id, device_id));
         Ok(TimePunch {
             id: Uuid::new_v4(),
             tenant_id,

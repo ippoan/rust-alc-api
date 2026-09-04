@@ -498,3 +498,184 @@ async fn test_hub_measurements_ingest_rejects_bad_session_id() {
     let inserted = repo.inserted.lock().unwrap();
     assert_eq!(inserted[0].1.session_id.as_deref(), Some("s-42_7"));
 }
+
+// ---------------------------------------------------------------------------
+// kind="timecard" の打刻中継 (Refs ippoan/alc-app-s3#134)
+//
+// NFC タイムカード端末は打刻を「測定」として送る。ingest が新規に入れた行だけを
+// time_punches へ中継する — 端末は ack されるまで同じ seq を再送するので、
+// ここが二重打刻を防ぐ唯一の関門になる。
+// ---------------------------------------------------------------------------
+
+fn timecard_item(seq: i64, card_id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "device_id": "timecard-dev-1",
+        "kind": "timecard",
+        "seq": seq,
+        "recorded_at_ms": 1_752_300_000_000i64,
+        "payload": { "card_id": card_id, "card_kind": "felica_idm" }
+    })
+}
+
+/// timecard 中継用の state (hub_measurements と timecard の両 repo を差し替える)
+fn timecard_state() -> (
+    rust_alc_api::AppState,
+    Arc<MockHubMeasurementsRepository>,
+    Arc<crate::mock_helpers::MockTimecardRepository>,
+) {
+    let mut state = setup_mock_app_state();
+    let hub = Arc::new(MockHubMeasurementsRepository::default());
+    let tc = Arc::new(crate::mock_helpers::MockTimecardRepository::default());
+    state.hub_measurements = hub.clone();
+    state.timecard = tc.clone();
+    (state, hub, tc)
+}
+
+async fn post_timecard(
+    base_url: &str,
+    tenant_id: Uuid,
+    items: Vec<serde_json::Value>,
+) -> reqwest::Response {
+    reqwest::Client::new()
+        .post(format!("{base_url}/api/hub/measurements"))
+        .header(
+            "X-Internal-Shared-Secret",
+            crate::common::TEST_INTERNAL_SHARED_SECRET,
+        )
+        .header("X-Tenant-ID", tenant_id.to_string())
+        .json(&items)
+        .send()
+        .await
+        .unwrap()
+}
+
+/// カード登録あり → 打刻される。device_id は NULL (hub の device_id は
+/// time_punches.device_id の UUID FK に入らないため、plan §3.3 の決定どおり)
+#[tokio::test]
+async fn test_timecard_relay_punches_when_card_is_registered() {
+    let (state, _hub, tc) = timecard_state();
+    let tenant_id = Uuid::new_v4();
+    let employee_id = Uuid::new_v4();
+    *tc.find_card_data.lock().unwrap() = Some(rust_alc_api::db::models::TimecardCard {
+        id: Uuid::new_v4(),
+        tenant_id,
+        employee_id,
+        card_id: "01401D0B1D37B660".to_string(),
+        label: None,
+        created_at: chrono::Utc::now(),
+    });
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+
+    let res = post_timecard(
+        &base_url,
+        tenant_id,
+        vec![timecard_item(1, "01401D0B1D37B660")],
+    )
+    .await;
+    assert_eq!(res.status(), 201);
+
+    let punches = tc.punches.lock().unwrap();
+    assert_eq!(punches.len(), 1);
+    assert_eq!(punches[0], (tenant_id, employee_id, None));
+}
+
+/// カード未登録でも employees.nfc_id にあれば打刻される (免許証 16 桁の経路)
+#[tokio::test]
+async fn test_timecard_relay_falls_back_to_employee_nfc_id() {
+    let (state, _hub, tc) = timecard_state();
+    let tenant_id = Uuid::new_v4();
+    let employee_id = Uuid::new_v4();
+    // find_card_data は None のまま = timecard_cards に無い
+    *tc.nfc_employee_id.lock().unwrap() = Some(employee_id);
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+
+    let res = post_timecard(
+        &base_url,
+        tenant_id,
+        vec![timecard_item(1, "2023060920280513")],
+    )
+    .await;
+    assert_eq!(res.status(), 201);
+
+    let punches = tc.punches.lock().unwrap();
+    assert_eq!(punches.len(), 1);
+    assert_eq!(punches[0].1, employee_id);
+}
+
+/// 未登録カードは打刻されないが **ingest は 201**。
+/// ここで 500 を返すと端末が ack を受け取れず、行は既に入っているので
+/// 「新規でない」と判定され、二度と打刻されないまま無限再送になる
+#[tokio::test]
+async fn test_timecard_relay_unknown_card_does_not_fail_ingest() {
+    let (state, _hub, tc) = timecard_state();
+    let tenant_id = Uuid::new_v4();
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+
+    let res = post_timecard(&base_url, tenant_id, vec![timecard_item(1, "DEADBEEF")]).await;
+    assert_eq!(res.status(), 201);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["inserted"], 1);
+    assert!(tc.punches.lock().unwrap().is_empty());
+}
+
+/// payload に card_id が無い壊れた行も ingest は 201 のまま (打刻はしない)
+#[tokio::test]
+async fn test_timecard_relay_missing_card_id_does_not_fail_ingest() {
+    let (state, _hub, tc) = timecard_state();
+    let tenant_id = Uuid::new_v4();
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+
+    let item = serde_json::json!({
+        "device_id": "timecard-dev-1",
+        "kind": "timecard",
+        "seq": 1,
+        "payload": { "card_kind": "felica_idm" }
+    });
+    let res = post_timecard(&base_url, tenant_id, vec![item]).await;
+    assert_eq!(res.status(), 201);
+    assert!(tc.punches.lock().unwrap().is_empty());
+}
+
+/// **同じ seq の再送では二度打刻しない** (端末は ack されるまで再送する)。
+/// 冪等の関門は insert_batch の「新規に入ったか」だけ
+#[tokio::test]
+async fn test_timecard_relay_is_idempotent_on_resend() {
+    let (state, _hub, tc) = timecard_state();
+    let tenant_id = Uuid::new_v4();
+    let employee_id = Uuid::new_v4();
+    *tc.nfc_employee_id.lock().unwrap() = Some(employee_id);
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+
+    for _ in 0..3 {
+        let res = post_timecard(
+            &base_url,
+            tenant_id,
+            vec![timecard_item(7, "2023060920280513")],
+        )
+        .await;
+        assert_eq!(res.status(), 201);
+    }
+    assert_eq!(tc.punches.lock().unwrap().len(), 1);
+}
+
+/// timecard 以外の kind は中継しない (混在バッチでも timecard だけ拾う)
+#[tokio::test]
+async fn test_timecard_relay_ignores_other_kinds() {
+    let (state, _hub, tc) = timecard_state();
+    let tenant_id = Uuid::new_v4();
+    *tc.nfc_employee_id.lock().unwrap() = Some(Uuid::new_v4());
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+
+    let res = post_timecard(
+        &base_url,
+        tenant_id,
+        vec![
+            measurement(1, "temperature"),
+            timecard_item(2, "2023060920280513"),
+            measurement(3, "alcohol"),
+        ],
+    )
+    .await;
+    assert_eq!(res.status(), 201);
+    assert_eq!(tc.punches.lock().unwrap().len(), 1);
+}

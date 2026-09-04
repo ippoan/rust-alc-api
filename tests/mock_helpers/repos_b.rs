@@ -1838,14 +1838,15 @@ impl HubMeasurementsRepository for MockHubMeasurementsRepository {
         &self,
         tenant_id: Uuid,
         items: &[HubMeasurementCreate],
-    ) -> Result<HubMeasurementsIngestResponse, sqlx::Error> {
+    ) -> Result<Vec<bool>, sqlx::Error> {
         check_fail!(self);
         let mut seen = self.seen.lock().unwrap();
         let mut inserted_log = self.inserted.lock().unwrap();
         let mut rows = self.rows.lock().unwrap();
-        let mut inserted: i64 = 0;
+        let mut inserted = Vec::with_capacity(items.len());
         for item in items {
-            if seen.insert((tenant_id, item.device_id.clone(), item.seq)) {
+            let is_new = seen.insert((tenant_id, item.device_id.clone(), item.seq));
+            if is_new {
                 inserted_log.push((tenant_id, item.clone()));
                 let created_at = mock_hub_created_at(rows.len());
                 rows.push(HubMeasurement {
@@ -1861,13 +1862,10 @@ impl HubMeasurementsRepository for MockHubMeasurementsRepository {
                         .and_then(DateTime::from_timestamp_millis),
                     created_at,
                 });
-                inserted += 1;
             }
+            inserted.push(is_new);
         }
-        Ok(HubMeasurementsIngestResponse {
-            inserted,
-            duplicates: items.len() as i64 - inserted,
-        })
+        Ok(inserted)
     }
 
     async fn list(

@@ -110,3 +110,24 @@ pub trait TimecardRepository: Send + Sync {
         date_to: Option<DateTime<Utc>>,
     ) -> Result<Vec<TimePunchCsvRow>, sqlx::Error>;
 }
+
+/// カード ID から社員を特定する。`timecard_cards` を引き、外れたら
+/// `employees.nfc_id` (免許証の交付日 8 桁 + 有効期限 8 桁) へフォールバックする。
+///
+/// **打刻の入口はブラウザ版 (`POST /api/timecard/punch`) と NFC タイムカード端末
+/// (`hub_measurements` の `kind="timecard"` 中継、Refs ippoan/alc-app-s3#134) の
+/// 2 つあるが、照合はこの 1 か所に閉じる。** 2 実装目を作ると、どちらか片方だけに
+/// フォールバックを足す/外すといったズレが必ず出る。
+///
+/// 照合は**完全一致**なので、呼び出し側は `card_id` を加工せずに渡すこと
+/// (端末は読み取った生値を送る。接頭辞や正規化を挟むと必ず外れる)。
+pub async fn resolve_employee_by_card(
+    repo: &dyn TimecardRepository,
+    tenant_id: Uuid,
+    card_id: &str,
+) -> Result<Option<Uuid>, sqlx::Error> {
+    if let Some(card) = repo.find_card_by_card_id(tenant_id, card_id).await? {
+        return Ok(Some(card.employee_id));
+    }
+    repo.find_employee_id_by_nfc(tenant_id, card_id).await
+}
