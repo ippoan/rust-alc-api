@@ -163,6 +163,14 @@ async fn ingest(
             tracing::error!("hub_measurements.insert_batch error: {e}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
+    // 下の zip は「items と同順同長」が前提。短い Vec を返す実装があると
+    // **zip が黙って打ち切られ、打刻だけが落ちる** (測定は入っているので
+    // 気付けない)。trait の doc で約束している不変条件をここでも押さえる
+    debug_assert_eq!(
+        inserted_flags.len(),
+        items.len(),
+        "insert_batch は items と同順同長の Vec<bool> を返すこと"
+    );
     let inserted = inserted_flags.iter().filter(|new| **new).count() as i64;
 
     // NFC タイムカード端末の打刻中継 (Refs ippoan/alc-app-s3#134)。
