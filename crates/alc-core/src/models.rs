@@ -356,6 +356,10 @@ pub struct TimePunchWithDevice {
     pub device_id: Option<Uuid>,
     /// 打刻端末の `hub_measurements.device_id` (auth-worker 発行の文字列)
     pub device_name: Option<String>,
+    /// かざしたカードの値 (`timecard` は card_id、`license` は nfc_id)。
+    /// **未解決のタップで「どのカードが未登録か」を出すために要る** — これが
+    /// 無いと画面は「未登録カード」としか出せず、登録しに行けない
+    pub card_id: Option<String>,
     /// `timecard` (打刻機のタップ) か `license` (点呼開始時の免許証)。
     /// **一覧は両方を返すので、区別はこの列でしかできない** — 始業点呼 = 始業打刻
     /// として同じ表に並べる運用のため (Refs ippoan/alc-app-s3#134)

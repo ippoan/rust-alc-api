@@ -120,6 +120,9 @@ async fn test_punches_are_derived_from_hub_measurements() {
                 .find(|p| p["employee_id"].is_null())
                 .unwrap_or_else(|| panic!("未解決の打刻が無い: {body}"));
             assert!(unresolved["employee_name"].is_null());
+            // **どのカードが未登録かを出せること。** これが無いと画面は
+            // 「未登録カード」としか言えず、登録しに行けない
+            assert_eq!(unresolved["card_id"], "DEADBEEFDEADBEEF");
         }
     );
 }
