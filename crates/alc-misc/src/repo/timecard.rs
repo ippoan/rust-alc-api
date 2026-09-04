@@ -88,6 +88,10 @@ WITH p AS (
             e_nfc.id
         ) AS employee_id,
         hm.device_id AS hub_device_id,
+        -- 未解決のタップで「どのカードか」を出すため。employees の JOIN 条件と
+        -- 同じ式なので、片方だけ変えると表示と照合がずれる
+        COALESCE(hm.payload->>'card_id', hm.payload->>'nfc_id') AS card_id,
+        hm.kind,
         COALESCE(hm.recorded_at, hm.created_at) AS punched_at,
         hm.created_at
     FROM hub_measurements hm
@@ -313,7 +317,7 @@ impl TimecardRepository for PgTimecardRepository {
         let sql = format!(
             r#"{PUNCHES_CTE}
                SELECT p.id, p.tenant_id, p.employee_id, NULL::uuid AS device_id,
-                      p.hub_device_id AS device_name,
+                      p.hub_device_id AS device_name, p.card_id, p.kind,
                       e.name AS employee_name, p.punched_at, p.created_at
                FROM p
                LEFT JOIN employees e ON e.id = p.employee_id
@@ -352,7 +356,7 @@ impl TimecardRepository for PgTimecardRepository {
         let sql = format!(
             r#"{PUNCHES_CTE}
             SELECT p.id, p.punched_at, e.name AS employee_name, e.code AS employee_code,
-                   p.hub_device_id AS device_name
+                   p.hub_device_id AS device_name, p.kind
             FROM p
             LEFT JOIN employees e ON e.id = p.employee_id
             WHERE {where_clause}

@@ -1522,6 +1522,7 @@ async fn test_export_csv_with_data_jst_timezone() {
         employee_name: Some("Taro Test".to_string()),
         employee_code: Some("EMP001".to_string()),
         device_name: Some("Kiosk-A".to_string()),
+        kind: "timecard".to_string(),
     }];
 
     let (base_url, jwt) = spawn_with_mock(mock).await;
@@ -1555,6 +1556,7 @@ async fn test_export_csv_with_null_fields() {
         employee_name: Some("No Code Employee".to_string()),
         employee_code: None,
         device_name: None,
+        kind: "timecard".to_string(),
     }];
 
     let (base_url, jwt) = spawn_with_mock(mock).await;
@@ -1777,6 +1779,7 @@ async fn test_export_csv_keeps_unresolved_tap_with_blank_employee() {
         employee_name: None,
         employee_code: None,
         device_name: Some("timecard-dev-1".to_string()),
+        kind: "timecard".to_string(),
     }];
 
     let (base_url, jwt) = spawn_with_mock(mock).await;
@@ -1795,4 +1798,60 @@ async fn test_export_csv_keeps_unresolved_tap_with_blank_employee() {
     assert!(csv.contains("2026-01-15 09:30:00"));
     // 社員コードと社員名は空欄 (,, が連続する)
     assert!(csv.lines().any(|l| l.contains(",,,2026-01-15 09:30:00")));
+}
+
+/// **未知の kind は「区分」列にそのまま出す。** 知らない値を空欄や「打刻」に
+/// 丸めると、新しい kind が増えたときに診断できない
+/// (`csv_kind_label` の既定分岐、Refs ippoan/alc-app-s3#134)
+#[tokio::test]
+async fn test_export_csv_unknown_kind_is_shown_verbatim() {
+    let mock = Arc::new(crate::mock_helpers::MockTimecardRepository::default());
+    *mock.csv_rows.lock().unwrap() = vec![TimePunchCsvRow {
+        id: Uuid::new_v4(),
+        punched_at: Utc.with_ymd_and_hms(2026, 1, 15, 0, 30, 0).unwrap(),
+        employee_name: Some("Taro Test".to_string()),
+        employee_code: Some("EMP001".to_string()),
+        device_name: Some("hub-1".to_string()),
+        kind: "some_future_kind".to_string(),
+    }];
+
+    let (base_url, jwt) = spawn_with_mock(mock).await;
+    let res = reqwest::Client::new()
+        .get(format!("{base_url}/api/timecard/punches/csv"))
+        .header("Authorization", auth(&jwt))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+
+    let bytes = res.bytes().await.unwrap();
+    let csv = std::str::from_utf8(&bytes[3..]).unwrap();
+    assert!(csv.contains(",some_future_kind,"), "{csv}");
+}
+
+/// 点呼 (`license`) の行は「点呼」と出す
+#[tokio::test]
+async fn test_export_csv_license_kind_is_labelled_tenko() {
+    let mock = Arc::new(crate::mock_helpers::MockTimecardRepository::default());
+    *mock.csv_rows.lock().unwrap() = vec![TimePunchCsvRow {
+        id: Uuid::new_v4(),
+        punched_at: Utc.with_ymd_and_hms(2026, 1, 15, 0, 30, 0).unwrap(),
+        employee_name: Some("Taro Test".to_string()),
+        employee_code: None,
+        device_name: None,
+        kind: "license".to_string(),
+    }];
+
+    let (base_url, jwt) = spawn_with_mock(mock).await;
+    let res = reqwest::Client::new()
+        .get(format!("{base_url}/api/timecard/punches/csv"))
+        .header("Authorization", auth(&jwt))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+
+    let bytes = res.bytes().await.unwrap();
+    let csv = std::str::from_utf8(&bytes[3..]).unwrap();
+    assert!(csv.contains(",点呼,"), "{csv}");
 }

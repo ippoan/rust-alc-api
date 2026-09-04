@@ -236,6 +236,15 @@ async fn list_punches(
 
 // --- CSV Export ---
 
+/// CSV の「区分」列の表示名。未知の値はそのまま出す (隠すと診断できない)
+fn csv_kind_label(kind: &str) -> String {
+    match kind {
+        "timecard" => "打刻".to_string(),
+        "license" => "点呼".to_string(),
+        other => other.to_string(),
+    }
+}
+
 async fn export_csv(
     State(state): State<AppState>,
     tenant: axum::Extension<TenantId>,
@@ -255,12 +264,15 @@ async fn export_csv(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let mut wtr = csv::Writer::from_writer(vec![]);
-    wtr.write_record(["ID", "社員コード", "社員名", "打刻日時", "デバイス"])
+    // **区分列は必須。** 一覧は打刻 (timecard) と点呼 (license) を両方返すので、
+    // 列が無いと点呼が打刻として集計される
+    wtr.write_record(["ID", "区分", "社員コード", "社員名", "打刻日時", "デバイス"])
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     for r in &rows {
         wtr.write_record([
             r.id.to_string(),
+            csv_kind_label(&r.kind),
             r.employee_code.clone().unwrap_or_default(),
             r.employee_name.clone().unwrap_or_default(),
             r.punched_at
