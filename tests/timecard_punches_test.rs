@@ -293,3 +293,68 @@ async fn test_today_punches_use_jst_day_boundary() {
         );
     });
 }
+
+/// 点呼 (`kind=license`) も同じ一覧に並ぶが、**`kind` で区別できること**。
+/// 列が無いと画面も CSV も点呼を打刻として扱ってしまう
+#[tokio::test]
+async fn test_punches_expose_kind_to_separate_tenko_from_timecard() {
+    test_group!("timecard punches (区分)");
+
+    test_case!("timecard と license が kind で見分けられる", {
+        let state = common::setup_app_state().await;
+        let base_url = common::spawn_test_server(state.clone()).await;
+        let tenant = common::create_test_tenant(state.pool(), "Punch Kind").await;
+        let auth = format!("Bearer {}", common::create_test_jwt(tenant, "admin"));
+        let client = reqwest::Client::new();
+
+        // 打刻機のタップ
+        post_timecard(&client, &base_url, tenant, 1, "AAAA", None).await;
+        // 点呼の免許証読み取り (同じ表に別 kind で入る)
+        let lic = json!([{
+            "device_id": "cores3-1",
+            "kind": "license",
+            "seq": 1,
+            "payload": { "nfc_id": "2023060920280513", "issue": "20230609", "expiry": "20280513" }
+        }]);
+        let res = client
+            .post(format!("{base_url}/api/hub/measurements"))
+            .header(
+                "X-Internal-Shared-Secret",
+                common::TEST_INTERNAL_SHARED_SECRET,
+            )
+            .header("X-Tenant-ID", tenant.to_string())
+            .json(&lic)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 201);
+
+        let body = list_punches(&client, &base_url, &auth).await;
+        let punches = body["punches"].as_array().unwrap();
+        assert_eq!(punches.len(), 2, "{body}");
+        assert_eq!(
+            punches.iter().filter(|p| p["kind"] == "timecard").count(),
+            1,
+            "{body}"
+        );
+        assert_eq!(
+            punches.iter().filter(|p| p["kind"] == "license").count(),
+            1,
+            "{body}"
+        );
+
+        // CSV にも区分列が出る
+        let res = client
+            .get(format!("{base_url}/api/timecard/punches/csv"))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200);
+        let bytes = res.bytes().await.unwrap();
+        let csv = std::str::from_utf8(&bytes[3..]).unwrap();
+        assert!(csv.lines().next().unwrap().contains("区分"), "{csv}");
+        assert!(csv.contains(",打刻,"), "{csv}");
+        assert!(csv.contains(",点呼,"), "{csv}");
+    });
+}

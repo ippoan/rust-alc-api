@@ -1522,6 +1522,7 @@ async fn test_export_csv_with_data_jst_timezone() {
         employee_name: Some("Taro Test".to_string()),
         employee_code: Some("EMP001".to_string()),
         device_name: Some("Kiosk-A".to_string()),
+        kind: "timecard".to_string(),
     }];
 
     let (base_url, jwt) = spawn_with_mock(mock).await;
@@ -1555,6 +1556,7 @@ async fn test_export_csv_with_null_fields() {
         employee_name: Some("No Code Employee".to_string()),
         employee_code: None,
         device_name: None,
+        kind: "timecard".to_string(),
     }];
 
     let (base_url, jwt) = spawn_with_mock(mock).await;
@@ -1777,6 +1779,7 @@ async fn test_export_csv_keeps_unresolved_tap_with_blank_employee() {
         employee_name: None,
         employee_code: None,
         device_name: Some("timecard-dev-1".to_string()),
+        kind: "timecard".to_string(),
     }];
 
     let (base_url, jwt) = spawn_with_mock(mock).await;

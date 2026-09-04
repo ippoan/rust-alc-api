@@ -14,6 +14,9 @@ pub struct TimePunchCsvRow {
     pub employee_name: Option<String>,
     pub employee_code: Option<String>,
     pub device_name: Option<String>,
+    /// `timecard` / `license`。CSV の「区分」列になる — 混ぜたまま出すと
+    /// 点呼が打刻として集計される
+    pub kind: String,
 }
 
 #[async_trait]
