@@ -168,6 +168,7 @@ jobs:
           - { name: db-trouble, target: "//:trouble_test", coverage: "cov-db-trouble" }
           - { name: db-archive, target: "//:archive_repo_test", coverage: "cov-db-archive" }
           - { name: db-hub-measurements, target: "//:hub_measurements_test" }
+          - { name: db-timecard-punches, target: "//:timecard_punches_test" }
           # theearth DVR 動画通知の受け皿 (Refs ohishi-exp/nuxt-dtako-admin#1094)。
           # 自然キーの冪等性とテナント分離 (id は X-Tenant-ID と対で突合) を実 DB で固定する。
           # ci.yml の bazel-test-db と cache-warm.yml を同じ内容にすること
