@@ -64,12 +64,25 @@ pub trait TimecardRepository: Send + Sync {
         nfc_id: &str,
     ) -> Result<Option<Uuid>, sqlx::Error>;
 
-    /// Create a time punch record.
+    /// ブラウザ版 (キオスク / Android) の打刻を 1 件記録する。
+    ///
+    /// **書き込み先は `hub_measurements` で、`time_punches` ではない**
+    /// (Refs ippoan/alc-app-s3#134)。打刻の一次表を 1 つにするため — 2 つあると
+    /// 「時刻がサーバ時刻になる」「端末 ID が入らない」「重複排除が要る」が
+    /// そこから生まれる。端末 (NFC タイムカード端末) は同じ表に WS 経由で入れる。
+    ///
+    /// `employee_id` は**呼び出し側が解決済みのものを渡し、payload に凍結する**。
+    /// 端末側 (`freeze_employee_id`) と同じ理由で、読み出し時に引き直すと
+    /// カードを付け替えたときに過去の打刻が別人に動く。
+    ///
+    /// 戻り値は互換のため `TimePunch` の形にして返すが、`id` は
+    /// `hub_measurements.id`。`time_punches` に行は作らない。
     async fn create_punch(
         &self,
         tenant_id: Uuid,
         employee_id: Uuid,
         device_id: Option<Uuid>,
+        card_id: &str,
     ) -> Result<TimePunch, sqlx::Error>;
 
     /// Get employee name by id.

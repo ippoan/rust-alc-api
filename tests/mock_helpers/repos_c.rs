@@ -1455,6 +1455,9 @@ pub struct MockTimecardRepository {
     /// 照合の手前で正規化が 1 回だけ効いていること (Refs ippoan/alc-app-s3#134) を
     /// ブラウザ版と端末中継の両経路で固定するために使う
     pub card_lookups: std::sync::Mutex<Vec<String>>,
+    /// create_punch に渡された card_id。**打刻の payload に凍結される値**なので、
+    /// 照合に使った値とずれていないかを固定する (Refs ippoan/alc-app-s3#134)
+    pub punch_card_ids: std::sync::Mutex<Vec<String>>,
 }
 
 impl Default for MockTimecardRepository {
@@ -1471,6 +1474,7 @@ impl Default for MockTimecardRepository {
             cards_list: std::sync::Mutex::new(vec![]),
             punches: std::sync::Mutex::new(vec![]),
             card_lookups: std::sync::Mutex::new(vec![]),
+            punch_card_ids: std::sync::Mutex::new(vec![]),
         }
     }
 }
@@ -1557,8 +1561,13 @@ impl TimecardRepository for MockTimecardRepository {
         tenant_id: Uuid,
         employee_id: Uuid,
         device_id: Option<Uuid>,
+        card_id: &str,
     ) -> Result<TimePunch, sqlx::Error> {
         check_fail!(self);
+        self.punch_card_ids
+            .lock()
+            .unwrap()
+            .push(card_id.to_string());
         self.punches
             .lock()
             .unwrap()

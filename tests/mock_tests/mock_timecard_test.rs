@@ -100,6 +100,7 @@ impl TimecardRepository for PunchCardFoundMock {
         tenant_id: Uuid,
         employee_id: Uuid,
         device_id: Option<Uuid>,
+        _card_id: &str,
     ) -> Result<rust_alc_api::db::models::TimePunch, sqlx::Error> {
         Ok(rust_alc_api::db::models::TimePunch {
             id: Uuid::new_v4(),
@@ -207,6 +208,7 @@ impl TimecardRepository for PunchNfcFallbackMock {
         tenant_id: Uuid,
         employee_id: Uuid,
         device_id: Option<Uuid>,
+        _card_id: &str,
     ) -> Result<rust_alc_api::db::models::TimePunch, sqlx::Error> {
         Ok(rust_alc_api::db::models::TimePunch {
             id: Uuid::new_v4(),
@@ -319,6 +321,7 @@ impl TimecardRepository for PunchCreateFailMock {
         _: Uuid,
         _: Uuid,
         _: Option<Uuid>,
+        _: &str,
     ) -> Result<rust_alc_api::db::models::TimePunch, sqlx::Error> {
         Err(sqlx::Error::RowNotFound)
     }
@@ -422,6 +425,7 @@ impl TimecardRepository for PunchGetNameFailMock {
         tenant_id: Uuid,
         employee_id: Uuid,
         device_id: Option<Uuid>,
+        _card_id: &str,
     ) -> Result<rust_alc_api::db::models::TimePunch, sqlx::Error> {
         Ok(rust_alc_api::db::models::TimePunch {
             id: Uuid::new_v4(),
@@ -533,6 +537,7 @@ impl TimecardRepository for PunchListTodayFailMock {
         tenant_id: Uuid,
         employee_id: Uuid,
         device_id: Option<Uuid>,
+        _card_id: &str,
     ) -> Result<rust_alc_api::db::models::TimePunch, sqlx::Error> {
         Ok(rust_alc_api::db::models::TimePunch {
             id: Uuid::new_v4(),
@@ -638,6 +643,7 @@ impl TimecardRepository for PunchFindCardDbErrorMock {
         _: Uuid,
         _: Uuid,
         _: Option<Uuid>,
+        _: &str,
     ) -> Result<rust_alc_api::db::models::TimePunch, sqlx::Error> {
         unreachable!()
     }
@@ -733,6 +739,7 @@ impl TimecardRepository for PunchNfcDbErrorMock {
         _: Uuid,
         _: Uuid,
         _: Option<Uuid>,
+        _: &str,
     ) -> Result<rust_alc_api::db::models::TimePunch, sqlx::Error> {
         unreachable!()
     }
@@ -825,6 +832,7 @@ impl TimecardRepository for ListPunchesCountFailMock {
         _: Uuid,
         _: Uuid,
         _: Option<Uuid>,
+        _: &str,
     ) -> Result<rust_alc_api::db::models::TimePunch, sqlx::Error> {
         unreachable!()
     }

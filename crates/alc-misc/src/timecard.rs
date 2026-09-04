@@ -159,7 +159,7 @@ async fn punch(
     // 打刻記録
     let punch = state
         .timecard
-        .create_punch(tenant_id, employee_id, body.device_id)
+        .create_punch(tenant_id, employee_id, body.device_id, &body.card_id)
         .await
         .map_err(|e| {
             tracing::error!("punch error: {e}");
