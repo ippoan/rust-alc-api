@@ -342,12 +342,19 @@ pub struct TimePunchFilter {
     pub per_page: Option<i64>,
 }
 
+/// 打刻 1 件。**`hub_measurements` から導出する** (Refs ippoan/alc-app-s3#134) ので
+/// `id` は `hub_measurements.id`。
 #[derive(Debug, Clone, Serialize, FromRow)]
 pub struct TimePunchWithDevice {
     pub id: Uuid,
     pub tenant_id: Uuid,
-    pub employee_id: Uuid,
+    /// 解決できた社員。**未登録カードのタップでは None** — 行ごと落とすと
+    /// 「タップしたのに履歴に出ない」になり、登録漏れに気付けなくなる
+    pub employee_id: Option<Uuid>,
+    /// 常に None。`devices(id)` への UUID FK だが、打刻端末の device_id は
+    /// auth-worker 発行の文字列で入らない。どの端末かは `device_name` を見る
     pub device_id: Option<Uuid>,
+    /// 打刻端末の `hub_measurements.device_id` (auth-worker 発行の文字列)
     pub device_name: Option<String>,
     pub employee_name: Option<String>,
     pub punched_at: DateTime<Utc>,

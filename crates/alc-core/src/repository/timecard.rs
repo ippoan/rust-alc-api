@@ -9,7 +9,9 @@ use crate::models::{TimePunch, TimePunchWithDevice, TimecardCard};
 pub struct TimePunchCsvRow {
     pub id: Uuid,
     pub punched_at: DateTime<Utc>,
-    pub employee_name: String,
+    /// 未登録カードのタップでは None (CSV では空欄)。行ごと落とすと
+    /// 「タップしたのに CSV に出ない」になり、登録漏れに気付けなくなる
+    pub employee_name: Option<String>,
     pub employee_code: Option<String>,
     pub device_name: Option<String>,
 }
