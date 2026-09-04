@@ -510,6 +510,53 @@ async fn update_license_db_error_returns_500() {
 }
 
 // ===========================================================================
+// DELETE /api/employees/{id}/license — clear_license
+// ===========================================================================
+
+#[tokio::test]
+async fn clear_license_success() {
+    let mock = Arc::new(MockEmployeeRepository::default());
+    mock.return_some.store(true, Ordering::SeqCst);
+    let (base, auth) = setup_with_mock(mock).await;
+    let id = uuid::Uuid::new_v4();
+    let res = client()
+        .delete(format!("{base}/api/employees/{id}/license"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["name"], "Test Employee");
+}
+
+#[tokio::test]
+async fn clear_license_not_found_returns_404() {
+    let (base, auth) = setup().await;
+    let id = uuid::Uuid::new_v4();
+    let res = client()
+        .delete(format!("{base}/api/employees/{id}/license"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 404);
+}
+
+#[tokio::test]
+async fn clear_license_db_error_returns_500() {
+    let (base, auth) = setup_failing().await;
+    let id = uuid::Uuid::new_v4();
+    let res = client()
+        .delete(format!("{base}/api/employees/{id}/license"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 500);
+}
+
+// ===========================================================================
 // GET /api/employees/face-data — list_face_data
 // ===========================================================================
 

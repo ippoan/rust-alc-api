@@ -225,6 +225,29 @@ impl EmployeeRepository for PgEmployeeRepository {
         .await
     }
 
+    async fn clear_license(
+        &self,
+        tenant_id: Uuid,
+        id: Uuid,
+    ) -> Result<Option<Employee>, sqlx::Error> {
+        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
+        sqlx::query_as::<_, Employee>(
+            r#"
+            UPDATE employees SET
+                license_issue_date = NULL,
+                license_expiry_date = NULL,
+                nfc_id = NULL,
+                updated_at = NOW()
+            WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL
+            RETURNING *
+            "#,
+        )
+        .bind(id)
+        .bind(tenant_id)
+        .fetch_optional(&mut *tc.conn)
+        .await
+    }
+
     async fn upsert_by_code(
         &self,
         tenant_id: Uuid,

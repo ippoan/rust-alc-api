@@ -64,6 +64,14 @@ pub trait EmployeeRepository: Send + Sync {
         nfc_id: &str,
     ) -> Result<Option<Employee>, sqlx::Error>;
 
+    /// 免許証の登録を解除する (交付日・有効期限・nfc_id を NULL に戻す)。
+    /// `update_license` は COALESCE で「null = 変更なし」なので、消すのはこちら。
+    async fn clear_license(
+        &self,
+        tenant_id: Uuid,
+        id: Uuid,
+    ) -> Result<Option<Employee>, sqlx::Error>;
+
     /// 乗務員CD (code) キーの一括 upsert (Refs ippoan/alc-app-s3#125)。
     /// 1 トランザクションで items を順に処理する。
     async fn upsert_by_code(
