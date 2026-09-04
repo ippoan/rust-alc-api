@@ -1181,6 +1181,18 @@ impl EmployeeRepository for MockEmployeeRepository {
         Ok(None)
     }
 
+    async fn clear_license(
+        &self,
+        _tenant_id: Uuid,
+        _id: Uuid,
+    ) -> Result<Option<Employee>, sqlx::Error> {
+        check_fail!(self);
+        if self.return_some.load(Ordering::SeqCst) {
+            return Ok(Some(self.sample_employee()));
+        }
+        Ok(None)
+    }
+
     async fn approve_face(
         &self,
         _tenant_id: Uuid,

@@ -32,7 +32,10 @@ pub fn tenant_router() -> Router<AppState> {
         )
         .route("/employees/{id}/face", put(update_face))
         .route("/employees/{id}/nfc", put(update_nfc_id))
-        .route("/employees/{id}/license", put(update_license))
+        .route(
+            "/employees/{id}/license",
+            put(update_license).delete(clear_license),
+        )
         .route("/employees/face-data", get(list_face_data))
         .route("/employees/{id}/face/approve", put(approve_face))
         .route("/employees/{id}/face/reject", put(reject_face))
@@ -230,6 +233,27 @@ async fn update_nfc_id(
         .await
         .map_err(|e| {
             tracing::error!("update_nfc_id error: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    Ok(Json(employee))
+}
+
+/// 免許証の登録解除 (交付日・有効期限・nfc_id を NULL に戻す)。
+/// テスト登録した免許証を消すための口 (Refs ippoan/alc-app#149)。
+/// `update_license` は COALESCE なので null では消せない。
+async fn clear_license(
+    State(state): State<AppState>,
+    tenant: axum::Extension<TenantId>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Employee>, StatusCode> {
+    let employee = state
+        .employees
+        .clear_license(tenant.0 .0, id)
+        .await
+        .map_err(|e| {
+            tracing::error!("clear_license error: {e}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?
         .ok_or(StatusCode::NOT_FOUND)?;
