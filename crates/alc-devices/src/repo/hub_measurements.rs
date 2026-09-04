@@ -3,7 +3,9 @@ use chrono::DateTime;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use alc_core::models::{HubMeasurement, HubMeasurementCreate, HubMeasurementFilter};
+use alc_core::models::{
+    HubMeasurement, HubMeasurementCreate, HubMeasurementFilter, HubMeasurementsIngestResponse,
+};
 use alc_core::tenant::TenantConn;
 
 pub use alc_core::repository::hub_measurements::*;
@@ -24,9 +26,9 @@ impl HubMeasurementsRepository for PgHubMeasurementsRepository {
         &self,
         tenant_id: Uuid,
         items: &[HubMeasurementCreate],
-    ) -> Result<Vec<bool>, sqlx::Error> {
+    ) -> Result<HubMeasurementsIngestResponse, sqlx::Error> {
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
-        let mut inserted = Vec::with_capacity(items.len());
+        let mut inserted: i64 = 0;
         for item in items {
             // recorded_at_ms (端末計時 unix ms) → TIMESTAMPTZ。範囲外は NULL に落とす。
             let recorded_at = item
@@ -52,9 +54,12 @@ impl HubMeasurementsRepository for PgHubMeasurementsRepository {
             .await?;
             // ON CONFLICT DO NOTHING なので rows_affected() は 0 か 1。
             // 1 = 新規に入った行 (端末の再送は 0 になる)
-            inserted.push(res.rows_affected() > 0);
+            inserted += res.rows_affected() as i64;
         }
-        Ok(inserted)
+        Ok(HubMeasurementsIngestResponse {
+            inserted,
+            duplicates: items.len() as i64 - inserted,
+        })
     }
 
     async fn list(
