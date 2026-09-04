@@ -11,6 +11,7 @@ use alc_core::models::{
     HubMeasurementCreate, HubMeasurementFilter, HubMeasurementsIngestResponse,
     HubMeasurementsListResponse,
 };
+use alc_core::repository::timecard::resolve_employee_by_card;
 use alc_core::AppState;
 
 /// `STAGING_MODE=true` かどうか (alc-auth / alc-misc::staging と同判定)。
@@ -41,6 +42,9 @@ async fn ensure_tenant_for_staging(state: &AppState, tenant_id: Uuid) -> Result<
         })
 }
 
+/// 打刻中継の対象 kind (Refs ippoan/alc-app-s3#134)。文字列の直書きを避ける。
+pub const KIND_TIMECARD: &str = "timecard";
+
 /// 受理する測定種別の allowlist (Refs #564 設計レビュー 2026-07-12)。
 ///
 /// - temperature / blood_pressure … ble-medical-gateway 互換 JSON
@@ -66,7 +70,7 @@ pub const HUB_MEASUREMENT_KINDS: &[&str] = &[
     "alcohol",
     "fc1200_raw",
     "license",
-    "timecard",
+    KIND_TIMECARD,
 ];
 
 /// 1 リクエストで受けるバッチの上限 (再送スパイクからの防御)。
@@ -151,7 +155,7 @@ async fn ingest(
         return Err(StatusCode::BAD_REQUEST);
     }
     ensure_tenant_for_staging(&state, tenant.0 .0).await?;
-    let resp = state
+    let inserted_flags = state
         .hub_measurements
         .insert_batch(tenant.0 .0, &items)
         .await
@@ -159,7 +163,75 @@ async fn ingest(
             tracing::error!("hub_measurements.insert_batch error: {e}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
-    Ok((StatusCode::CREATED, Json(resp)))
+    let inserted = inserted_flags.iter().filter(|new| **new).count() as i64;
+
+    // NFC タイムカード端末の打刻中継 (Refs ippoan/alc-app-s3#134)。
+    // **新規に入った行だけ**を打刻する — 端末は ack されるまで同じ seq を再送し、
+    // 再送は ON CONFLICT DO NOTHING で弾かれて flag が false になるので、
+    // ここが二重打刻を防ぐ関門になる。
+    for (item, _) in items
+        .iter()
+        .zip(inserted_flags.iter())
+        .filter(|(item, new)| **new && item.kind == KIND_TIMECARD)
+    {
+        relay_timecard_punch(&state, tenant.0 .0, item).await;
+    }
+
+    Ok((
+        StatusCode::CREATED,
+        Json(HubMeasurementsIngestResponse {
+            inserted,
+            duplicates: items.len() as i64 - inserted,
+        }),
+    ))
+}
+
+/// `kind="timecard"` の 1 行を打刻 (`time_punches`) に変換する。
+///
+/// **失敗しても ingest は失敗させない (ログのみ)。** 500 を返すと端末は ack を
+/// 受け取れず同じ seq を再送するが、測定行は既に入っているので再送は
+/// 「新規でない」と判定され、**二度と打刻されないまま無限再送になる**。
+/// 未登録カードや DB 障害は「測定は残り打刻だけ落ちる」に倒す方が回復可能
+/// (行が残っているので後から手で打刻し直せる)。
+async fn relay_timecard_punch(state: &AppState, tenant_id: Uuid, item: &HubMeasurementCreate) {
+    let Some(card_id) = item.payload.get("card_id").and_then(|v| v.as_str()) else {
+        tracing::warn!(
+            "timecard relay: payload に card_id が無い (device_id={} seq={})",
+            item.device_id,
+            item.seq
+        );
+        return;
+    };
+    // 照合はブラウザ版の punch と同じ 1 か所 (alc_core::repository::timecard)。
+    // card_id は端末が読んだ生値のまま渡す (完全一致 SQL のため加工しない)
+    let employee_id =
+        match resolve_employee_by_card(state.timecard.as_ref(), tenant_id, card_id).await {
+            Ok(Some(id)) => id,
+            Ok(None) => {
+                // 未登録カード。ブラウザ版なら 404 を返す分岐で、ここでは記録だけ残す
+                tracing::warn!(
+                    "timecard relay: 未登録カード (device_id={} seq={} card_kind={:?})",
+                    item.device_id,
+                    item.seq,
+                    item.payload.get("card_kind").and_then(|v| v.as_str()),
+                );
+                return;
+            }
+            Err(e) => {
+                tracing::error!("timecard relay: カード照合に失敗: {e}");
+                return;
+            }
+        };
+    // device_id は NULL。time_punches.device_id は devices(id) への UUID FK だが
+    // hub 側の device_id は auth-worker 発行の短い文字列で入らない。どの端末かは
+    // hub_measurements.device_id で追える (plan/standing-devices.md §3.3)
+    if let Err(e) = state
+        .timecard
+        .create_punch(tenant_id, employee_id, None)
+        .await
+    {
+        tracing::error!("timecard relay: 打刻の記録に失敗: {e}");
+    }
 }
 
 /// clamp 済みの (limit, offset) を返す。負値・0・上限超えを安全側に丸める。
