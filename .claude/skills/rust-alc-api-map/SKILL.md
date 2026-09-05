@@ -1,6 +1,6 @@
 ---
 name: rust-alc-api-map
-generated-from: rust-alc-api:32df349f
+generated-from: rust-alc-api:62ffaf62
 paths: [crates/, src/, migrations/]
 description: rust-alc-api (アルコールチェッカー基盤の Rust/Axum Cargo workspace — domain crate 群 + monolith 単一バイナリ、PostgreSQL+RLS、Cloud Run) の構造ナビゲーション。どの crate に何のルートがあるか / monolith (rust-alc-api) 一本化 (gateway + per-domain は #556 で廃止) / RLS・migration・deploy/release 分離の gotcha を 1 枚にまとめる。トリガー:「rust-alc-api」「alc-api」「alc-notify」「alc-tenko」「alc-trouble」「alc-carins」「alc-dtako」「gateway」「tenko-api」「carins-api」「dtako-api」「trouble-api」「RLS テナント」「sqlx migration」「ts-rs」「Release Wave」「Bazel」等。
 ---
@@ -531,7 +531,8 @@ rust-logi から移行。nuxt-pwa-carins フロントエンドが使用。
 ## タイムカード機能
 
 - **テーブル**: `timecard_cards` (カード:社員 = 多:1)。**`time_punches` は書き手も読み手も無い** (Refs ippoan/alc-app-s3#134 で打刻の一次表を `hub_measurements` へ寄せた)。DROP はしていないので、過去の行は SQL でだけ見える
-- **マイグレーション**: `migrations/034_create_timecard.sql` + `migrations/134_timecard_cards_normalize_card_id.sql` (card_id の正規化移行 + CHECK 制約)
+- **マイグレーション**: `migrations/034_create_timecard.sql` + `migrations/134_timecard_cards_normalize_card_id.sql` (card_id の正規化移行 + CHECK 制約) + `migrations/138_delete_prehistoric_timecard_punches.sql` (1970 年の打刻を削除)
+- **★ `recorded_at` が 1970 になるのは時計未同期の端末が稼働時間を送ったため (Refs ippoan/alc-app-s3#144)**。NFC タイムカード端末は SNTP 起動より前、`recorded_at_ms` に**起動からの稼働時間**を入れていたので 1970 起点になる。送信時に稼働時間の差で補正する仕組み (ippoan/alc-app-s3#124) は「あとで同期したら過去ぶんを補正する」形で、**1 度も同期しなかった端末の行には永久に発火しない**。一覧の絞り込みと並びは `COALESCE(recorded_at, created_at)` なので、これらは 1970 年の打刻として並ぶ。migration 138 が `kind='timecard' AND recorded_at < 2020-01-01 AND created_at < 2026-09-05` の 3 条件で削除した (賃金データなのでオーナー判断で削除)。**device_id / tenant_id はハードコードしない** (public repo に本番の device credential を残さない / device_id は `UNIQUE (tenant_id, device_id, seq)` で全体一意ではない)、**`created_at` の上限が「測定時点で既にあった行だけ」を意味する**、**`recorded_at IS NULL` と他 kind は巻き込まない**。20 件超で `RAISE EXCEPTION` する guard 付き — 発火すると `_sqlx_migrations` に dirty 行が残るので、消してから新 version で作り直す
 - **card_id の正規化 (Refs ippoan/alc-app-s3#134)**: `alc_core::repository::timecard::normalize_card_id` = `trim` + **小文字** + `':'` 除去。同じ物理カードでも読み取り側で表記が揺れる (NFC タイムカード端末は `%02X` の大文字 IDm、ローカル NFC ブリッジは小文字、`AA:BB:..` と区切る実装もある) のに照合は完全一致なので、**登録・照合・登録照会の 3 経路すべて**を同じ形に揃える: 登録 = `create_card`、照合 = `resolve_employee_by_card` (ブラウザ版 punch と端末中継の共有 choke point)、登録照会 = `get_card_by_card_id` (choke point を通らない 3 本目)。**小文字**なのは `alc-carins` の `normalize_nfc_uuid` (車検証 NFC タグ) と規約を揃えるため — 1 repo に NFC ID の正規化規約を 2 つ並べない。**読み側だけ正規化してはいけない**: `ABC` と `abc` の 2 行が同時に存在し得ると正規化後の値がどちらにも一致して**打刻が別人に着く**。migration 134 が既存行を移行し、CHECK 制約 `timecard_cards_card_id_normalized` が書き忘れを loud fail させる (既存の `idx_timecard_cards_unique (tenant_id, card_id)` がそのまま正規化後の一意性を保証するので index は増やさない)。`employees.nfc_id` フォールバック (免許証 16 桁の数字) に対しては no-op
 - **バックエンド**: `src/routes/timecard.rs`
   - カード CRUD: `POST/GET /api/timecard/cards`, `DELETE /api/timecard/cards/{id}`, `GET /api/timecard/cards/by-card/{card_id}`
