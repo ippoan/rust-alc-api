@@ -48,10 +48,10 @@ fn build_punch_where(
 
 /// 打刻一覧の共通 CTE (Refs ippoan/alc-app-s3#134)。
 ///
-/// **打刻の一次表は `hub_measurements` で、`time_punches` は読まない。**
-/// あちらはコピーであり、コピーを作ったせいで「時刻がサーバ時刻になる」
-/// 「端末 ID が入らない」「重複排除が要る」が生まれた。書き手を外したので、
-/// 読み出しも元の表へ寄せる。
+/// **打刻の一次表は `hub_measurements` ただ 1 つ。**
+/// かつては ingest のコピーを別表に持っており、そのせいで「時刻がサーバ時刻になる」
+/// 「端末 ID が入らない」「重複排除が要る」が生まれた。書き手・読み手を外したうえで
+/// 表ごと DROP した (#620) ので、経路は元の表 1 本だけである。
 ///
 /// # 社員の解決は 1 本の式
 ///
@@ -273,8 +273,8 @@ impl TimecardRepository for PgTimecardRepository {
     ) -> Result<Vec<TimePunch>, sqlx::Error> {
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
         // 打刻の一次表は hub_measurements (Refs ippoan/alc-app-s3#134)。一覧と
-        // 同じ CTE を使う — ここだけ time_punches を読むと、ブラウザで打った
-        // 直後の応答にその打刻が出ない (書き込み先が違うため)。
+        // 同じ CTE を使う — ここだけ別の表を読むと、ブラウザで打った直後の応答に
+        // その打刻が出ない (書き込み先が違うため)。
         //
         // **「今日」は JST で切る。** `CURRENT_DATE` はサーバ TZ (Cloud Run は UTC) の
         // 日付なので、JST の 0 時〜9 時に打刻すると「昨日」に落ちて当日一覧から消える。
