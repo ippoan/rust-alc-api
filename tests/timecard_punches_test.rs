@@ -2,7 +2,7 @@
 //!
 //! **このファイルが無いと、打刻の読み出し SQL は 1 度も実行されないまま出ます。**
 //! mock テスト (`tests/mock_tests/mock_timecard_test.rs`) は repository を丸ごと
-//! 差し替えるので SQL を通りません。打刻一覧は #134 で `time_punches` の読み出しから
+//! 差し替えるので SQL を通りません。打刻一覧は #134 で旧・打刻表の読み出しから
 //! `hub_measurements` の導出 (CTE + 3 段の COALESCE + 2 本の LEFT JOIN) に変わり、
 //! **SQL 側だけで壊れうる範囲が一気に増えた**ので、実 DB で固定します。
 
@@ -266,8 +266,8 @@ async fn test_today_punches_use_jst_day_boundary() {
         .iter()
         .enumerate()
         {
-            // **打刻の一次表は hub_measurements。** time_punches に入れても
-            // 読まれない (Refs ippoan/alc-app-s3#134)
+            // **打刻の一次表は hub_measurements。** 一覧はここからだけ導出する
+            // (Refs ippoan/alc-app-s3#134)
             sqlx::query(&format!(
                 r#"INSERT INTO hub_measurements
                        (tenant_id, device_id, kind, payload, seq, recorded_at)
@@ -375,8 +375,9 @@ async fn test_punches_expose_kind_to_separate_tenko_from_timecard() {
 /// ブラウザ版 (キオスク / Android) の打刻も `hub_measurements` へ入る
 /// (Refs ippoan/alc-app-s3#134)。
 ///
-/// **`time_punches` には 1 行も作らない。** 一次表を 2 つ持つと「時刻がサーバ
-/// 時刻になる」「端末 ID が入らない」「重複排除が要る」がそこから生まれる。
+/// **書き込み先は `hub_measurements` だけ。** 一次表を 2 つ持つと「時刻がサーバ
+/// 時刻になる」「端末 ID が入らない」「重複排除が要る」がそこから生まれる
+/// (旧・打刻表は #620 で DROP 済み)。
 #[tokio::test]
 async fn test_browser_punch_writes_to_hub_measurements() {
     test_group!("timecard punches (ブラウザ版の書き込み先)");
@@ -414,22 +415,13 @@ async fn test_browser_punch_writes_to_hub_measurements() {
             assert_eq!(res.status(), 201);
             let body: Value = res.json().await.unwrap();
             assert_eq!(body["employee_name"], "ブラウザ 太郎");
-            // **打った本人の打刻が当日一覧に出る** — ここが time_punches のままだと
-            // 書き込み先と読み出し先が割れて空になる
+            // **打った本人の打刻が当日一覧に出る** — 書き込み先と読み出し先が
+            // 割れていると空になる
             assert_eq!(
                 body["today_punches"].as_array().unwrap().len(),
                 1,
                 "当日一覧に自分の打刻が出ない: {body}"
             );
-
-            // time_punches には作らない
-            let legacy: i64 =
-                sqlx::query_scalar("SELECT count(*) FROM time_punches WHERE tenant_id = $1")
-                    .bind(tenant)
-                    .fetch_one(state.pool())
-                    .await
-                    .unwrap();
-            assert_eq!(legacy, 0, "time_punches に行を作っている");
 
             // hub_measurements に 1 行、payload に employee_id が凍結されている
             let (kind, payload): (String, Value) =
