@@ -15,6 +15,12 @@ const AUTH_TOKEN_ENDPOINT: &str = "https://auth.worksmobile.com/oauth2/v2.0/toke
 const BOT_ENDPOINT: &str = "https://www.worksapis.com/v1.0/bots/";
 const USERS_ENDPOINT: &str = "https://www.worksapis.com/v1.0/users";
 const AUDIT_LOG_DOWNLOAD_ENDPOINT: &str = "https://www.worksapis.com/v1.0/audits/logs/download";
+const BOARDS_ENDPOINT: &str = "https://www.worksapis.com/v1.0/boards";
+/// 掲示板 API のトラバース上限 (board × post の呼び出し回数を抑える安全弁、Refs #540)。
+/// 未検証の API を本番でいきなり無制限に叩かないための保守的な値。実運用で board 数・
+/// 直近投稿数がこれを超えるようなら、`since` によるページング打ち切りと合わせて見直す。
+const BOARD_ACTIVITY_MAX_BOARDS: usize = 5;
+const BOARD_ACTIVITY_MAX_POSTS_PER_BOARD: usize = 10;
 
 #[derive(Debug, thiserror::Error)]
 pub enum LineworksBotError {
@@ -131,6 +137,49 @@ struct ResponseMetaData {
     next_cursor: Option<String>,
 }
 
+/// `GET /v1.0/boards` レスポンス (Refs #540)。★ フィールド名は公式ドキュメントの
+/// 概要記述からの推測で実データ未検証。ズレていたら `boards: None` 相当になり
+/// `list_boards` は空を返す (`unwrap_or_default`) だけなので、board シグナルが
+/// 静かに 0 件になる形で fail する (呼び出し元は best-effort 扱いなので害はない)。
+#[derive(Debug, Deserialize)]
+struct BoardsResponse {
+    boards: Option<Vec<BoardEntry>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct BoardEntry {
+    #[serde(rename = "boardId")]
+    board_id: String,
+}
+
+/// `GET /v1.0/boards/{id}/posts` レスポンス (★ 実データ未検証、上記と同じ注意)。
+#[derive(Debug, Deserialize)]
+struct PostsResponse {
+    posts: Option<Vec<PostEntry>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PostEntry {
+    #[serde(rename = "postId")]
+    post_id: String,
+    #[serde(rename = "createdTime")]
+    created_time: String,
+}
+
+/// `GET /v1.0/boards/{id}/posts/{id}/readers` レスポンス (★ 実データ未検証、同上)。
+#[derive(Debug, Deserialize)]
+struct ReadersResponse {
+    readers: Option<Vec<ReaderEntry>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ReaderEntry {
+    #[serde(rename = "userId")]
+    user_id: String,
+    #[serde(rename = "isRead")]
+    is_read: bool,
+}
+
 /// マルチテナント対応の LINE WORKS Bot クライアント
 /// (config_id, scope) ごとにトークンをキャッシュ
 pub struct LineworksBotClient {
@@ -143,6 +192,7 @@ pub struct LineworksBotClient {
     bot_endpoint: String,
     auth_token_endpoint: String,
     audit_log_download_endpoint: String,
+    boards_endpoint: String,
 }
 
 impl Default for LineworksBotClient {
@@ -173,6 +223,22 @@ impl LineworksBotClient {
         auth_token_endpoint: &str,
         audit_log_download_endpoint: &str,
     ) -> Self {
+        Self::with_all_endpoints_and_boards(
+            bot_endpoint,
+            auth_token_endpoint,
+            audit_log_download_endpoint,
+            BOARDS_ENDPOINT,
+        )
+    }
+
+    /// `with_all_endpoints` に加えて掲示板 API の endpoint も差し替えるコンストラクタ
+    /// (Refs #540、board 系メソッドのテスト用)。
+    pub fn with_all_endpoints_and_boards(
+        bot_endpoint: &str,
+        auth_token_endpoint: &str,
+        audit_log_download_endpoint: &str,
+        boards_endpoint: &str,
+    ) -> Self {
         Self {
             client: reqwest::Client::new(),
             no_redirect_client: reqwest::Client::builder()
@@ -183,6 +249,7 @@ impl LineworksBotClient {
             bot_endpoint: bot_endpoint.to_string(),
             auth_token_endpoint: auth_token_endpoint.to_string(),
             audit_log_download_endpoint: audit_log_download_endpoint.to_string(),
+            boards_endpoint: boards_endpoint.to_string(),
         }
     }
 
@@ -505,6 +572,7 @@ impl LineworksBotClient {
     }
 
     /// LINE WORKS 監査ログ (audit.read scope) の CSV をダウンロードする (Refs #540)。
+    /// `service` は `auth` / `message` など監査ログの対象サービス種別。
     ///
     /// `GET /v1.0/audits/logs/download?service=...&startTime=...&endTime=...` は 302 で
     /// 実ファイルのダウンロード URL (`Location`) を返す。**この Location 先にも同じ
@@ -523,10 +591,11 @@ impl LineworksBotClient {
     /// 期間は最長 31 日 (LINE WORKS API 制限)、呼び出し元で担保すること。
     /// 「並行して呼び出さないでください」という制約への対応 (直列化・キャッシュ) は
     /// このクライアントの責務ではなく呼び出し側 (`lineworks_login_activity.rs`) に置く。
-    pub async fn fetch_login_audit_csv(
+    pub async fn fetch_audit_csv(
         &self,
         config_id: Uuid,
         config: &LineworksBotConfig,
+        service: &str,
         start: DateTime<Utc>,
         end: DateTime<Utc>,
     ) -> Result<String, LineworksBotError> {
@@ -535,14 +604,197 @@ impl LineworksBotClient {
             .await?;
 
         let url = format!(
-            "{}?service=auth&startTime={}&endTime={}&language=ja_JP",
+            "{}?service={}&startTime={}&endTime={}&language=ja_JP",
             self.audit_log_download_endpoint,
+            urlencoding::encode(service),
             urlencoding::encode(&format_audit_time(start)),
             urlencoding::encode(&format_audit_time(end)),
         );
 
         let bytes = self.get_with_auth_redirect(&url, &token).await?;
         Ok(decode_csv_bytes(&bytes))
+    }
+
+    /// `fetch_audit_csv` の `service=auth` 固定版 (後方互換・既存呼び出し元用)。
+    pub async fn fetch_login_audit_csv(
+        &self,
+        config_id: Uuid,
+        config: &LineworksBotConfig,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<String, LineworksBotError> {
+        self.fetch_audit_csv(config_id, config, "auth", start, end)
+            .await
+    }
+
+    /// 掲示板の既読状況から「投稿日時以降にアクティブだった」という**下限**シグナルを
+    /// 集計する (`board.read` scope、Refs #540)。
+    ///
+    /// LINE WORKS の掲示板既読 API (`/v1.0/boards/{id}/posts/{id}/readers`) は
+    /// **既読フラグ (true/false) のみを返し、既読日時は取れない** (API 仕様)。
+    /// そのため「この投稿を読んだ = 投稿の作成日時以降にアクティブだったはず」という
+    /// 下限値として扱う (実際の最終アクティブ日時はこれ以降の可能性がある)。
+    ///
+    /// 掲示板一覧 → 各掲示板の投稿一覧 → 各投稿の既読者一覧、と3段の API 呼び出しに
+    /// なるため、`BOARD_ACTIVITY_MAX_BOARDS` / `BOARD_ACTIVITY_MAX_POSTS_PER_BOARD` で
+    /// 呼び出し回数の上限を設ける (未検証 API を無制限に叩かないための安全弁)。
+    /// `since` より古い投稿は無視する。
+    ///
+    /// 戻り値は `user_id → 下限日時`。呼び出し元 (`lineworks_login_activity.rs`) で
+    /// `list_org_users` の email と突き合わせる。
+    pub async fn fetch_board_activity_lower_bound(
+        &self,
+        config_id: Uuid,
+        config: &LineworksBotConfig,
+        since: DateTime<Utc>,
+    ) -> Result<HashMap<String, DateTime<Utc>>, LineworksBotError> {
+        let token = self
+            .get_access_token(config_id, config, "board.read")
+            .await?;
+
+        let boards = self.list_boards(&token).await?;
+        let mut lower_bound: HashMap<String, DateTime<Utc>> = HashMap::new();
+
+        for board_id in boards.into_iter().take(BOARD_ACTIVITY_MAX_BOARDS) {
+            let posts = self
+                .list_recent_board_posts(&token, &board_id, since)
+                .await?;
+            for (post_id, created_at) in posts.into_iter().take(BOARD_ACTIVITY_MAX_POSTS_PER_BOARD)
+            {
+                let reader_ids = self
+                    .list_board_post_readers(&token, &board_id, &post_id)
+                    .await?;
+                for user_id in reader_ids {
+                    lower_bound
+                        .entry(user_id)
+                        .and_modify(|cur| {
+                            if created_at > *cur {
+                                *cur = created_at;
+                            }
+                        })
+                        .or_insert(created_at);
+                }
+            }
+        }
+
+        Ok(lower_bound)
+    }
+
+    async fn list_boards(&self, token: &str) -> Result<Vec<String>, LineworksBotError> {
+        let resp = self
+            .client
+            .get(&self.boards_endpoint)
+            .header("Authorization", format!("Bearer {}", token))
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            tracing::error!("LINE WORKS list boards failed: {status} - {body}");
+            return Err(LineworksBotError::SendFailed(format!("{status}: {body}")));
+        }
+
+        let text = resp.text().await?;
+        let body: BoardsResponse = serde_json::from_str(&text).map_err(|e| {
+            LineworksBotError::SendFailed(format!(
+                "parse boards response: {e} - body: {}",
+                truncate_for_log(&text)
+            ))
+        })?;
+
+        Ok(body
+            .boards
+            .unwrap_or_default()
+            .into_iter()
+            .map(|b| b.board_id)
+            .collect())
+    }
+
+    /// `since` 以降に作成された投稿の `(postId, createdTime)` を返す。
+    /// API に期間フィルタが無いため最初の1ページ (最大 `count`) を取得し、
+    /// 呼び出し側でフィルタする。
+    async fn list_recent_board_posts(
+        &self,
+        token: &str,
+        board_id: &str,
+        since: DateTime<Utc>,
+    ) -> Result<Vec<(String, DateTime<Utc>)>, LineworksBotError> {
+        let url = format!("{}/{board_id}/posts?count=40", self.boards_endpoint);
+        let resp = self
+            .client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", token))
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            tracing::error!("LINE WORKS list board posts failed: {status} - {body}");
+            return Err(LineworksBotError::SendFailed(format!("{status}: {body}")));
+        }
+
+        let text = resp.text().await?;
+        let body: PostsResponse = serde_json::from_str(&text).map_err(|e| {
+            LineworksBotError::SendFailed(format!(
+                "parse posts response: {e} - body: {}",
+                truncate_for_log(&text)
+            ))
+        })?;
+
+        Ok(body
+            .posts
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|p| {
+                let created = DateTime::parse_from_rfc3339(&p.created_time)
+                    .ok()?
+                    .with_timezone(&Utc);
+                (created >= since).then_some((p.post_id, created))
+            })
+            .collect())
+    }
+
+    async fn list_board_post_readers(
+        &self,
+        token: &str,
+        board_id: &str,
+        post_id: &str,
+    ) -> Result<Vec<String>, LineworksBotError> {
+        let url = format!(
+            "{}/{board_id}/posts/{post_id}/readers",
+            self.boards_endpoint
+        );
+        let resp = self
+            .client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", token))
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            tracing::error!("LINE WORKS list board post readers failed: {status} - {body}");
+            return Err(LineworksBotError::SendFailed(format!("{status}: {body}")));
+        }
+
+        let text = resp.text().await?;
+        let body: ReadersResponse = serde_json::from_str(&text).map_err(|e| {
+            LineworksBotError::SendFailed(format!(
+                "parse readers response: {e} - body: {}",
+                truncate_for_log(&text)
+            ))
+        })?;
+
+        Ok(body
+            .readers
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|r| r.is_read)
+            .map(|r| r.user_id)
+            .collect())
     }
 
     /// リダイレクトを自動追従せず、3xx を見たら `Location` へ同じ `Authorization` を
@@ -600,6 +852,19 @@ fn format_audit_time(dt: DateTime<Utc>) -> String {
     dt.format("%Y-%m-%dT%H:%M:%S%:z").to_string()
 }
 
+/// エラーメッセージ/ログに埋め込む際に、レスポンス本文を扱いやすい長さへ切り詰める
+/// (board API のレスポンス shape が未検証なので、parse 失敗時に実物を見て直せるように
+/// するための診断用。Refs #540)。
+fn truncate_for_log(s: &str) -> String {
+    const MAX: usize = 500;
+    if s.chars().count() <= MAX {
+        s.to_string()
+    } else {
+        let truncated: String = s.chars().take(MAX).collect();
+        format!("{truncated}...(truncated)")
+    }
+}
+
 /// CSV バイト列を文字列にデコードする。公式ドキュメントに文字コードの明記が無いため、
 /// まず UTF-8 として読み、失敗したら Shift_JIS にフォールバックする (実データ未確認、Refs #540)。
 fn decode_csv_bytes(bytes: &[u8]) -> String {
@@ -615,18 +880,23 @@ fn decode_csv_bytes(bytes: &[u8]) -> String {
 /// email → 成功ログインの最終日時、の集計結果。
 pub type LastLoginByEmail = HashMap<String, DateTime<Utc>>;
 
-/// LINE WORKS 監査ログ CSV (`service=auth`) を解析し、メールアドレスごとの
-/// 「成功したログインの最終日時」を集計する。
+/// LINE WORKS 監査ログ CSV (`service=auth` / `message` 等) を解析し、メールアドレスごとの
+/// 「成功したイベントの最終日時」を集計する。
 ///
 /// ★ 実データで確認済み (2026-09-11、本番テナントの `language=ja_JP` CSV)。
-/// ヘッダーは `説明,メンバー,日時,IPアドレス,ログイン方法,サービスタイプ` の6列で、
-/// issue #540 本文にあった「結果」「メール」という独立列は無い:
-/// - **メンバー**: `"山田太郎 (demo@example.com)"` のように表示名 + `(メールアドレス)`
-///   の形式 (`extract_email_from_member_field` で括弧内を抽出。素のメールアドレスが
-///   そのまま入っている変種にもフォールバックで対応)。
-/// - **説明**: ログインの成否を表す文 (失敗時はエラーコード付きの文言になるらしい)。
-///   独立した「結果」列が無いため、この列に対して `is_success_result` の
-///   キーワード判定 (「成功」を含むか) を流用する。
+/// `service` によって列構成が違う:
+/// - **`service=auth`**: `説明,メンバー,日時,IPアドレス,ログイン方法,サービスタイプ` の6列。
+///   issue #540 本文にあった「結果」「メール」という独立列は無い:
+///   - **メンバー**: `"山田太郎 (demo@example.com)"` のように表示名 + `(メールアドレス)`
+///     の形式 (`extract_email_from_member_field` で括弧内を抽出。素のメールアドレスが
+///     そのまま入っている変種にもフォールバックで対応)。
+///   - **説明**: ログインの成否を表す文 (失敗時はエラーコード付きの文言になるらしい)。
+///     独立した「結果」列が無いため、この列に対して `is_success_result` の
+///     キーワード判定 (「成功」を含むか) を流用する。
+/// - **`service=message`**: `日時,送信者,受信者,チャンネルID,イベント` の5列
+///   (2026-09-11 本番実測)。「メンバー」相当が **「送信者」** という列名になる —
+///   人ごとの識別列は `find_column` のキーワードに応じて拾い分ける。「結果」相当の
+///   列も無いため (メッセージ送信に成功/失敗の概念が無い)、全行を有効なイベントとして扱う。
 ///
 /// 未知の見出しに遭遇したら黙って握りつぶさず `Err` を返す
 /// (誤判定より「気づける失敗」を優先する設計)。
@@ -640,8 +910,19 @@ pub fn parse_login_audit_csv(csv_text: &str) -> Result<LastLoginByEmail, String>
         .map_err(|e| format!("CSV header read error: {e}"))?
         .clone();
 
-    let member_idx = find_column(&headers, &["メンバー", "member", "メール", "email", "mail"])
-        .ok_or_else(|| format!("member/email column not found in headers: {headers:?}"))?;
+    let member_idx = find_column(
+        &headers,
+        &[
+            "メンバー",
+            "member",
+            "送信者",
+            "sender",
+            "メール",
+            "email",
+            "mail",
+        ],
+    )
+    .ok_or_else(|| format!("member/email column not found in headers: {headers:?}"))?;
     let datetime_idx = find_column(&headers, &["日時", "datetime", "time", "date"])
         .ok_or_else(|| format!("datetime column not found in headers: {headers:?}"))?;
     // 独立した「結果」列は無く、「説明」列に成否が文章で書かれている (実データ確認済み)。
@@ -830,6 +1111,21 @@ mod tests {
     }
 
     #[test]
+    fn parse_login_audit_csv_supports_message_service_sender_column() {
+        // service=message の実ヘッダー (2026-09-11 実測): 日時,送信者,受信者,チャンネルID,イベント。
+        // 「メンバー」列は無く「送信者」列になる。「結果」相当の列も無いため全行を有効なイベント
+        // として扱う (メッセージ送信に成功/失敗の概念が無いため)。
+        let csv = "日時,送信者,受信者,チャンネルID,イベント\n\
+                    2026/09/01 09:00:00,山田太郎 (a@x.com),鈴木花子 (b@x.com),c1,送信\n";
+        let result = parse_login_audit_csv(csv).expect("parse");
+        assert!(result.contains_key("a@x.com"), "送信者列から拾える");
+        assert!(
+            !result.contains_key("b@x.com"),
+            "受信者は拾わない (送信者のみ)"
+        );
+    }
+
+    #[test]
     fn parse_login_audit_csv_without_result_column_treats_all_rows_as_success() {
         // 「説明」列を見つけられない見出しでも、メンバー/日時さえ拾えれば失敗しない
         // (誤って全件除外するより、失敗ログインを紛れ込ませる方が実害が小さいため)。
@@ -899,6 +1195,19 @@ mod tests {
     fn parse_audit_datetime_rejects_garbage() {
         assert!(parse_audit_datetime("not-a-date").is_none());
         assert!(parse_audit_datetime("").is_none());
+    }
+
+    #[test]
+    fn truncate_for_log_leaves_short_strings_untouched() {
+        assert_eq!(truncate_for_log("short"), "short");
+    }
+
+    #[test]
+    fn truncate_for_log_truncates_long_strings_with_marker() {
+        let long = "a".repeat(600);
+        let out = truncate_for_log(&long);
+        assert!(out.ends_with("...(truncated)"));
+        assert!(out.len() < long.len());
     }
 
     #[test]
@@ -1190,5 +1499,149 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.to_string().contains("Location"));
+    }
+
+    // --- board activity lower bound (#540) ---
+
+    #[tokio::test]
+    async fn fetch_board_activity_lower_bound_collects_readers_of_recent_posts() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let auth_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "tok",
+                "refresh_token": "r",
+                "expires_in": 3600,
+            })))
+            .mount(&auth_server)
+            .await;
+
+        let boards_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/boards"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "boards": [{"boardId": "b1"}]
+            })))
+            .mount(&boards_server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/boards/b1/posts"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "posts": [
+                    {"postId": "p1", "createdTime": "2026-09-01T00:00:00+09:00"},
+                    // since より古い投稿は呼び出し元 (list_recent_board_posts) で弾かれる。
+                    {"postId": "p_old", "createdTime": "2020-01-01T00:00:00+09:00"},
+                ]
+            })))
+            .mount(&boards_server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/boards/b1/posts/p1/readers"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "readers": [
+                    {"userId": "u1", "isRead": true},
+                    {"userId": "u2", "isRead": false},
+                ]
+            })))
+            .mount(&boards_server)
+            .await;
+
+        let client = LineworksBotClient::with_all_endpoints_and_boards(
+            "http://unused/",
+            &format!("{}/token", auth_server.uri()),
+            "http://unused-audit/",
+            &format!("{}/boards", boards_server.uri()),
+        );
+        let config = test_config();
+        let since = Utc::now() - chrono::Duration::days(30);
+
+        let result = client
+            .fetch_board_activity_lower_bound(Uuid::new_v4(), &config, since)
+            .await
+            .expect("fetch succeeds");
+
+        assert_eq!(result.len(), 1, "isRead=false の u2 は含まれない");
+        assert!(result.contains_key("u1"));
+    }
+
+    #[tokio::test]
+    async fn fetch_board_activity_lower_bound_returns_empty_when_no_boards() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let auth_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "tok",
+                "refresh_token": "r",
+                "expires_in": 3600,
+            })))
+            .mount(&auth_server)
+            .await;
+
+        let boards_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/boards"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "boards": []
+            })))
+            .mount(&boards_server)
+            .await;
+
+        let client = LineworksBotClient::with_all_endpoints_and_boards(
+            "http://unused/",
+            &format!("{}/token", auth_server.uri()),
+            "http://unused-audit/",
+            &format!("{}/boards", boards_server.uri()),
+        );
+        let config = test_config();
+        let result = client
+            .fetch_board_activity_lower_bound(Uuid::new_v4(), &config, Utc::now())
+            .await
+            .expect("fetch succeeds with 0 boards");
+        assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn fetch_board_activity_lower_bound_propagates_403_from_list_boards() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let auth_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "tok",
+                "refresh_token": "r",
+                "expires_in": 3600,
+            })))
+            .mount(&auth_server)
+            .await;
+
+        let boards_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/boards"))
+            .respond_with(ResponseTemplate::new(403).set_body_string("forbidden"))
+            .mount(&boards_server)
+            .await;
+
+        let client = LineworksBotClient::with_all_endpoints_and_boards(
+            "http://unused/",
+            &format!("{}/token", auth_server.uri()),
+            "http://unused-audit/",
+            &format!("{}/boards", boards_server.uri()),
+        );
+        let config = test_config();
+        // 呼び出し元 (lineworks_login_activity.rs) はこの Err を best-effort で
+        // 無視する設計。ここではクライアント側が Err をちゃんと返すことだけ確認する。
+        let err = client
+            .fetch_board_activity_lower_bound(Uuid::new_v4(), &config, Utc::now())
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("403"));
     }
 }
