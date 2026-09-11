@@ -618,11 +618,17 @@ pub type LastLoginByEmail = HashMap<String, DateTime<Utc>>;
 /// LINE WORKS 監査ログ CSV (`service=auth`) を解析し、メールアドレスごとの
 /// 「成功したログインの最終日時」を集計する。
 ///
-/// ★★ 実 CSV 未確認 (issue #540 時点)。公式ドキュメント (audit-log-download) には
-/// CSV の列構成の記載が無く、ここでは issue 本文の記述 (ログイン結果=成功/失敗、
-/// メンバー名・メール、日時、利用プログラム区分) からキーワードでヘッダ列を推定している。
-/// **実データを入手したら `find_column` に渡すキーワード候補を実物の見出しに合わせて
-/// 更新すること。** 未知の見出しに遭遇したら黙って握りつぶさず `Err` を返す
+/// ★ 実データで確認済み (2026-09-11、本番テナントの `language=ja_JP` CSV)。
+/// ヘッダーは `説明,メンバー,日時,IPアドレス,ログイン方法,サービスタイプ` の6列で、
+/// issue #540 本文にあった「結果」「メール」という独立列は無い:
+/// - **メンバー**: `"山田太郎 (demo@example.com)"` のように表示名 + `(メールアドレス)`
+///   の形式 (`extract_email_from_member_field` で括弧内を抽出。素のメールアドレスが
+///   そのまま入っている変種にもフォールバックで対応)。
+/// - **説明**: ログインの成否を表す文 (失敗時はエラーコード付きの文言になるらしい)。
+///   独立した「結果」列が無いため、この列に対して `is_success_result` の
+///   キーワード判定 (「成功」を含むか) を流用する。
+///
+/// 未知の見出しに遭遇したら黙って握りつぶさず `Err` を返す
 /// (誤判定より「気づける失敗」を優先する設計)。
 pub fn parse_login_audit_csv(csv_text: &str) -> Result<LastLoginByEmail, String> {
     let mut rdr = csv::ReaderBuilder::new()
@@ -634,11 +640,12 @@ pub fn parse_login_audit_csv(csv_text: &str) -> Result<LastLoginByEmail, String>
         .map_err(|e| format!("CSV header read error: {e}"))?
         .clone();
 
-    let email_idx = find_column(&headers, &["メール", "email", "mail"])
-        .ok_or_else(|| format!("email column not found in headers: {headers:?}"))?;
+    let member_idx = find_column(&headers, &["メンバー", "member", "メール", "email", "mail"])
+        .ok_or_else(|| format!("member/email column not found in headers: {headers:?}"))?;
     let datetime_idx = find_column(&headers, &["日時", "datetime", "time", "date"])
         .ok_or_else(|| format!("datetime column not found in headers: {headers:?}"))?;
-    let result_idx = find_column(&headers, &["結果", "result"]);
+    // 独立した「結果」列は無く、「説明」列に成否が文章で書かれている (実データ確認済み)。
+    let result_idx = find_column(&headers, &["結果", "result", "説明", "description"]);
 
     let mut last_login: LastLoginByEmail = HashMap::new();
 
@@ -651,7 +658,10 @@ pub fn parse_login_audit_csv(csv_text: &str) -> Result<LastLoginByEmail, String>
             }
         }
 
-        let Some(email) = row.get(email_idx).map(str::trim).filter(|s| !s.is_empty()) else {
+        let Some(email) = row
+            .get(member_idx)
+            .and_then(extract_email_from_member_field)
+        else {
             continue;
         };
         let Some(dt) = row.get(datetime_idx).and_then(parse_audit_datetime) else {
@@ -682,7 +692,30 @@ fn find_column(headers: &csv::StringRecord, keywords: &[&str]) -> Option<usize> 
     })
 }
 
-/// 「結果」列の値がログイン成功を表すか判定する (実データ未確認、代表的な表記を列挙)。
+/// 「メンバー」列 (`"表示名 (email@example.com)"`) からメールアドレスを取り出す。
+/// 括弧が無く生のメールアドレスがそのまま入っている変種にもフォールバックする。
+fn extract_email_from_member_field(raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    if let Some(open) = raw.rfind('(') {
+        if let Some(close_rel) = raw[open + 1..].find(')') {
+            let inner = raw[open + 1..open + 1 + close_rel].trim();
+            if inner.contains('@') {
+                return Some(inner.to_string());
+            }
+        }
+    }
+    if raw.contains('@') {
+        return Some(raw.to_string());
+    }
+    None
+}
+
+/// 「説明」(または「結果」) 列の値がログイン成功を表すか判定する。
+/// 独立した結果列でも、文章まじりの説明列でも「成功」を含むかで判定する
+/// (実データ確認済み: 説明列は成否を表す文になっている)。
 fn is_success_result(value: &str) -> bool {
     let v = value.trim();
     v.contains("成功") || v.eq_ignore_ascii_case("success") || v.eq_ignore_ascii_case("OK")
@@ -767,10 +800,11 @@ mod tests {
 
     #[test]
     fn parse_login_audit_csv_keeps_latest_success_per_email() {
-        let csv = "日時,メールアドレス,結果,利用プログラム区分\n\
-                    2026/09/01 09:00:00,a@x.com,成功,ブラウザ\n\
-                    2026/09/03 10:30:00,a@x.com,成功,モバイルアプリ\n\
-                    2026/09/02 08:00:00,b@x.com,失敗,ブラウザ\n";
+        // 実データ確認済みのヘッダー (2026-09-11): 説明,メンバー,日時,IPアドレス,ログイン方法,サービスタイプ
+        let csv = "説明,メンバー,日時,IPアドレス,ログイン方法,サービスタイプ\n\
+                    ログインに成功しました,山田太郎 (a@x.com),2026/09/01 09:00:00,1.2.3.4,パスワード,ブラウザ\n\
+                    ログインに成功しました,山田太郎 (a@x.com),2026/09/03 10:30:00,1.2.3.4,パスワード,モバイルアプリ\n\
+                    ログインに失敗しました (エラーコード: 401),鈴木花子 (b@x.com),2026/09/02 08:00:00,5.6.7.8,パスワード,ブラウザ\n";
         let result = parse_login_audit_csv(csv).expect("parse");
         assert_eq!(result.len(), 1);
         let a = result.get("a@x.com").expect("a@x.com present");
@@ -780,16 +814,26 @@ mod tests {
 
     #[test]
     fn parse_login_audit_csv_matches_email_case_insensitively_and_trims() {
-        let csv = "日時,メール,結果\n2026/09/01 09:00:00, A@X.com ,成功\n";
+        let csv =
+            "説明,メンバー,日時\nログインに成功しました, 山田太郎 (A@X.com) ,2026/09/01 09:00:00\n";
+        let result = parse_login_audit_csv(csv).expect("parse");
+        assert!(result.contains_key("a@x.com"));
+    }
+
+    #[test]
+    fn parse_login_audit_csv_accepts_bare_email_without_display_name() {
+        // 「メンバー」列が名前 (email) 形式ではなく、生のメールアドレスだけの
+        // 変種にもフォールバックする。
+        let csv = "説明,メンバー,日時\nログインに成功しました,a@x.com,2026/09/01 09:00:00\n";
         let result = parse_login_audit_csv(csv).expect("parse");
         assert!(result.contains_key("a@x.com"));
     }
 
     #[test]
     fn parse_login_audit_csv_without_result_column_treats_all_rows_as_success() {
-        // 「結果」列を見つけられない見出しでも、email/日時さえ拾えれば失敗しない
+        // 「説明」列を見つけられない見出しでも、メンバー/日時さえ拾えれば失敗しない
         // (誤って全件除外するより、失敗ログインを紛れ込ませる方が実害が小さいため)。
-        let csv = "日時,メール\n2026/09/01 09:00:00,a@x.com\n";
+        let csv = "メンバー,日時\n山田太郎 (a@x.com),2026/09/01 09:00:00\n";
         let result = parse_login_audit_csv(csv).expect("parse");
         assert!(result.contains_key("a@x.com"));
     }
@@ -799,15 +843,43 @@ mod tests {
         // 列名が全く想定外なら黙って空集計にせず Err を返す (#540 の設計方針)。
         let csv = "col_a,col_b\n1,2\n";
         let err = parse_login_audit_csv(csv).unwrap_err();
-        assert!(err.contains("email column not found"));
+        assert!(err.contains("member/email column not found"));
+    }
+
+    #[test]
+    fn extract_email_from_member_field_prefers_parenthesized_email() {
+        assert_eq!(
+            extract_email_from_member_field("山田太郎 (demo@example.com)"),
+            Some("demo@example.com".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_email_from_member_field_falls_back_to_bare_email() {
+        assert_eq!(
+            extract_email_from_member_field("demo@example.com"),
+            Some("demo@example.com".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_email_from_member_field_returns_none_without_at_sign() {
+        // 括弧内に @ が無い (例: 部署名等) 場合は誤抽出せず諦める。
+        assert_eq!(extract_email_from_member_field("山田太郎 (営業部)"), None);
+        assert_eq!(extract_email_from_member_field("山田太郎"), None);
+        assert_eq!(extract_email_from_member_field(""), None);
     }
 
     #[test]
     fn is_success_result_recognizes_known_variants() {
         assert!(is_success_result("成功"));
+        assert!(is_success_result("ログインに成功しました"));
         assert!(is_success_result(" success "));
         assert!(is_success_result("OK"));
         assert!(!is_success_result("失敗"));
+        assert!(!is_success_result(
+            "ログインに失敗しました (エラーコード: 401)"
+        ));
         assert!(!is_success_result("failure"));
     }
 
