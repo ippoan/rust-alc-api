@@ -266,12 +266,19 @@ async fn get_or_fetch_login_activity(
                 .iter()
                 .filter_map(|m| m.email.as_deref().map(|e| (m.user_id.as_str(), e)))
                 .collect();
+            let readers = lower_bound_by_user_id.len();
             let mut by_email: LastLoginByEmail = HashMap::new();
             for (user_id, dt) in lower_bound_by_user_id {
                 if let Some(&email) = email_by_user_id.get(user_id.as_str()) {
                     by_email.insert(email.to_lowercase(), dt);
                 }
             }
+            // 突合で落ちた数を残す。userId が一致しない既読者・email の無いメンバーは
+            // ここで黙って捨てるので、件数が無いと 0 件の原因を切り分けられない (Refs #540)。
+            tracing::info!(
+                "board activity: readers={readers} matched_to_member_email={}",
+                by_email.len()
+            );
             by_email
         }
         Err(e) => {

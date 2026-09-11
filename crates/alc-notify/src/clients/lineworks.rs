@@ -648,7 +648,9 @@ impl LineworksBotClient {
             urlencoding::encode(&format_audit_time(end)),
         );
 
-        let bytes = self.get_with_auth_redirect(&url, &token).await?;
+        let bytes = self
+            .get_with_auth_redirect(&url, &token, "audit log download")
+            .await?;
         Ok(decode_csv_bytes(&bytes))
     }
 
@@ -690,6 +692,8 @@ impl LineworksBotClient {
             .await?;
 
         let boards = self.list_boards(&token).await?;
+        let boards_total = boards.len();
+        let mut posts_scanned = 0usize;
         let mut lower_bound: HashMap<String, DateTime<Utc>> = HashMap::new();
 
         for board_id in boards.into_iter().take(BOARD_ACTIVITY_MAX_BOARDS) {
@@ -698,6 +702,7 @@ impl LineworksBotClient {
                 .await?;
             for (post_id, created_at) in posts.into_iter().take(BOARD_ACTIVITY_MAX_POSTS_PER_BOARD)
             {
+                posts_scanned += 1;
                 let reader_ids = self
                     .list_board_post_readers(&token, &board_id, &post_id)
                     .await?;
@@ -714,38 +719,24 @@ impl LineworksBotClient {
             }
         }
 
+        // 段ごとの件数の要約。どこかの段で 0 になっても無言にならないように 1 行残す (Refs #540)。
+        tracing::info!(
+            "LINE WORKS board activity: boards={boards_total} scanned_boards={} posts_scanned={posts_scanned} readers={}",
+            boards_total.min(BOARD_ACTIVITY_MAX_BOARDS),
+            lower_bound.len()
+        );
         Ok(lower_bound)
     }
 
     async fn list_boards(&self, token: &str) -> Result<Vec<String>, LineworksBotError> {
-        let resp = self
-            .client
-            .get(&self.boards_endpoint)
-            .header("Authorization", format!("Bearer {}", token))
-            .send()
+        let body: BoardsResponse = self
+            .get_json(&self.boards_endpoint, token, "list boards")
             .await?;
-
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            tracing::error!("LINE WORKS list boards failed: {status} - {body}");
-            return Err(LineworksBotError::SendFailed(format!("{status}: {body}")));
-        }
-
-        let text = resp.text().await?;
-        let body: BoardsResponse = serde_json::from_str(&text).map_err(|e| {
-            LineworksBotError::SendFailed(format!(
-                "parse boards response: {e} - body: {}",
-                truncate_for_log(&text)
-            ))
-        })?;
-
-        Ok(body
-            .boards
-            .unwrap_or_default()
-            .into_iter()
-            .map(|b| b.board_id)
-            .collect())
+        let Some(boards) = body.boards else {
+            tracing::warn!("LINE WORKS list boards: `boards` key missing");
+            return Ok(Vec::new());
+        };
+        Ok(boards.into_iter().map(|b| b.board_id).collect())
     }
 
     /// `since` 以降に作成された投稿の `(postId, createdTime)` を返す。
@@ -758,39 +749,42 @@ impl LineworksBotClient {
         since: DateTime<Utc>,
     ) -> Result<Vec<(String, DateTime<Utc>)>, LineworksBotError> {
         let url = format!("{}/{board_id}/posts?count=40", self.boards_endpoint);
-        let resp = self
-            .client
-            .get(&url)
-            .header("Authorization", format!("Bearer {}", token))
-            .send()
-            .await?;
+        let body: PostsResponse = self.get_json(&url, token, "list board posts").await?;
+        let Some(posts) = body.posts else {
+            tracing::warn!("LINE WORKS list board posts: `posts` key missing (board {board_id})");
+            return Ok(Vec::new());
+        };
 
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            tracing::error!("LINE WORKS list board posts failed: {status} - {body}");
-            return Err(LineworksBotError::SendFailed(format!("{status}: {body}")));
+        let total = posts.len();
+        let mut unparsable = 0usize;
+        let mut unparsable_sample: Option<String> = None;
+        let mut recent = Vec::new();
+        for p in posts {
+            match DateTime::parse_from_rfc3339(&p.created_time) {
+                Ok(t) => {
+                    let created = t.with_timezone(&Utc);
+                    if created >= since {
+                        recent.push((p.post_id, created));
+                    }
+                }
+                Err(_) => {
+                    unparsable += 1;
+                    unparsable_sample.get_or_insert(p.created_time);
+                }
+            }
         }
-
-        let text = resp.text().await?;
-        let body: PostsResponse = serde_json::from_str(&text).map_err(|e| {
-            LineworksBotError::SendFailed(format!(
-                "parse posts response: {e} - body: {}",
-                truncate_for_log(&text)
-            ))
-        })?;
-
-        Ok(body
-            .posts
-            .unwrap_or_default()
-            .into_iter()
-            .filter_map(|p| {
-                let created = DateTime::parse_from_rfc3339(&p.created_time)
-                    .ok()?
-                    .with_timezone(&Utc);
-                (created >= since).then_some((p.post_id, created))
-            })
-            .collect())
+        if let Some(sample) = unparsable_sample {
+            // 出すのは createdTime の値だけ (題名・投稿者は出さない)。
+            tracing::warn!(
+                "LINE WORKS list board posts: {unparsable} createdTime not RFC3339 (board {board_id}, e.g. {})",
+                truncate_for_log(&sample)
+            );
+        }
+        tracing::info!(
+            "LINE WORKS list board posts: board {board_id} posts={total} in_window={}",
+            recent.len()
+        );
+        Ok(recent)
     }
 
     async fn list_board_post_readers(
@@ -803,44 +797,54 @@ impl LineworksBotClient {
             "{}/{board_id}/posts/{post_id}/readers",
             self.boards_endpoint
         );
-        let resp = self
-            .client
-            .get(&url)
-            .header("Authorization", format!("Bearer {}", token))
-            .send()
+        let body: ReadersResponse = self
+            .get_json(&url, token, "list board post readers")
             .await?;
-
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            tracing::error!("LINE WORKS list board post readers failed: {status} - {body}");
-            return Err(LineworksBotError::SendFailed(format!("{status}: {body}")));
-        }
-
-        let text = resp.text().await?;
-        let body: ReadersResponse = serde_json::from_str(&text).map_err(|e| {
-            LineworksBotError::SendFailed(format!(
-                "parse readers response: {e} - body: {}",
-                truncate_for_log(&text)
-            ))
-        })?;
-
-        Ok(body
-            .readers
-            .unwrap_or_default()
+        let Some(readers) = body.readers else {
+            tracing::warn!(
+                "LINE WORKS list board post readers: `readers` key missing (board {board_id} post {post_id})"
+            );
+            return Ok(Vec::new());
+        };
+        let total = readers.len();
+        let read: Vec<String> = readers
             .into_iter()
             .filter(|r| r.is_read)
             .map(|r| r.user_id)
-            .collect())
+            .collect();
+        tracing::info!(
+            "LINE WORKS list board post readers: board {board_id} post {post_id} readers={total} is_read={}",
+            read.len()
+        );
+        Ok(read)
+    }
+
+    /// 掲示板 API の GET → JSON。status 異常も parse 失敗もエラーにし、parse 失敗時は本文
+    /// (`truncate_for_log` で 500 字まで) を添える。`label` はログとエラー文言に使う。
+    async fn get_json<T: serde::de::DeserializeOwned>(
+        &self,
+        url: &str,
+        token: &str,
+        label: &str,
+    ) -> Result<T, LineworksBotError> {
+        let bytes = self.get_with_auth_redirect(url, token, label).await?;
+        serde_json::from_slice(&bytes).map_err(|e| {
+            LineworksBotError::SendFailed(format!(
+                "parse {label} response: {e} - body: {}",
+                truncate_for_log(&String::from_utf8_lossy(&bytes))
+            ))
+        })
     }
 
     /// リダイレクトを自動追従せず、3xx を見たら `Location` へ同じ `Authorization` を
     /// 付け直して手動で辿る GET。LINE WORKS のダウンロード URL 系 API 共通の作法
-    /// (`fetch_login_audit_csv` 参照)。
+    /// (`fetch_login_audit_csv` 参照)。掲示板 API も `get_json` 経由でこれを使う。
+    /// `label` はログとエラー文言に使う。
     async fn get_with_auth_redirect(
         &self,
         url: &str,
         token: &str,
+        label: &str,
     ) -> Result<Vec<u8>, LineworksBotError> {
         const MAX_HOPS: u8 = 5;
         let mut current = url.to_string();
@@ -871,7 +875,7 @@ impl LineworksBotClient {
 
             if !status.is_success() {
                 let body = resp.text().await.unwrap_or_default();
-                tracing::error!("LINE WORKS audit log download failed: {status} - {body}");
+                tracing::error!("LINE WORKS {label} failed: {status} - {body}");
                 return Err(LineworksBotError::SendFailed(format!("{status}: {body}")));
             }
 
@@ -879,7 +883,7 @@ impl LineworksBotClient {
         }
 
         Err(LineworksBotError::SendFailed(format!(
-            "too many redirects (> {MAX_HOPS}) following audit log download URL"
+            "too many redirects (> {MAX_HOPS}) following {label} URL"
         )))
     }
 }
