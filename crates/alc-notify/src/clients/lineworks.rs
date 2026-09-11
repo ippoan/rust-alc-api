@@ -73,6 +73,39 @@ where
     deserializer.deserialize_any(V)
 }
 
+/// board API の ID 系フィールド (`boardId` 等) 用。2026-09-11 本番実測で `boardId` が
+/// JSON の数値 (`4080000000172174357`) で返ってくると判明した (issue #540 実装時は
+/// 文字列と推測していた)。以降 `postId`/`userId` 等も型が予想と違う可能性を潰すため、
+/// 文字列・数値のどちらでも受け付けて `String` に正規化する
+/// (この後の用途は URL のパスセグメント/HashMap key への文字列展開のみで、
+/// 数値としての演算は不要なため `String` で統一する)。
+fn deserialize_id_as_string<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::{self, Visitor};
+    struct V;
+    impl<'de> Visitor<'de> for V {
+        type Value = String;
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str("string or integer id")
+        }
+        fn visit_str<E: de::Error>(self, v: &str) -> Result<String, E> {
+            Ok(v.to_string())
+        }
+        fn visit_string<E: de::Error>(self, v: String) -> Result<String, E> {
+            Ok(v)
+        }
+        fn visit_u64<E: de::Error>(self, v: u64) -> Result<String, E> {
+            Ok(v.to_string())
+        }
+        fn visit_i64<E: de::Error>(self, v: i64) -> Result<String, E> {
+            Ok(v.to_string())
+        }
+    }
+    deserializer.deserialize_any(V)
+}
+
 #[derive(Debug, Clone, Deserialize)]
 struct TokenResponse {
     access_token: String,
@@ -137,10 +170,12 @@ struct ResponseMetaData {
     next_cursor: Option<String>,
 }
 
-/// `GET /v1.0/boards` レスポンス (Refs #540)。★ フィールド名は公式ドキュメントの
-/// 概要記述からの推測で実データ未検証。ズレていたら `boards: None` 相当になり
-/// `list_boards` は空を返す (`unwrap_or_default`) だけなので、board シグナルが
-/// 静かに 0 件になる形で fail する (呼び出し元は best-effort 扱いなので害はない)。
+/// `GET /v1.0/boards` レスポンス (Refs #540)。★ 実データで shape 確認済み
+/// (2026-09-11): `{"boards": [{"boardId": <数値>, "boardName": ..., ...}]}`。
+/// `boardId` は文字列ではなく **JSON の数値** (`4080000000172174357` のような
+/// 64bit 整数) だった — 実装時は文字列と推測していたが誤り (`deserialize_id_as_string`
+/// で文字列・数値どちらでも受け付けるよう修正済み)。`posts`/`readers` の ID も
+/// 同じ書き方で防御している (未検証)。
 #[derive(Debug, Deserialize)]
 struct BoardsResponse {
     boards: Option<Vec<BoardEntry>>,
@@ -148,7 +183,7 @@ struct BoardsResponse {
 
 #[derive(Debug, Deserialize)]
 struct BoardEntry {
-    #[serde(rename = "boardId")]
+    #[serde(rename = "boardId", deserialize_with = "deserialize_id_as_string")]
     board_id: String,
 }
 
@@ -160,7 +195,7 @@ struct PostsResponse {
 
 #[derive(Debug, Deserialize)]
 struct PostEntry {
-    #[serde(rename = "postId")]
+    #[serde(rename = "postId", deserialize_with = "deserialize_id_as_string")]
     post_id: String,
     #[serde(rename = "createdTime")]
     created_time: String,
@@ -174,7 +209,9 @@ struct ReadersResponse {
 
 #[derive(Debug, Deserialize)]
 struct ReaderEntry {
-    #[serde(rename = "userId")]
+    // userId は Directory API (list_org_users) と同じ UUID 文字列である想定だが、
+    // boardId が数値だった前例があるため念のため同じ柔軟デシリアライザを使う。
+    #[serde(rename = "userId", deserialize_with = "deserialize_id_as_string")]
     user_id: String,
     #[serde(rename = "isRead")]
     is_read: bool,
@@ -1211,6 +1248,26 @@ mod tests {
     }
 
     #[test]
+    fn boards_response_parses_numeric_board_id() {
+        // 2026-09-11 本番実測の実データそのまま (boardId は文字列ではなく数値)。
+        let json = r#"{"boards":[{"boardId":4080000000172174357,"boardName":"事務所　業務連絡","description":"","tenantBoard":false,"createdTime":"2022-06-07T14:05:17+09:00","modifiedTime":"2026-06-27T18:29:19+09:00","displayOrder":0,"resourceLocation":null}]}"#;
+        let body: BoardsResponse = serde_json::from_str(json).expect("deserialize");
+        assert_eq!(
+            body.boards.unwrap()[0].board_id,
+            "4080000000172174357",
+            "数値の boardId が文字列に正規化される"
+        );
+    }
+
+    #[test]
+    fn boards_response_still_accepts_string_board_id() {
+        // 文字列で返ってくる変種にも対応できることを確認 (deserialize_id_as_string の両対応)。
+        let json = r#"{"boards":[{"boardId":"b1"}]}"#;
+        let body: BoardsResponse = serde_json::from_str(json).expect("deserialize");
+        assert_eq!(body.boards.unwrap()[0].board_id, "b1");
+    }
+
+    #[test]
     fn decode_csv_bytes_strips_utf8_bom() {
         let mut bytes = vec![0xEF, 0xBB, 0xBF];
         bytes.extend_from_slice("a,b\n1,2\n".as_bytes());
@@ -1519,27 +1576,31 @@ mod tests {
             .mount(&auth_server)
             .await;
 
+        // boardId/postId は本番実測 (2026-09-11) で JSON の数値と判明したので、
+        // 文字列ではなく数値リテラルで mock する (回帰ガード)。
         let boards_server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/boards"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "boards": [{"boardId": "b1"}]
+                "boards": [{"boardId": 4080000000172174357u64}]
             })))
             .mount(&boards_server)
             .await;
         Mock::given(method("GET"))
-            .and(path("/boards/b1/posts"))
+            .and(path("/boards/4080000000172174357/posts"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "posts": [
-                    {"postId": "p1", "createdTime": "2026-09-01T00:00:00+09:00"},
+                    {"postId": 1234567890123456789u64, "createdTime": "2026-09-01T00:00:00+09:00"},
                     // since より古い投稿は呼び出し元 (list_recent_board_posts) で弾かれる。
-                    {"postId": "p_old", "createdTime": "2020-01-01T00:00:00+09:00"},
+                    {"postId": 9999999999999999999u64, "createdTime": "2020-01-01T00:00:00+09:00"},
                 ]
             })))
             .mount(&boards_server)
             .await;
         Mock::given(method("GET"))
-            .and(path("/boards/b1/posts/p1/readers"))
+            .and(path(
+                "/boards/4080000000172174357/posts/1234567890123456789/readers",
+            ))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "readers": [
                     {"userId": "u1", "isRead": true},
