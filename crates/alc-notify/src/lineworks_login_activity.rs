@@ -26,11 +26,14 @@
 //!    ただし投稿は月〜四半期に 1 回の頻度のため、30 日窓ではこの下限値は通常空になる
 //!    (best-effort であり不具合ではない。各段の件数は info/warn ログに出る)。構造が
 //!    ずれても 0 件になるだけで既存の auth/message 結果は壊さない設計
-//!    (`fetch_board_activity_lower_bound` の doc 参照)。この下限値そのものは
-//!    `LoginActivityEntry.board_read_lower_bound_at` としても個別に返す (2026-09-11、
-//!    #540 フォローアップ)。`last_login_at`/`stale` は3信号を合成した `combined` を
-//!    使うのに対し、こちらは board 単体の値なので基準が異なる — 同じ行で両方を
-//!    見せる画面側は「下限値」であることが分かるよう表記すること。
+//!    (`fetch_board_activity_lower_bound` の doc 参照)。
+//!
+//! 各行は合成値 `last_login_at` と一緒に、その値を出した信号 `last_login_source`
+//! (`"auth"` / `"message"` / `"board"`、記録なしは `null`) を返す (2026-09-11、#540
+//! フォローアップ)。画面 (`/admin/notify` のログイン状況タブ) が「この日時はログインか
+//! メッセージ送信か掲示板既読か」を表示し絞り込むため。同時刻なら auth > message > board
+//! の順で決める (`activity_source` 参照)。信号単体の日時は返さない — source が一致する
+//! 信号の値は `last_login_at` と同じになり、情報が重複するため。
 //!
 //! **2 と 3 は best-effort**: scope 未設定・API 未対応・構造不一致などで失敗しても
 //! ログに警告を出すだけで無視し、1 (auth) の結果はそのまま返す。1 の失敗だけが
@@ -115,22 +118,20 @@ pub struct LoginActivityEntry {
     pub days_since_login: Option<i64>,
     /// `true` = 記録なし、または `days` しきい値以上ログインが無い。
     pub stale: bool,
-    /// RFC3339。掲示板既読の根拠にした投稿の投稿日時 (下限値 — 実際の最終アクティブ日時は
-    /// これ以降の可能性がある。モジュール doc の信号3参照)。記録なしなら `null`。
-    pub board_read_lower_bound_at: Option<String>,
+    /// `last_login_at` を出した信号。`"auth"` (ログイン監査ログ) / `"message"` (トーク送信) /
+    /// `"board"` (掲示板既読の下限値)。記録なしなら `null`。値は auth-worker の
+    /// `/admin/notify` の絞り込み (`la-source` の option value) と一致させること。
+    pub last_login_source: Option<&'static str>,
 }
 
-/// auth/message/board の3信号を合成した結果。`combined` が既存の「分かっている最も
-/// 新しい下限」(last_login_at / stale 判定の実体)。`auth` / `message` / `board` は
-/// 各信号単体の値の内訳 — 今回は `board` だけ画面に出すが、次に別の信号を見せて
-/// ほしいと言われたときにこの struct と cache をもう一度作り直さずに済むよう
-/// 保持しておく (2026-09-11、#540 フォローアップで board 分だけ先に露出)。
+/// auth/message/board の3信号を合成した結果。`combined` が「分かっている最も新しい
+/// 下限」(last_login_at / stale 判定の実体)。`auth` / `message` / `board` は各信号単体の
+/// 値の内訳で、`combined` の値をどの信号が出したか (`last_login_source`) を
+/// `activity_source` が決めるのに使う。
 #[derive(Debug, Clone)]
 struct CombinedActivity {
     combined: LastLoginByEmail,
-    #[allow(dead_code)] // 画面には未露出の内訳 (将来「auth単体の日時」要望に備える)
     auth: LastLoginByEmail,
-    #[allow(dead_code)] // 同上 (message)
     message: LastLoginByEmail,
     board: LastLoginByEmail,
 }
@@ -172,9 +173,9 @@ async fn get_login_activity(
             let last_login = email_lower
                 .as_ref()
                 .and_then(|e| activity.combined.get(e).copied());
-            let board_read_lower_bound = email_lower
-                .as_ref()
-                .and_then(|e| activity.board.get(e).copied());
+            let last_login_source = email_lower
+                .as_deref()
+                .and_then(|e| activity_source(&activity, e));
             let days_since_login = last_login.map(|dt| (now - dt).num_days());
             let stale = days_since_login.map(|d| d >= days).unwrap_or(true);
             LoginActivityEntry {
@@ -184,7 +185,7 @@ async fn get_login_activity(
                 last_login_at: last_login.map(|dt| dt.to_rfc3339()),
                 days_since_login,
                 stale,
-                board_read_lower_bound_at: board_read_lower_bound.map(|dt| dt.to_rfc3339()),
+                last_login_source,
             }
         })
         .collect();
@@ -321,6 +322,21 @@ fn combine_activity(
     }
 }
 
+/// `combined` の値 (= `last_login_at`) をどの信号が出したかを返す。合成値と**等しい**
+/// 信号を auth → message → board の順で探すので、同時刻なら auth > message > board。
+/// 合成値が無ければ (記録なし) `None`。`email` は小文字化済みのキー。
+fn activity_source(activity: &CombinedActivity, email: &str) -> Option<&'static str> {
+    let latest = activity.combined.get(email)?;
+    [
+        ("auth", &activity.auth),
+        ("message", &activity.message),
+        ("board", &activity.board),
+    ]
+    .into_iter()
+    .find(|(_, signal)| signal.get(email) == Some(latest))
+    .map(|(source, _)| source)
+}
+
 /// `other` の各エントリを `base` にマージし、同じキーがあれば新しい方の日時を残す。
 fn merge_keep_latest(base: &mut LastLoginByEmail, other: LastLoginByEmail) {
     for (email, dt) in other {
@@ -420,10 +436,81 @@ mod tests {
         assert_eq!(activity.combined.get("c@x.com"), board.get("c@x.com"));
 
         // 信号別の内訳は combined に潰されず、入力そのままで残る
-        // (board_read_lower_bound_at が「掲示板由来の値だけ」を表示できる根拠)。
+        // (last_login_source が combined の値の出どころを判定できる根拠)。
         assert_eq!(activity.auth, auth);
         assert_eq!(activity.message, message);
         assert_eq!(activity.board, board);
+        assert_eq!(activity_source(&activity, "a@x.com"), Some("message"));
+        assert_eq!(activity_source(&activity, "b@x.com"), Some("message"));
+        assert_eq!(activity_source(&activity, "c@x.com"), Some("board"));
+    }
+
+    fn at(days_ago: i64) -> DateTime<Utc> {
+        // 同時刻の比較をするので Utc::now() ではなく固定の基準時刻から引く。
+        DateTime::parse_from_rfc3339("2026-09-11T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc)
+            - Duration::days(days_ago)
+    }
+
+    fn one(email: &str, dt: DateTime<Utc>) -> LastLoginByEmail {
+        HashMap::from([(email.to_string(), dt)])
+    }
+
+    #[test]
+    fn activity_source_auth_only_is_auth() {
+        let activity = combine_activity(
+            one("demo@example.com", at(3)),
+            HashMap::new(),
+            HashMap::new(),
+        );
+        assert_eq!(activity_source(&activity, "demo@example.com"), Some("auth"));
+    }
+
+    #[test]
+    fn activity_source_message_newer_than_auth_is_message() {
+        let activity = combine_activity(
+            one("demo@example.com", at(10)),
+            one("demo@example.com", at(2)),
+            HashMap::new(),
+        );
+        assert_eq!(
+            activity_source(&activity, "demo@example.com"),
+            Some("message")
+        );
+    }
+
+    #[test]
+    fn activity_source_board_newest_is_board() {
+        let activity = combine_activity(
+            one("demo@example.com", at(10)),
+            one("demo@example.com", at(5)),
+            one("demo@example.com", at(1)),
+        );
+        assert_eq!(
+            activity_source(&activity, "demo@example.com"),
+            Some("board")
+        );
+    }
+
+    #[test]
+    fn activity_source_without_any_signal_is_none() {
+        let activity = combine_activity(
+            one("other@example.com", at(1)),
+            HashMap::new(),
+            HashMap::new(),
+        );
+        assert_eq!(activity_source(&activity, "demo@example.com"), None);
+    }
+
+    #[test]
+    fn activity_source_same_time_prefers_auth_over_message() {
+        let activity = combine_activity(
+            one("demo@example.com", at(4)),
+            one("demo@example.com", at(4)),
+            HashMap::new(),
+        );
+        assert_eq!(activity_source(&activity, "demo@example.com"), Some("auth"));
     }
 
     #[test]
