@@ -17,8 +17,9 @@ const USERS_ENDPOINT: &str = "https://www.worksapis.com/v1.0/users";
 const AUDIT_LOG_DOWNLOAD_ENDPOINT: &str = "https://www.worksapis.com/v1.0/audits/logs/download";
 const BOARDS_ENDPOINT: &str = "https://www.worksapis.com/v1.0/boards";
 /// 掲示板 API のトラバース上限 (board × post の呼び出し回数を抑える安全弁、Refs #540)。
-/// 未検証の API を本番でいきなり無制限に叩かないための保守的な値。実運用で board 数・
-/// 直近投稿数がこれを超えるようなら、`since` によるページング打ち切りと合わせて見直す。
+/// テナント単位の mutex を握ったまま直列に叩くので上限を置く。2026-09-11 の本番実測では
+/// 掲示板 11 件・投稿は新しい順で、30 日窓内の投稿は 0 件だった (投稿は月〜四半期に 1 回の
+/// 頻度のため、下限値は通常空になる。best-effort として窓・上限はユーザー判断で据え置き)。
 const BOARD_ACTIVITY_MAX_BOARDS: usize = 5;
 const BOARD_ACTIVITY_MAX_POSTS_PER_BOARD: usize = 10;
 
@@ -74,7 +75,7 @@ where
 }
 
 /// board API の ID 系フィールド (`boardId` 等) 用。2026-09-11 本番実測で `boardId` が
-/// JSON の数値 (`4080000000172174357`) で返ってくると判明した (issue #540 実装時は
+/// JSON の数値 (`4000000000000000001`) で返ってくると判明した (issue #540 実装時は
 /// 文字列と推測していた)。以降 `postId`/`userId` 等も型が予想と違う可能性を潰すため、
 /// 文字列・数値のどちらでも受け付けて `String` に正規化する
 /// (この後の用途は URL のパスセグメント/HashMap key への文字列展開のみで、
@@ -172,10 +173,10 @@ struct ResponseMetaData {
 
 /// `GET /v1.0/boards` レスポンス (Refs #540)。★ 実データで shape 確認済み
 /// (2026-09-11): `{"boards": [{"boardId": <数値>, "boardName": ..., ...}]}`。
-/// `boardId` は文字列ではなく **JSON の数値** (`4080000000172174357` のような
+/// `boardId` は文字列ではなく **JSON の数値** (`4000000000000000001` のような
 /// 64bit 整数) だった — 実装時は文字列と推測していたが誤り (`deserialize_id_as_string`
-/// で文字列・数値どちらでも受け付けるよう修正済み)。`posts`/`readers` の ID も
-/// 同じ書き方で防御している (未検証)。
+/// で文字列・数値どちらでも受け付けるよう修正済み)。`posts` の `postId` も
+/// 同じく 64bit の JSON 数値だった (2026-09-11 実測)。
 #[derive(Debug, Deserialize)]
 struct BoardsResponse {
     boards: Option<Vec<BoardEntry>>,
@@ -187,7 +188,8 @@ struct BoardEntry {
     board_id: String,
 }
 
-/// `GET /v1.0/boards/{id}/posts` レスポンス (★ 実データ未検証、上記と同じ注意)。
+/// `GET /v1.0/boards/{id}/posts` レスポンス (2026-09-11 実測: 新しい順に並び、`postId` は 64bit の
+/// 数値、`createdTime` は RFC3339 (`+09:00`))。
 #[derive(Debug, Deserialize)]
 struct PostsResponse {
     posts: Option<Vec<PostEntry>>,
@@ -201,7 +203,8 @@ struct PostEntry {
     created_time: String,
 }
 
-/// `GET /v1.0/boards/{id}/posts/{id}/readers` レスポンス (★ 実データ未検証、同上)。
+/// `GET /v1.0/boards/{id}/posts/{id}/readers` レスポンス (2026-09-11 実測: query 無しでメンバー全員が
+/// `isRead` の true/false 付きで 1 ページに返る)。
 #[derive(Debug, Deserialize)]
 struct ReadersResponse {
     readers: Option<Vec<ReaderEntry>>,
@@ -209,8 +212,8 @@ struct ReadersResponse {
 
 #[derive(Debug, Deserialize)]
 struct ReaderEntry {
-    // userId は Directory API (list_org_users) と同じ UUID 文字列である想定だが、
-    // boardId が数値だった前例があるため念のため同じ柔軟デシリアライザを使う。
+    // userId は UUID 文字列だった (2026-09-11 実測)。boardId が数値だった前例があるため、
+    // 念のため同じ柔軟デシリアライザを使う。
     #[serde(rename = "userId", deserialize_with = "deserialize_id_as_string")]
     user_id: String,
     #[serde(rename = "isRead")]
@@ -648,7 +651,9 @@ impl LineworksBotClient {
             urlencoding::encode(&format_audit_time(end)),
         );
 
-        let bytes = self.get_with_auth_redirect(&url, &token).await?;
+        let bytes = self
+            .get_with_auth_redirect(&url, &token, "audit log download")
+            .await?;
         Ok(decode_csv_bytes(&bytes))
     }
 
@@ -674,7 +679,7 @@ impl LineworksBotClient {
     ///
     /// 掲示板一覧 → 各掲示板の投稿一覧 → 各投稿の既読者一覧、と3段の API 呼び出しに
     /// なるため、`BOARD_ACTIVITY_MAX_BOARDS` / `BOARD_ACTIVITY_MAX_POSTS_PER_BOARD` で
-    /// 呼び出し回数の上限を設ける (未検証 API を無制限に叩かないための安全弁)。
+    /// 呼び出し回数の上限を設ける (テナント単位の mutex を握ったまま直列に叩くための安全弁)。
     /// `since` より古い投稿は無視する。
     ///
     /// 戻り値は `user_id → 下限日時`。呼び出し元 (`lineworks_login_activity.rs`) で
@@ -690,6 +695,8 @@ impl LineworksBotClient {
             .await?;
 
         let boards = self.list_boards(&token).await?;
+        let boards_total = boards.len();
+        let mut posts_scanned = 0usize;
         let mut lower_bound: HashMap<String, DateTime<Utc>> = HashMap::new();
 
         for board_id in boards.into_iter().take(BOARD_ACTIVITY_MAX_BOARDS) {
@@ -698,6 +705,7 @@ impl LineworksBotClient {
                 .await?;
             for (post_id, created_at) in posts.into_iter().take(BOARD_ACTIVITY_MAX_POSTS_PER_BOARD)
             {
+                posts_scanned += 1;
                 let reader_ids = self
                     .list_board_post_readers(&token, &board_id, &post_id)
                     .await?;
@@ -714,38 +722,24 @@ impl LineworksBotClient {
             }
         }
 
+        // 段ごとの件数の要約。どこかの段で 0 になっても無言にならないように 1 行残す (Refs #540)。
+        tracing::info!(
+            "LINE WORKS board activity: boards={boards_total} scanned_boards={} posts_scanned={posts_scanned} readers={}",
+            boards_total.min(BOARD_ACTIVITY_MAX_BOARDS),
+            lower_bound.len()
+        );
         Ok(lower_bound)
     }
 
     async fn list_boards(&self, token: &str) -> Result<Vec<String>, LineworksBotError> {
-        let resp = self
-            .client
-            .get(&self.boards_endpoint)
-            .header("Authorization", format!("Bearer {}", token))
-            .send()
+        let body: BoardsResponse = self
+            .get_json(&self.boards_endpoint, token, "list boards")
             .await?;
-
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            tracing::error!("LINE WORKS list boards failed: {status} - {body}");
-            return Err(LineworksBotError::SendFailed(format!("{status}: {body}")));
-        }
-
-        let text = resp.text().await?;
-        let body: BoardsResponse = serde_json::from_str(&text).map_err(|e| {
-            LineworksBotError::SendFailed(format!(
-                "parse boards response: {e} - body: {}",
-                truncate_for_log(&text)
-            ))
-        })?;
-
-        Ok(body
-            .boards
-            .unwrap_or_default()
-            .into_iter()
-            .map(|b| b.board_id)
-            .collect())
+        let Some(boards) = body.boards else {
+            tracing::warn!("LINE WORKS list boards: `boards` key missing");
+            return Ok(Vec::new());
+        };
+        Ok(boards.into_iter().map(|b| b.board_id).collect())
     }
 
     /// `since` 以降に作成された投稿の `(postId, createdTime)` を返す。
@@ -758,39 +752,42 @@ impl LineworksBotClient {
         since: DateTime<Utc>,
     ) -> Result<Vec<(String, DateTime<Utc>)>, LineworksBotError> {
         let url = format!("{}/{board_id}/posts?count=40", self.boards_endpoint);
-        let resp = self
-            .client
-            .get(&url)
-            .header("Authorization", format!("Bearer {}", token))
-            .send()
-            .await?;
+        let body: PostsResponse = self.get_json(&url, token, "list board posts").await?;
+        let Some(posts) = body.posts else {
+            tracing::warn!("LINE WORKS list board posts: `posts` key missing (board {board_id})");
+            return Ok(Vec::new());
+        };
 
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            tracing::error!("LINE WORKS list board posts failed: {status} - {body}");
-            return Err(LineworksBotError::SendFailed(format!("{status}: {body}")));
+        let total = posts.len();
+        let mut unparsable = 0usize;
+        let mut unparsable_sample: Option<String> = None;
+        let mut recent = Vec::new();
+        for p in posts {
+            match DateTime::parse_from_rfc3339(&p.created_time) {
+                Ok(t) => {
+                    let created = t.with_timezone(&Utc);
+                    if created >= since {
+                        recent.push((p.post_id, created));
+                    }
+                }
+                Err(_) => {
+                    unparsable += 1;
+                    unparsable_sample.get_or_insert(p.created_time);
+                }
+            }
         }
-
-        let text = resp.text().await?;
-        let body: PostsResponse = serde_json::from_str(&text).map_err(|e| {
-            LineworksBotError::SendFailed(format!(
-                "parse posts response: {e} - body: {}",
-                truncate_for_log(&text)
-            ))
-        })?;
-
-        Ok(body
-            .posts
-            .unwrap_or_default()
-            .into_iter()
-            .filter_map(|p| {
-                let created = DateTime::parse_from_rfc3339(&p.created_time)
-                    .ok()?
-                    .with_timezone(&Utc);
-                (created >= since).then_some((p.post_id, created))
-            })
-            .collect())
+        if let Some(sample) = unparsable_sample {
+            // 出すのは createdTime の値だけ (題名・投稿者は出さない)。
+            tracing::warn!(
+                "LINE WORKS list board posts: {unparsable} createdTime not RFC3339 (board {board_id}, e.g. {})",
+                truncate_for_log(&sample)
+            );
+        }
+        tracing::info!(
+            "LINE WORKS list board posts: board {board_id} posts={total} in_window={}",
+            recent.len()
+        );
+        Ok(recent)
     }
 
     async fn list_board_post_readers(
@@ -803,44 +800,54 @@ impl LineworksBotClient {
             "{}/{board_id}/posts/{post_id}/readers",
             self.boards_endpoint
         );
-        let resp = self
-            .client
-            .get(&url)
-            .header("Authorization", format!("Bearer {}", token))
-            .send()
+        let body: ReadersResponse = self
+            .get_json(&url, token, "list board post readers")
             .await?;
-
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            tracing::error!("LINE WORKS list board post readers failed: {status} - {body}");
-            return Err(LineworksBotError::SendFailed(format!("{status}: {body}")));
-        }
-
-        let text = resp.text().await?;
-        let body: ReadersResponse = serde_json::from_str(&text).map_err(|e| {
-            LineworksBotError::SendFailed(format!(
-                "parse readers response: {e} - body: {}",
-                truncate_for_log(&text)
-            ))
-        })?;
-
-        Ok(body
-            .readers
-            .unwrap_or_default()
+        let Some(readers) = body.readers else {
+            tracing::warn!(
+                "LINE WORKS list board post readers: `readers` key missing (board {board_id} post {post_id})"
+            );
+            return Ok(Vec::new());
+        };
+        let total = readers.len();
+        let read: Vec<String> = readers
             .into_iter()
             .filter(|r| r.is_read)
             .map(|r| r.user_id)
-            .collect())
+            .collect();
+        tracing::info!(
+            "LINE WORKS list board post readers: board {board_id} post {post_id} readers={total} is_read={}",
+            read.len()
+        );
+        Ok(read)
+    }
+
+    /// 掲示板 API の GET → JSON。status 異常も parse 失敗もエラーにし、parse 失敗時は本文
+    /// (`truncate_for_log` で 500 字まで) を添える。`label` はログとエラー文言に使う。
+    async fn get_json<T: serde::de::DeserializeOwned>(
+        &self,
+        url: &str,
+        token: &str,
+        label: &str,
+    ) -> Result<T, LineworksBotError> {
+        let bytes = self.get_with_auth_redirect(url, token, label).await?;
+        serde_json::from_slice(&bytes).map_err(|e| {
+            LineworksBotError::SendFailed(format!(
+                "parse {label} response: {e} - body: {}",
+                truncate_for_log(&String::from_utf8_lossy(&bytes))
+            ))
+        })
     }
 
     /// リダイレクトを自動追従せず、3xx を見たら `Location` へ同じ `Authorization` を
     /// 付け直して手動で辿る GET。LINE WORKS のダウンロード URL 系 API 共通の作法
-    /// (`fetch_login_audit_csv` 参照)。
+    /// (`fetch_login_audit_csv` 参照)。掲示板 API も `get_json` 経由でこれを使う。
+    /// `label` はログとエラー文言に使う。
     async fn get_with_auth_redirect(
         &self,
         url: &str,
         token: &str,
+        label: &str,
     ) -> Result<Vec<u8>, LineworksBotError> {
         const MAX_HOPS: u8 = 5;
         let mut current = url.to_string();
@@ -871,7 +878,7 @@ impl LineworksBotClient {
 
             if !status.is_success() {
                 let body = resp.text().await.unwrap_or_default();
-                tracing::error!("LINE WORKS audit log download failed: {status} - {body}");
+                tracing::error!("LINE WORKS {label} failed: {status} - {body}");
                 return Err(LineworksBotError::SendFailed(format!("{status}: {body}")));
             }
 
@@ -879,7 +886,7 @@ impl LineworksBotClient {
         }
 
         Err(LineworksBotError::SendFailed(format!(
-            "too many redirects (> {MAX_HOPS}) following audit log download URL"
+            "too many redirects (> {MAX_HOPS}) following {label} URL"
         )))
     }
 }
@@ -890,8 +897,8 @@ fn format_audit_time(dt: DateTime<Utc>) -> String {
 }
 
 /// エラーメッセージ/ログに埋め込む際に、レスポンス本文を扱いやすい長さへ切り詰める
-/// (board API のレスポンス shape が未検証なので、parse 失敗時に実物を見て直せるように
-/// するための診断用。Refs #540)。
+/// (board API の shape が将来ずれたときに、parse 失敗の実物を見て直せるようにするための
+/// 診断用。Refs #540)。
 fn truncate_for_log(s: &str) -> String {
     const MAX: usize = 500;
     if s.chars().count() <= MAX {
@@ -1249,12 +1256,12 @@ mod tests {
 
     #[test]
     fn boards_response_parses_numeric_board_id() {
-        // 2026-09-11 本番実測の実データそのまま (boardId は文字列ではなく数値)。
-        let json = r#"{"boards":[{"boardId":4080000000172174357,"boardName":"事務所　業務連絡","description":"","tenantBoard":false,"createdTime":"2022-06-07T14:05:17+09:00","modifiedTime":"2026-06-27T18:29:19+09:00","displayOrder":0,"resourceLocation":null}]}"#;
+        // 2026-09-11 本番実測と同じ形 (boardId は文字列ではなく 64bit の数値)。値はダミー。
+        let json = r#"{"boards":[{"boardId":4000000000000000001,"boardName":"テスト掲示板","description":"","tenantBoard":false,"createdTime":"2022-01-01T09:00:00+09:00","modifiedTime":"2026-01-01T09:00:00+09:00","displayOrder":0,"resourceLocation":null}]}"#;
         let body: BoardsResponse = serde_json::from_str(json).expect("deserialize");
         assert_eq!(
             body.boards.unwrap()[0].board_id,
-            "4080000000172174357",
+            "4000000000000000001",
             "数値の boardId が文字列に正規化される"
         );
     }
@@ -1582,12 +1589,12 @@ mod tests {
         Mock::given(method("GET"))
             .and(path("/boards"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "boards": [{"boardId": 4080000000172174357u64}]
+                "boards": [{"boardId": 4000000000000000001u64}]
             })))
             .mount(&boards_server)
             .await;
         Mock::given(method("GET"))
-            .and(path("/boards/4080000000172174357/posts"))
+            .and(path("/boards/4000000000000000001/posts"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "posts": [
                     {"postId": 1234567890123456789u64, "createdTime": "2026-09-01T00:00:00+09:00"},
@@ -1599,7 +1606,7 @@ mod tests {
             .await;
         Mock::given(method("GET"))
             .and(path(
-                "/boards/4080000000172174357/posts/1234567890123456789/readers",
+                "/boards/4000000000000000001/posts/1234567890123456789/readers",
             ))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "readers": [
