@@ -70,6 +70,38 @@ pub fn tenant_router() -> Router<AppState> {
         .route("/devices/{id}/authorize-repair", post(authorize_repair))
 }
 
+/// `require_internal_jwt` (aud=alc-api-internal) 配下に nest される internal ルート。
+/// auth-worker の `POST /device/pair-internal` が device credential 発行時の
+/// tenant 決定に使う — 「呼び出し元が渡した tenant_id」ではなく「登録済みで
+/// 有効な端末の記録」から tenant を決める (Refs ippoan/auth-worker#544)。
+pub fn internal_router() -> Router<AppState> {
+    Router::new().route(
+        "/internal/devices/{device_id}/pairing-tenant",
+        get(get_pairing_tenant),
+    )
+}
+
+#[derive(Serialize)]
+struct PairingTenantResponse {
+    tenant_id: Uuid,
+}
+
+async fn get_pairing_tenant(
+    State(state): State<AppState>,
+    Path(device_id): Path<Uuid>,
+) -> Result<Json<PairingTenantResponse>, StatusCode> {
+    let row = state
+        .devices
+        .get_device_tenant_active(device_id)
+        .await
+        .map_err(|e| db_err("get_pairing_tenant", e))?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    Ok(Json(PairingTenantResponse {
+        tenant_id: row.tenant_id,
+    }))
+}
+
 /// DB エラーをログ出力して 500 を返すヘルパー
 fn db_err(context: &str, e: sqlx::Error) -> StatusCode {
     tracing::error!("{context}: {e}");
@@ -1923,10 +1955,13 @@ async fn re_pair(
     let device_id = body.device_id;
     let tenant_id = row.tenant_id;
     let label = format!("alc-app:{device_id}");
-    let credential = pair_client.mint(tenant_id, &label).await.map_err(|e| {
-        tracing::error!("re_pair: pair-internal call failed device_id={device_id} err={e:?}");
-        StatusCode::NOT_FOUND
-    })?;
+    let credential = pair_client
+        .mint(tenant_id, device_id, &label)
+        .await
+        .map_err(|e| {
+            tracing::error!("re_pair: pair-internal call failed device_id={device_id} err={e:?}");
+            StatusCode::NOT_FOUND
+        })?;
 
     let consumed = state
         .devices

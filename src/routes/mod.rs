@@ -120,6 +120,9 @@ pub fn router(
         .merge(notify_line_webhook::internal_router())
         .merge(trouble_schedules::internal_fire_router().with_state(trouble_state.clone()))
         .merge(auth::internal_router())
+        // device_id から有効な端末の tenant を返す内部口。auth-worker の
+        // pair-internal が tenant 決定に使う (Refs ippoan/auth-worker#544)。
+        .merge(devices::internal_router())
         .layer(axum_middleware::from_fn(require_internal_jwt))
         // OIDC 検証設定 (Refs #479 — HS256 dual-accept 撤去で OIDC 一本化)。
         // require_internal_jwt の外側に置き、ハンドラ実行時に Extension を解決
