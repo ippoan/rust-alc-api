@@ -17,8 +17,9 @@ const USERS_ENDPOINT: &str = "https://www.worksapis.com/v1.0/users";
 const AUDIT_LOG_DOWNLOAD_ENDPOINT: &str = "https://www.worksapis.com/v1.0/audits/logs/download";
 const BOARDS_ENDPOINT: &str = "https://www.worksapis.com/v1.0/boards";
 /// 掲示板 API のトラバース上限 (board × post の呼び出し回数を抑える安全弁、Refs #540)。
-/// 未検証の API を本番でいきなり無制限に叩かないための保守的な値。実運用で board 数・
-/// 直近投稿数がこれを超えるようなら、`since` によるページング打ち切りと合わせて見直す。
+/// テナント単位の mutex を握ったまま直列に叩くので上限を置く。2026-09-11 の本番実測では
+/// 掲示板 11 件・投稿は新しい順で、30 日窓内の投稿は 0 件だった (投稿は月〜四半期に 1 回の
+/// 頻度のため、下限値は通常空になる。best-effort として窓・上限はユーザー判断で据え置き)。
 const BOARD_ACTIVITY_MAX_BOARDS: usize = 5;
 const BOARD_ACTIVITY_MAX_POSTS_PER_BOARD: usize = 10;
 
@@ -174,8 +175,8 @@ struct ResponseMetaData {
 /// (2026-09-11): `{"boards": [{"boardId": <数値>, "boardName": ..., ...}]}`。
 /// `boardId` は文字列ではなく **JSON の数値** (`4000000000000000001` のような
 /// 64bit 整数) だった — 実装時は文字列と推測していたが誤り (`deserialize_id_as_string`
-/// で文字列・数値どちらでも受け付けるよう修正済み)。`posts`/`readers` の ID も
-/// 同じ書き方で防御している (未検証)。
+/// で文字列・数値どちらでも受け付けるよう修正済み)。`posts` の `postId` も
+/// 同じく 64bit の JSON 数値だった (2026-09-11 実測)。
 #[derive(Debug, Deserialize)]
 struct BoardsResponse {
     boards: Option<Vec<BoardEntry>>,
@@ -187,7 +188,8 @@ struct BoardEntry {
     board_id: String,
 }
 
-/// `GET /v1.0/boards/{id}/posts` レスポンス (★ 実データ未検証、上記と同じ注意)。
+/// `GET /v1.0/boards/{id}/posts` レスポンス (2026-09-11 実測: 新しい順に並び、`postId` は 64bit の
+/// 数値、`createdTime` は RFC3339 (`+09:00`))。
 #[derive(Debug, Deserialize)]
 struct PostsResponse {
     posts: Option<Vec<PostEntry>>,
@@ -201,7 +203,8 @@ struct PostEntry {
     created_time: String,
 }
 
-/// `GET /v1.0/boards/{id}/posts/{id}/readers` レスポンス (★ 実データ未検証、同上)。
+/// `GET /v1.0/boards/{id}/posts/{id}/readers` レスポンス (2026-09-11 実測: query 無しでメンバー全員が
+/// `isRead` の true/false 付きで 1 ページに返る)。
 #[derive(Debug, Deserialize)]
 struct ReadersResponse {
     readers: Option<Vec<ReaderEntry>>,
@@ -209,8 +212,8 @@ struct ReadersResponse {
 
 #[derive(Debug, Deserialize)]
 struct ReaderEntry {
-    // userId は Directory API (list_org_users) と同じ UUID 文字列である想定だが、
-    // boardId が数値だった前例があるため念のため同じ柔軟デシリアライザを使う。
+    // userId は UUID 文字列だった (2026-09-11 実測)。boardId が数値だった前例があるため、
+    // 念のため同じ柔軟デシリアライザを使う。
     #[serde(rename = "userId", deserialize_with = "deserialize_id_as_string")]
     user_id: String,
     #[serde(rename = "isRead")]
@@ -676,7 +679,7 @@ impl LineworksBotClient {
     ///
     /// 掲示板一覧 → 各掲示板の投稿一覧 → 各投稿の既読者一覧、と3段の API 呼び出しに
     /// なるため、`BOARD_ACTIVITY_MAX_BOARDS` / `BOARD_ACTIVITY_MAX_POSTS_PER_BOARD` で
-    /// 呼び出し回数の上限を設ける (未検証 API を無制限に叩かないための安全弁)。
+    /// 呼び出し回数の上限を設ける (テナント単位の mutex を握ったまま直列に叩くための安全弁)。
     /// `since` より古い投稿は無視する。
     ///
     /// 戻り値は `user_id → 下限日時`。呼び出し元 (`lineworks_login_activity.rs`) で
@@ -894,8 +897,8 @@ fn format_audit_time(dt: DateTime<Utc>) -> String {
 }
 
 /// エラーメッセージ/ログに埋め込む際に、レスポンス本文を扱いやすい長さへ切り詰める
-/// (board API のレスポンス shape が未検証なので、parse 失敗時に実物を見て直せるように
-/// するための診断用。Refs #540)。
+/// (board API の shape が将来ずれたときに、parse 失敗の実物を見て直せるようにするための
+/// 診断用。Refs #540)。
 fn truncate_for_log(s: &str) -> String {
     const MAX: usize = 500;
     if s.chars().count() <= MAX {

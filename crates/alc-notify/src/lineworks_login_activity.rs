@@ -21,9 +21,11 @@
 //!    既読 API (`/v1.0/boards/{id}/posts/{id}/readers`) は既読日時を返さず
 //!    true/false のみなので、「この投稿を読んだ = 投稿作成日時以降にアクティブ
 //!    だったはず」という下限として扱う (実際の最終アクティブ日時はこれより新しい
-//!    可能性がある)。★ board API 3種 (`list_boards` / `list_recent_board_posts` /
-//!    `list_board_post_readers`) のレスポンス shape は本番未検証 — 構造が想定と
-//!    ズレていても静かに 0 件になるだけで既存の auth/message 結果は壊さない設計
+//!    可能性がある)。board API 3種 (`list_boards` / `list_recent_board_posts` /
+//!    `list_board_post_readers`) のレスポンス shape は 2026-09-11 に本番で実測済み。
+//!    ただし投稿は月〜四半期に 1 回の頻度のため、30 日窓ではこの下限値は通常空になる
+//!    (best-effort であり不具合ではない。各段の件数は info/warn ログに出る)。構造が
+//!    ずれても 0 件になるだけで既存の auth/message 結果は壊さない設計
 //!    (`fetch_board_activity_lower_bound` の doc 参照)。この下限値そのものは
 //!    `LoginActivityEntry.board_read_lower_bound_at` としても個別に返す (2026-09-11、
 //!    #540 フォローアップ)。`last_login_at`/`stale` は3信号を合成した `combined` を
