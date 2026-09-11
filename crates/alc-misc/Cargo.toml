@@ -5,6 +5,8 @@ edition = "2021"
 
 [dependencies]
 alc-core = { path = "../alc-core" }
+# 通常点呼の測定の保存と同じ transaction で点呼記録を作るため (Refs ippoan/alc-app#238)
+alc-tenko = { path = "../alc-tenko" }
 async-trait = "0.1"
 axum = { version = "0.8", features = ["multipart"] }
 sqlx = { version = "0.8", features = ["postgres", "chrono", "uuid"] }

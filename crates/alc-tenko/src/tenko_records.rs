@@ -198,7 +198,7 @@ async fn export_csv(
             r.tenko_type.clone(),
             r.tenko_method.clone(),
             r.status.clone(),
-            r.responsible_manager_name.clone(),
+            r.responsible_manager_name.clone().unwrap_or_default(),
             r.started_at.map_or(String::new(), |t| t.to_rfc3339()),
             r.completed_at.map_or(String::new(), |t| t.to_rfc3339()),
             r.location.clone().unwrap_or_default(),

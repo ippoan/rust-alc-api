@@ -182,6 +182,12 @@ jobs:
           # bazel-test-db と同じ内容にすること
           # (check_bazel_test_matrix.sh が pair 一致を検査する)
           - { name: db-auth-user-role, target: "//:auth_user_role_test" }
+          # Refs ippoan/alc-app#238 / ippoan/alc-app-s3#135: 通常点呼を点呼記録に載せる。
+          # 冪等の担保は migration 140 の部分 unique + ON CONFLICT DO NOTHING に
+          # 任せているので mock では 1 行も通らない。ci.yml の bazel-test-db と
+          # cache-warm.yml を同じ内容にすること
+          # (check_bazel_test_matrix.sh が pair 一致を検査する)
+          - { name: db-normal-tenko-record, target: "//:normal_tenko_record_test" }
     services:
       postgres:
         image: postgres:16

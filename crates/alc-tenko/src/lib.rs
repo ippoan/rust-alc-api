@@ -3,6 +3,7 @@ pub mod driver_info;
 pub mod equipment_failures;
 pub mod health_baselines;
 pub mod models;
+pub mod normal_tenko;
 pub mod overdue;
 pub mod repo;
 pub mod repository;

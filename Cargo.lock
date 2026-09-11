@@ -191,6 +191,7 @@ name = "alc-misc"
 version = "0.1.0"
 dependencies = [
  "alc-core",
+ "alc-tenko",
  "async-trait",
  "axum",
  "base64 0.22.1",
