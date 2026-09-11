@@ -135,6 +135,10 @@ struct ResponseMetaData {
 /// (config_id, scope) ごとにトークンをキャッシュ
 pub struct LineworksBotClient {
     client: reqwest::Client,
+    /// 監査ログダウンロード用: リダイレクトを自動追従しない client。
+    /// 302 → `Location` へ手動で `Authorization` を付け直して進むために使う
+    /// (`get_with_auth_redirect` 参照、Refs #540)。
+    no_redirect_client: reqwest::Client,
     cache: Arc<RwLock<HashMap<(Uuid, String), CachedToken>>>,
     bot_endpoint: String,
     auth_token_endpoint: String,
@@ -171,6 +175,10 @@ impl LineworksBotClient {
     ) -> Self {
         Self {
             client: reqwest::Client::new(),
+            no_redirect_client: reqwest::Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .expect("build reqwest client with redirect disabled"),
             cache: Arc::new(RwLock::new(HashMap::new())),
             bot_endpoint: bot_endpoint.to_string(),
             auth_token_endpoint: auth_token_endpoint.to_string(),
@@ -499,9 +507,18 @@ impl LineworksBotClient {
     /// LINE WORKS 監査ログ (audit.read scope) の CSV をダウンロードする (Refs #540)。
     ///
     /// `GET /v1.0/audits/logs/download?service=...&startTime=...&endTime=...` は 302 で
-    /// 実ファイルの署名付き URL (`Location`) を返す。`reqwest::Client` は既定でリダイレクトを
-    /// 追従し、かつリダイレクト先ホストが変わると `Authorization` ヘッダを引き継がない
-    /// (署名付き URL は Bearer 不要な前提) ので、追加のリダイレクト処理は書かない。
+    /// 実ファイルのダウンロード URL (`Location`) を返す。**この Location 先にも同じ
+    /// `Authorization: Bearer` ヘッダを付け直してアクセスする必要がある**
+    /// (公式ドキュメント file-upload の注記「ダウンロード URL にアクセスする際にも
+    /// Authorization ヘッダを指定する必要があります。利用するライブラリによっては
+    /// Authorization ヘッダを指定せずに自動的にリダイレクトされる場合があります」、
+    /// 監査ログ API も同仕様。LINE WORKS Developers コミュニティに同一症状の解決事例あり)。
+    ///
+    /// **旧実装の不具合 (2026-09-11 本番実測)**: `reqwest::Client` の既定リダイレクト追従に
+    /// 任せていたところ、Location 先がクロスホスト (`www.worksapis.com` → 別ドメイン) のため
+    /// `Authorization` ヘッダが自動で外れ、Location 先が `401 Unauthorized
+    /// "Authentication failed."` を返していた。`no_redirect_client` (リダイレクト非追従) で
+    /// 明示的に Location を辿り、毎回 `Authorization` を付け直す。
     ///
     /// 期間は最長 31 日 (LINE WORKS API 制限)、呼び出し元で担保すること。
     /// 「並行して呼び出さないでください」という制約への対応 (直列化・キャッシュ) は
@@ -524,22 +541,57 @@ impl LineworksBotClient {
             urlencoding::encode(&format_audit_time(end)),
         );
 
-        let resp = self
-            .client
-            .get(&url)
-            .header("Authorization", format!("Bearer {}", token))
-            .send()
-            .await?;
+        let bytes = self.get_with_auth_redirect(&url, &token).await?;
+        Ok(decode_csv_bytes(&bytes))
+    }
 
-        if !resp.status().is_success() {
+    /// リダイレクトを自動追従せず、3xx を見たら `Location` へ同じ `Authorization` を
+    /// 付け直して手動で辿る GET。LINE WORKS のダウンロード URL 系 API 共通の作法
+    /// (`fetch_login_audit_csv` 参照)。
+    async fn get_with_auth_redirect(
+        &self,
+        url: &str,
+        token: &str,
+    ) -> Result<Vec<u8>, LineworksBotError> {
+        const MAX_HOPS: u8 = 5;
+        let mut current = url.to_string();
+
+        for _ in 0..MAX_HOPS {
+            let resp = self
+                .no_redirect_client
+                .get(&current)
+                .header("Authorization", format!("Bearer {}", token))
+                .send()
+                .await?;
+
             let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            tracing::error!("LINE WORKS audit log download failed: {status} - {body}");
-            return Err(LineworksBotError::SendFailed(format!("{status}: {body}")));
+            if status.is_redirection() {
+                let location = resp
+                    .headers()
+                    .get(reqwest::header::LOCATION)
+                    .and_then(|v| v.to_str().ok())
+                    .map(str::to_string)
+                    .ok_or_else(|| {
+                        LineworksBotError::SendFailed(format!(
+                            "{status}: redirect response without Location header"
+                        ))
+                    })?;
+                current = location;
+                continue;
+            }
+
+            if !status.is_success() {
+                let body = resp.text().await.unwrap_or_default();
+                tracing::error!("LINE WORKS audit log download failed: {status} - {body}");
+                return Err(LineworksBotError::SendFailed(format!("{status}: {body}")));
+            }
+
+            return Ok(resp.bytes().await?.to_vec());
         }
 
-        let bytes = resp.bytes().await?;
-        Ok(decode_csv_bytes(&bytes))
+        Err(LineworksBotError::SendFailed(format!(
+            "too many redirects (> {MAX_HOPS}) following audit log download URL"
+        )))
     }
 }
 
@@ -820,7 +872,7 @@ mod tests {
 
     #[tokio::test]
     async fn fetch_login_audit_csv_follows_redirect_and_returns_body() {
-        use wiremock::matchers::{method, path, query_param};
+        use wiremock::matchers::{header, method, path, query_param};
         use wiremock::{Mock, MockServer, ResponseTemplate};
 
         let auth_server = MockServer::start().await;
@@ -835,8 +887,13 @@ mod tests {
             .await;
 
         let csv_server = MockServer::start().await;
+        // 回帰ガード (2026-09-11 実測のバグ): Location 先は別ホストなので、
+        // reqwest の既定リダイレクト追従だと Authorization が落ちる。ここで
+        // 明示的に header を要求し、付いていなければ 404 (マッチ無し) で
+        // テストが失敗するようにする。
         Mock::given(method("GET"))
             .and(path("/download/csv"))
+            .and(header("Authorization", "Bearer tok"))
             .respond_with(
                 ResponseTemplate::new(200)
                     .set_body_string("日時,メール,結果\n2026/09/01 09:00:00,a@x.com,成功\n"),
@@ -909,5 +966,157 @@ mod tests {
             .unwrap_err();
         assert!(matches!(err, LineworksBotError::SendFailed(_)));
         assert!(err.to_string().contains("403"));
+    }
+
+    #[tokio::test]
+    async fn fetch_login_audit_csv_returns_401_when_redirect_target_rejects_auth() {
+        // 2026-09-11 本番実測の再現: リダイレクト先が Authorization を要求するのに
+        // 付いていなければ 401 になる (旧実装のバグそのもの)。現行実装は毎回
+        // Authorization を付け直すので、この mock (header 無し要求) には
+        // 到達せず 200 になることを裏側の別テストで確認済み。ここでは
+        // Location 先がヘッダ不備を理由に 401 を返すケースが、握りつぶさず
+        // ちゃんとエラーとして伝播することを確認する。
+        use wiremock::matchers::{method, path, query_param};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let auth_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "tok",
+                "refresh_token": "r",
+                "expires_in": 3600,
+            })))
+            .mount(&auth_server)
+            .await;
+
+        let csv_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/download/csv"))
+            .respond_with(ResponseTemplate::new(401).set_body_json(serde_json::json!({
+                "code": "UNAUTHORIZED",
+                "description": "Authentication failed.",
+            })))
+            .mount(&csv_server)
+            .await;
+
+        let audit_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/audit"))
+            .and(query_param("service", "auth"))
+            .respond_with(
+                ResponseTemplate::new(302)
+                    .insert_header("Location", format!("{}/download/csv", csv_server.uri())),
+            )
+            .mount(&audit_server)
+            .await;
+
+        let client = LineworksBotClient::with_all_endpoints(
+            "http://unused/",
+            &format!("{}/token", auth_server.uri()),
+            &format!("{}/audit", audit_server.uri()),
+        );
+        let config = test_config();
+        let err = client
+            .fetch_login_audit_csv(Uuid::new_v4(), &config, Utc::now(), Utc::now())
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("401"));
+        assert!(err.to_string().contains("UNAUTHORIZED"));
+    }
+
+    #[tokio::test]
+    async fn fetch_login_audit_csv_follows_multiple_redirect_hops_with_auth() {
+        use wiremock::matchers::{header, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let auth_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "tok",
+                "refresh_token": "r",
+                "expires_in": 3600,
+            })))
+            .mount(&auth_server)
+            .await;
+
+        let csv_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/final/csv"))
+            .and(header("Authorization", "Bearer tok"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string("メール,日時\na@x.com,2026/09/01 09:00:00\n"),
+            )
+            .mount(&csv_server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/hop1"))
+            .and(header("Authorization", "Bearer tok"))
+            .respond_with(
+                ResponseTemplate::new(302)
+                    .insert_header("Location", format!("{}/final/csv", csv_server.uri())),
+            )
+            .mount(&csv_server)
+            .await;
+
+        let audit_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/audit"))
+            .respond_with(
+                ResponseTemplate::new(302)
+                    .insert_header("Location", format!("{}/hop1", csv_server.uri())),
+            )
+            .mount(&audit_server)
+            .await;
+
+        let client = LineworksBotClient::with_all_endpoints(
+            "http://unused/",
+            &format!("{}/token", auth_server.uri()),
+            &format!("{}/audit", audit_server.uri()),
+        );
+        let config = test_config();
+        let csv = client
+            .fetch_login_audit_csv(Uuid::new_v4(), &config, Utc::now(), Utc::now())
+            .await
+            .expect("fetch succeeds across 2 redirect hops");
+        assert!(csv.contains("a@x.com"));
+    }
+
+    #[tokio::test]
+    async fn fetch_login_audit_csv_errors_on_redirect_without_location() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let auth_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "tok",
+                "refresh_token": "r",
+                "expires_in": 3600,
+            })))
+            .mount(&auth_server)
+            .await;
+
+        let audit_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/audit"))
+            .respond_with(ResponseTemplate::new(302)) // Location ヘッダ無し
+            .mount(&audit_server)
+            .await;
+
+        let client = LineworksBotClient::with_all_endpoints(
+            "http://unused/",
+            &format!("{}/token", auth_server.uri()),
+            &format!("{}/audit", audit_server.uri()),
+        );
+        let config = test_config();
+        let err = client
+            .fetch_login_audit_csv(Uuid::new_v4(), &config, Utc::now(), Utc::now())
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("Location"));
     }
 }

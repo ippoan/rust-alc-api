@@ -17,7 +17,11 @@
 //!   `now - N` 〜 `now` (ちょうど31*24h) で指定すると LINE WORKS 側が
 //!   `400 LIMIT_EXCEEDED "Period must be within 31 days."` を返す (2026-09-11 本番実測、
 //!   Refs #540)。開始・終了の暦日をまたぐと「31日を超える」と判定されるらしく、
-//!   境界値ぴったりは弾かれる。**`AUDIT_WINDOW_DAYS` は上限の 31 ではなく 30 に
+//!   境界値ぴったりは弾かれる。★ さらに **監査ログダウンロード URL (302 → Location) は
+//!   Location 先にも同じ `Authorization` を付け直す必要がある** — 詳細・修正は
+//!   `clients::lineworks::LineworksBotClient::fetch_login_audit_csv` の doc 参照
+//!   (2026-09-11 本番実測、audit.read scope 自体は正しく有効化されていたにも関わらず
+//!   `401 Authentication failed` になっていた)。**`AUDIT_WINDOW_DAYS` は上限の 31 ではなく 30 に
 //!   落として安全側に倒す。** `days` はその窓の中から「N 日以上ログインなし」を
 //!   判定するしきい値であり、`AUDIT_WINDOW_DAYS` を超える `days` を渡しても
 //!   それより前の記録は判定できない (「記録なし」表示になる)。
@@ -197,7 +201,7 @@ fn scope_error(e: LineworksBotError, scope: &str) -> (StatusCode, Json<serde_jso
                 "error": "missing_scope",
                 "scope": scope,
                 "message": format!(
-                    "LINE WORKS Developer Console で {scope} scope を追加してください (audit.read は監査の管理者権限も必要)"
+                    "LINE WORKS Developer Console で {scope} scope を追加してください"
                 ),
             })),
         );
