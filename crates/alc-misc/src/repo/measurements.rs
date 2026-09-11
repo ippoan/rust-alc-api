@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use sqlx::PgPool;
+use sqlx::{Acquire, PgPool};
 use uuid::Uuid;
 
 use alc_core::models::{
@@ -47,7 +47,8 @@ impl MeasurementsRepository for PgMeasurementsRepository {
         input: &CreateMeasurement,
     ) -> Result<Measurement, sqlx::Error> {
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
-        sqlx::query_as::<_, Measurement>(
+        let mut tx = tc.conn.begin().await?;
+        let m = sqlx::query_as::<_, Measurement>(
             r#"
             INSERT INTO measurements (
                 tenant_id, employee_id, alcohol_level, result,
@@ -75,8 +76,12 @@ impl MeasurementsRepository for PgMeasurementsRepository {
         .bind(input.face_verified)
         .bind(input.medical_manual_input)
         .bind(&input.video_url)
-        .fetch_one(&mut *tc.conn)
-        .await
+        .fetch_one(&mut *tx)
+        .await?;
+
+        record_as_tenko_if_marked(&mut tx, &m, input.record_as_tenko).await;
+        tx.commit().await?;
+        Ok(m)
     }
 
     async fn update(
@@ -86,7 +91,8 @@ impl MeasurementsRepository for PgMeasurementsRepository {
         input: &UpdateMeasurement,
     ) -> Result<Option<Measurement>, sqlx::Error> {
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
-        sqlx::query_as::<_, Measurement>(
+        let mut tx = tc.conn.begin().await?;
+        let m = sqlx::query_as::<_, Measurement>(
             r#"
             UPDATE measurements SET
                 status = COALESCE($1, status),
@@ -124,8 +130,14 @@ impl MeasurementsRepository for PgMeasurementsRepository {
         .bind(&input.video_url)
         .bind(id)
         .bind(tenant_id)
-        .fetch_optional(&mut *tc.conn)
-        .await
+        .fetch_optional(&mut *tx)
+        .await?;
+
+        if let Some(m) = &m {
+            record_as_tenko_if_marked(&mut tx, m, input.record_as_tenko).await;
+        }
+        tx.commit().await?;
+        Ok(m)
     }
 
     async fn get(&self, tenant_id: Uuid, id: Uuid) -> Result<Option<Measurement>, sqlx::Error> {
@@ -226,5 +238,55 @@ impl MeasurementsRepository for PgMeasurementsRepository {
             measurements,
             total,
         })
+    }
+}
+
+/// 通常点呼の印が付いた「完了した測定」から、点呼セッションと点呼記録を作る。
+///
+/// **測定の保存は必ず残す** のがこの関数の契約。記録の作成は内側の区切り
+/// (SAVEPOINT = sqlx の入れ子 transaction) で行い、失敗したら内側だけ戻して
+/// warn を残す — 外側の測定の保存はそのまま commit される
+/// (Refs ippoan/alc-app#238, ippoan/alc-app-s3#135)。
+async fn record_as_tenko_if_marked(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    m: &Measurement,
+    record_as_tenko: bool,
+) {
+    if !record_as_tenko || m.status != "completed" {
+        return;
+    }
+
+    let mut inner = match tx.begin().await {
+        Ok(inner) => inner,
+        Err(e) => {
+            tracing::warn!(
+                "通常点呼の記録を開始できませんでした (measurement {}): {e}",
+                m.id
+            );
+            return;
+        }
+    };
+
+    match alc_tenko::normal_tenko::record(&mut inner, m).await {
+        Ok(_) => {
+            if let Err(e) = inner.commit().await {
+                tracing::warn!(
+                    "通常点呼の記録を確定できませんでした (measurement {}): {e}",
+                    m.id
+                );
+            }
+        }
+        Err(e) => {
+            tracing::warn!(
+                "通常点呼の記録の作成に失敗しました (measurement {}): {e}",
+                m.id
+            );
+            if let Err(e) = inner.rollback().await {
+                tracing::warn!(
+                    "通常点呼の記録の巻き戻しに失敗しました (measurement {}): {e}",
+                    m.id
+                );
+            }
+        }
     }
 }

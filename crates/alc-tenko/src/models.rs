@@ -183,7 +183,8 @@ pub struct TenkoRecord {
     pub status: String,
     pub record_data: serde_json::Value,
     pub employee_name: String,
-    pub responsible_manager_name: String,
+    /// 通常点呼 / 遠隔点呼は執行者が付かないので NULL になりうる (migration 140)
+    pub responsible_manager_name: Option<String>,
     pub tenko_method: String,
     pub location: Option<String>,
     pub alcohol_result: Option<String>,

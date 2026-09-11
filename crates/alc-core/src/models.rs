@@ -182,6 +182,10 @@ pub struct Measurement {
 #[derive(Debug, Deserialize)]
 pub struct CreateMeasurement {
     pub employee_id: Uuid,
+    /// 通常点呼として点呼セッション・点呼記録も作るかどうか (運行者端末からの保存で true)。
+    /// 既存の呼び元は送ってこないので default = false。
+    #[serde(default)]
+    pub record_as_tenko: bool,
     #[serde(alias = "alcohol_level")]
     pub alcohol_value: f64,
     #[serde(alias = "result")]
@@ -209,6 +213,9 @@ pub struct StartMeasurement {
 #[derive(Debug, Deserialize)]
 pub struct UpdateMeasurement {
     pub status: Option<String>,
+    /// status が completed になる保存でのみ効く。詳細は [`CreateMeasurement::record_as_tenko`]。
+    #[serde(default)]
+    pub record_as_tenko: bool,
     #[serde(alias = "alcohol_level")]
     pub alcohol_value: Option<f64>,
     #[serde(alias = "result")]

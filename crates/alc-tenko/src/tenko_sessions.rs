@@ -157,7 +157,8 @@ async fn submit_alcohol(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    let is_fail = matches!(body.alcohol_result.as_str(), "fail" | "over");
+    let judged = status_for_result(Some(body.alcohol_result.as_str()));
+    let is_fail = matches!(judged, Some(("cancelled", _)));
 
     let next_status = if is_fail {
         "cancelled"
@@ -169,11 +170,7 @@ async fn submit_alcohol(
         }
     };
 
-    let cancel_reason = if is_fail {
-        Some("アルコール検知".to_string())
-    } else {
-        None
-    };
+    let cancel_reason = judged.and_then(|(_, reason)| reason).map(|r| r.to_string());
 
     let completed_at = if is_fail { Some(Utc::now()) } else { None };
 
@@ -492,6 +489,34 @@ async fn dashboard(
     Ok(Json(dashboard))
 }
 
+/// アルコール測定の結果から「点呼をどう閉じるか」を決める。
+///
+/// * `fail` / `over` → 中止 (`cancelled`) + 中止理由「アルコール検知」
+/// * `pass` / `normal` → 完了 (`completed`)
+/// * `error` / 未知の値 / 無し → `None` (点呼として閉じない = 記録を作らない)
+///
+/// 自動点呼 (`submit_alcohol`) と通常点呼 ([`crate::normal_tenko`]) で規則を 1 本に保つ。
+pub(crate) fn status_for_result(
+    result: Option<&str>,
+) -> Option<(&'static str, Option<&'static str>)> {
+    match result {
+        Some("fail") | Some("over") => Some(("cancelled", Some("アルコール検知"))),
+        Some("pass") | Some("normal") => Some(("completed", None)),
+        _ => None,
+    }
+}
+
+/// 点呼記録の `record_data` と `record_hash` を作る。
+/// hash はセッションの JSON をそのまま SHA-256 にかけたもの (作り方は変えない)。
+pub(crate) fn record_payload(
+    session: &TenkoSession,
+) -> Result<(serde_json::Value, String), serde_json::Error> {
+    let record_data = serde_json::to_value(session)?;
+    let canonical = serde_json::to_string(&record_data)?;
+    let hash = format!("{:x}", Sha256::digest(canonical.as_bytes()));
+    Ok((record_data, hash))
+}
+
 /// 不変レコード作成
 async fn create_tenko_record(
     repo: &dyn TenkoSessionRepository,
@@ -512,12 +537,8 @@ async fn create_tenko_record(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let record_data =
-        serde_json::to_value(session).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let canonical =
-        serde_json::to_string(&record_data).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let hash = format!("{:x}", Sha256::digest(canonical.as_bytes()));
+    let (record_data, hash) =
+        record_payload(session).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let record = repo
         .create_tenko_record(
@@ -1059,6 +1080,31 @@ async fn resume_session(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_status_for_result_pass_and_normal_complete() {
+        assert_eq!(status_for_result(Some("pass")), Some(("completed", None)));
+        assert_eq!(status_for_result(Some("normal")), Some(("completed", None)));
+    }
+
+    #[test]
+    fn test_status_for_result_fail_and_over_cancel_with_reason() {
+        assert_eq!(
+            status_for_result(Some("fail")),
+            Some(("cancelled", Some("アルコール検知")))
+        );
+        assert_eq!(
+            status_for_result(Some("over")),
+            Some(("cancelled", Some("アルコール検知")))
+        );
+    }
+
+    #[test]
+    fn test_status_for_result_error_and_none_and_unknown_are_not_recorded() {
+        assert_eq!(status_for_result(Some("error")), None);
+        assert_eq!(status_for_result(None), None);
+        assert_eq!(status_for_result(Some("unexpected")), None);
+    }
 
     #[test]
     fn test_check_self_declaration_none() {

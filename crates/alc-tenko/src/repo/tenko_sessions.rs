@@ -630,69 +630,16 @@ impl TenkoSessionRepository for PgTenkoSessionRepository {
         record_hash: &str,
     ) -> Result<TenkoRecord, sqlx::Error> {
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
-        let has_face_photo = session.alcohol_face_photo_url.is_some();
-        sqlx::query_as::<_, TenkoRecord>(
-            r#"
-            INSERT INTO tenko_records (
-                tenant_id, session_id, employee_id, tenko_type, status,
-                record_data, employee_name, responsible_manager_name,
-                location, alcohol_result, alcohol_value, alcohol_has_face_photo,
-                temperature, systolic, diastolic, pulse,
-                instruction, instruction_confirmed_at,
-                report_vehicle_road_status, report_driver_alternation, report_no_report,
-                report_vehicle_road_audio_url, report_driver_alternation_audio_url,
-                started_at, completed_at, record_hash,
-                self_declaration, safety_judgment, daily_inspection,
-                interrupted_at, resumed_at, resume_reason
-            )
-            VALUES (
-                $1, $2, $3, $4, $5,
-                $6, $7, $8,
-                $9, $10, $11, $12,
-                $13, $14, $15, $16,
-                $17, $18,
-                $19, $20, $21,
-                $22, $23,
-                $24, $25, $26,
-                $27, $28, $29,
-                $30, $31, $32
-            )
-            RETURNING *
-            "#,
+        insert_record(
+            &mut tc.conn,
+            tenant_id,
+            session,
+            employee_name,
+            instruction,
+            record_data,
+            record_hash,
+            "自動点呼",
         )
-        .bind(tenant_id)
-        .bind(session.id)
-        .bind(session.employee_id)
-        .bind(&session.tenko_type)
-        .bind(&session.status)
-        .bind(record_data)
-        .bind(employee_name)
-        .bind(&session.responsible_manager_name)
-        .bind(&session.location)
-        .bind(&session.alcohol_result)
-        .bind(session.alcohol_value)
-        .bind(has_face_photo)
-        .bind(session.temperature)
-        .bind(session.systolic)
-        .bind(session.diastolic)
-        .bind(session.pulse)
-        .bind(instruction)
-        .bind(session.instruction_confirmed_at)
-        .bind(&session.report_vehicle_road_status)
-        .bind(&session.report_driver_alternation)
-        .bind(session.report_no_report)
-        .bind(&session.report_vehicle_road_audio_url)
-        .bind(&session.report_driver_alternation_audio_url)
-        .bind(session.started_at)
-        .bind(session.completed_at)
-        .bind(record_hash)
-        .bind(&session.self_declaration)
-        .bind(&session.safety_judgment)
-        .bind(&session.daily_inspection)
-        .bind(session.interrupted_at)
-        .bind(session.resumed_at)
-        .bind(&session.resume_reason)
-        .fetch_one(&mut *tc.conn)
         .await
     }
 
@@ -761,4 +708,89 @@ impl TenkoSessionRepository for PgTenkoSessionRepository {
             overdue_schedules,
         })
     }
+}
+
+/// 点呼記録 (`tenko_records`) の INSERT 本体。
+///
+/// 自動点呼 / 遠隔点呼 (`create_tenko_record`) と通常点呼 ([`crate::normal_tenko`]) で
+/// 32 列の INSERT を 1 本に保つための共有関数。通常点呼は測定の保存と同じ
+/// transaction の中で呼ぶので、接続を自分で取らず `conn` を受け取る形にしてある。
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn insert_record(
+    conn: &mut sqlx::PgConnection,
+    tenant_id: Uuid,
+    session: &TenkoSession,
+    employee_name: &str,
+    instruction: &Option<String>,
+    record_data: &serde_json::Value,
+    record_hash: &str,
+    tenko_method: &str,
+) -> Result<TenkoRecord, sqlx::Error> {
+    let has_face_photo = session.alcohol_face_photo_url.is_some();
+    sqlx::query_as::<_, TenkoRecord>(
+        r#"
+        INSERT INTO tenko_records (
+            tenant_id, session_id, employee_id, tenko_type, status,
+            record_data, employee_name, responsible_manager_name,
+            location, alcohol_result, alcohol_value, alcohol_has_face_photo,
+            temperature, systolic, diastolic, pulse,
+            instruction, instruction_confirmed_at,
+            report_vehicle_road_status, report_driver_alternation, report_no_report,
+            report_vehicle_road_audio_url, report_driver_alternation_audio_url,
+            started_at, completed_at, record_hash,
+            self_declaration, safety_judgment, daily_inspection,
+            interrupted_at, resumed_at, resume_reason,
+            tenko_method
+        )
+        VALUES (
+            $1, $2, $3, $4, $5,
+            $6, $7, $8,
+            $9, $10, $11, $12,
+            $13, $14, $15, $16,
+            $17, $18,
+            $19, $20, $21,
+            $22, $23,
+            $24, $25, $26,
+            $27, $28, $29,
+            $30, $31, $32,
+            $33
+        )
+        RETURNING *
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(session.id)
+    .bind(session.employee_id)
+    .bind(&session.tenko_type)
+    .bind(&session.status)
+    .bind(record_data)
+    .bind(employee_name)
+    .bind(&session.responsible_manager_name)
+    .bind(&session.location)
+    .bind(&session.alcohol_result)
+    .bind(session.alcohol_value)
+    .bind(has_face_photo)
+    .bind(session.temperature)
+    .bind(session.systolic)
+    .bind(session.diastolic)
+    .bind(session.pulse)
+    .bind(instruction)
+    .bind(session.instruction_confirmed_at)
+    .bind(&session.report_vehicle_road_status)
+    .bind(&session.report_driver_alternation)
+    .bind(session.report_no_report)
+    .bind(&session.report_vehicle_road_audio_url)
+    .bind(&session.report_driver_alternation_audio_url)
+    .bind(session.started_at)
+    .bind(session.completed_at)
+    .bind(record_hash)
+    .bind(&session.self_declaration)
+    .bind(&session.safety_judgment)
+    .bind(&session.daily_inspection)
+    .bind(session.interrupted_at)
+    .bind(session.resumed_at)
+    .bind(&session.resume_reason)
+    .bind(tenko_method)
+    .fetch_one(conn)
+    .await
 }
