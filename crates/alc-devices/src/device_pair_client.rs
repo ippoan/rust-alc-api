@@ -19,10 +19,9 @@ use uuid::Uuid;
 #[derive(Serialize)]
 struct PairInternalRequest<'a> {
     tenant_id: Uuid,
-    /// 呼び出し元 (re-pair) の device_id。auth-worker が tenant の出どころを
-    /// 「渡された tenant_id」ではなく「登録済みで有効な端末の記録」に揃える
-    /// ための移行用 (Refs ippoan/auth-worker#544)。tenant_id は auth-worker 側の
-    /// 切り替えが配信されるまで残す。
+    /// 呼び出し元 (re-pair) の device_id。auth-worker が端末の tenant を
+    /// 登録記録から引くために送る (Refs ippoan/auth-worker#544)。tenant_id は
+    /// auth-worker 側の切り替えが配信されるまで残す。
     device_id: Uuid,
     label: &'a str,
     role: &'a str,

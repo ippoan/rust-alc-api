@@ -71,9 +71,8 @@ pub fn tenant_router() -> Router<AppState> {
 }
 
 /// `require_internal_jwt` (aud=alc-api-internal) 配下に nest される internal ルート。
-/// auth-worker の `POST /device/pair-internal` が device credential 発行時の
-/// tenant 決定に使う — 「呼び出し元が渡した tenant_id」ではなく「登録済みで
-/// 有効な端末の記録」から tenant を決める (Refs ippoan/auth-worker#544)。
+/// auth-worker の `POST /device/pair-internal` が device credential 発行時に、
+/// 登録済みで有効 (status='active') な端末の tenant を返す (Refs ippoan/auth-worker#544)。
 pub fn internal_router() -> Router<AppState> {
     Router::new().route(
         "/internal/devices/{device_id}/pairing-tenant",
