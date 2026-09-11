@@ -18,10 +18,8 @@ use uuid::Uuid;
 
 #[derive(Serialize)]
 struct PairInternalRequest<'a> {
-    tenant_id: Uuid,
     /// 呼び出し元 (re-pair) の device_id。auth-worker が端末の tenant を
-    /// 登録記録から引くために送る (Refs ippoan/auth-worker#544)。tenant_id は
-    /// auth-worker 側の切り替えが配信されるまで残す。
+    /// 登録記録から引くために送る (Refs ippoan/auth-worker#544)。
     device_id: Uuid,
     label: &'a str,
     role: &'a str,
@@ -87,7 +85,6 @@ impl HttpDevicePairClient {
 impl DevicePairClient for HttpDevicePairClient {
     async fn mint(
         &self,
-        tenant_id: Uuid,
         device_id: Uuid,
         label: &str,
     ) -> Result<PairedCredential, DevicePairClientError> {
@@ -96,7 +93,6 @@ impl DevicePairClient for HttpDevicePairClient {
             .post(&self.pair_internal_url)
             .header("X-Internal-Shared-Secret", &self.shared_secret)
             .json(&PairInternalRequest {
-                tenant_id,
                 device_id,
                 label,
                 role: RE_PAIR_ROLE,
@@ -259,12 +255,37 @@ mod tests {
             format!("{}/device/pair-internal", server.uri()),
             "s3cr3t".into(),
         );
-        let cred = client
-            .mint(Uuid::new_v4(), device_id, "alc-app:device-1")
-            .await
-            .unwrap();
+        let cred = client.mint(device_id, "alc-app:device-1").await.unwrap();
         assert_eq!(cred.device_id, "dev-1");
         assert_eq!(cred.device_secret, "top-secret");
+    }
+
+    /// auth-worker が device_id から tenant を決めるので、本文に tenant_id を
+    /// 載せない (Refs ippoan/auth-worker#544)。
+    #[tokio::test]
+    async fn mint_body_omits_tenant_id() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/device/pair-internal"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "device_id": "dev-1",
+                "device_secret": "top-secret"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = HttpDevicePairClient::with_endpoint(
+            format!("{}/device/pair-internal", server.uri()),
+            "s".into(),
+        );
+        client.mint(Uuid::new_v4(), "label").await.unwrap();
+
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 1);
+        let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        assert!(body.get("tenant_id").is_none());
+        assert!(body.get("device_id").is_some());
     }
 
     #[tokio::test]
@@ -280,10 +301,7 @@ mod tests {
             format!("{}/device/pair-internal", server.uri()),
             "s".into(),
         );
-        let err = client
-            .mint(Uuid::new_v4(), Uuid::new_v4(), "label")
-            .await
-            .unwrap_err();
+        let err = client.mint(Uuid::new_v4(), "label").await.unwrap_err();
         assert!(matches!(err, DevicePairClientError::Upstream(_)));
     }
 
@@ -300,10 +318,7 @@ mod tests {
             format!("{}/device/pair-internal", server.uri()),
             "s".into(),
         );
-        let err = client
-            .mint(Uuid::new_v4(), Uuid::new_v4(), "label")
-            .await
-            .unwrap_err();
+        let err = client.mint(Uuid::new_v4(), "label").await.unwrap_err();
         assert!(matches!(err, DevicePairClientError::Upstream(_)));
     }
 
@@ -313,10 +328,7 @@ mod tests {
             "http://127.0.0.1:1/device/pair-internal".into(),
             "s".into(),
         );
-        let err = client
-            .mint(Uuid::new_v4(), Uuid::new_v4(), "label")
-            .await
-            .unwrap_err();
+        let err = client.mint(Uuid::new_v4(), "label").await.unwrap_err();
         assert!(matches!(err, DevicePairClientError::Upstream(_)));
     }
 }

@@ -1954,13 +1954,10 @@ async fn re_pair(
     let device_id = body.device_id;
     let tenant_id = row.tenant_id;
     let label = format!("alc-app:{device_id}");
-    let credential = pair_client
-        .mint(tenant_id, device_id, &label)
-        .await
-        .map_err(|e| {
-            tracing::error!("re_pair: pair-internal call failed device_id={device_id} err={e:?}");
-            StatusCode::NOT_FOUND
-        })?;
+    let credential = pair_client.mint(device_id, &label).await.map_err(|e| {
+        tracing::error!("re_pair: pair-internal call failed device_id={device_id} err={e:?}");
+        StatusCode::NOT_FOUND
+    })?;
 
     let consumed = state
         .devices
