@@ -695,10 +695,13 @@ impl LineworksBotClient {
             return Err(LineworksBotError::SendFailed(format!("{status}: {body}")));
         }
 
-        let body: BoardsResponse = resp
-            .json()
-            .await
-            .map_err(|e| LineworksBotError::SendFailed(format!("parse boards response: {e}")))?;
+        let text = resp.text().await?;
+        let body: BoardsResponse = serde_json::from_str(&text).map_err(|e| {
+            LineworksBotError::SendFailed(format!(
+                "parse boards response: {e} - body: {}",
+                truncate_for_log(&text)
+            ))
+        })?;
 
         Ok(body
             .boards
@@ -732,10 +735,13 @@ impl LineworksBotClient {
             return Err(LineworksBotError::SendFailed(format!("{status}: {body}")));
         }
 
-        let body: PostsResponse = resp
-            .json()
-            .await
-            .map_err(|e| LineworksBotError::SendFailed(format!("parse posts response: {e}")))?;
+        let text = resp.text().await?;
+        let body: PostsResponse = serde_json::from_str(&text).map_err(|e| {
+            LineworksBotError::SendFailed(format!(
+                "parse posts response: {e} - body: {}",
+                truncate_for_log(&text)
+            ))
+        })?;
 
         Ok(body
             .posts
@@ -774,10 +780,13 @@ impl LineworksBotClient {
             return Err(LineworksBotError::SendFailed(format!("{status}: {body}")));
         }
 
-        let body: ReadersResponse = resp
-            .json()
-            .await
-            .map_err(|e| LineworksBotError::SendFailed(format!("parse readers response: {e}")))?;
+        let text = resp.text().await?;
+        let body: ReadersResponse = serde_json::from_str(&text).map_err(|e| {
+            LineworksBotError::SendFailed(format!(
+                "parse readers response: {e} - body: {}",
+                truncate_for_log(&text)
+            ))
+        })?;
 
         Ok(body
             .readers
@@ -843,6 +852,19 @@ fn format_audit_time(dt: DateTime<Utc>) -> String {
     dt.format("%Y-%m-%dT%H:%M:%S%:z").to_string()
 }
 
+/// エラーメッセージ/ログに埋め込む際に、レスポンス本文を扱いやすい長さへ切り詰める
+/// (board API のレスポンス shape が未検証なので、parse 失敗時に実物を見て直せるように
+/// するための診断用。Refs #540)。
+fn truncate_for_log(s: &str) -> String {
+    const MAX: usize = 500;
+    if s.chars().count() <= MAX {
+        s.to_string()
+    } else {
+        let truncated: String = s.chars().take(MAX).collect();
+        format!("{truncated}...(truncated)")
+    }
+}
+
 /// CSV バイト列を文字列にデコードする。公式ドキュメントに文字コードの明記が無いため、
 /// まず UTF-8 として読み、失敗したら Shift_JIS にフォールバックする (実データ未確認、Refs #540)。
 fn decode_csv_bytes(bytes: &[u8]) -> String {
@@ -858,18 +880,23 @@ fn decode_csv_bytes(bytes: &[u8]) -> String {
 /// email → 成功ログインの最終日時、の集計結果。
 pub type LastLoginByEmail = HashMap<String, DateTime<Utc>>;
 
-/// LINE WORKS 監査ログ CSV (`service=auth`) を解析し、メールアドレスごとの
-/// 「成功したログインの最終日時」を集計する。
+/// LINE WORKS 監査ログ CSV (`service=auth` / `message` 等) を解析し、メールアドレスごとの
+/// 「成功したイベントの最終日時」を集計する。
 ///
 /// ★ 実データで確認済み (2026-09-11、本番テナントの `language=ja_JP` CSV)。
-/// ヘッダーは `説明,メンバー,日時,IPアドレス,ログイン方法,サービスタイプ` の6列で、
-/// issue #540 本文にあった「結果」「メール」という独立列は無い:
-/// - **メンバー**: `"山田太郎 (demo@example.com)"` のように表示名 + `(メールアドレス)`
-///   の形式 (`extract_email_from_member_field` で括弧内を抽出。素のメールアドレスが
-///   そのまま入っている変種にもフォールバックで対応)。
-/// - **説明**: ログインの成否を表す文 (失敗時はエラーコード付きの文言になるらしい)。
-///   独立した「結果」列が無いため、この列に対して `is_success_result` の
-///   キーワード判定 (「成功」を含むか) を流用する。
+/// `service` によって列構成が違う:
+/// - **`service=auth`**: `説明,メンバー,日時,IPアドレス,ログイン方法,サービスタイプ` の6列。
+///   issue #540 本文にあった「結果」「メール」という独立列は無い:
+///   - **メンバー**: `"山田太郎 (demo@example.com)"` のように表示名 + `(メールアドレス)`
+///     の形式 (`extract_email_from_member_field` で括弧内を抽出。素のメールアドレスが
+///     そのまま入っている変種にもフォールバックで対応)。
+///   - **説明**: ログインの成否を表す文 (失敗時はエラーコード付きの文言になるらしい)。
+///     独立した「結果」列が無いため、この列に対して `is_success_result` の
+///     キーワード判定 (「成功」を含むか) を流用する。
+/// - **`service=message`**: `日時,送信者,受信者,チャンネルID,イベント` の5列
+///   (2026-09-11 本番実測)。「メンバー」相当が **「送信者」** という列名になる —
+///   人ごとの識別列は `find_column` のキーワードに応じて拾い分ける。「結果」相当の
+///   列も無いため (メッセージ送信に成功/失敗の概念が無い)、全行を有効なイベントとして扱う。
 ///
 /// 未知の見出しに遭遇したら黙って握りつぶさず `Err` を返す
 /// (誤判定より「気づける失敗」を優先する設計)。
@@ -883,8 +910,19 @@ pub fn parse_login_audit_csv(csv_text: &str) -> Result<LastLoginByEmail, String>
         .map_err(|e| format!("CSV header read error: {e}"))?
         .clone();
 
-    let member_idx = find_column(&headers, &["メンバー", "member", "メール", "email", "mail"])
-        .ok_or_else(|| format!("member/email column not found in headers: {headers:?}"))?;
+    let member_idx = find_column(
+        &headers,
+        &[
+            "メンバー",
+            "member",
+            "送信者",
+            "sender",
+            "メール",
+            "email",
+            "mail",
+        ],
+    )
+    .ok_or_else(|| format!("member/email column not found in headers: {headers:?}"))?;
     let datetime_idx = find_column(&headers, &["日時", "datetime", "time", "date"])
         .ok_or_else(|| format!("datetime column not found in headers: {headers:?}"))?;
     // 独立した「結果」列は無く、「説明」列に成否が文章で書かれている (実データ確認済み)。
@@ -1073,6 +1111,21 @@ mod tests {
     }
 
     #[test]
+    fn parse_login_audit_csv_supports_message_service_sender_column() {
+        // service=message の実ヘッダー (2026-09-11 実測): 日時,送信者,受信者,チャンネルID,イベント。
+        // 「メンバー」列は無く「送信者」列になる。「結果」相当の列も無いため全行を有効なイベント
+        // として扱う (メッセージ送信に成功/失敗の概念が無いため)。
+        let csv = "日時,送信者,受信者,チャンネルID,イベント\n\
+                    2026/09/01 09:00:00,山田太郎 (a@x.com),鈴木花子 (b@x.com),c1,送信\n";
+        let result = parse_login_audit_csv(csv).expect("parse");
+        assert!(result.contains_key("a@x.com"), "送信者列から拾える");
+        assert!(
+            !result.contains_key("b@x.com"),
+            "受信者は拾わない (送信者のみ)"
+        );
+    }
+
+    #[test]
     fn parse_login_audit_csv_without_result_column_treats_all_rows_as_success() {
         // 「説明」列を見つけられない見出しでも、メンバー/日時さえ拾えれば失敗しない
         // (誤って全件除外するより、失敗ログインを紛れ込ませる方が実害が小さいため)。
@@ -1142,6 +1195,19 @@ mod tests {
     fn parse_audit_datetime_rejects_garbage() {
         assert!(parse_audit_datetime("not-a-date").is_none());
         assert!(parse_audit_datetime("").is_none());
+    }
+
+    #[test]
+    fn truncate_for_log_leaves_short_strings_untouched() {
+        assert_eq!(truncate_for_log("short"), "short");
+    }
+
+    #[test]
+    fn truncate_for_log_truncates_long_strings_with_marker() {
+        let long = "a".repeat(600);
+        let out = truncate_for_log(&long);
+        assert!(out.ends_with("...(truncated)"));
+        assert!(out.len() < long.len());
     }
 
     #[test]
