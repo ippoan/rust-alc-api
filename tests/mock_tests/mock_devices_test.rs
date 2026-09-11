@@ -4275,3 +4275,104 @@ async fn test_re_pair_race_window_already_consumed() {
         .unwrap();
     assert_eq!(res.status(), 404);
 }
+
+// ============================================================
+// GET /api/internal/devices/{device_id}/pairing-tenant (Refs ippoan/auth-worker#544)
+// ============================================================
+
+#[tokio::test]
+async fn test_pairing_tenant_active_device_returns_200() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+
+    let mock = Arc::new(MockDeviceRepository::default());
+    mock.return_data.store(true, Ordering::SeqCst);
+    let mut state = setup_mock_app_state();
+    state.devices = mock;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+
+    let jwt = crate::common::create_test_internal_jwt();
+    let res = reqwest::Client::new()
+        .get(format!(
+            "{base_url}/api/internal/devices/{}/pairing-tenant",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(body["tenant_id"], Uuid::nil().to_string());
+}
+
+#[tokio::test]
+async fn test_pairing_tenant_not_found_returns_404() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+
+    // return_data=false (既定) → MockDeviceRepository::get_device_tenant_active
+    // は None を返す。未登録 / status != 'active' の両方をこれで代表する。
+    let mock = Arc::new(MockDeviceRepository::default());
+    let mut state = setup_mock_app_state();
+    state.devices = mock;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+
+    let jwt = crate::common::create_test_internal_jwt();
+    let res = reqwest::Client::new()
+        .get(format!(
+            "{base_url}/api/internal/devices/{}/pairing-tenant",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 404);
+}
+
+#[tokio::test]
+async fn test_pairing_tenant_db_error_returns_500() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+
+    let mock = Arc::new(MockDeviceRepository::default());
+    mock.fail_next.store(true, Ordering::SeqCst);
+    let mut state = setup_mock_app_state();
+    state.devices = mock;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+
+    let jwt = crate::common::create_test_internal_jwt();
+    let res = reqwest::Client::new()
+        .get(format!(
+            "{base_url}/api/internal/devices/{}/pairing-tenant",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 500);
+}
+
+#[tokio::test]
+async fn test_pairing_tenant_unauthorized_without_jwt() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+
+    let mock = Arc::new(MockDeviceRepository::default());
+    mock.return_data.store(true, Ordering::SeqCst);
+    let mut state = setup_mock_app_state();
+    state.devices = mock;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+
+    let res = reqwest::Client::new()
+        .get(format!(
+            "{base_url}/api/internal/devices/{}/pairing-tenant",
+            Uuid::new_v4()
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 401);
+}

@@ -38,6 +38,7 @@ pub trait DevicePairClient: Send + Sync {
     async fn mint(
         &self,
         tenant_id: Uuid,
+        device_id: Uuid,
         label: &str,
     ) -> Result<PairedCredential, DevicePairClientError>;
 }
