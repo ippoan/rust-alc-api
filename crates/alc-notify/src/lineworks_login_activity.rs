@@ -1,8 +1,34 @@
 //! LINE WORKS ログイン状況確認 (`GET /notify/lineworks/login-activity?days=N`, Refs #540)。
 //!
 //! LINE WORKS のトークは既読/未読を取得できないため、「しばらく LINE WORKS を見ていない人」を
-//! 把握する手段として監査ログ API のログイン履歴から最終ログイン日時を出す。用途は確認
-//! (一覧表示) のみで、リマインド送信等の自動アクションは行わない。
+//! 把握する手段として監査ログ API から最終アクティブ日時を出す。用途は確認 (一覧表示) のみで、
+//! リマインド送信等の自動アクションは行わない。
+//!
+//! ## 3つの信号を合成する (2026-09-11、ユーザーとの調査で判明した制約への対応)
+//! `service=auth` (明示ログイン) 単体では、モバイルアプリがセッションを保持する
+//! ユーザー (トラック乗務員のような「受け取るだけ」の利用が主なメンバー) の実態を
+//! ほぼ反映できない (本番実測: 187人中167人が「記録なし」)。次の3信号を合成して
+//! 「分かっている最も新しい下限値」を最終アクティブ日時として扱う:
+//!
+//! 1. **`service=auth`** — 明示的なログイン日時 (最も確実、これだけは必須)。
+//! 2. **`service=message`** — トーク送信日時 (`parse_login_audit_csv` を流用。
+//!    列構成が auth と同じ前提で「結果」列相当が見つからなければ全行を有効な
+//!    送信イベントとして扱う設計になっている — メッセージ送信に成功/失敗の概念は
+//!    無いため都合が良い)。**送信した履歴の無い「読むだけ」のメンバーには効かない**
+//!    (LINE WORKS のトーク監査ログには受信・既読の記録が無く、送信の一覧しか
+//!    取れないとコミュニティで報告されている)。
+//! 3. **`service=board.read` (掲示板既読)** — 掲示板投稿の既読フラグからの**下限値**。
+//!    既読 API (`/v1.0/boards/{id}/posts/{id}/readers`) は既読日時を返さず
+//!    true/false のみなので、「この投稿を読んだ = 投稿作成日時以降にアクティブ
+//!    だったはず」という下限として扱う (実際の最終アクティブ日時はこれより新しい
+//!    可能性がある)。★ board API 3種 (`list_boards` / `list_recent_board_posts` /
+//!    `list_board_post_readers`) のレスポンス shape は本番未検証 — 構造が想定と
+//!    ズレていても静かに 0 件になるだけで既存の auth/message 結果は壊さない設計
+//!    (`fetch_board_activity_lower_bound` の doc 参照)。
+//!
+//! **2 と 3 は best-effort**: scope 未設定・API 未対応・構造不一致などで失敗しても
+//! ログに警告を出すだけで無視し、1 (auth) の結果はそのまま返す。1 の失敗だけが
+//! エンドポイント全体のエラーになる。
 //!
 //! ## 既知の制約
 //! - LINE WORKS の監査ログ CSV は列構成が公式ドキュメントに記載されていないが、
@@ -44,7 +70,8 @@ use alc_core::auth_middleware::TenantId;
 use alc_core::AppState;
 
 use crate::clients::lineworks::{
-    parse_login_audit_csv, LastLoginByEmail, LineworksBotClient, LineworksBotError,
+    parse_login_audit_csv, LastLoginByEmail, LineworksBotClient, LineworksBotConfig,
+    LineworksBotError,
 };
 use crate::lineworks_config::resolve_lineworks_config;
 
@@ -111,7 +138,7 @@ async fn get_login_activity(
         .map_err(|e| scope_error(e, "directory.read"))?;
 
     let last_login_by_email =
-        get_or_fetch_login_activity(&client, config_id, &config, tenant.0).await?;
+        get_or_fetch_login_activity(&client, config_id, &config, tenant.0, &members).await?;
 
     let now = Utc::now();
     let mut entries: Vec<LoginActivityEntry> = members
@@ -148,11 +175,15 @@ async fn get_login_activity(
 /// tenant ごとに直列化 + `CACHE_TTL_SECS` 秒キャッシュしてから監査ログを取得する。
 /// ロックを保持したまま fetch することで、同一 tenant への並行アクセスを直列化する
 /// (「並行して呼び出さないでください」という LINE WORKS API 制約への対応)。
+///
+/// auth (必須) + message・board (best-effort) を合成する。後者2つが失敗しても
+/// auth の結果はそのまま返す (モジュール doc 参照)。
 async fn get_or_fetch_login_activity(
     client: &LineworksBotClient,
     config_id: Uuid,
-    config: &crate::clients::lineworks::LineworksBotConfig,
+    config: &LineworksBotConfig,
     tenant_id: Uuid,
+    members: &[crate::clients::lineworks::LineworksMember],
 ) -> Result<LastLoginByEmail, (StatusCode, Json<serde_json::Value>)> {
     let mut guard = cache().lock().await;
 
@@ -164,13 +195,14 @@ async fn get_or_fetch_login_activity(
 
     let now = Utc::now();
     let start = now - Duration::days(AUDIT_WINDOW_DAYS);
-    let csv = client
-        .fetch_login_audit_csv(config_id, config, start, now)
+
+    // 1. auth (必須)。失敗はそのままエンドポイントのエラーにする。
+    let auth_csv = client
+        .fetch_audit_csv(config_id, config, "auth", start, now)
         .await
         .map_err(|e| scope_error(e, "audit.read"))?;
-
-    let last_login_by_email = parse_login_audit_csv(&csv).map_err(|e| {
-        tracing::error!("parse login audit csv: {e}");
+    let mut combined = parse_login_audit_csv(&auth_csv).map_err(|e| {
+        tracing::error!("parse login audit csv (auth): {e}");
         (
             StatusCode::BAD_GATEWAY,
             Json(serde_json::json!({
@@ -180,15 +212,61 @@ async fn get_or_fetch_login_activity(
         )
     })?;
 
+    // 2. message (best-effort)。トーク送信日時。失敗してもログに残すだけで進む。
+    match client
+        .fetch_audit_csv(config_id, config, "message", start, now)
+        .await
+    {
+        Ok(csv) => match parse_login_audit_csv(&csv) {
+            Ok(sent_by_email) => merge_keep_latest(&mut combined, sent_by_email),
+            Err(e) => tracing::warn!("parse message audit csv (best-effort, skip): {e}"),
+        },
+        Err(e) => tracing::warn!("fetch message audit csv (best-effort, skip): {e}"),
+    }
+
+    // 3. board (best-effort)。既読投稿の作成日時を「下限」として合成する。
+    match client
+        .fetch_board_activity_lower_bound(config_id, config, start)
+        .await
+    {
+        Ok(lower_bound_by_user_id) => {
+            let email_by_user_id: HashMap<&str, &str> = members
+                .iter()
+                .filter_map(|m| m.email.as_deref().map(|e| (m.user_id.as_str(), e)))
+                .collect();
+            let mut by_email: LastLoginByEmail = HashMap::new();
+            for (user_id, dt) in lower_bound_by_user_id {
+                if let Some(&email) = email_by_user_id.get(user_id.as_str()) {
+                    by_email.insert(email.to_lowercase(), dt);
+                }
+            }
+            merge_keep_latest(&mut combined, by_email);
+        }
+        Err(e) => tracing::warn!("fetch board activity (best-effort, skip): {e}"),
+    }
+
     guard.insert(
         tenant_id,
         CachedActivity {
             fetched_at: now,
-            last_login_by_email: last_login_by_email.clone(),
+            last_login_by_email: combined.clone(),
         },
     );
 
-    Ok(last_login_by_email)
+    Ok(combined)
+}
+
+/// `other` の各エントリを `base` にマージし、同じキーがあれば新しい方の日時を残す。
+fn merge_keep_latest(base: &mut LastLoginByEmail, other: LastLoginByEmail) {
+    for (email, dt) in other {
+        base.entry(email)
+            .and_modify(|cur| {
+                if dt > *cur {
+                    *cur = dt;
+                }
+            })
+            .or_insert(dt);
+    }
 }
 
 fn scope_error(e: LineworksBotError, scope: &str) -> (StatusCode, Json<serde_json::Value>) {
@@ -230,6 +308,47 @@ mod tests {
         assert!(
             AUDIT_WINDOW_DAYS < 31,
             "31 ちょうどは LINE WORKS 側に拒否される"
+        );
+    }
+
+    #[test]
+    fn merge_keep_latest_prefers_newer_entry_for_shared_key() {
+        let mut base: LastLoginByEmail = HashMap::new();
+        base.insert("a@x.com".to_string(), Utc::now() - Duration::days(10));
+
+        let mut other: LastLoginByEmail = HashMap::new();
+        other.insert("a@x.com".to_string(), Utc::now() - Duration::days(2)); // より新しい
+        other.insert("b@x.com".to_string(), Utc::now() - Duration::days(5)); // 新規キー
+
+        let a_before = *base.get("a@x.com").unwrap();
+        merge_keep_latest(&mut base, other.clone());
+
+        assert!(
+            base.get("a@x.com").unwrap() > &a_before,
+            "新しい方で上書きされる"
+        );
+        assert_eq!(
+            base.get("b@x.com"),
+            other.get("b@x.com"),
+            "無いキーは追加される"
+        );
+    }
+
+    #[test]
+    fn merge_keep_latest_does_not_overwrite_with_older_entry() {
+        let mut base: LastLoginByEmail = HashMap::new();
+        let newer = Utc::now() - Duration::days(1);
+        base.insert("a@x.com".to_string(), newer);
+
+        let mut other: LastLoginByEmail = HashMap::new();
+        other.insert("a@x.com".to_string(), Utc::now() - Duration::days(20)); // より古い
+
+        merge_keep_latest(&mut base, other);
+
+        assert_eq!(
+            base.get("a@x.com"),
+            Some(&newer),
+            "古い方には上書きされない"
         );
     }
 }
