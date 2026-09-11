@@ -74,7 +74,7 @@ where
 }
 
 /// board API の ID 系フィールド (`boardId` 等) 用。2026-09-11 本番実測で `boardId` が
-/// JSON の数値 (`4080000000172174357`) で返ってくると判明した (issue #540 実装時は
+/// JSON の数値 (`4000000000000000001`) で返ってくると判明した (issue #540 実装時は
 /// 文字列と推測していた)。以降 `postId`/`userId` 等も型が予想と違う可能性を潰すため、
 /// 文字列・数値のどちらでも受け付けて `String` に正規化する
 /// (この後の用途は URL のパスセグメント/HashMap key への文字列展開のみで、
@@ -172,7 +172,7 @@ struct ResponseMetaData {
 
 /// `GET /v1.0/boards` レスポンス (Refs #540)。★ 実データで shape 確認済み
 /// (2026-09-11): `{"boards": [{"boardId": <数値>, "boardName": ..., ...}]}`。
-/// `boardId` は文字列ではなく **JSON の数値** (`4080000000172174357` のような
+/// `boardId` は文字列ではなく **JSON の数値** (`4000000000000000001` のような
 /// 64bit 整数) だった — 実装時は文字列と推測していたが誤り (`deserialize_id_as_string`
 /// で文字列・数値どちらでも受け付けるよう修正済み)。`posts`/`readers` の ID も
 /// 同じ書き方で防御している (未検証)。
@@ -1249,12 +1249,12 @@ mod tests {
 
     #[test]
     fn boards_response_parses_numeric_board_id() {
-        // 2026-09-11 本番実測の実データそのまま (boardId は文字列ではなく数値)。
-        let json = r#"{"boards":[{"boardId":4080000000172174357,"boardName":"事務所　業務連絡","description":"","tenantBoard":false,"createdTime":"2022-06-07T14:05:17+09:00","modifiedTime":"2026-06-27T18:29:19+09:00","displayOrder":0,"resourceLocation":null}]}"#;
+        // 2026-09-11 本番実測と同じ形 (boardId は文字列ではなく 64bit の数値)。値はダミー。
+        let json = r#"{"boards":[{"boardId":4000000000000000001,"boardName":"テスト掲示板","description":"","tenantBoard":false,"createdTime":"2022-01-01T09:00:00+09:00","modifiedTime":"2026-01-01T09:00:00+09:00","displayOrder":0,"resourceLocation":null}]}"#;
         let body: BoardsResponse = serde_json::from_str(json).expect("deserialize");
         assert_eq!(
             body.boards.unwrap()[0].board_id,
-            "4080000000172174357",
+            "4000000000000000001",
             "数値の boardId が文字列に正規化される"
         );
     }
@@ -1582,12 +1582,12 @@ mod tests {
         Mock::given(method("GET"))
             .and(path("/boards"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "boards": [{"boardId": 4080000000172174357u64}]
+                "boards": [{"boardId": 4000000000000000001u64}]
             })))
             .mount(&boards_server)
             .await;
         Mock::given(method("GET"))
-            .and(path("/boards/4080000000172174357/posts"))
+            .and(path("/boards/4000000000000000001/posts"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "posts": [
                     {"postId": 1234567890123456789u64, "createdTime": "2026-09-01T00:00:00+09:00"},
@@ -1599,7 +1599,7 @@ mod tests {
             .await;
         Mock::given(method("GET"))
             .and(path(
-                "/boards/4080000000172174357/posts/1234567890123456789/readers",
+                "/boards/4000000000000000001/posts/1234567890123456789/readers",
             ))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "readers": [
