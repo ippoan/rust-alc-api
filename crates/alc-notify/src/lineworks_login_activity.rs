@@ -13,9 +13,14 @@
 //!   複数インスタンス構成では効かない (このコードベースに分散ロック機構が無いため。他の
 //!   LINE WORKS クライアント呼び出しも同様にプロセスローカルなトークンキャッシュしか
 //!   持たない — 詳細はコードレビュー時の調査メモ参照)。
-//! - 1 リクエストの取得期間は API 上限の 31 日に固定する。`days` はその 31 日分から
-//!   「N 日以上ログインなし」を判定するしきい値であり、31 を超える `days` を渡しても
-//!   31 日より前の記録は判定できない (「記録なし」表示になる)。
+//! - 1 リクエストの取得期間は API 上限 31 日ぎりぎりの `Duration::days(31)` を
+//!   `now - N` 〜 `now` (ちょうど31*24h) で指定すると LINE WORKS 側が
+//!   `400 LIMIT_EXCEEDED "Period must be within 31 days."` を返す (2026-09-11 本番実測、
+//!   Refs #540)。開始・終了の暦日をまたぐと「31日を超える」と判定されるらしく、
+//!   境界値ぴったりは弾かれる。**`AUDIT_WINDOW_DAYS` は上限の 31 ではなく 30 に
+//!   落として安全側に倒す。** `days` はその窓の中から「N 日以上ログインなし」を
+//!   判定するしきい値であり、`AUDIT_WINDOW_DAYS` を超える `days` を渡しても
+//!   それより前の記録は判定できない (「記録なし」表示になる)。
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -45,8 +50,10 @@ pub fn tenant_router() -> Router<AppState> {
     )
 }
 
-/// LINE WORKS API 上限 (1 リクエスト最長31日)。
-const AUDIT_WINDOW_DAYS: i64 = 31;
+/// LINE WORKS API 上限は「1 リクエスト最長31日」だが、境界値ぴったり (31*24h) を
+/// 指定すると暦日ベースの判定で弾かれる (2026-09-11 実測、上のモジュール doc 参照)。
+/// 安全マージンを取って 30 日にする。
+const AUDIT_WINDOW_DAYS: i64 = 30;
 /// 「並行して呼び出さないでください」への対応 + 過度な再取得の抑制。
 const CACHE_TTL_SECS: i64 = 300;
 
@@ -202,4 +209,22 @@ fn scope_error(e: LineworksBotError, scope: &str) -> (StatusCode, Json<serde_jso
             "message": msg,
         })),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[allow(clippy::assertions_on_constants)] // 定数への回帰ガードとして意図的
+    fn audit_window_stays_under_the_31_day_api_limit() {
+        // 2026-09-11 本番実測: ちょうど 31*24h を指定すると LINE WORKS 側が
+        // `LIMIT_EXCEEDED "Period must be within 31 days."` を返す (暦日ベースの
+        // 判定で境界値ぴったりは弾かれる)。安全マージンを削って 31 に戻す変更を
+        // 防ぐための回帰テスト。
+        assert!(
+            AUDIT_WINDOW_DAYS < 31,
+            "31 ちょうどは LINE WORKS 側に拒否される"
+        );
+    }
 }
