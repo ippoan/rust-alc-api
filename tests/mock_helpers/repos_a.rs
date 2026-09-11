@@ -1748,7 +1748,6 @@ impl Default for MockDevicePairClient {
 impl rust_alc_api::device_pair_client::DevicePairClient for MockDevicePairClient {
     async fn mint(
         &self,
-        _tenant_id: Uuid,
         _device_id: Uuid,
         _label: &str,
     ) -> Result<
