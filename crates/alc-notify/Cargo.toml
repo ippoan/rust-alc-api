@@ -12,6 +12,8 @@ async-trait = "0.1"
 base64 = "0.22"
 axum = { version = "0.8", features = ["multipart"] }
 chrono = { version = "0.4", features = ["serde"] }
+csv = "1"
+encoding_rs = "0.8"
 flate2 = "1"
 hmac = "0.12"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
