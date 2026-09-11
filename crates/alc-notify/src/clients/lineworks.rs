@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use chrono::{DateTime, FixedOffset, NaiveDateTime, TimeZone, Utc};
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
@@ -13,6 +14,7 @@ use uuid::Uuid;
 const AUTH_TOKEN_ENDPOINT: &str = "https://auth.worksmobile.com/oauth2/v2.0/token";
 const BOT_ENDPOINT: &str = "https://www.worksapis.com/v1.0/bots/";
 const USERS_ENDPOINT: &str = "https://www.worksapis.com/v1.0/users";
+const AUDIT_LOG_DOWNLOAD_ENDPOINT: &str = "https://www.worksapis.com/v1.0/audits/logs/download";
 
 #[derive(Debug, thiserror::Error)]
 pub enum LineworksBotError {
@@ -136,6 +138,7 @@ pub struct LineworksBotClient {
     cache: Arc<RwLock<HashMap<(Uuid, String), CachedToken>>>,
     bot_endpoint: String,
     auth_token_endpoint: String,
+    audit_log_download_endpoint: String,
 }
 
 impl Default for LineworksBotClient {
@@ -152,11 +155,26 @@ impl LineworksBotClient {
     /// Test/staging 用にエンドポイントを差し替えるコンストラクタ。
     /// `bot_endpoint` は末尾スラッシュ付き (例: `https://www.worksapis.com/v1.0/bots/`)。
     pub fn with_endpoints(bot_endpoint: &str, auth_token_endpoint: &str) -> Self {
+        Self::with_all_endpoints(
+            bot_endpoint,
+            auth_token_endpoint,
+            AUDIT_LOG_DOWNLOAD_ENDPOINT,
+        )
+    }
+
+    /// `with_endpoints` に加えて監査ログダウンロード endpoint も差し替えるコンストラクタ
+    /// (Refs #540、`fetch_login_audit_csv` のテスト用)。
+    pub fn with_all_endpoints(
+        bot_endpoint: &str,
+        auth_token_endpoint: &str,
+        audit_log_download_endpoint: &str,
+    ) -> Self {
         Self {
             client: reqwest::Client::new(),
             cache: Arc::new(RwLock::new(HashMap::new())),
             bot_endpoint: bot_endpoint.to_string(),
             auth_token_endpoint: auth_token_endpoint.to_string(),
+            audit_log_download_endpoint: audit_log_download_endpoint.to_string(),
         }
     }
 
@@ -477,6 +495,171 @@ impl LineworksBotClient {
 
         Ok(members)
     }
+
+    /// LINE WORKS 監査ログ (audit.read scope) の CSV をダウンロードする (Refs #540)。
+    ///
+    /// `GET /v1.0/audits/logs/download?service=...&startTime=...&endTime=...` は 302 で
+    /// 実ファイルの署名付き URL (`Location`) を返す。`reqwest::Client` は既定でリダイレクトを
+    /// 追従し、かつリダイレクト先ホストが変わると `Authorization` ヘッダを引き継がない
+    /// (署名付き URL は Bearer 不要な前提) ので、追加のリダイレクト処理は書かない。
+    ///
+    /// 期間は最長 31 日 (LINE WORKS API 制限)、呼び出し元で担保すること。
+    /// 「並行して呼び出さないでください」という制約への対応 (直列化・キャッシュ) は
+    /// このクライアントの責務ではなく呼び出し側 (`lineworks_login_activity.rs`) に置く。
+    pub async fn fetch_login_audit_csv(
+        &self,
+        config_id: Uuid,
+        config: &LineworksBotConfig,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<String, LineworksBotError> {
+        let token = self
+            .get_access_token(config_id, config, "audit.read")
+            .await?;
+
+        let url = format!(
+            "{}?service=auth&startTime={}&endTime={}&language=ja_JP",
+            self.audit_log_download_endpoint,
+            urlencoding::encode(&format_audit_time(start)),
+            urlencoding::encode(&format_audit_time(end)),
+        );
+
+        let resp = self
+            .client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", token))
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            tracing::error!("LINE WORKS audit log download failed: {status} - {body}");
+            return Err(LineworksBotError::SendFailed(format!("{status}: {body}")));
+        }
+
+        let bytes = resp.bytes().await?;
+        Ok(decode_csv_bytes(&bytes))
+    }
+}
+
+/// 監査ログ API が要求する `YYYY-MM-DDThh:mm:ssTZD` 形式。
+fn format_audit_time(dt: DateTime<Utc>) -> String {
+    dt.format("%Y-%m-%dT%H:%M:%S%:z").to_string()
+}
+
+/// CSV バイト列を文字列にデコードする。公式ドキュメントに文字コードの明記が無いため、
+/// まず UTF-8 として読み、失敗したら Shift_JIS にフォールバックする (実データ未確認、Refs #540)。
+fn decode_csv_bytes(bytes: &[u8]) -> String {
+    match std::str::from_utf8(bytes) {
+        Ok(s) => s.trim_start_matches('\u{feff}').to_string(),
+        Err(_) => {
+            let (decoded, _, _) = encoding_rs::SHIFT_JIS.decode(bytes);
+            decoded.into_owned()
+        }
+    }
+}
+
+/// email → 成功ログインの最終日時、の集計結果。
+pub type LastLoginByEmail = HashMap<String, DateTime<Utc>>;
+
+/// LINE WORKS 監査ログ CSV (`service=auth`) を解析し、メールアドレスごとの
+/// 「成功したログインの最終日時」を集計する。
+///
+/// ★★ 実 CSV 未確認 (issue #540 時点)。公式ドキュメント (audit-log-download) には
+/// CSV の列構成の記載が無く、ここでは issue 本文の記述 (ログイン結果=成功/失敗、
+/// メンバー名・メール、日時、利用プログラム区分) からキーワードでヘッダ列を推定している。
+/// **実データを入手したら `find_column` に渡すキーワード候補を実物の見出しに合わせて
+/// 更新すること。** 未知の見出しに遭遇したら黙って握りつぶさず `Err` を返す
+/// (誤判定より「気づける失敗」を優先する設計)。
+pub fn parse_login_audit_csv(csv_text: &str) -> Result<LastLoginByEmail, String> {
+    let mut rdr = csv::ReaderBuilder::new()
+        .flexible(true)
+        .from_reader(csv_text.as_bytes());
+
+    let headers = rdr
+        .headers()
+        .map_err(|e| format!("CSV header read error: {e}"))?
+        .clone();
+
+    let email_idx = find_column(&headers, &["メール", "email", "mail"])
+        .ok_or_else(|| format!("email column not found in headers: {headers:?}"))?;
+    let datetime_idx = find_column(&headers, &["日時", "datetime", "time", "date"])
+        .ok_or_else(|| format!("datetime column not found in headers: {headers:?}"))?;
+    let result_idx = find_column(&headers, &["結果", "result"]);
+
+    let mut last_login: LastLoginByEmail = HashMap::new();
+
+    for row in rdr.records() {
+        let row = row.map_err(|e| format!("CSV row read error: {e}"))?;
+
+        if let Some(idx) = result_idx {
+            if !row.get(idx).map(is_success_result).unwrap_or(false) {
+                continue; // 失敗ログイン行はスキップ
+            }
+        }
+
+        let Some(email) = row.get(email_idx).map(str::trim).filter(|s| !s.is_empty()) else {
+            continue;
+        };
+        let Some(dt) = row.get(datetime_idx).and_then(parse_audit_datetime) else {
+            continue;
+        };
+
+        let key = email.to_lowercase();
+        last_login
+            .entry(key)
+            .and_modify(|cur| {
+                if dt > *cur {
+                    *cur = dt;
+                }
+            })
+            .or_insert(dt);
+    }
+
+    Ok(last_login)
+}
+
+/// ヘッダ行からキーワード (部分一致・大小無視) を含む列の index を探す。
+fn find_column(headers: &csv::StringRecord, keywords: &[&str]) -> Option<usize> {
+    headers.iter().position(|h| {
+        let h_lower = h.to_lowercase();
+        keywords
+            .iter()
+            .any(|k| h.contains(k) || h_lower.contains(&k.to_lowercase()))
+    })
+}
+
+/// 「結果」列の値がログイン成功を表すか判定する (実データ未確認、代表的な表記を列挙)。
+fn is_success_result(value: &str) -> bool {
+    let v = value.trim();
+    v.contains("成功") || v.eq_ignore_ascii_case("success") || v.eq_ignore_ascii_case("OK")
+}
+
+/// 「日時」列の値を UTC の `DateTime` に変換する。タイムゾーン付き (RFC3339) を優先し、
+/// 無ければ `language=ja_JP` を想定して JST (`+09:00`) のローカル時刻として解釈する。
+fn parse_audit_datetime(raw: &str) -> Option<DateTime<Utc>> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    if let Ok(dt) = DateTime::parse_from_rfc3339(raw) {
+        return Some(dt.with_timezone(&Utc));
+    }
+    for fmt in [
+        "%Y/%m/%d %H:%M:%S",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y/%m/%d %H:%M",
+        "%Y-%m-%d %H:%M",
+    ] {
+        if let Ok(naive) = NaiveDateTime::parse_from_str(raw, fmt) {
+            let jst = FixedOffset::east_opt(9 * 3600)?;
+            if let Some(dt) = jst.from_local_datetime(&naive).single() {
+                return Some(dt.with_timezone(&Utc));
+            }
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -525,5 +708,206 @@ mod tests {
         let json = r#"{"users": [], "responseMetaData": {}}"#;
         let body: UsersResponse = serde_json::from_str(json).expect("deserialize");
         assert!(body.response_meta_data.unwrap().next_cursor.is_none());
+    }
+
+    // --- login audit CSV (#540) ---
+    // ★ 実 CSV 未確認。ここでのヘッダ文字列は issue #540 本文の記述からの推測。
+
+    #[test]
+    fn parse_login_audit_csv_keeps_latest_success_per_email() {
+        let csv = "日時,メールアドレス,結果,利用プログラム区分\n\
+                    2026/09/01 09:00:00,a@x.com,成功,ブラウザ\n\
+                    2026/09/03 10:30:00,a@x.com,成功,モバイルアプリ\n\
+                    2026/09/02 08:00:00,b@x.com,失敗,ブラウザ\n";
+        let result = parse_login_audit_csv(csv).expect("parse");
+        assert_eq!(result.len(), 1);
+        let a = result.get("a@x.com").expect("a@x.com present");
+        assert_eq!(a.to_rfc3339(), "2026-09-03T01:30:00+00:00"); // JST → UTC
+        assert!(!result.contains_key("b@x.com")); // 失敗のみの行は集計しない
+    }
+
+    #[test]
+    fn parse_login_audit_csv_matches_email_case_insensitively_and_trims() {
+        let csv = "日時,メール,結果\n2026/09/01 09:00:00, A@X.com ,成功\n";
+        let result = parse_login_audit_csv(csv).expect("parse");
+        assert!(result.contains_key("a@x.com"));
+    }
+
+    #[test]
+    fn parse_login_audit_csv_without_result_column_treats_all_rows_as_success() {
+        // 「結果」列を見つけられない見出しでも、email/日時さえ拾えれば失敗しない
+        // (誤って全件除外するより、失敗ログインを紛れ込ませる方が実害が小さいため)。
+        let csv = "日時,メール\n2026/09/01 09:00:00,a@x.com\n";
+        let result = parse_login_audit_csv(csv).expect("parse");
+        assert!(result.contains_key("a@x.com"));
+    }
+
+    #[test]
+    fn parse_login_audit_csv_fails_loudly_on_unrecognized_headers() {
+        // 列名が全く想定外なら黙って空集計にせず Err を返す (#540 の設計方針)。
+        let csv = "col_a,col_b\n1,2\n";
+        let err = parse_login_audit_csv(csv).unwrap_err();
+        assert!(err.contains("email column not found"));
+    }
+
+    #[test]
+    fn is_success_result_recognizes_known_variants() {
+        assert!(is_success_result("成功"));
+        assert!(is_success_result(" success "));
+        assert!(is_success_result("OK"));
+        assert!(!is_success_result("失敗"));
+        assert!(!is_success_result("failure"));
+    }
+
+    #[test]
+    fn parse_audit_datetime_accepts_rfc3339() {
+        let dt = parse_audit_datetime("2026-09-01T00:00:00+09:00").expect("parse");
+        assert_eq!(dt.to_rfc3339(), "2026-08-31T15:00:00+00:00");
+    }
+
+    #[test]
+    fn parse_audit_datetime_treats_slash_format_as_jst() {
+        let dt = parse_audit_datetime("2026/09/01 09:00:00").expect("parse");
+        assert_eq!(dt.to_rfc3339(), "2026-09-01T00:00:00+00:00");
+    }
+
+    #[test]
+    fn parse_audit_datetime_rejects_garbage() {
+        assert!(parse_audit_datetime("not-a-date").is_none());
+        assert!(parse_audit_datetime("").is_none());
+    }
+
+    #[test]
+    fn decode_csv_bytes_strips_utf8_bom() {
+        let mut bytes = vec![0xEF, 0xBB, 0xBF];
+        bytes.extend_from_slice("a,b\n1,2\n".as_bytes());
+        assert_eq!(decode_csv_bytes(&bytes), "a,b\n1,2\n");
+    }
+
+    #[test]
+    fn decode_csv_bytes_falls_back_to_shift_jis() {
+        let (encoded, _, had_errors) = encoding_rs::SHIFT_JIS.encode("名前,結果\n田中,成功\n");
+        assert!(!had_errors);
+        assert_eq!(decode_csv_bytes(&encoded), "名前,結果\n田中,成功\n");
+    }
+
+    /// RSA 鍵生成は 2048bit で数百 ms かかるのでテスト間で使い回す
+    /// (lineworks_channels.rs のテストヘルパーと同じ方針)。
+    fn test_private_pem() -> &'static str {
+        use rsa::pkcs1::EncodeRsaPrivateKey;
+        use rsa::rand_core::OsRng;
+        use rsa::RsaPrivateKey;
+        use std::sync::OnceLock;
+        static PEM: OnceLock<String> = OnceLock::new();
+        PEM.get_or_init(|| {
+            RsaPrivateKey::new(&mut OsRng, 2048)
+                .unwrap()
+                .to_pkcs1_pem(rsa::pkcs1::LineEnding::LF)
+                .unwrap()
+                .to_string()
+        })
+    }
+
+    fn test_config() -> LineworksBotConfig {
+        LineworksBotConfig {
+            client_id: "client".into(),
+            client_secret: "secret".into(),
+            service_account: "sa@example.com".into(),
+            private_key: test_private_pem().to_string(),
+            bot_id: "bot1".into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn fetch_login_audit_csv_follows_redirect_and_returns_body() {
+        use wiremock::matchers::{method, path, query_param};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let auth_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "tok",
+                "refresh_token": "r",
+                "expires_in": 3600,
+            })))
+            .mount(&auth_server)
+            .await;
+
+        let csv_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/download/csv"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string("日時,メール,結果\n2026/09/01 09:00:00,a@x.com,成功\n"),
+            )
+            .mount(&csv_server)
+            .await;
+
+        let audit_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/audit"))
+            .and(query_param("service", "auth"))
+            .respond_with(
+                ResponseTemplate::new(302)
+                    .insert_header("Location", format!("{}/download/csv", csv_server.uri())),
+            )
+            .mount(&audit_server)
+            .await;
+
+        let client = LineworksBotClient::with_all_endpoints(
+            "http://unused/",
+            &format!("{}/token", auth_server.uri()),
+            &format!("{}/audit", audit_server.uri()),
+        );
+        let config = test_config();
+        let start = Utc::now() - chrono::Duration::days(31);
+        let end = Utc::now();
+
+        let csv = client
+            .fetch_login_audit_csv(Uuid::new_v4(), &config, start, end)
+            .await
+            .expect("fetch succeeds");
+
+        assert!(csv.contains("a@x.com"));
+        let parsed = parse_login_audit_csv(&csv).expect("parse");
+        assert!(parsed.contains_key("a@x.com"));
+    }
+
+    #[tokio::test]
+    async fn fetch_login_audit_csv_maps_403_to_send_failed() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let auth_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "tok",
+                "refresh_token": "r",
+                "expires_in": 3600,
+            })))
+            .mount(&auth_server)
+            .await;
+
+        let audit_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/audit"))
+            .respond_with(ResponseTemplate::new(403).set_body_string("forbidden"))
+            .mount(&audit_server)
+            .await;
+
+        let client = LineworksBotClient::with_all_endpoints(
+            "http://unused/",
+            &format!("{}/token", auth_server.uri()),
+            &format!("{}/audit", audit_server.uri()),
+        );
+        let config = test_config();
+        let err = client
+            .fetch_login_audit_csv(Uuid::new_v4(), &config, Utc::now(), Utc::now())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, LineworksBotError::SendFailed(_)));
+        assert!(err.to_string().contains("403"));
     }
 }

@@ -48,6 +48,7 @@ pub use alc_notify::line_config as notify_line_config;
 pub use alc_notify::line_webhook as notify_line_webhook;
 pub use alc_notify::lineworks_channels as notify_lineworks_channels;
 pub use alc_notify::lineworks_directory as notify_lineworks_directory;
+pub use alc_notify::lineworks_login_activity as notify_lineworks_login_activity;
 pub use alc_notify::read_tracker as notify_read_tracker;
 pub use alc_notify::recipients as notify_recipients;
 pub use alc_notify::test_endpoints as notify_test_endpoints;
@@ -166,6 +167,7 @@ pub fn router(
         .merge(notify_recipients::tenant_router())
         .merge(notify_groups::tenant_router())
         .merge(notify_lineworks_directory::tenant_router())
+        .merge(notify_lineworks_login_activity::tenant_router())
         .merge(notify_lineworks_channels::tenant_router())
         .merge(notify_documents::tenant_router())
         .merge(notify_distribute::tenant_router())

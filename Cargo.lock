@@ -218,6 +218,8 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "chrono",
+ "csv",
+ "encoding_rs",
  "flate2",
  "hmac",
  "image",
