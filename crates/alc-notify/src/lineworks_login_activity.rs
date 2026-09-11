@@ -24,7 +24,11 @@
 //!    可能性がある)。★ board API 3種 (`list_boards` / `list_recent_board_posts` /
 //!    `list_board_post_readers`) のレスポンス shape は本番未検証 — 構造が想定と
 //!    ズレていても静かに 0 件になるだけで既存の auth/message 結果は壊さない設計
-//!    (`fetch_board_activity_lower_bound` の doc 参照)。
+//!    (`fetch_board_activity_lower_bound` の doc 参照)。この下限値そのものは
+//!    `LoginActivityEntry.board_read_lower_bound_at` としても個別に返す (2026-09-11、
+//!    #540 フォローアップ)。`last_login_at`/`stale` は3信号を合成した `combined` を
+//!    使うのに対し、こちらは board 単体の値なので基準が異なる — 同じ行で両方を
+//!    見せる画面側は「下限値」であることが分かるよう表記すること。
 //!
 //! **2 と 3 は best-effort**: scope 未設定・API 未対応・構造不一致などで失敗しても
 //! ログに警告を出すだけで無視し、1 (auth) の結果はそのまま返す。1 の失敗だけが
@@ -109,11 +113,29 @@ pub struct LoginActivityEntry {
     pub days_since_login: Option<i64>,
     /// `true` = 記録なし、または `days` しきい値以上ログインが無い。
     pub stale: bool,
+    /// RFC3339。掲示板既読の根拠にした投稿の投稿日時 (下限値 — 実際の最終アクティブ日時は
+    /// これ以降の可能性がある。モジュール doc の信号3参照)。記録なしなら `null`。
+    pub board_read_lower_bound_at: Option<String>,
+}
+
+/// auth/message/board の3信号を合成した結果。`combined` が既存の「分かっている最も
+/// 新しい下限」(last_login_at / stale 判定の実体)。`auth` / `message` / `board` は
+/// 各信号単体の値の内訳 — 今回は `board` だけ画面に出すが、次に別の信号を見せて
+/// ほしいと言われたときにこの struct と cache をもう一度作り直さずに済むよう
+/// 保持しておく (2026-09-11、#540 フォローアップで board 分だけ先に露出)。
+#[derive(Debug, Clone)]
+struct CombinedActivity {
+    combined: LastLoginByEmail,
+    #[allow(dead_code)] // 画面には未露出の内訳 (将来「auth単体の日時」要望に備える)
+    auth: LastLoginByEmail,
+    #[allow(dead_code)] // 同上 (message)
+    message: LastLoginByEmail,
+    board: LastLoginByEmail,
 }
 
 struct CachedActivity {
     fetched_at: DateTime<Utc>,
-    last_login_by_email: LastLoginByEmail,
+    activity: CombinedActivity,
 }
 
 type ActivityCache = Mutex<HashMap<Uuid, CachedActivity>>;
@@ -137,17 +159,20 @@ async fn get_login_activity(
         .await
         .map_err(|e| scope_error(e, "directory.read"))?;
 
-    let last_login_by_email =
+    let activity =
         get_or_fetch_login_activity(&client, config_id, &config, tenant.0, &members).await?;
 
     let now = Utc::now();
     let mut entries: Vec<LoginActivityEntry> = members
         .into_iter()
         .map(|m| {
-            let last_login = m
-                .email
+            let email_lower = m.email.as_ref().map(|e| e.to_lowercase());
+            let last_login = email_lower
                 .as_ref()
-                .and_then(|e| last_login_by_email.get(&e.to_lowercase()).copied());
+                .and_then(|e| activity.combined.get(e).copied());
+            let board_read_lower_bound = email_lower
+                .as_ref()
+                .and_then(|e| activity.board.get(e).copied());
             let days_since_login = last_login.map(|dt| (now - dt).num_days());
             let stale = days_since_login.map(|d| d >= days).unwrap_or(true);
             LoginActivityEntry {
@@ -157,6 +182,7 @@ async fn get_login_activity(
                 last_login_at: last_login.map(|dt| dt.to_rfc3339()),
                 days_since_login,
                 stale,
+                board_read_lower_bound_at: board_read_lower_bound.map(|dt| dt.to_rfc3339()),
             }
         })
         .collect();
@@ -184,12 +210,12 @@ async fn get_or_fetch_login_activity(
     config: &LineworksBotConfig,
     tenant_id: Uuid,
     members: &[crate::clients::lineworks::LineworksMember],
-) -> Result<LastLoginByEmail, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<CombinedActivity, (StatusCode, Json<serde_json::Value>)> {
     let mut guard = cache().lock().await;
 
     if let Some(cached) = guard.get(&tenant_id) {
         if Utc::now() - cached.fetched_at < Duration::seconds(CACHE_TTL_SECS) {
-            return Ok(cached.last_login_by_email.clone());
+            return Ok(cached.activity.clone());
         }
     }
 
@@ -201,7 +227,7 @@ async fn get_or_fetch_login_activity(
         .fetch_audit_csv(config_id, config, "auth", start, now)
         .await
         .map_err(|e| scope_error(e, "audit.read"))?;
-    let mut combined = parse_login_audit_csv(&auth_csv).map_err(|e| {
+    let auth_by_email = parse_login_audit_csv(&auth_csv).map_err(|e| {
         tracing::error!("parse login audit csv (auth): {e}");
         (
             StatusCode::BAD_GATEWAY,
@@ -213,19 +239,25 @@ async fn get_or_fetch_login_activity(
     })?;
 
     // 2. message (best-effort)。トーク送信日時。失敗してもログに残すだけで進む。
-    match client
+    let message_by_email: LastLoginByEmail = match client
         .fetch_audit_csv(config_id, config, "message", start, now)
         .await
     {
         Ok(csv) => match parse_login_audit_csv(&csv) {
-            Ok(sent_by_email) => merge_keep_latest(&mut combined, sent_by_email),
-            Err(e) => tracing::warn!("parse message audit csv (best-effort, skip): {e}"),
+            Ok(sent_by_email) => sent_by_email,
+            Err(e) => {
+                tracing::warn!("parse message audit csv (best-effort, skip): {e}");
+                HashMap::new()
+            }
         },
-        Err(e) => tracing::warn!("fetch message audit csv (best-effort, skip): {e}"),
-    }
+        Err(e) => {
+            tracing::warn!("fetch message audit csv (best-effort, skip): {e}");
+            HashMap::new()
+        }
+    };
 
     // 3. board (best-effort)。既読投稿の作成日時を「下限」として合成する。
-    match client
+    let board_by_email: LastLoginByEmail = match client
         .fetch_board_activity_lower_bound(config_id, config, start)
         .await
     {
@@ -240,20 +272,44 @@ async fn get_or_fetch_login_activity(
                     by_email.insert(email.to_lowercase(), dt);
                 }
             }
-            merge_keep_latest(&mut combined, by_email);
+            by_email
         }
-        Err(e) => tracing::warn!("fetch board activity (best-effort, skip): {e}"),
-    }
+        Err(e) => {
+            tracing::warn!("fetch board activity (best-effort, skip): {e}");
+            HashMap::new()
+        }
+    };
+
+    let activity = combine_activity(auth_by_email, message_by_email, board_by_email);
 
     guard.insert(
         tenant_id,
         CachedActivity {
             fetched_at: now,
-            last_login_by_email: combined.clone(),
+            activity: activity.clone(),
         },
     );
 
-    Ok(combined)
+    Ok(activity)
+}
+
+/// auth/message/board を「一番新しい下限」に合成しつつ、信号別の内訳も保持する。
+/// ネットワーク呼び出しを含まない純粋関数にしてあるのは、3信号がそれぞれ独立して
+/// 保持されること (どれか1つに潰れないこと) を単体テストで確認できるようにするため。
+fn combine_activity(
+    auth: LastLoginByEmail,
+    message: LastLoginByEmail,
+    board: LastLoginByEmail,
+) -> CombinedActivity {
+    let mut combined = auth.clone();
+    merge_keep_latest(&mut combined, message.clone());
+    merge_keep_latest(&mut combined, board.clone());
+    CombinedActivity {
+        combined,
+        auth,
+        message,
+        board,
+    }
 }
 
 /// `other` の各エントリを `base` にマージし、同じキーがあれば新しい方の日時を残す。
@@ -332,6 +388,33 @@ mod tests {
             other.get("b@x.com"),
             "無いキーは追加される"
         );
+    }
+
+    #[test]
+    fn combine_activity_keeps_per_signal_breakdown_and_merges_combined() {
+        let mut auth: LastLoginByEmail = HashMap::new();
+        auth.insert("a@x.com".to_string(), Utc::now() - Duration::days(10));
+
+        let mut message: LastLoginByEmail = HashMap::new();
+        message.insert("a@x.com".to_string(), Utc::now() - Duration::days(5)); // authより新しい
+        message.insert("b@x.com".to_string(), Utc::now() - Duration::days(3));
+
+        let mut board: LastLoginByEmail = HashMap::new();
+        board.insert("a@x.com".to_string(), Utc::now() - Duration::days(20)); // 他の信号より古い
+        board.insert("c@x.com".to_string(), Utc::now() - Duration::days(1)); // auth/messageに無いキー
+
+        let activity = combine_activity(auth.clone(), message.clone(), board.clone());
+
+        // combined は各キーごとに3信号のうち最新を採用する。
+        assert_eq!(activity.combined.get("a@x.com"), message.get("a@x.com"));
+        assert_eq!(activity.combined.get("b@x.com"), message.get("b@x.com"));
+        assert_eq!(activity.combined.get("c@x.com"), board.get("c@x.com"));
+
+        // 信号別の内訳は combined に潰されず、入力そのままで残る
+        // (board_read_lower_bound_at が「掲示板由来の値だけ」を表示できる根拠)。
+        assert_eq!(activity.auth, auth);
+        assert_eq!(activity.message, message);
+        assert_eq!(activity.board, board);
     }
 
     #[test]
