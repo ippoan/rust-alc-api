@@ -111,6 +111,75 @@ async fn test_create_measurement_invalid_result_type() {
 }
 
 // =========================================================================
+// POST /api/measurements — tenko_type (通常点呼の種別)
+// =========================================================================
+
+#[tokio::test]
+async fn test_create_measurement_invalid_tenko_type() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+
+    let mock = Arc::new(MockMeasurementsRepository::default());
+    // repository まで届いたら 500 になる = 400 は repository より前で返っている
+    mock.fail_next.store(true, Ordering::SeqCst);
+
+    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
+    state.measurements = mock;
+    let tenant_id = Uuid::new_v4();
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+    let client = reqwest::Client::new();
+
+    let body = serde_json::json!({
+        "employee_id": Uuid::new_v4(),
+        "alcohol_value": 0.0,
+        "result_type": "pass",
+        "record_as_tenko": true,
+        "tenko_type": "mid_operation",
+    });
+
+    let res = client
+        .post(format!("{base_url}/api/measurements"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 400);
+}
+
+#[tokio::test]
+async fn test_create_measurement_valid_tenko_type() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+
+    let state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let tenant_id = Uuid::new_v4();
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+    let client = reqwest::Client::new();
+
+    let body = serde_json::json!({
+        "employee_id": Uuid::new_v4(),
+        "alcohol_value": 0.0,
+        "result_type": "pass",
+        "record_as_tenko": true,
+        "tenko_type": "pre_operation",
+    });
+
+    let res = client
+        .post(format!("{base_url}/api/measurements"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 201);
+}
+
+// =========================================================================
 // POST /api/measurements — invalid JSON (400)
 // =========================================================================
 
@@ -561,6 +630,77 @@ async fn test_update_measurement_invalid_status() {
         .unwrap();
 
     assert_eq!(res.status(), 400);
+}
+
+// =========================================================================
+// PUT /api/measurements/{id} — tenko_type (通常点呼の種別)
+// =========================================================================
+
+#[tokio::test]
+async fn test_update_measurement_invalid_tenko_type() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+
+    let mock = Arc::new(MockMeasurementsRepository::default());
+    // repository まで届いたら 500 になる = 400 は repository より前で返っている
+    mock.fail_next.store(true, Ordering::SeqCst);
+
+    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
+    state.measurements = mock;
+    let tenant_id = Uuid::new_v4();
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+    let client = reqwest::Client::new();
+
+    let id = Uuid::new_v4();
+    let body = serde_json::json!({
+        "status": "completed",
+        "record_as_tenko": true,
+        "tenko_type": "NORMAL",
+    });
+
+    let res = client
+        .put(format!("{base_url}/api/measurements/{id}"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 400);
+}
+
+#[tokio::test]
+async fn test_update_measurement_valid_tenko_type() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+
+    let mock = Arc::new(MockMeasurementsRepository::default());
+    mock.return_some.store(true, Ordering::SeqCst);
+
+    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
+    state.measurements = mock;
+    let tenant_id = Uuid::new_v4();
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+    let client = reqwest::Client::new();
+
+    let id = Uuid::new_v4();
+    let body = serde_json::json!({
+        "status": "completed",
+        "record_as_tenko": true,
+        "tenko_type": "post_operation",
+    });
+
+    let res = client
+        .put(format!("{base_url}/api/measurements/{id}"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
 }
 
 // =========================================================================

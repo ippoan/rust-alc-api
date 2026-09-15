@@ -186,6 +186,10 @@ pub struct CreateMeasurement {
     /// 既存の呼び元は送ってこないので default = false。
     #[serde(default)]
     pub record_as_tenko: bool,
+    /// 通常点呼の記録の種別 (`normal` / `pre_operation` / `post_operation`)。
+    /// 運行者端末で始業/終業を選んだときだけ送られる。無ければ `normal`。
+    #[serde(default)]
+    pub tenko_type: Option<String>,
     #[serde(alias = "alcohol_level")]
     pub alcohol_value: f64,
     #[serde(alias = "result")]
@@ -216,6 +220,9 @@ pub struct UpdateMeasurement {
     /// status が completed になる保存でのみ効く。詳細は [`CreateMeasurement::record_as_tenko`]。
     #[serde(default)]
     pub record_as_tenko: bool,
+    /// 詳細は [`CreateMeasurement::tenko_type`]。
+    #[serde(default)]
+    pub tenko_type: Option<String>,
     #[serde(alias = "alcohol_level")]
     pub alcohol_value: Option<f64>,
     #[serde(alias = "result")]

@@ -79,7 +79,13 @@ impl MeasurementsRepository for PgMeasurementsRepository {
         .fetch_one(&mut *tx)
         .await?;
 
-        record_as_tenko_if_marked(&mut tx, &m, input.record_as_tenko).await;
+        record_as_tenko_if_marked(
+            &mut tx,
+            &m,
+            input.record_as_tenko,
+            input.tenko_type.as_deref(),
+        )
+        .await;
         tx.commit().await?;
         Ok(m)
     }
@@ -134,7 +140,13 @@ impl MeasurementsRepository for PgMeasurementsRepository {
         .await?;
 
         if let Some(m) = &m {
-            record_as_tenko_if_marked(&mut tx, m, input.record_as_tenko).await;
+            record_as_tenko_if_marked(
+                &mut tx,
+                m,
+                input.record_as_tenko,
+                input.tenko_type.as_deref(),
+            )
+            .await;
         }
         tx.commit().await?;
         Ok(m)
@@ -251,6 +263,7 @@ async fn record_as_tenko_if_marked(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     m: &Measurement,
     record_as_tenko: bool,
+    tenko_type: Option<&str>,
 ) {
     if !record_as_tenko || m.status != "completed" {
         return;
@@ -267,7 +280,7 @@ async fn record_as_tenko_if_marked(
         }
     };
 
-    match alc_tenko::normal_tenko::record(&mut inner, m).await {
+    match alc_tenko::normal_tenko::record(&mut inner, m, tenko_type).await {
         Ok(_) => {
             if let Err(e) = inner.commit().await {
                 tracing::warn!(

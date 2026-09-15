@@ -15,20 +15,24 @@ use crate::models::TenkoSession;
 use crate::repo::tenko_sessions::insert_record;
 use crate::tenko_sessions::{record_payload, status_for_result};
 
-/// 通常点呼の種別。業務前 / 業務後で分けず 1 種にする (オーナー判断)。
+/// 通常点呼の種別の既定値。運行者端末で始業 / 終業を選ぶと `pre_operation` /
+/// `post_operation` が渡ってくる (2026-09 のオーナー判断で migration 140 の方針を改めた)。
 const TENKO_TYPE_NORMAL: &str = "normal";
 
-/// 点呼記録の点呼方法。運行管理者の一覧・CSV にこの文字列が出る。
+/// 点呼セッション・点呼記録の点呼方法。運行管理者の一覧・CSV にこの文字列が出る。
+/// 種別 (業務前 / 業務後) とは軸が違うので、始業 / 終業を選んでもこのまま。
 const TENKO_METHOD_NORMAL: &str = "通常点呼";
 
 /// 完了した通常点呼の測定から、点呼セッションと点呼記録を 1 組作る。
 ///
 /// * 結果が `error` / 無し → `Ok(None)` (測定だけ残す。エラーにしない)
+/// * `tenko_type` が `None` → `normal` (値の検査は handler で済ませてある)
 /// * 既に記録済み (同じ測定、または同じ乗務員・同じ測定時刻) → `Ok(None)`
-///   — migration 140 の部分 unique に `ON CONFLICT DO NOTHING` で任せる
+///   — migration 141 の部分 unique に `ON CONFLICT DO NOTHING` で任せる
 pub async fn record(
     conn: &mut PgConnection,
     m: &Measurement,
+    tenko_type: Option<&str>,
 ) -> Result<Option<TenkoSession>, sqlx::Error> {
     let Some((status, cancel_reason)) = status_for_result(m.result.as_deref()) else {
         return Ok(None);
@@ -43,7 +47,7 @@ pub async fn record(
             temperature, systolic, diastolic, pulse, medical_measured_at,
             medical_manual_input,
             responsible_manager_name, cancel_reason,
-            started_at, completed_at
+            started_at, completed_at, tenko_method
         )
         VALUES (
             $1, $2, NULL, $3, $4,
@@ -52,7 +56,7 @@ pub async fn record(
             $10, $11, $12, $13, $14,
             $15,
             NULL, $16,
-            $17, NOW()
+            $17, NOW(), $18
         )
         ON CONFLICT DO NOTHING
         RETURNING *
@@ -60,7 +64,7 @@ pub async fn record(
     )
     .bind(m.tenant_id)
     .bind(m.employee_id)
-    .bind(TENKO_TYPE_NORMAL)
+    .bind(tenko_type.unwrap_or(TENKO_TYPE_NORMAL))
     .bind(status)
     .bind(m.id)
     .bind(&m.result)
@@ -75,6 +79,7 @@ pub async fn record(
     .bind(m.medical_manual_input)
     .bind(cancel_reason)
     .bind(m.measured_at)
+    .bind(TENKO_METHOD_NORMAL)
     .fetch_optional(&mut *conn)
     .await?;
 
