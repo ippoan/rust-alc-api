@@ -13,6 +13,7 @@ use alc_core::models::{
     CreateMeasurement, Measurement, MeasurementFilter, MeasurementsResponse, StartMeasurement,
     UpdateMeasurement,
 };
+use alc_core::repository::car_inspections::normalize_carins_numbers;
 use alc_core::AppState;
 
 /// 通常点呼の記録に付けられる種別 (`tenko_sessions_tenko_type_check` と同じ 3 つ)
@@ -63,7 +64,7 @@ async fn update_measurement(
     State(state): State<AppState>,
     tenant: axum::Extension<TenantId>,
     Path(id): Path<Uuid>,
-    Json(body): Json<UpdateMeasurement>,
+    Json(mut body): Json<UpdateMeasurement>,
 ) -> Result<Json<Measurement>, StatusCode> {
     let tenant_id = tenant.0 .0;
 
@@ -87,6 +88,9 @@ async fn update_measurement(
         }
     }
 
+    normalize_carins_numbers(&mut body.carins_cert_no, &mut body.carins_vehicle_id)
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+
     let measurement = state
         .measurements
         .update(tenant_id, id, &body)
@@ -104,7 +108,7 @@ async fn update_measurement(
 async fn create_measurement(
     State(state): State<AppState>,
     tenant: axum::Extension<TenantId>,
-    Json(body): Json<CreateMeasurement>,
+    Json(mut body): Json<CreateMeasurement>,
 ) -> Result<(StatusCode, Json<Measurement>), StatusCode> {
     let tenant_id = tenant.0 .0;
 
@@ -118,6 +122,9 @@ async fn create_measurement(
             return Err(StatusCode::BAD_REQUEST);
         }
     }
+
+    normalize_carins_numbers(&mut body.carins_cert_no, &mut body.carins_vehicle_id)
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
 
     let measurement = state
         .measurements

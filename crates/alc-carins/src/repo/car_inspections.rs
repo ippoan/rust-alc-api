@@ -570,4 +570,14 @@ impl CarInspectionRepository for PgCarInspectionRepository {
         .await?;
         Ok(exists)
     }
+
+    async fn lookup_expiry(
+        &self,
+        tenant_id: Uuid,
+        cert_no: Option<&str>,
+        car_id: Option<&str>,
+    ) -> Result<CarinsLookup, sqlx::Error> {
+        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
+        alc_core::repo::car_inspections::lookup_expiry(&mut tc.conn, cert_no, car_id).await
+    }
 }

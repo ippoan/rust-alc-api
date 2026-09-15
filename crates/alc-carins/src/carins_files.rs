@@ -732,6 +732,14 @@ mod tests {
         ) -> Result<bool, sqlx::Error> {
             Ok(*self.json_exists.lock().unwrap())
         }
+        async fn lookup_expiry(
+            &self,
+            _: Uuid,
+            _: Option<&str>,
+            _: Option<&str>,
+        ) -> Result<alc_core::repository::car_inspections::CarinsLookup, sqlx::Error> {
+            unimplemented!()
+        }
     }
 
     #[test]

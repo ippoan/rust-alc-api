@@ -190,6 +190,13 @@ pub struct CreateMeasurement {
     /// 運行者端末で始業/終業を選んだときだけ送られる。無ければ `normal`。
     #[serde(default)]
     pub tenko_type: Option<String>,
+    /// 運行者端末が電子車検証から読んだ管理番号 (数字 12〜13 桁)。通常点呼の記録に写す
+    /// (Refs ippoan/alc-app-s3#110)。空文字は無しと同じ
+    #[serde(default)]
+    pub carins_cert_no: Option<String>,
+    /// 同じく車両 ID (英数 14 桁)
+    #[serde(default)]
+    pub carins_vehicle_id: Option<String>,
     #[serde(alias = "alcohol_level")]
     pub alcohol_value: f64,
     #[serde(alias = "result")]
@@ -223,6 +230,12 @@ pub struct UpdateMeasurement {
     /// 詳細は [`CreateMeasurement::tenko_type`]。
     #[serde(default)]
     pub tenko_type: Option<String>,
+    /// 詳細は [`CreateMeasurement::carins_cert_no`]。
+    #[serde(default)]
+    pub carins_cert_no: Option<String>,
+    /// 詳細は [`CreateMeasurement::carins_vehicle_id`]。
+    #[serde(default)]
+    pub carins_vehicle_id: Option<String>,
     #[serde(alias = "alcohol_level")]
     pub alcohol_value: Option<f64>,
     #[serde(alias = "result")]

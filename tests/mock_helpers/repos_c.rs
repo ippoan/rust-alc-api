@@ -414,6 +414,8 @@ pub struct MockTenkoRecordsRepository {
     pub return_some: AtomicBool,
     pub return_data: AtomicBool,
     pub return_ng_data: AtomicBool,
+    /// list_all の記録の record_data に電子車検証の 4 値を載せる (CSV 末尾 4 列)
+    pub return_carins_data: AtomicBool,
 }
 
 impl Default for MockTenkoRecordsRepository {
@@ -423,6 +425,7 @@ impl Default for MockTenkoRecordsRepository {
             return_some: AtomicBool::new(false),
             return_data: AtomicBool::new(false),
             return_ng_data: AtomicBool::new(false),
+            return_carins_data: AtomicBool::new(false),
         }
     }
 }
@@ -523,6 +526,16 @@ impl TenkoRecordsRepository for MockTenkoRecordsRepository {
         _filter: &TenkoRecordFilter,
     ) -> Result<Vec<TenkoRecord>, sqlx::Error> {
         check_fail!(self);
+        if self.return_carins_data.load(Ordering::SeqCst) {
+            let mut record = make_mock_tenko_record_for_list(_tenant_id, Uuid::new_v4());
+            record.record_data = serde_json::json!({
+                "carins_cert_no": "000000000001",
+                "carins_vehicle_id": "TESTCARID00001",
+                "carins_expires_on": "2030-12-31",
+                "carins_matched_by": "cert_no",
+            });
+            return Ok(vec![record]);
+        }
         if self.return_ng_data.load(Ordering::SeqCst) {
             let mut record = make_mock_tenko_record_for_list(_tenant_id, Uuid::new_v4());
             record.daily_inspection = Some(
@@ -813,6 +826,10 @@ fn make_mock_session(
         carrying_items_checked: None,
         started_at: Some(now),
         completed_at: None,
+        carins_cert_no: None,
+        carins_vehicle_id: None,
+        carins_expires_on: None,
+        carins_matched_by: None,
         created_at: now,
         updated_at: now,
     }

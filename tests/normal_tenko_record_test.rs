@@ -880,3 +880,499 @@ async fn test_auto_tenko_session_is_not_caught_by_normal_flow_index() {
         }
     );
 }
+
+// ---------------------------------------------------------------------------
+// 電子車検証の番号と carins の車検期限 (migration 142、Refs ippoan/alc-app-s3#110)
+//
+// 値はすべて合成値。照合の SQL (alc-core の repo/car_inspections.rs) は RLS と
+// 正規表現・to_date を実 DB で通すので mock では検証できない。
+// ---------------------------------------------------------------------------
+
+/// car_inspection に合成の行を 1 件入れる (取り込みと同じ UPSERT を通す)
+async fn insert_car_inspection(
+    state: &rust_alc_api::AppState,
+    tenant: Uuid,
+    cert_no: &str,
+    car_id: &str,
+    expirdate: &str,
+    grantdate_d: &str,
+) {
+    let cert_info = serde_json::json!({
+        "ElectCertMgNo": cert_no,
+        "CarId": car_id,
+        "EntryNoCarNo": format!("TEST-CAR-NO-{cert_no}"),
+        "GrantdateE": "R",
+        "GrantdateY": "07",
+        "GrantdateM": "01",
+        "GrantdateD": grantdate_d,
+        "TwodimensionCodeInfoValidPeriodExpirdate": expirdate,
+    });
+    state
+        .car_inspections
+        .upsert_from_json(tenant, &cert_info, "test")
+        .await
+        .expect("car_inspection の合成行を入れられない");
+}
+
+/// 電子車検証の番号付きで通常点呼の測定を保存する
+#[allow(clippy::too_many_arguments)]
+async fn send_carins_measurement(
+    client: &reqwest::Client,
+    base_url: &str,
+    auth: &str,
+    employee_id: &str,
+    measured_at: &str,
+    cert_no: Option<&str>,
+    vehicle_id: Option<&str>,
+) -> reqwest::Response {
+    let mut body = serde_json::json!({
+        "employee_id": employee_id,
+        "alcohol_value": 0.0,
+        "result_type": "normal",
+        "measured_at": measured_at,
+        "record_as_tenko": true,
+    });
+    if let Some(v) = cert_no {
+        body["carins_cert_no"] = Value::from(v);
+    }
+    if let Some(v) = vehicle_id {
+        body["carins_vehicle_id"] = Value::from(v);
+    }
+    client
+        .post(format!("{base_url}/api/measurements"))
+        .header("Authorization", auth)
+        .json(&body)
+        .send()
+        .await
+        .unwrap()
+}
+
+type CarinsCols = (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
+
+/// 測定に紐づく session の 4 列と、record の record_data の同じ 4 値
+async fn carins_of(
+    pool: &sqlx::PgPool,
+    tenant_id: Uuid,
+    measurement: &Value,
+) -> (CarinsCols, CarinsCols) {
+    let mid = Uuid::parse_str(measurement["id"].as_str().unwrap()).unwrap();
+    let session: CarinsCols = sqlx::query_as(
+        "SELECT carins_cert_no, carins_vehicle_id, carins_expires_on::text, carins_matched_by
+         FROM alc_api.tenko_sessions WHERE tenant_id = $1 AND measurement_id = $2",
+    )
+    .bind(tenant_id)
+    .bind(mid)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let record: CarinsCols = sqlx::query_as(
+        "SELECT r.record_data->>'carins_cert_no', r.record_data->>'carins_vehicle_id',
+                r.record_data->>'carins_expires_on', r.record_data->>'carins_matched_by'
+         FROM alc_api.tenko_records r
+         JOIN alc_api.tenko_sessions s ON s.id = r.session_id
+         WHERE r.tenant_id = $1 AND s.measurement_id = $2",
+    )
+    .bind(tenant_id)
+    .bind(mid)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    (session, record)
+}
+
+fn cols(
+    cert_no: Option<&str>,
+    vehicle_id: Option<&str>,
+    expires_on: Option<&str>,
+    matched_by: Option<&str>,
+) -> CarinsCols {
+    (
+        cert_no.map(str::to_string),
+        vehicle_id.map(str::to_string),
+        expires_on.map(str::to_string),
+        matched_by.map(str::to_string),
+    )
+}
+
+#[tokio::test]
+async fn test_carins_expiry_is_recorded() {
+    test_group!("通常点呼 → 点呼記録 (電子車検証)");
+    test_case!(
+        "管理番号一致 / 車両 ID 一致 / 未登録 / 番号なし を session・record_data・CSV に残す",
+        {
+            let state = common::setup_app_state().await;
+            let base_url = common::spawn_test_server(state.clone()).await;
+            let tenant = common::create_test_tenant(state.pool(), "Normal Tenko Carins").await;
+            let jwt = common::create_test_jwt(tenant, "admin");
+            let auth = format!("Bearer {jwt}");
+            let client = reqwest::Client::new();
+
+            let emp =
+                common::create_test_employee(&client, &base_url, &auth, "運行者", "NTC1").await;
+            let emp_id = emp["id"].as_str().unwrap();
+            insert_car_inspection(
+                &state,
+                tenant,
+                "000000000001",
+                "TESTCARID00001",
+                "301231",
+                "01",
+            )
+            .await;
+
+            // 管理番号で一致
+            let res = send_carins_measurement(
+                &client,
+                &base_url,
+                &auth,
+                emp_id,
+                "2026-09-15T01:00:00Z",
+                Some("000000000001"),
+                Some("TESTCARID00009"),
+            )
+            .await;
+            assert_eq!(res.status(), 201);
+            let by_cert: Value = res.json().await.unwrap();
+            let expected = cols(
+                Some("000000000001"),
+                Some("TESTCARID00009"),
+                Some("2030-12-31"),
+                Some("cert_no"),
+            );
+            assert_eq!(
+                carins_of(state.pool(), tenant, &by_cert).await,
+                (expected.clone(), expected)
+            );
+
+            // 管理番号は不一致、車両 ID で一致
+            let res = send_carins_measurement(
+                &client,
+                &base_url,
+                &auth,
+                emp_id,
+                "2026-09-15T02:00:00Z",
+                Some("000000000009"),
+                Some("TESTCARID00001"),
+            )
+            .await;
+            assert_eq!(res.status(), 201);
+            let by_car: Value = res.json().await.unwrap();
+            let expected = cols(
+                Some("000000000009"),
+                Some("TESTCARID00001"),
+                Some("2030-12-31"),
+                Some("car_id"),
+            );
+            assert_eq!(
+                carins_of(state.pool(), tenant, &by_car).await,
+                (expected.clone(), expected)
+            );
+
+            // carins に無い → none・期限 NULL (点呼は記録する)
+            let res = send_carins_measurement(
+                &client,
+                &base_url,
+                &auth,
+                emp_id,
+                "2026-09-15T03:00:00Z",
+                Some("000000000008"),
+                None,
+            )
+            .await;
+            assert_eq!(res.status(), 201);
+            let none: Value = res.json().await.unwrap();
+            let expected = cols(Some("000000000008"), None, None, Some("none"));
+            assert_eq!(
+                carins_of(state.pool(), tenant, &none).await,
+                (expected.clone(), expected)
+            );
+
+            // 番号を送らない (空文字も無しと同じ) → 4 列とも NULL
+            let res = send_carins_measurement(
+                &client,
+                &base_url,
+                &auth,
+                emp_id,
+                "2026-09-15T04:00:00Z",
+                Some(""),
+                None,
+            )
+            .await;
+            assert_eq!(res.status(), 201);
+            let without: Value = res.json().await.unwrap();
+            let expected = cols(None, None, None, None);
+            assert_eq!(
+                carins_of(state.pool(), tenant, &without).await,
+                (expected.clone(), expected)
+            );
+            assert_eq!(counts(state.pool(), tenant).await, (4, 4));
+
+            // CSV の末尾 4 列
+            let res = client
+                .get(format!("{base_url}/api/tenko/records/csv"))
+                .header("Authorization", &auth)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 200);
+            let csv = res.text().await.unwrap();
+            let mut lines = csv.trim_start_matches('\u{feff}').lines();
+            let header = lines.next().unwrap();
+            assert!(
+                header.ends_with(
+                    "record_hash,carins_cert_no,carins_vehicle_id,carins_expires_on,carins_matched_by"
+                ),
+                "CSV の末尾 4 列: {header}"
+            );
+            let tails: Vec<String> = lines
+                .map(|l| l.rsplitn(5, ',').collect::<Vec<_>>()[..4].join("|"))
+                .collect();
+            for expected in [
+                "cert_no|2030-12-31|TESTCARID00009|000000000001",
+                "car_id|2030-12-31|TESTCARID00001|000000000009",
+                "none|||000000000008",
+                "|||",
+            ] {
+                assert!(
+                    tails.iter().any(|t| t == expected),
+                    "CSV に {expected} の行がある: {tails:?}"
+                );
+            }
+        }
+    );
+}
+
+#[tokio::test]
+async fn test_carins_newer_row_of_same_car_wins() {
+    test_group!("通常点呼 → 点呼記録 (電子車検証)");
+    test_case!(
+        "同じ車両 ID で管理番号の違う古い行と新しい行 → 新しい期限 (記録と照合口の両方)",
+        {
+            let state = common::setup_app_state().await;
+            let base_url = common::spawn_test_server(state.clone()).await;
+            let tenant = common::create_test_tenant(state.pool(), "Normal Tenko Carins New").await;
+            let jwt = common::create_test_jwt(tenant, "admin");
+            let auth = format!("Bearer {jwt}");
+            let client = reqwest::Client::new();
+
+            let emp =
+                common::create_test_employee(&client, &base_url, &auth, "運行者", "NTC2").await;
+            let emp_id = emp["id"].as_str().unwrap();
+            // 継続検査の前 (古い管理番号) と後 (新しい管理番号)
+            insert_car_inspection(
+                &state,
+                tenant,
+                "000000000002",
+                "TESTCARID00002",
+                "250101",
+                "01",
+            )
+            .await;
+            insert_car_inspection(
+                &state,
+                tenant,
+                "000000000003",
+                "TESTCARID00002",
+                "301231",
+                "02",
+            )
+            .await;
+
+            // 古い電子車検証の番号でタップしても、同じ車の新しい期限が出る
+            let res = send_carins_measurement(
+                &client,
+                &base_url,
+                &auth,
+                emp_id,
+                "2026-09-15T05:00:00Z",
+                Some("000000000002"),
+                Some("TESTCARID00002"),
+            )
+            .await;
+            assert_eq!(res.status(), 201);
+            let m: Value = res.json().await.unwrap();
+            let (session, _) = carins_of(state.pool(), tenant, &m).await;
+            assert_eq!(session.2.as_deref(), Some("2030-12-31"));
+            assert_eq!(
+                session.3.as_deref(),
+                Some("car_id"),
+                "新しい行は管理番号が違うので car_id で一致"
+            );
+
+            // 照合口 (kiosk) も同じ SQL
+            let res = client
+                .post(format!("{base_url}/api/car-inspections/lookup"))
+                .header("Authorization", &auth)
+                .json(&serde_json::json!({"cert_no": "000000000003", "car_id": "TESTCARID00002"}))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 200);
+            let body: Value = res.json().await.unwrap();
+            assert_eq!(
+                body,
+                serde_json::json!({
+                    "expires_on": "2030-12-31",
+                    "matched_by": "cert_no",
+                    "car_no": "TEST-CAR-NO-000000000003",
+                })
+            );
+        }
+    );
+}
+
+#[tokio::test]
+async fn test_carins_broken_expiry_still_records() {
+    test_group!("通常点呼 → 点呼記録 (電子車検証)");
+    test_case!(
+        "壊れた期限の行でも記録は作られ、期限は NULL",
+        {
+            let state = common::setup_app_state().await;
+            let base_url = common::spawn_test_server(state.clone()).await;
+            let tenant =
+                common::create_test_tenant(state.pool(), "Normal Tenko Carins Broken").await;
+            let jwt = common::create_test_jwt(tenant, "admin");
+            let auth = format!("Bearer {jwt}");
+            let client = reqwest::Client::new();
+
+            let emp =
+                common::create_test_employee(&client, &base_url, &auth, "運行者", "NTC3").await;
+            let emp_id = emp["id"].as_str().unwrap();
+            // 月が 13 — 正規表現で外れて NULL (照合は成功)
+            insert_car_inspection(
+                &state,
+                tenant,
+                "000000000004",
+                "TESTCARID00004",
+                "301399",
+                "01",
+            )
+            .await;
+            // 2 月 31 日 — 正規表現は通るが to_date が失敗する (照合の SQL エラー)
+            insert_car_inspection(
+                &state,
+                tenant,
+                "000000000005",
+                "TESTCARID00005",
+                "300231",
+                "01",
+            )
+            .await;
+
+            let res = send_carins_measurement(
+                &client,
+                &base_url,
+                &auth,
+                emp_id,
+                "2026-09-15T06:00:00Z",
+                Some("000000000004"),
+                None,
+            )
+            .await;
+            assert_eq!(res.status(), 201);
+            let m: Value = res.json().await.unwrap();
+            let expected = cols(Some("000000000004"), None, None, Some("cert_no"));
+            assert_eq!(
+                carins_of(state.pool(), tenant, &m).await,
+                (expected.clone(), expected)
+            );
+
+            let res = send_carins_measurement(
+                &client,
+                &base_url,
+                &auth,
+                emp_id,
+                "2026-09-15T07:00:00Z",
+                Some("000000000005"),
+                Some("TESTCARID00005"),
+            )
+            .await;
+            assert_eq!(res.status(), 201);
+            let m: Value = res.json().await.unwrap();
+            let expected = cols(Some("000000000005"), Some("TESTCARID00005"), None, None);
+            assert_eq!(
+                carins_of(state.pool(), tenant, &m).await,
+                (expected.clone(), expected),
+                "照合に失敗しても番号は保存し、期限と matched_by は NULL"
+            );
+            assert_eq!(counts(state.pool(), tenant).await, (2, 2));
+        }
+    );
+}
+
+#[tokio::test]
+async fn test_invalid_carins_number_is_rejected() {
+    test_group!("通常点呼 → 点呼記録 (電子車検証)");
+    test_case!(
+        "不正な桁の番号は 400 で、測定も記録も作らない (POST / PUT)",
+        {
+            let state = common::setup_app_state().await;
+            let base_url = common::spawn_test_server(state.clone()).await;
+            let tenant =
+                common::create_test_tenant(state.pool(), "Normal Tenko Carins Invalid").await;
+            let jwt = common::create_test_jwt(tenant, "admin");
+            let auth = format!("Bearer {jwt}");
+            let client = reqwest::Client::new();
+
+            let emp =
+                common::create_test_employee(&client, &base_url, &auth, "運行者", "NTC4").await;
+            let emp_id = emp["id"].as_str().unwrap();
+
+            // POST
+            let res = send_carins_measurement(
+                &client,
+                &base_url,
+                &auth,
+                emp_id,
+                "2026-09-15T08:00:00Z",
+                Some("0000000001"),
+                None,
+            )
+            .await;
+            assert_eq!(res.status(), 400);
+            assert_eq!(measurement_count(state.pool(), tenant).await, 0);
+
+            // PUT (測定開始 → 完了 PUT に不正な車両 ID)
+            let res = client
+                .post(format!("{base_url}/api/measurements/start"))
+                .header("Authorization", &auth)
+                .json(&serde_json::json!({ "employee_id": emp_id }))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 201);
+            let started: Value = res.json().await.unwrap();
+            let m_id = started["id"].as_str().unwrap();
+
+            let res = client
+                .put(format!("{base_url}/api/measurements/{m_id}"))
+                .header("Authorization", &auth)
+                .json(&serde_json::json!({
+                    "status": "completed",
+                    "alcohol_value": 0.0,
+                    "result_type": "normal",
+                    "measured_at": "2026-09-15T08:30:00Z",
+                    "record_as_tenko": true,
+                    "carins_vehicle_id": "TESTCARID-0001",
+                }))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 400);
+
+            let status: String =
+                sqlx::query_scalar("SELECT status FROM alc_api.measurements WHERE id = $1")
+                    .bind(Uuid::parse_str(m_id).unwrap())
+                    .fetch_one(state.pool())
+                    .await
+                    .unwrap();
+            assert_eq!(status, "started", "400 の PUT は測定を更新しない");
+            assert_eq!(counts(state.pool(), tenant).await, (0, 0));
+        }
+    );
+}

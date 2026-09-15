@@ -7,6 +7,7 @@ use alc_core::models::{
 };
 
 use alc_core::tenant::TenantConn;
+use alc_tenko::normal_tenko::NormalTenkoInput;
 
 pub use alc_core::repository::measurements::*;
 
@@ -79,13 +80,12 @@ impl MeasurementsRepository for PgMeasurementsRepository {
         .fetch_one(&mut *tx)
         .await?;
 
-        record_as_tenko_if_marked(
-            &mut tx,
-            &m,
-            input.record_as_tenko,
-            input.tenko_type.as_deref(),
-        )
-        .await;
+        let tenko = NormalTenkoInput {
+            tenko_type: input.tenko_type.as_deref(),
+            carins_cert_no: input.carins_cert_no.as_deref(),
+            carins_vehicle_id: input.carins_vehicle_id.as_deref(),
+        };
+        record_as_tenko_if_marked(&mut tx, &m, input.record_as_tenko, &tenko).await;
         tx.commit().await?;
         Ok(m)
     }
@@ -140,13 +140,12 @@ impl MeasurementsRepository for PgMeasurementsRepository {
         .await?;
 
         if let Some(m) = &m {
-            record_as_tenko_if_marked(
-                &mut tx,
-                m,
-                input.record_as_tenko,
-                input.tenko_type.as_deref(),
-            )
-            .await;
+            let tenko = NormalTenkoInput {
+                tenko_type: input.tenko_type.as_deref(),
+                carins_cert_no: input.carins_cert_no.as_deref(),
+                carins_vehicle_id: input.carins_vehicle_id.as_deref(),
+            };
+            record_as_tenko_if_marked(&mut tx, m, input.record_as_tenko, &tenko).await;
         }
         tx.commit().await?;
         Ok(m)
@@ -263,7 +262,7 @@ async fn record_as_tenko_if_marked(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     m: &Measurement,
     record_as_tenko: bool,
-    tenko_type: Option<&str>,
+    tenko: &NormalTenkoInput<'_>,
 ) {
     if !record_as_tenko || m.status != "completed" {
         return;
@@ -280,7 +279,7 @@ async fn record_as_tenko_if_marked(
         }
     };
 
-    match alc_tenko::normal_tenko::record(&mut inner, m, tenko_type).await {
+    match alc_tenko::normal_tenko::record(&mut inner, m, tenko).await {
         Ok(_) => {
             if let Err(e) = inner.commit().await {
                 tracing::warn!(
