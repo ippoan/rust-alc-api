@@ -15,6 +15,9 @@ use alc_core::models::{
 };
 use alc_core::AppState;
 
+/// 通常点呼の記録に付けられる種別 (`tenko_sessions_tenko_type_check` と同じ 3 つ)
+const VALID_TENKO_TYPES: [&str; 3] = ["normal", "pre_operation", "post_operation"];
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route(
@@ -78,6 +81,12 @@ async fn update_measurement(
         }
     }
 
+    if let Some(ref tt) = body.tenko_type {
+        if !VALID_TENKO_TYPES.contains(&tt.as_str()) {
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    }
+
     let measurement = state
         .measurements
         .update(tenant_id, id, &body)
@@ -102,6 +111,12 @@ async fn create_measurement(
     let valid_results = ["pass", "fail", "normal", "over", "error"];
     if !valid_results.contains(&body.result_type.as_str()) {
         return Err(StatusCode::BAD_REQUEST);
+    }
+
+    if let Some(ref tt) = body.tenko_type {
+        if !VALID_TENKO_TYPES.contains(&tt.as_str()) {
+            return Err(StatusCode::BAD_REQUEST);
+        }
     }
 
     let measurement = state
