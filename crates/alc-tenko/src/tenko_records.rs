@@ -121,6 +121,11 @@ async fn export_csv(
         "resume_reason",
         "recorded_at",
         "record_hash",
+        // 電子車検証 (通常点呼だけ。tenko_records は不変テーブルなので record_data から読む)
+        "carins_cert_no",
+        "carins_vehicle_id",
+        "carins_expires_on",
+        "carins_matched_by",
     ])
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -226,6 +231,10 @@ async fn export_csv(
             r.resume_reason.clone().unwrap_or_default(),
             r.recorded_at.to_rfc3339(),
             r.record_hash.clone(),
+            record_data_str(&r.record_data, "carins_cert_no"),
+            record_data_str(&r.record_data, "carins_vehicle_id"),
+            record_data_str(&r.record_data, "carins_expires_on"),
+            record_data_str(&r.record_data, "carins_matched_by"),
         ])
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     }
@@ -247,4 +256,13 @@ async fn export_csv(
         )
         .body(Body::from(bom_data))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+/// record_data (記録時のセッションの JSON) の文字列の値。無い / NULL は空欄
+fn record_data_str(record_data: &serde_json::Value, key: &str) -> String {
+    record_data
+        .get(key)
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string()
 }

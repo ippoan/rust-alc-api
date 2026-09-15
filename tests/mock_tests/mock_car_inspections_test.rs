@@ -6,7 +6,7 @@ use std::sync::Arc;
 use serde_json::Value;
 
 use rust_alc_api::db::repository::car_inspections::{
-    CarInspectionFile, CarInspectionRepository, VehicleCategories,
+    CarInspectionFile, CarInspectionRepository, CarinsLookup, VehicleCategories,
 };
 
 // ============================================================
@@ -184,6 +184,33 @@ impl CarInspectionRepository for SuccessMockCarInspectionRepository {
             return Err(sqlx::Error::RowNotFound);
         }
         Ok(false)
+    }
+
+    async fn lookup_expiry(
+        &self,
+        _tenant_id: Uuid,
+        cert_no: Option<&str>,
+        car_id: Option<&str>,
+    ) -> Result<CarinsLookup, sqlx::Error> {
+        let expires_on = chrono::NaiveDate::from_ymd_opt(2030, 12, 31);
+        let car_no = Some("TEST-CAR-NO".to_string());
+        Ok(match (cert_no, car_id) {
+            (Some("000000000001"), _) => CarinsLookup {
+                expires_on,
+                matched_by: "cert_no",
+                car_no,
+            },
+            (_, Some("TESTCARID00001")) => CarinsLookup {
+                expires_on,
+                matched_by: "car_id",
+                car_no,
+            },
+            _ => CarinsLookup {
+                expires_on: None,
+                matched_by: "none",
+                car_no: None,
+            },
+        })
     }
 }
 
@@ -527,4 +554,104 @@ async fn test_list_history_unauthorized() {
         .await
         .unwrap();
     assert_eq!(res.status(), 401);
+}
+
+// ============================================================
+// lookup: POST /api/car-inspections/lookup (kiosk の車検期限の照合)
+// ============================================================
+
+async fn post_lookup(
+    mock: Arc<dyn CarInspectionRepository>,
+    body: serde_json::Value,
+) -> reqwest::Response {
+    let (base_url, jwt) = spawn_with_mock(mock).await;
+    reqwest::Client::new()
+        .post(format!("{base_url}/api/car-inspections/lookup"))
+        .header("Authorization", auth(&jwt))
+        .json(&body)
+        .send()
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn test_lookup_matched_by_cert_no() {
+    let mock = Arc::new(SuccessMockCarInspectionRepository::new());
+    let res = post_lookup(
+        mock,
+        serde_json::json!({"cert_no": "000000000001", "car_id": "TESTCARID00009"}),
+    )
+    .await;
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(
+        body,
+        serde_json::json!({
+            "expires_on": "2030-12-31",
+            "matched_by": "cert_no",
+            "car_no": "TEST-CAR-NO",
+        }),
+        "期限・matched_by・登録番号だけを返す"
+    );
+}
+
+#[tokio::test]
+async fn test_lookup_matched_by_car_id() {
+    let mock = Arc::new(SuccessMockCarInspectionRepository::new());
+    let res = post_lookup(mock, serde_json::json!({"car_id": "TESTCARID00001"})).await;
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(body["matched_by"], "car_id");
+    assert_eq!(body["expires_on"], "2030-12-31");
+}
+
+#[tokio::test]
+async fn test_lookup_none() {
+    let mock = Arc::new(SuccessMockCarInspectionRepository::new());
+    let res = post_lookup(mock, serde_json::json!({"cert_no": "000000000002"})).await;
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(
+        body,
+        serde_json::json!({"expires_on": null, "matched_by": "none", "car_no": null})
+    );
+}
+
+#[tokio::test]
+async fn test_lookup_without_numbers_is_bad_request() {
+    // repository まで届いたら 500 になる = 400 は repository より前で返っている
+    let mock = Arc::new(crate::mock_helpers::MockCarInspectionRepository::default());
+    mock.fail_next.store(true, Ordering::SeqCst);
+    let res = post_lookup(mock, serde_json::json!({"cert_no": "", "car_id": null})).await;
+    assert_eq!(res.status(), 400);
+}
+
+#[tokio::test]
+async fn test_lookup_bad_shape_is_bad_request() {
+    let mock = Arc::new(crate::mock_helpers::MockCarInspectionRepository::default());
+    mock.fail_next.store(true, Ordering::SeqCst);
+    let res = post_lookup(mock, serde_json::json!({"cert_no": "12345"})).await;
+    assert_eq!(res.status(), 400);
+}
+
+#[tokio::test]
+async fn test_lookup_db_error() {
+    let mock = Arc::new(crate::mock_helpers::MockCarInspectionRepository::default());
+    mock.fail_next.store(true, Ordering::SeqCst);
+    let res = post_lookup(mock, serde_json::json!({"car_id": "TESTCARID00001"})).await;
+    assert_eq!(res.status(), 500);
+}
+
+#[tokio::test]
+async fn test_lookup_get_is_not_routed_to_get_by_id() {
+    // GET では番号を URL に載せない — POST 専用。`/{id}` の GET に吸われない
+    let mock = Arc::new(SuccessMockCarInspectionRepository::new());
+    let (base_url, jwt) = spawn_with_mock(mock).await;
+    let res = reqwest::Client::new()
+        .get(format!("{base_url}/api/car-inspections/lookup"))
+        .header("Authorization", auth(&jwt))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 405);
 }

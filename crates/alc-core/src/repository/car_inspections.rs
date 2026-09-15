@@ -38,6 +38,47 @@ pub struct VehicleCategories {
     pub private_businesses: Vec<String>,
 }
 
+/// 電子車検証の番号で car_inspection を照合した結果 (Refs ippoan/alc-app-s3#110)。
+/// 照合の SQL は `crate::repo::car_inspections::lookup_expiry` の 1 か所。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CarinsLookup {
+    /// 2 次元コードの有効期限。形の崩れた値は None
+    pub expires_on: Option<chrono::NaiveDate>,
+    /// `cert_no` (管理番号で一致) / `car_id` (車両 ID で一致) / `none` (該当なし)
+    pub matched_by: &'static str,
+    /// 登録番号 (空なら None)。所有者・住所・車台番号は返さない
+    pub car_no: Option<String>,
+}
+
+/// 番号の形が合わない (管理番号は数字 12〜13 桁、車両 ID は英数 14 桁)
+#[derive(Debug, PartialEq, Eq)]
+pub struct InvalidCarinsNumber;
+
+/// 端末から受け取った電子車検証の番号を検査する。空文字は None に寄せる。
+pub fn normalize_carins_numbers(
+    cert_no: &mut Option<String>,
+    vehicle_id: &mut Option<String>,
+) -> Result<(), InvalidCarinsNumber> {
+    fn check(
+        value: &mut Option<String>,
+        valid: fn(&str) -> bool,
+    ) -> Result<(), InvalidCarinsNumber> {
+        if value.as_deref() == Some("") {
+            *value = None;
+        }
+        match value.as_deref() {
+            Some(v) if !valid(v) => Err(InvalidCarinsNumber),
+            _ => Ok(()),
+        }
+    }
+    check(cert_no, |v| {
+        (12..=13).contains(&v.len()) && v.bytes().all(|b| b.is_ascii_digit())
+    })?;
+    check(vehicle_id, |v| {
+        v.len() == 14 && v.bytes().all(|b| b.is_ascii_alphanumeric())
+    })
+}
+
 #[async_trait]
 pub trait CarInspectionRepository: Send + Sync {
     /// 現在有効な車検証一覧 (DISTINCT ON CarId, to_jsonb)
@@ -113,4 +154,53 @@ pub trait CarInspectionRepository: Send + Sync {
         grantdate_m: &str,
         grantdate_d: &str,
     ) -> Result<bool, sqlx::Error>;
+
+    /// 電子車検証の管理番号 / 車両 ID で期限を照合する (kiosk の照合口)
+    async fn lookup_expiry(
+        &self,
+        tenant_id: Uuid,
+        cert_no: Option<&str>,
+        car_id: Option<&str>,
+    ) -> Result<CarinsLookup, sqlx::Error>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn normalize(
+        cert_no: Option<&str>,
+        vehicle_id: Option<&str>,
+    ) -> Result<(Option<String>, Option<String>), InvalidCarinsNumber> {
+        let mut c = cert_no.map(str::to_string);
+        let mut v = vehicle_id.map(str::to_string);
+        normalize_carins_numbers(&mut c, &mut v).map(|()| (c, v))
+    }
+
+    #[test]
+    fn test_normalize_carins_numbers_accepts_valid_shapes() {
+        assert_eq!(normalize(None, None), Ok((None, None)));
+        assert_eq!(
+            normalize(Some("000000000001"), Some("TESTCARID00001")),
+            Ok((
+                Some("000000000001".to_string()),
+                Some("TESTCARID00001".to_string())
+            ))
+        );
+        assert!(normalize(Some("0000000000001"), None).is_ok());
+    }
+
+    #[test]
+    fn test_normalize_carins_numbers_empty_is_none() {
+        assert_eq!(normalize(Some(""), Some("")), Ok((None, None)));
+    }
+
+    #[test]
+    fn test_normalize_carins_numbers_rejects_bad_shapes() {
+        assert!(normalize(Some("00000000001"), None).is_err());
+        assert!(normalize(Some("00000000000012"), None).is_err());
+        assert!(normalize(Some("00000000000A"), None).is_err());
+        assert!(normalize(None, Some("TESTCARID0001")).is_err());
+        assert!(normalize(None, Some("TESTCARID-0001")).is_err());
+    }
 }

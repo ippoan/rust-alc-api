@@ -660,6 +660,20 @@ impl CarInspectionRepository for MockCarInspectionRepository {
         check_fail!(self);
         Ok(false)
     }
+
+    async fn lookup_expiry(
+        &self,
+        _tenant_id: Uuid,
+        _cert_no: Option<&str>,
+        _car_id: Option<&str>,
+    ) -> Result<alc_core::repository::car_inspections::CarinsLookup, sqlx::Error> {
+        check_fail!(self);
+        Ok(alc_core::repository::car_inspections::CarinsLookup {
+            expires_on: None,
+            matched_by: "none",
+            car_no: None,
+        })
+    }
 }
 
 // ============================================================

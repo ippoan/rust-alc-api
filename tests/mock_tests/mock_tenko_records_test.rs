@@ -390,6 +390,81 @@ async fn test_export_csv_with_data() {
     assert!(csv_str.contains("ok"));
 }
 
+/// CSV の 1 行を列名 → 値で引けるようにする (header と data row の 2 行。
+/// mock の記録の値にはカンマも引用符も無いので素朴に分ける)
+fn csv_row(csv_str: &str) -> std::collections::HashMap<String, String> {
+    let mut lines = csv_str.lines();
+    let header = lines.next().unwrap().split(',');
+    let row = lines.next().unwrap().split(',');
+    header
+        .zip(row)
+        .map(|(h, v)| (h.to_string(), v.to_string()))
+        .collect()
+}
+
+#[tokio::test]
+async fn test_export_csv_carins_columns_with_values() {
+    let mock = Arc::new(MockTenkoRecordsRepository::default());
+    mock.return_carins_data.store(true, Ordering::SeqCst);
+    let state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
+    tenko_state.tenko_records = mock;
+    let base_url =
+        crate::mock_helpers::app_state::spawn_mock_server_with_tenko(state, tenko_state).await;
+    let jwt = crate::common::create_test_jwt(uuid::Uuid::new_v4(), "admin");
+
+    let res = reqwest::Client::new()
+        .get(format!("{base_url}/api/tenko/records/csv"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let bytes = res.bytes().await.unwrap();
+    let csv_str = std::str::from_utf8(&bytes[3..]).unwrap();
+
+    // 末尾 4 列 (既存の列位置は動かさない)
+    let header: Vec<&str> = csv_str.lines().next().unwrap().split(',').collect();
+    assert_eq!(
+        &header[header.len() - 5..],
+        &[
+            "record_hash",
+            "carins_cert_no",
+            "carins_vehicle_id",
+            "carins_expires_on",
+            "carins_matched_by",
+        ]
+    );
+    let row = csv_row(csv_str);
+    assert_eq!(row["carins_cert_no"], "000000000001");
+    assert_eq!(row["carins_vehicle_id"], "TESTCARID00001");
+    assert_eq!(row["carins_expires_on"], "2030-12-31");
+    assert_eq!(row["carins_matched_by"], "cert_no");
+}
+
+#[tokio::test]
+async fn test_export_csv_carins_columns_without_values() {
+    let (base_url, auth_header) = setup_with_data().await;
+    let res = reqwest::Client::new()
+        .get(format!("{base_url}/api/tenko/records/csv"))
+        .header("Authorization", &auth_header)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let bytes = res.bytes().await.unwrap();
+    let row = csv_row(std::str::from_utf8(&bytes[3..]).unwrap());
+    assert_eq!(row["record_hash"], "abc123hash");
+    for key in [
+        "carins_cert_no",
+        "carins_vehicle_id",
+        "carins_expires_on",
+        "carins_matched_by",
+    ] {
+        assert_eq!(row[key], "", "{key} は番号なしの記録では空欄");
+    }
+}
+
 #[tokio::test]
 async fn test_export_csv_with_filters() {
     let (base_url, auth_header, _) = setup().await;

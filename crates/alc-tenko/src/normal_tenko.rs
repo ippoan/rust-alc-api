@@ -7,9 +7,11 @@
 //! 呼び元は `alc-misc` の測定 repository。接続を自分で取らず `conn` を受け取るのは、
 //! 測定の INSERT / UPDATE と同じ transaction に相乗りするため。
 
-use sqlx::PgConnection;
+use chrono::NaiveDate;
+use sqlx::{Connection, PgConnection};
 
 use alc_core::models::Measurement;
+use alc_core::repo::car_inspections::lookup_expiry;
 
 use crate::models::TenkoSession;
 use crate::repo::tenko_sessions::insert_record;
@@ -23,20 +25,36 @@ const TENKO_TYPE_NORMAL: &str = "normal";
 /// 種別 (業務前 / 業務後) とは軸が違うので、始業 / 終業を選んでもこのまま。
 const TENKO_METHOD_NORMAL: &str = "通常点呼";
 
+/// 測定の保存に付いてくる、通常点呼の記録だけに使う値 (値の検査は handler で済ませてある)。
+#[derive(Debug, Default, Clone, Copy)]
+pub struct NormalTenkoInput<'a> {
+    /// `None` → `normal`
+    pub tenko_type: Option<&'a str>,
+    /// 運行者端末が電子車検証から読んだ管理番号 (Refs ippoan/alc-app-s3#110)
+    pub carins_cert_no: Option<&'a str>,
+    /// 同じく車両 ID
+    pub carins_vehicle_id: Option<&'a str>,
+}
+
 /// 完了した通常点呼の測定から、点呼セッションと点呼記録を 1 組作る。
 ///
 /// * 結果が `error` / 無し → `Ok(None)` (測定だけ残す。エラーにしない)
-/// * `tenko_type` が `None` → `normal` (値の検査は handler で済ませてある)
+/// * `tenko_type` が `None` → `normal`
 /// * 既に記録済み (同じ測定、または同じ乗務員・同じ測定時刻) → `Ok(None)`
 ///   — migration 141 の部分 unique に `ON CONFLICT DO NOTHING` で任せる
+/// * 電子車検証の番号があれば、同じ transaction で carins を照合して期限を写す
+///   ([`carins_expiry`])。照合に失敗しても記録は作る
 pub async fn record(
     conn: &mut PgConnection,
     m: &Measurement,
-    tenko_type: Option<&str>,
+    input: &NormalTenkoInput<'_>,
 ) -> Result<Option<TenkoSession>, sqlx::Error> {
     let Some((status, cancel_reason)) = status_for_result(m.result.as_deref()) else {
         return Ok(None);
     };
+
+    let (carins_expires_on, carins_matched_by) =
+        carins_expiry(conn, input.carins_cert_no, input.carins_vehicle_id).await;
 
     let session = sqlx::query_as::<_, TenkoSession>(
         r#"
@@ -47,7 +65,8 @@ pub async fn record(
             temperature, systolic, diastolic, pulse, medical_measured_at,
             medical_manual_input,
             responsible_manager_name, cancel_reason,
-            started_at, completed_at, tenko_method
+            started_at, completed_at, tenko_method,
+            carins_cert_no, carins_vehicle_id, carins_expires_on, carins_matched_by
         )
         VALUES (
             $1, $2, NULL, $3, $4,
@@ -56,7 +75,8 @@ pub async fn record(
             $10, $11, $12, $13, $14,
             $15,
             NULL, $16,
-            $17, NOW(), $18
+            $17, NOW(), $18,
+            $19, $20, $21, $22
         )
         ON CONFLICT DO NOTHING
         RETURNING *
@@ -64,7 +84,7 @@ pub async fn record(
     )
     .bind(m.tenant_id)
     .bind(m.employee_id)
-    .bind(tenko_type.unwrap_or(TENKO_TYPE_NORMAL))
+    .bind(input.tenko_type.unwrap_or(TENKO_TYPE_NORMAL))
     .bind(status)
     .bind(m.id)
     .bind(&m.result)
@@ -80,6 +100,10 @@ pub async fn record(
     .bind(cancel_reason)
     .bind(m.measured_at)
     .bind(TENKO_METHOD_NORMAL)
+    .bind(input.carins_cert_no)
+    .bind(input.carins_vehicle_id)
+    .bind(carins_expires_on)
+    .bind(carins_matched_by)
     .fetch_optional(&mut *conn)
     .await?;
 
@@ -113,4 +137,43 @@ pub async fn record(
     .await?;
 
     Ok(Some(session))
+}
+
+/// 電子車検証の番号で carins を照合し、(期限, matched_by) を返す。
+///
+/// * 番号が両方無い → `(None, None)` (照合しない)
+/// * 照合は内側の区切り (SAVEPOINT) で行う。SQL が失敗しても区切りだけ戻し、
+///   `(None, None)` で記録を続ける — 失敗した文で外側の transaction を壊さないため。
+///   warn には番号を出さず理由だけ残す
+async fn carins_expiry(
+    conn: &mut PgConnection,
+    cert_no: Option<&str>,
+    vehicle_id: Option<&str>,
+) -> (Option<NaiveDate>, Option<&'static str>) {
+    if cert_no.is_none() && vehicle_id.is_none() {
+        return (None, None);
+    }
+    let mut sp = match conn.begin().await {
+        Ok(sp) => sp,
+        Err(e) => {
+            tracing::warn!("車検証の照合を開始できませんでした: {e}");
+            return (None, None);
+        }
+    };
+    match lookup_expiry(&mut sp, cert_no, vehicle_id).await {
+        Ok(found) => match sp.commit().await {
+            Ok(()) => (found.expires_on, Some(found.matched_by)),
+            Err(e) => {
+                tracing::warn!("車検証の照合を確定できませんでした: {e}");
+                (None, None)
+            }
+        },
+        Err(e) => {
+            tracing::warn!("車検証の照合に失敗したので期限なしで記録します: {e}");
+            if let Err(e) = sp.rollback().await {
+                tracing::warn!("車検証の照合の巻き戻しに失敗しました: {e}");
+            }
+            (None, None)
+        }
+    }
 }

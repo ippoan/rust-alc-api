@@ -1,6 +1,6 @@
 //! tenko ドメインの models (alc-core から移設、Refs #513)。
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
@@ -107,6 +107,19 @@ pub struct TenkoSession {
     pub carrying_items_checked: Option<serde_json::Value>,
     pub started_at: Option<DateTime<Utc>>,
     pub completed_at: Option<DateTime<Utc>>,
+    // 電子車検証 (migration 142、通常点呼だけが書く。Refs ippoan/alc-app-s3#110)
+    /// 端末が読んだ管理番号
+    #[serde(default)]
+    pub carins_cert_no: Option<String>,
+    /// 端末が読んだ車両 ID
+    #[serde(default)]
+    pub carins_vehicle_id: Option<String>,
+    /// carins で照合できた車検期限
+    #[serde(default)]
+    pub carins_expires_on: Option<NaiveDate>,
+    /// `cert_no` / `car_id` / `none`。NULL = 番号なし、または照合に失敗
+    #[serde(default)]
+    pub carins_matched_by: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

@@ -1,13 +1,14 @@
 use axum::{
     extract::{Path, State},
     http::StatusCode,
-    routing::get,
+    routing::{get, post},
     Extension, Json, Router,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::CarinsState;
 use alc_core::auth_middleware::TenantId;
+use alc_core::repository::car_inspections::normalize_carins_numbers;
 
 pub fn tenant_router<S>() -> Router<S>
 where
@@ -26,6 +27,8 @@ where
             "/car-inspections/by-car/{car_id}/history",
             get(list_history),
         )
+        // 番号を URL (request log) に載せないよう POST。`/{id}` より前に置く
+        .route("/car-inspections/lookup", post(lookup))
         .route("/car-inspections/{id}", get(get_by_id))
 }
 
@@ -34,6 +37,54 @@ where
 struct ListResponse {
     #[serde(rename = "carInspections")]
     car_inspections: Vec<serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LookupRequest {
+    #[serde(default)]
+    cert_no: Option<String>,
+    #[serde(default)]
+    car_id: Option<String>,
+}
+
+/// 車検期限の照合の応答。所有者・住所・車台番号は返さない
+#[derive(Debug, Serialize, ts_rs::TS)]
+#[ts(export)]
+struct CarInspectionLookupResponse {
+    /// "YYYY-MM-DD"
+    expires_on: Option<chrono::NaiveDate>,
+    /// `cert_no` / `car_id` / `none`
+    matched_by: String,
+    /// 登録番号
+    car_no: Option<String>,
+}
+
+/// 電子車検証の管理番号 / 車両 ID で車検期限を照合する (運行者端末の車両の段、
+/// Refs ippoan/alc-app-s3#110)。番号は tracing に出さない。
+async fn lookup(
+    State(state): State<CarinsState>,
+    Extension(tenant_id): Extension<TenantId>,
+    Json(mut body): Json<LookupRequest>,
+) -> Result<Json<CarInspectionLookupResponse>, StatusCode> {
+    normalize_carins_numbers(&mut body.cert_no, &mut body.car_id)
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    if body.cert_no.is_none() && body.car_id.is_none() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let found = state
+        .car_inspections
+        .lookup_expiry(tenant_id.0, body.cert_no.as_deref(), body.car_id.as_deref())
+        .await
+        .map_err(|e| {
+            tracing::error!("lookup_expiry failed: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    Ok(Json(CarInspectionLookupResponse {
+        expires_on: found.expires_on,
+        matched_by: found.matched_by.to_string(),
+        car_no: found.car_no,
+    }))
 }
 
 async fn list_current(
