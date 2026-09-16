@@ -171,6 +171,24 @@ rust_test(
     ),
 )
 
+# 車検期限照合の和暦フォールバック (Refs ippoan/alc-app-s3#110)。alc-core の
+# repo/car_inspections.rs::lookup_expiry は正規表現・LATERAL JOIN・make_date を
+# 含む生 SQL なので、repository を差し替える mock テストでは 1 行も通らない。
+rust_test(
+    name = "car_inspections_expiry_test",
+    srcs = ["tests/car_inspections_expiry_test.rs"] + glob(["tests/common/**/*.rs"]),
+    crate_root = "tests/car_inspections_expiry_test.rs",
+    compile_data = glob(["migrations/**"]),
+    deps = [":rust_alc_api_lib"] + all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ) + _WORKSPACE_CRATES,
+    proc_macro_deps = all_crate_deps(
+        proc_macro = True,
+        proc_macro_dev = True,
+    ),
+)
+
 rust_test(
     name = "dvr_notifications_test",
     srcs = ["tests/dvr_notifications_test.rs"] + glob(["tests/common/**/*.rs"]),
