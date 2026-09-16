@@ -327,4 +327,50 @@ async fn escalate_to_remote_flow() {
             .unwrap();
         assert_eq!(res.status(), 400);
     });
+
+    test_case!("completed のセッションは切り替えられない", {
+        let session = start_pre_operation_session(&client, &base_url, &auth, employee_id).await;
+        let session_id = session["id"].as_str().unwrap();
+        let session_uuid = Uuid::parse_str(session_id).unwrap();
+
+        sqlx::query("UPDATE alc_api.tenko_sessions SET status = 'completed' WHERE id = $1")
+            .bind(session_uuid)
+            .execute(state.pool())
+            .await
+            .unwrap();
+
+        let res = client
+            .put(format!(
+                "{base_url}/api/tenko/sessions/{session_id}/escalate-remote"
+            ))
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({ "reason": "測定不能" }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 400, "終了済み (completed) は弾くはず");
+    });
+
+    test_case!("cancelled のセッションは切り替えられない", {
+        let session = start_pre_operation_session(&client, &base_url, &auth, employee_id).await;
+        let session_id = session["id"].as_str().unwrap();
+        let session_uuid = Uuid::parse_str(session_id).unwrap();
+
+        sqlx::query("UPDATE alc_api.tenko_sessions SET status = 'cancelled' WHERE id = $1")
+            .bind(session_uuid)
+            .execute(state.pool())
+            .await
+            .unwrap();
+
+        let res = client
+            .put(format!(
+                "{base_url}/api/tenko/sessions/{session_id}/escalate-remote"
+            ))
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({ "reason": "測定不能" }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 400, "終了済み (cancelled) は弾くはず");
+    });
 }
