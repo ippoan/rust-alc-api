@@ -744,7 +744,31 @@ async fn test_escalate_remote_success() {
     let body: serde_json::Value = res.json().await.unwrap();
     assert_eq!(body["tenko_method"], "遠隔点呼");
     assert_eq!(body["remote_escalation_reason"], "血圧計が故障している");
-    assert!(body["remote_escalated_at"].is_string());
+    // JSON キーは escalated_to_remote_at (親の決定 — 画面側の管理者バッジがこの名前を見る)
+    assert!(body["escalated_to_remote_at"].is_string());
+}
+
+#[tokio::test]
+async fn test_escalate_remote_reason_too_long() {
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_status.lock().unwrap() = "medical_pending".to_string();
+    *mock.session_tenko_type.lock().unwrap() = "pre_operation".to_string();
+    *mock.session_tenko_method.lock().unwrap() = "自動点呼".to_string();
+    let (base_url, auth_header, _) = setup_with_mock(mock).await;
+
+    let too_long = "あ".repeat(201);
+    let res = client()
+        .put(format!(
+            "{base_url}/api/tenko/sessions/{}/escalate-remote",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({ "reason": too_long }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 400);
 }
 
 #[tokio::test]
@@ -829,6 +853,28 @@ async fn test_escalate_remote_already_normal_tenko() {
         .unwrap();
 
     assert_eq!(res.status(), 400);
+}
+
+#[tokio::test]
+async fn test_escalate_remote_already_escalated() {
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_status.lock().unwrap() = "medical_pending".to_string();
+    *mock.session_tenko_type.lock().unwrap() = "pre_operation".to_string();
+    *mock.session_tenko_method.lock().unwrap() = "遠隔点呼".to_string();
+    let (base_url, auth_header, _) = setup_with_mock(mock).await;
+
+    let res = client()
+        .put(format!(
+            "{base_url}/api/tenko/sessions/{}/escalate-remote",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({ "reason": "測定不能" }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 400, "二重の切り替えは弾くはず");
 }
 
 #[tokio::test]

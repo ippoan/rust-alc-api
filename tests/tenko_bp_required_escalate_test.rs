@@ -176,8 +176,9 @@ async fn escalate_to_remote_flow() {
             let body: Value = res.json().await.unwrap();
             assert_eq!(body["tenko_method"], "遠隔点呼");
             assert_eq!(body["remote_escalation_reason"], "血圧計が壊れている");
+            // JSON キーは escalated_to_remote_at (親の決定 — 画面側の管理者バッジがこの名前を見る)
             assert!(
-                body["remote_escalated_at"].is_string(),
+                body["escalated_to_remote_at"].is_string(),
                 "切り替え時刻が残っているはず (応答: {body})"
             );
             // status は変えない (血圧を必須にしないまま医療データ提出へ進める)
@@ -253,7 +254,7 @@ async fn escalate_to_remote_flow() {
     });
 
     test_case!(
-        "通常点呼へは切り替えられない (別経路の振る舞いを変えない)",
+        "通常点呼のセッションは遠隔へ切り替えられない (別経路の振る舞いを変えない)",
         {
             let session = start_pre_operation_session(&client, &base_url, &auth, employee_id).await;
             let session_id = session["id"].as_str().unwrap();
@@ -279,4 +280,51 @@ async fn escalate_to_remote_flow() {
             assert_eq!(res.status(), 400);
         }
     );
+
+    test_case!(
+        "既に遠隔点呼へ切り替え済みのセッションは再度切り替えられない (二重にならない)",
+        {
+            let session = start_pre_operation_session(&client, &base_url, &auth, employee_id).await;
+            let session_id = session["id"].as_str().unwrap();
+
+            let res = client
+                .put(format!(
+                    "{base_url}/api/tenko/sessions/{session_id}/escalate-remote"
+                ))
+                .header("Authorization", &auth)
+                .json(&serde_json::json!({ "reason": "血圧計が繋がっていない" }))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 200, "1 回目は通るはず");
+
+            let res = client
+                .put(format!(
+                    "{base_url}/api/tenko/sessions/{session_id}/escalate-remote"
+                ))
+                .header("Authorization", &auth)
+                .json(&serde_json::json!({ "reason": "その他" }))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 400, "2 回目は弾くはず");
+        }
+    );
+
+    test_case!("理由が上限 (200 文字) を超えたら 400", {
+        let session = start_pre_operation_session(&client, &base_url, &auth, employee_id).await;
+        let session_id = session["id"].as_str().unwrap();
+        let too_long = "あ".repeat(201);
+
+        let res = client
+            .put(format!(
+                "{base_url}/api/tenko/sessions/{session_id}/escalate-remote"
+            ))
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({ "reason": too_long }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 400);
+    });
 }

@@ -280,6 +280,14 @@ async fn submit_medical(
     Ok(Json(session))
 }
 
+/// escalate-remote の `reason` の上限 (Refs ippoan/alc-app-s3#135、親の決定)。
+/// 画面は選択肢から短い語を送る想定 (例: 「血圧計の故障」「血圧計が繋がっていない」
+/// 「その他」) だが、サーバ側は特定の値に縛らない — 選択肢が増えても API・migration に
+/// 手を入れずに済むようにするため。上限を超えたときは**切り詰めずに 400 で弾く**
+/// (`crates/alc-misc/src/employees.rs` の `MAX_NAME_LEN` と同じ作法 — 切り詰めると
+/// 監査に残る理由が静かに欠けるため、はっきり拒否する方を選ぶ)
+const MAX_ESCALATE_REASON_LEN: usize = 200;
+
 /// 自動点呼 → 遠隔点呼への切り替え (血圧が測れないとき、Refs ippoan/alc-app-s3#135)。
 /// tenko_method を「遠隔点呼」にし、切り替え時刻・理由を記録する。
 /// status は変えない — 血圧を必須にしない状態で医療データ提出へ進める
@@ -292,7 +300,8 @@ async fn escalate_remote(
     let tenant_id = tenant.0 .0;
     let repo = &*state.tenko_sessions;
 
-    if body.reason.trim().is_empty() {
+    let reason = body.reason.trim();
+    if reason.is_empty() || reason.chars().count() > MAX_ESCALATE_REASON_LEN {
         return Err(StatusCode::BAD_REQUEST);
     }
 
@@ -302,16 +311,19 @@ async fn escalate_remote(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
 
-    // 血圧必須の対象は業務前のみ。通常点呼はこの口の対象外 (別経路の振る舞いを変えない)
-    if session.tenko_type != "pre_operation" || session.tenko_method == "通常点呼" {
+    // 血圧必須の対象は業務前のみ。自動点呼以外 (通常点呼・既に遠隔へ切り替え済み) は
+    // この口の対象外 — 二重の切り替えも別経路の振る舞いを変えることも避ける
+    // (親の決定: 自動点呼以外からの切り替えを弾く)
+    if session.tenko_type != "pre_operation" || session.tenko_method != "自動点呼" {
         return Err(StatusCode::BAD_REQUEST);
     }
+    // 終了済みのセッションは弾く (親の決定)
     if matches!(session.status.as_str(), "completed" | "cancelled") {
         return Err(StatusCode::BAD_REQUEST);
     }
 
     let session = repo
-        .escalate_to_remote(tenant_id, id, &body.reason)
+        .escalate_to_remote(tenant_id, id, reason)
         .await
         .map_err(|e| {
             tracing::error!("escalate_remote DB error: {e}");

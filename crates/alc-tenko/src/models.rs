@@ -124,8 +124,10 @@ pub struct TenkoSession {
     /// `cert_no` / `car_id` / `none`。NULL = 番号なし、または照合に失敗
     #[serde(default)]
     pub carins_matched_by: Option<String>,
-    // 遠隔点呼への切り替え (migration 144、Refs ippoan/alc-app-s3#135)
-    #[serde(default)]
+    // 遠隔点呼への切り替え (migration 144、Refs ippoan/alc-app-s3#135)。
+    // JSON キーは `escalated_to_remote_at` — 画面側 (#c135-41) の管理者バッジが
+    // この名前でフィールドの有無だけを見る (親の決定、DB 列名は変えない)
+    #[serde(default, rename = "escalated_to_remote_at")]
     pub remote_escalated_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub remote_escalation_reason: Option<String>,
