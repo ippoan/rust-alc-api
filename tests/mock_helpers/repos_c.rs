@@ -835,7 +835,7 @@ fn make_mock_session(
         carins_vehicle_id: None,
         carins_expires_on: None,
         carins_matched_by: None,
-        remote_escalated_at: None,
+        escalated_to_remote_at: None,
         remote_escalation_reason: None,
         created_at: now,
         updated_at: now,
@@ -1303,7 +1303,7 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
             false,
         );
         session.tenko_method = "遠隔点呼".to_string();
-        session.remote_escalated_at = Some(Utc::now());
+        session.escalated_to_remote_at = Some(Utc::now());
         session.remote_escalation_reason = Some(_reason.to_string());
         Ok(session)
     }

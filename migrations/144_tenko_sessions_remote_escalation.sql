@@ -56,6 +56,9 @@ ALTER TABLE alc_api.tenko_sessions
 
 -- 切り替えた時刻と理由。escalate-remote 呼び出し以外では NULL のまま
 -- (interrupted_at / resumed_at + resume_reason と同じ形)。
+-- 列名 escalated_to_remote_at は画面側 (#c135-41) が読む JSON キー名と揃えてある
+-- (親 #p135 の決定。このタスクの PR 内で 1 度リネームしただけで、この migration が
+-- 本 PR 以外の環境に出たことは無い)
 ALTER TABLE alc_api.tenko_sessions
-    ADD COLUMN IF NOT EXISTS remote_escalated_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS escalated_to_remote_at TIMESTAMPTZ,
     ADD COLUMN IF NOT EXISTS remote_escalation_reason TEXT;

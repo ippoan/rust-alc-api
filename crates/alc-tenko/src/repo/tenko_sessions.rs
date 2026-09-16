@@ -554,7 +554,7 @@ impl TenkoSessionRepository for PgTenkoSessionRepository {
             r#"
             UPDATE tenko_sessions SET
                 tenko_method = '遠隔点呼',
-                remote_escalated_at = NOW(),
+                escalated_to_remote_at = NOW(),
                 remote_escalation_reason = $1,
                 updated_at = NOW()
             WHERE id = $2 AND tenant_id = $3

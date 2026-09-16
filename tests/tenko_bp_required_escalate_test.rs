@@ -190,7 +190,7 @@ async fn escalate_to_remote_flow() {
                 Option<String>,
                 Option<chrono::DateTime<chrono::Utc>>,
             ) = sqlx::query_as(
-                "SELECT tenko_method, remote_escalation_reason, remote_escalated_at
+                "SELECT tenko_method, remote_escalation_reason, escalated_to_remote_at
                  FROM alc_api.tenko_sessions WHERE id = $1",
             )
             .bind(session_uuid)

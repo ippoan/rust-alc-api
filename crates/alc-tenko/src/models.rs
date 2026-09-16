@@ -125,10 +125,12 @@ pub struct TenkoSession {
     #[serde(default)]
     pub carins_matched_by: Option<String>,
     // 遠隔点呼への切り替え (migration 144、Refs ippoan/alc-app-s3#135)。
-    // JSON キーは `escalated_to_remote_at` — 画面側 (#c135-41) の管理者バッジが
-    // この名前でフィールドの有無だけを見る (親の決定、DB 列名は変えない)
-    #[serde(default, rename = "escalated_to_remote_at")]
-    pub remote_escalated_at: Option<DateTime<Utc>>,
+    // フィールド名 (= JSON キー) は `escalated_to_remote_at` — 画面側 (#c135-41) の
+    // 管理者バッジがこの名前でフィールドの有無だけを見る (親の決定)。DB 列名も同じに
+    // 揃えてある (rename attribute で JSON だけ合わせるより、名前を 1 つにする方が
+    // 読み違いの余地がないため)
+    #[serde(default)]
+    pub escalated_to_remote_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub remote_escalation_reason: Option<String>,
     pub created_at: DateTime<Utc>,
