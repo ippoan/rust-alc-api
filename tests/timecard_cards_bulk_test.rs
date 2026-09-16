@@ -357,3 +357,366 @@ async fn test_requires_tenant_identity() {
         }
     );
 }
+
+// ============================================================
+// source 列と削除の口 (`POST /api/timecard/cards/delete-by-card`)
+// Refs ippoan/rust-alc-api#644
+//
+// **mock テストでは 1 行も固定できません。** `source` を刻むのは INSERT の列で、
+// 「刻まない」ことを決めているのは `ON CONFLICT ... DO UPDATE` の SET と WHERE、
+// 削除の射程を縛るのは `WHERE source = $3` — どれも SQL の側にあります。
+// ============================================================
+
+/// 一括取り込みが刻む出所。**サーバ側の定数**で、body からは取らない。
+const SYNC_SOURCE: &str = "timecard-ic-ledger-import";
+
+impl Ctx {
+    /// `(card_id, source)` を card_id 順に。**行が無ければ空** —
+    /// 「消えた」と「source が NULL」を取り違えないため
+    async fn card_sources(&self) -> Vec<(String, Option<String>)> {
+        sqlx::query_as::<_, (String, Option<String>)>(
+            "SELECT card_id, source FROM timecard_cards WHERE tenant_id = $1 ORDER BY card_id",
+        )
+        .bind(self.tenant)
+        .fetch_all(self.state.pool())
+        .await
+        .unwrap()
+    }
+
+    /// 単発の `POST /timecard/cards` (alc 側で直接登録する経路)。
+    async fn create_card(&self, employee_id: Uuid, card_id: &str, label: Option<&str>) -> Value {
+        let res = self
+            .client
+            .post(format!("{}/api/timecard/cards", self.base_url))
+            .header("Authorization", &self.auth)
+            .json(&json!({"employee_id": employee_id, "card_id": card_id, "label": label}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 201, "POST /api/timecard/cards");
+        res.json().await.unwrap()
+    }
+
+    async fn delete_by_card(&self, body: Value) -> reqwest::Response {
+        self.client
+            .post(format!(
+                "{}/api/timecard/cards/delete-by-card",
+                self.base_url
+            ))
+            .header("Authorization", &self.auth)
+            .json(&body)
+            .send()
+            .await
+            .unwrap()
+    }
+
+    async fn delete_ok(&self, body: Value) -> Value {
+        let res = self.delete_by_card(body).await;
+        assert_eq!(res.status(), 200, "範囲外も不在も形不正も 200");
+        res.json().await.unwrap()
+    }
+}
+
+/// 受け入れ 1 / 2: `source` が入るのは一括取り込みで**新規作成**した行だけ。
+#[tokio::test]
+async fn test_only_bulk_created_rows_carry_the_sync_source() {
+    test_group!("source: 刻む経路");
+
+    test_case!(
+        "bulk-by-code の新規は定数 / POST /timecard/cards は NULL",
+        {
+            let ctx = setup("Card Source A").await;
+            let emp = ctx.employee("出所 太郎", "E001").await;
+
+            assert_eq!(
+                ctx.bulk_ok(json!({"items": [{"code": "E001", "card_id": "01401d0b1d37b660"}]}))
+                    .await["created"],
+                1
+            );
+            // 単発の登録は刻まない ⇒ NULL のまま = 削除の射程外 (fail-closed)
+            ctx.create_card(emp, "04A1B2C3D4E5F6", Some("入館証")).await;
+
+            assert_eq!(
+                ctx.card_sources().await,
+                vec![
+                    (
+                        "01401d0b1d37b660".to_string(),
+                        Some(SYNC_SOURCE.to_string())
+                    ),
+                    ("04a1b2c3d4e5f6".to_string(), None),
+                ]
+            );
+        }
+    );
+}
+
+/// 受け入れ 3: `source` を足しても冪等性は後退していない。
+#[tokio::test]
+async fn test_source_column_does_not_break_idempotency() {
+    test_group!("source: 冪等性");
+
+    test_case!("同じ body 2 回で created:1 → unchanged:1", {
+        let ctx = setup("Card Source B").await;
+        ctx.employee("冪等 太郎", "E001").await;
+        let body = json!({"items": [{"code": "E001", "card_id": "01401d0b1d37b660"}]});
+
+        assert_eq!(ctx.bulk_ok(body.clone()).await["created"], 1);
+
+        let second = ctx.bulk_ok(body).await;
+        assert_eq!(second["created"], 0, "{second}");
+        assert_eq!(second["updated"], 0);
+        assert_eq!(second["unchanged"], 1);
+        assert_eq!(
+            ctx.card_sources().await,
+            vec![(
+                "01401d0b1d37b660".to_string(),
+                Some(SYNC_SOURCE.to_string())
+            )]
+        );
+    });
+}
+
+/// 受け入れ 4: **これは仕様。`DO UPDATE` に `source` を足さないこと。**
+///
+/// alc 側で先に登録された行 (`source IS NULL`) を、同じ社員のまま一括取り込みが
+/// 再確認しても `source` は NULL のまま — `ON CONFLICT ... DO UPDATE` の WHERE が
+/// 外れる「unchanged」経路は**1 行も書かない**ため。
+///
+/// 「同期が知っているのに消せない」は一見バグに見えるが **fail-closed 側 (消せない
+/// だけ)** で、直そうと `DO UPDATE SET source = EXCLUDED.source` を足すと
+/// unchanged 経路が UPDATE になり、**実測済みの冪等性 (2 回目が created:0 /
+/// unchanged:120) が壊れる**。消したい行が出たら、同期側で 1 度カードを外して
+/// 入れ直す (= 新規 INSERT になり `source` が刻まれる) のが正しい直し方。
+#[tokio::test]
+async fn test_unchanged_row_keeps_null_source_by_design() {
+    test_group!("source: unchanged は書かない (仕様)");
+
+    test_case!(
+        "alc 側で登録済みの行は同期が再確認しても NULL のまま",
+        {
+            let ctx = setup("Card Source C").await;
+            let emp = ctx.employee("先行 太郎", "E001").await;
+            ctx.create_card(emp, "01401d0b1d37b660", None).await;
+
+            // 同じ社員・同じカード ⇒ unchanged (1 行も書かない)
+            let res = ctx
+                .bulk_ok(json!({"items": [{"code": "E001", "card_id": "01401d0b1d37b660"}]}))
+                .await;
+            assert_eq!(res["unchanged"], 1, "{res}");
+            assert_eq!(res["created"], 0);
+            assert_eq!(res["updated"], 0);
+            assert_eq!(
+                ctx.card_sources().await,
+                vec![("01401d0b1d37b660".to_string(), None)],
+                "★ 仕様: unchanged 経路は 1 行も書かないので source は NULL のまま。\
+                 直すために DO UPDATE へ source を足さないこと (冪等性が壊れる)"
+            );
+
+            // その帰結として削除の射程外になる (= 消せないだけ。fail-closed)
+            let deleted = ctx.delete_ok(json!({"card_id": "01401d0b1d37b660"})).await;
+            assert_eq!(deleted["reason"], "out_of_scope");
+            assert_eq!(ctx.card_count().await, 1);
+        }
+    );
+}
+
+/// 受け入れ 5: `dry_run` は行も `source` も書かない。
+#[tokio::test]
+async fn test_bulk_dry_run_writes_no_source() {
+    test_group!("source: dry_run");
+
+    test_case!("dry_run:true では 1 行も増えない", {
+        let ctx = setup("Card Source D").await;
+        ctx.employee("試し 太郎", "E001").await;
+
+        let dry = ctx
+            .bulk_ok(json!({
+                "dry_run": true,
+                "items": [{"code": "E001", "card_id": "01401d0b1d37b660"}]
+            }))
+            .await;
+        assert_eq!(dry["created"], 1, "判定は本番と同じ");
+        assert!(ctx.card_sources().await.is_empty(), "1 行も書かない");
+    });
+}
+
+/// 受け入れ 6: 削除の射程は `source` ちょうど。**どちらも 200。**
+#[tokio::test]
+async fn test_delete_by_card_only_removes_synced_rows() {
+    test_group!("delete-by-card: 射程");
+
+    test_case!(
+        "source が定数の行は消える / NULL の行は out_of_scope",
+        {
+            let ctx = setup("Card Delete A").await;
+            let emp = ctx.employee("削除 太郎", "E001").await;
+            ctx.bulk_ok(json!({"items": [{"code": "E001", "card_id": "01401d0b1d37b660"}]}))
+                .await;
+            ctx.create_card(emp, "04a1b2c3d4e5f6", None).await;
+
+            let gone = ctx.delete_ok(json!({"card_id": "01401d0b1d37b660"})).await;
+            assert_eq!(gone["deleted"], 1, "{gone}");
+            assert_eq!(gone["reason"], "deleted");
+            // 誰のカードを外したかを画面に出せる
+            assert_eq!(gone["code"], "E001");
+
+            let kept = ctx.delete_ok(json!({"card_id": "04a1b2c3d4e5f6"})).await;
+            assert_eq!(kept["deleted"], 0, "{kept}");
+            assert_eq!(kept["reason"], "out_of_scope");
+            assert!(kept["code"].is_null());
+
+            assert_eq!(
+                ctx.card_sources().await,
+                vec![("04a1b2c3d4e5f6".to_string(), None)],
+                "alc 側で直接登録したカードは巻き込まない"
+            );
+        }
+    );
+}
+
+/// 受け入れ 7: 不在と形不正も 200 + `reason` (4xx にしない)。
+#[tokio::test]
+async fn test_delete_by_card_reports_not_found_and_invalid_with_200() {
+    test_group!("delete-by-card: 不在 / 形不正");
+
+    test_case!("not_found も invalid_card_id も 200", {
+        let ctx = setup("Card Delete B").await;
+
+        let missing = ctx.delete_ok(json!({"card_id": "01401d0b1d37b660"})).await;
+        assert_eq!(missing["deleted"], 0);
+        assert_eq!(missing["reason"], "not_found");
+
+        let invalid = ctx.delete_ok(json!({"card_id": "未登録"})).await;
+        assert_eq!(invalid["deleted"], 0);
+        assert_eq!(invalid["reason"], "invalid_card_id");
+    });
+}
+
+/// 受け入れ 8 / 9: `dry_run` は消さない、正規化は効く。
+#[tokio::test]
+async fn test_delete_by_card_dry_run_and_card_id_normalization() {
+    test_group!("delete-by-card: dry_run と表記ゆれ");
+
+    test_case!(
+        "dry_run は残す / 大文字・`:` 区切りでも同じ行に当たる",
+        {
+            let ctx = setup("Card Delete C").await;
+            ctx.employee("正規化 太郎", "E001").await;
+            ctx.bulk_ok(json!({"items": [{"code": "E001", "card_id": "01401d0b1d37b660"}]}))
+                .await;
+
+            // 生値 (大文字・`:` 区切り・前後空白) でも当たる
+            let dry = ctx
+                .delete_ok(json!({"card_id": "  01401D0B:1D37:B660  ", "dry_run": true}))
+                .await;
+            assert_eq!(dry["deleted"], 1, "判定は本番と同じ: {dry}");
+            assert_eq!(dry["reason"], "deleted");
+            assert_eq!(ctx.card_count().await, 1, "dry_run で消してはいけない");
+
+            let applied = ctx
+                .delete_ok(json!({"card_id": "01401D0B:1D37:B660"}))
+                .await;
+            assert_eq!(applied, dry, "判定は同じコードを通る");
+            assert_eq!(ctx.card_count().await, 0);
+        }
+    );
+}
+
+/// 打刻履歴は道連れにしない。
+///
+/// `hub_measurements` の `payload.employee_id` は ingest 時に**凍結**される
+/// (Refs ippoan/alc-app-s3#134) ので、カードを外しても過去の打刻は残り、
+/// 誰の打刻かも動かない。
+#[tokio::test]
+async fn test_deleting_a_card_keeps_the_frozen_punch_history() {
+    test_group!("delete-by-card: 打刻履歴");
+
+    test_case!("カードを消しても凍結済みの打刻は残る", {
+        let ctx = setup("Card Delete D").await;
+        let emp = ctx.employee("履歴 太郎", "E001").await;
+        ctx.bulk_ok(json!({"items": [{"code": "E001", "card_id": "01401d0b1d37b660"}]}))
+            .await;
+
+        let res = ctx
+            .client
+            .post(format!("{}/api/hub/measurements", ctx.base_url))
+            .header(
+                "X-Internal-Shared-Secret",
+                common::TEST_INTERNAL_SHARED_SECRET,
+            )
+            .header("X-Tenant-ID", ctx.tenant.to_string())
+            .json(&json!([{
+                "device_id": "timecard-dev-1",
+                "kind": "timecard",
+                "seq": 1,
+                "payload": {"card_id": "01401D0B1D37B660", "card_kind": "felica_idm"}
+            }]))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 201, "ingest");
+
+        let frozen = sqlx::query_as::<_, (Option<String>,)>(
+            "SELECT payload->>'employee_id' FROM hub_measurements WHERE tenant_id = $1 AND kind = 'timecard'",
+        )
+        .bind(ctx.tenant)
+        .fetch_all(ctx.state.pool())
+        .await
+        .unwrap();
+        assert_eq!(frozen, vec![(Some(emp.to_string()),)], "凍結されている");
+
+        assert_eq!(
+            ctx.delete_ok(json!({"card_id": "01401d0b1d37b660"})).await["deleted"],
+            1
+        );
+        assert_eq!(ctx.card_count().await, 0);
+
+        let after = sqlx::query_as::<_, (Option<String>,)>(
+            "SELECT payload->>'employee_id' FROM hub_measurements WHERE tenant_id = $1 AND kind = 'timecard'",
+        )
+        .bind(ctx.tenant)
+        .fetch_all(ctx.state.pool())
+        .await
+        .unwrap();
+        assert_eq!(after, frozen, "打刻は道連れにしない");
+    });
+}
+
+/// 受け入れ 10 / `X-Tenant-ID` 無しは 401。
+#[tokio::test]
+async fn test_delete_by_card_rejects_other_methods_and_anonymous_callers() {
+    test_group!("delete-by-card: method と認証");
+
+    test_case!("POST 以外は 405 / 認証無しは 401", {
+        let ctx = setup("Card Delete E").await;
+        let url = format!("{}/api/timecard/cards/delete-by-card", ctx.base_url);
+
+        // ★ 呼び出し元 (auth-worker) の転送 allowlist は method を見ないので、
+        //   閉じるのはこちら側の責務
+        for method in [
+            reqwest::Method::GET,
+            reqwest::Method::PUT,
+            reqwest::Method::PATCH,
+            reqwest::Method::DELETE,
+        ] {
+            let res = ctx
+                .client
+                .request(method.clone(), &url)
+                .header("Authorization", &ctx.auth)
+                .json(&json!({"card_id": "01401d0b1d37b660"}))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 405, "{method} は 405");
+        }
+
+        let anon = ctx
+            .client
+            .post(&url)
+            .json(&json!({"card_id": "01401d0b1d37b660"}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(anon.status(), 401);
+    });
+}

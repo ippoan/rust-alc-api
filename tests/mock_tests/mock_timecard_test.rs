@@ -7,7 +7,7 @@ use chrono::{TimeZone, Utc};
 use serde_json::Value;
 
 use rust_alc_api::db::models::{
-    TimecardCard, TimecardCardConflictPolicy, TimecardCardUpsertSummary,
+    TimecardCard, TimecardCardConflictPolicy, TimecardCardDeleteResult, TimecardCardUpsertSummary,
 };
 use rust_alc_api::db::repository::timecard::{
     PreparedCardUpsert, TimePunchCsvRow, TimecardRepository,
@@ -39,6 +39,7 @@ fn make_card(tenant_id: Uuid, employee_id: Uuid, card_id: &str) -> TimecardCard 
         employee_id,
         card_id: card_id.to_string(),
         label: Some("Test Card".to_string()),
+        source: None,
         created_at: Utc::now(),
     }
 }
@@ -87,6 +88,14 @@ impl TimecardRepository for PunchCardFoundMock {
     async fn delete_card(&self, _: Uuid, _: Uuid) -> Result<bool, sqlx::Error> {
         unreachable!()
     }
+    async fn delete_card_by_card_id_from_sync(
+        &self,
+        _: Uuid,
+        _: &str,
+        _: bool,
+    ) -> Result<TimecardCardDeleteResult, sqlx::Error> {
+        unreachable!()
+    }
 
     async fn find_card_by_card_id(
         &self,
@@ -99,6 +108,7 @@ impl TimecardRepository for PunchCardFoundMock {
             employee_id: self.employee_id,
             card_id: card_id.to_string(),
             label: None,
+            source: None,
             created_at: Utc::now(),
         }))
     }
@@ -210,6 +220,14 @@ impl TimecardRepository for PunchNfcFallbackMock {
         unreachable!()
     }
     async fn delete_card(&self, _: Uuid, _: Uuid) -> Result<bool, sqlx::Error> {
+        unreachable!()
+    }
+    async fn delete_card_by_card_id_from_sync(
+        &self,
+        _: Uuid,
+        _: &str,
+        _: bool,
+    ) -> Result<TimecardCardDeleteResult, sqlx::Error> {
         unreachable!()
     }
 
@@ -327,6 +345,14 @@ impl TimecardRepository for PunchCreateFailMock {
     async fn delete_card(&self, _: Uuid, _: Uuid) -> Result<bool, sqlx::Error> {
         unreachable!()
     }
+    async fn delete_card_by_card_id_from_sync(
+        &self,
+        _: Uuid,
+        _: &str,
+        _: bool,
+    ) -> Result<TimecardCardDeleteResult, sqlx::Error> {
+        unreachable!()
+    }
 
     async fn find_card_by_card_id(
         &self,
@@ -339,6 +365,7 @@ impl TimecardRepository for PunchCreateFailMock {
             employee_id: Uuid::new_v4(),
             card_id: card_id.to_string(),
             label: None,
+            source: None,
             created_at: Utc::now(),
         }))
     }
@@ -440,6 +467,14 @@ impl TimecardRepository for PunchGetNameFailMock {
     async fn delete_card(&self, _: Uuid, _: Uuid) -> Result<bool, sqlx::Error> {
         unreachable!()
     }
+    async fn delete_card_by_card_id_from_sync(
+        &self,
+        _: Uuid,
+        _: &str,
+        _: bool,
+    ) -> Result<TimecardCardDeleteResult, sqlx::Error> {
+        unreachable!()
+    }
 
     async fn find_card_by_card_id(
         &self,
@@ -452,6 +487,7 @@ impl TimecardRepository for PunchGetNameFailMock {
             employee_id: Uuid::new_v4(),
             card_id: card_id.to_string(),
             label: None,
+            source: None,
             created_at: Utc::now(),
         }))
     }
@@ -561,6 +597,14 @@ impl TimecardRepository for PunchListTodayFailMock {
     async fn delete_card(&self, _: Uuid, _: Uuid) -> Result<bool, sqlx::Error> {
         unreachable!()
     }
+    async fn delete_card_by_card_id_from_sync(
+        &self,
+        _: Uuid,
+        _: &str,
+        _: bool,
+    ) -> Result<TimecardCardDeleteResult, sqlx::Error> {
+        unreachable!()
+    }
 
     async fn find_card_by_card_id(
         &self,
@@ -573,6 +617,7 @@ impl TimecardRepository for PunchListTodayFailMock {
             employee_id: Uuid::new_v4(),
             card_id: card_id.to_string(),
             label: None,
+            source: None,
             created_at: Utc::now(),
         }))
     }
@@ -683,6 +728,14 @@ impl TimecardRepository for PunchFindCardDbErrorMock {
     async fn delete_card(&self, _: Uuid, _: Uuid) -> Result<bool, sqlx::Error> {
         unreachable!()
     }
+    async fn delete_card_by_card_id_from_sync(
+        &self,
+        _: Uuid,
+        _: &str,
+        _: bool,
+    ) -> Result<TimecardCardDeleteResult, sqlx::Error> {
+        unreachable!()
+    }
 
     async fn find_card_by_card_id(
         &self,
@@ -788,6 +841,14 @@ impl TimecardRepository for PunchNfcDbErrorMock {
     async fn delete_card(&self, _: Uuid, _: Uuid) -> Result<bool, sqlx::Error> {
         unreachable!()
     }
+    async fn delete_card_by_card_id_from_sync(
+        &self,
+        _: Uuid,
+        _: &str,
+        _: bool,
+    ) -> Result<TimecardCardDeleteResult, sqlx::Error> {
+        unreachable!()
+    }
 
     async fn find_card_by_card_id(
         &self,
@@ -891,6 +952,14 @@ impl TimecardRepository for ListPunchesCountFailMock {
         unreachable!()
     }
     async fn delete_card(&self, _: Uuid, _: Uuid) -> Result<bool, sqlx::Error> {
+        unreachable!()
+    }
+    async fn delete_card_by_card_id_from_sync(
+        &self,
+        _: Uuid,
+        _: &str,
+        _: bool,
+    ) -> Result<TimecardCardDeleteResult, sqlx::Error> {
         unreachable!()
     }
     async fn find_card_by_card_id(
@@ -2211,4 +2280,189 @@ async fn bulk_cards_db_error_is_500() {
     )
     .await;
     assert_eq!(res.status(), 500);
+}
+
+// ============================================================
+// POST /api/timecard/cards/delete-by-card — 継続同期の削除側
+// (Refs ippoan/rust-alc-api#644)
+//
+// ★ mock は repository を丸ごと差し替えるので **SQL を 1 行も通らない**。
+//   `WHERE source = $3` で射程を縛ること・DELETE と「そもそも在るか」を 1 文で
+//   分けることは tests/timecard_cards_bulk_test.rs (実 DB) が固定する。
+//   ここで固定するのは handler の分岐 — 形不正の門前払い、正規化、応答の形、
+//   dry_run の受け渡し、DB error、POST 以外の method。
+// ============================================================
+
+/// 削除の応答を積んだ mock を返す。
+fn delete_mock(
+    deleted: usize,
+    reason: &str,
+    code: Option<&str>,
+) -> Arc<crate::mock_helpers::MockTimecardRepository> {
+    let mock = Arc::new(crate::mock_helpers::MockTimecardRepository::default());
+    *mock.delete_by_card_result.lock().unwrap() =
+        (deleted, reason.to_string(), code.map(|c| c.to_string()));
+    mock
+}
+
+async fn post_delete_by_card(base_url: &str, jwt: &str, body: Value) -> reqwest::Response {
+    reqwest::Client::new()
+        .post(format!("{base_url}/api/timecard/cards/delete-by-card"))
+        .header("Authorization", auth(jwt))
+        .json(&body)
+        .send()
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn delete_by_card_returns_the_owner_code_and_never_echoes_the_card_id() {
+    let mock = delete_mock(1, "deleted", Some("E001"));
+    let (base_url, jwt) = spawn_with_mock(mock.clone()).await;
+
+    let res = post_delete_by_card(
+        &base_url,
+        &jwt,
+        serde_json::json!({"card_id": "01401d0b1d37b660"}),
+    )
+    .await;
+    assert_eq!(res.status(), 200);
+    let text = res.text().await.unwrap();
+    // ★ card_id は応答に出さない (呼び出し元は public repo の Worker で、
+    //   応答がそのままログや issue に写る)
+    assert!(
+        !text.contains("01401d0b1d37b660"),
+        "応答に card_id を出してはいけない: {text}"
+    );
+    let body: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(body["deleted"], 1);
+    assert_eq!(body["reason"], "deleted");
+    // 誰のカードを外したかは画面に出すために返す
+    assert_eq!(body["code"], "E001");
+    assert_eq!(
+        *mock.delete_by_card_calls.lock().unwrap(),
+        vec![("01401d0b1d37b660".to_string(), false)]
+    );
+}
+
+#[tokio::test]
+async fn delete_by_card_out_of_scope_and_not_found_are_200_with_a_reason() {
+    // **範囲外も不在も 404 にしない** — 404 だと呼び出し元の画面が
+    // 「消えた」と誤解する文面を出す
+    for (deleted, reason) in [(0, "out_of_scope"), (0, "not_found")] {
+        let (base_url, jwt) = spawn_with_mock(delete_mock(deleted, reason, None)).await;
+        let res = post_delete_by_card(
+            &base_url,
+            &jwt,
+            serde_json::json!({"card_id": "01401d0b1d37b660"}),
+        )
+        .await;
+        assert_eq!(res.status(), 200, "{reason} は 200");
+        let body: Value = res.json().await.unwrap();
+        assert_eq!(body["deleted"], 0);
+        assert_eq!(body["reason"], reason);
+        assert!(body["code"].is_null(), "消していないなら code は null");
+    }
+}
+
+#[tokio::test]
+async fn delete_by_card_invalid_card_id_is_200_and_never_reaches_the_repository() {
+    let mock = delete_mock(1, "deleted", Some("E001"));
+    let (base_url, jwt) = spawn_with_mock(mock.clone()).await;
+
+    let res = post_delete_by_card(&base_url, &jwt, serde_json::json!({"card_id": "未登録"})).await;
+    assert_eq!(res.status(), 200, "形不正も 4xx にしない");
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(body["deleted"], 0);
+    assert_eq!(body["reason"], "invalid_card_id");
+    assert!(body["code"].is_null());
+    assert!(
+        mock.delete_by_card_calls.lock().unwrap().is_empty(),
+        "形が外れた値で DB を引きに行かない"
+    );
+}
+
+#[tokio::test]
+async fn delete_by_card_normalizes_the_card_id_before_looking_it_up() {
+    // 送り手は読み取った生値 (大文字・`:` 区切り) を送ってくる。正規化は
+    // `normalize_card_id` 1 か所 — 2 実装目を作ると「同期では入るのに削除では
+    // 当たらない」が生まれる
+    let mock = delete_mock(1, "deleted", Some("E001"));
+    let (base_url, jwt) = spawn_with_mock(mock.clone()).await;
+
+    let res = post_delete_by_card(
+        &base_url,
+        &jwt,
+        serde_json::json!({"card_id": "  01401D0B:1D37:B660  "}),
+    )
+    .await;
+    assert_eq!(res.status(), 200);
+    assert_eq!(
+        *mock.delete_by_card_calls.lock().unwrap(),
+        vec![("01401d0b1d37b660".to_string(), false)]
+    );
+}
+
+#[tokio::test]
+async fn delete_by_card_passes_dry_run_through() {
+    let mock = delete_mock(1, "deleted", Some("E001"));
+    let (base_url, jwt) = spawn_with_mock(mock.clone()).await;
+
+    let res = post_delete_by_card(
+        &base_url,
+        &jwt,
+        serde_json::json!({"card_id": "01401d0b1d37b660", "dry_run": true}),
+    )
+    .await;
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    // 判定は本番と同じコードを通る (書かないだけ)
+    assert_eq!(body["reason"], "deleted");
+    assert_eq!(
+        *mock.delete_by_card_calls.lock().unwrap(),
+        vec![("01401d0b1d37b660".to_string(), true)]
+    );
+}
+
+#[tokio::test]
+async fn delete_by_card_db_error_is_500_without_the_card_id() {
+    let mock = delete_mock(1, "deleted", Some("E001"));
+    mock.fail_next.store(true, Ordering::SeqCst);
+    let (base_url, jwt) = spawn_with_mock(mock).await;
+
+    let res = post_delete_by_card(
+        &base_url,
+        &jwt,
+        serde_json::json!({"card_id": "01401d0b1d37b660"}),
+    )
+    .await;
+    assert_eq!(res.status(), 500);
+    let text = res.text().await.unwrap();
+    assert_eq!(text, "internal error");
+    assert!(!text.contains("01401d0b1d37b660"));
+}
+
+#[tokio::test]
+async fn delete_by_card_rejects_every_method_but_post() {
+    // ★ 呼び出し元 (auth-worker) の転送 allowlist は **method を見ない** ので、
+    //   1 つ path を許すとその path は全 method で通る。閉じるのはこちら側の責務
+    let (base_url, jwt) = spawn_with_mock(delete_mock(1, "deleted", Some("E001"))).await;
+    let url = format!("{base_url}/api/timecard/cards/delete-by-card");
+    let client = reqwest::Client::new();
+
+    for method in [
+        reqwest::Method::GET,
+        reqwest::Method::PUT,
+        reqwest::Method::PATCH,
+        reqwest::Method::DELETE,
+    ] {
+        let res = client
+            .request(method.clone(), &url)
+            .header("Authorization", auth(&jwt))
+            .json(&serde_json::json!({"card_id": "01401d0b1d37b660"}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 405, "{method} は 405 で閉じる");
+    }
 }
