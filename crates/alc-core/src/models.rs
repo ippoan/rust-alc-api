@@ -334,6 +334,14 @@ pub struct TimecardCard {
     pub employee_id: Uuid,
     pub card_id: String,
     pub label: Option<String>,
+    /// 行の**出所**。一括取り込み (`PUT /timecard/cards/bulk-by-code`) が入れた行だけに
+    /// サーバ側の定数 (`CARD_SOURCE_LEDGER_SYNC`) が入り、それ以外は `NULL`
+    /// (Refs ippoan/rust-alc-api#644)。
+    ///
+    /// **body から受け取らない。** 削除の射程 (`POST /timecard/cards/delete-by-card`) を
+    /// 決める根拠なので、送り手が書ける値にすると alc 側で直接登録したカードまで
+    /// 消せるようになる。`label` を根拠にできないのも同じ理由 (自由文で誰でも書ける)。
+    pub source: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -391,6 +399,41 @@ pub struct TimecardCardUpsertSkipped {
     /// `employee_not_found` / `invalid_card_id` / `card_owner_conflict` /
     /// `duplicate_in_batch` の 4 種。
     pub reason: String,
+}
+
+/// `POST /api/timecard/cards/delete-by-card` のリクエスト (Refs ippoan/rust-alc-api#644)。
+///
+/// 外部の画面でカードを外したときに 1 枚ずつ反映するための口。`card_id` は
+/// **読み取った生値のまま**でよい (大文字・`:` 区切りも可) — 正規化は受け側の
+/// `normalize_card_id` 1 か所で行う。
+///
+/// **出所 (`source`) は body に持たせない。** どの範囲まで消してよいかはサーバ側の
+/// 定数だけで決まる。
+#[derive(Debug, Deserialize)]
+pub struct TimecardCardDeleteByCard {
+    pub card_id: String,
+    /// true なら**1 行も消さない**。判定は本番と同じコードを通し、
+    /// トランザクションを commit しない形で実現する。
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+/// `POST /api/timecard/cards/delete-by-card` の応答 (Refs ippoan/rust-alc-api#644)。
+///
+/// **範囲外・不在でも 200 + `reason`** にする。404 だと呼び出し元の画面が
+/// 「消えた」と誤解する文面を出してしまう。
+///
+/// **`card_id` は載せない** (`TimecardCardUpsertSkipped` と同じ理由 — 呼び出し元は
+/// public repo の Worker で、応答がそのままログや issue に写る)。
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub struct TimecardCardDeleteResult {
+    /// 0 か 1。
+    pub deleted: usize,
+    /// `deleted` / `not_found` / `out_of_scope` / `invalid_card_id` の 4 種。
+    pub reason: String,
+    /// **誰のカードを外したか** (`employees.code`)。消さなかったときは `None` —
+    /// 画面に「〜さんのカードを外しました」と出すためだけに返す。
+    pub code: Option<String>,
 }
 
 #[derive(Debug, Default, Serialize)]

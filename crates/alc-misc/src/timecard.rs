@@ -10,10 +10,12 @@ use uuid::Uuid;
 use alc_core::auth_middleware::TenantId;
 use alc_core::models::{
     CreateTimePunchByCard, CreateTimecardCard, TimePunchFilter, TimePunchWithEmployee,
-    TimePunchesResponse, TimecardCard, TimecardCardBulkUpsert, TimecardCardUpsertSummary,
-    MAX_BULK_UPSERT_ITEMS,
+    TimePunchesResponse, TimecardCard, TimecardCardBulkUpsert, TimecardCardDeleteByCard,
+    TimecardCardDeleteResult, TimecardCardUpsertSummary, MAX_BULK_UPSERT_ITEMS,
 };
-use alc_core::repository::timecard::{normalize_card_id, prepare_bulk_cards};
+use alc_core::repository::timecard::{
+    is_valid_bulk_card_id, normalize_card_id, prepare_bulk_cards,
+};
 use alc_core::AppState;
 
 pub fn tenant_router() -> Router<AppState> {
@@ -27,6 +29,14 @@ pub fn tenant_router() -> Router<AppState> {
         .route(
             "/timecard/cards/bulk-by-code",
             put(bulk_upsert_cards_by_code),
+        )
+        // 継続同期の削除側 (Refs ippoan/rust-alc-api#644)。
+        // **POST だけを登録する** — 呼び出し元 (auth-worker の転送 allowlist) は
+        // method を見ず path だけで通すので、閉じるのはこちら側の責務。
+        // 登録が POST 1 つなら axum が他 method に 405 を返す
+        .route(
+            "/timecard/cards/delete-by-card",
+            post(delete_card_by_card_id),
         )
         .route(
             "/timecard/cards/by-card/{card_id}",
@@ -109,6 +119,56 @@ async fn bulk_upsert_cards_by_code(
     summary.skipped.sort_by_key(|s| s.index);
 
     Ok((StatusCode::OK, Json(summary)))
+}
+
+/// `POST /timecard/cards/delete-by-card` — 同期で入れたカード 1 枚を外す
+/// (Refs ippoan/rust-alc-api#644)。
+///
+/// 外部の画面でカードを削除したときに 1 枚ずつ反映するための口。追加側は
+/// `PUT /timecard/cards/bulk-by-code` を items 1 件で再利用するので、専用の口はこれだけ。
+///
+/// **消す範囲は `source = CARD_SOURCE_LEDGER_SYNC` の行ちょうど。** `timecard_cards` には
+/// この同期と無関係に alc 側で直接登録されたカード (`source IS NULL`) が在り得るので、
+/// 無条件に消すとそれを巻き込む。
+///
+/// **範囲外・不在・形不正はどれも 200 + `reason`。** 404 にすると呼び出し元の画面が
+/// 「消えた」と誤解する文面を出す。`code` (`employees.code`) は「誰のカードを外したか」を
+/// 画面に出すために返す。
+///
+/// **`card_id` は応答にも `tracing` のログにも出さない** (一括取り込みと同じ理由)。
+async fn delete_card_by_card_id(
+    State(state): State<AppState>,
+    tenant: axum::Extension<TenantId>,
+    Json(body): Json<TimecardCardDeleteByCard>,
+) -> Result<(StatusCode, Json<TimecardCardDeleteResult>), (StatusCode, String)> {
+    // 正規化も形の検査も一括取り込みと同じ関数を通す。2 実装目を作ると
+    // 「同期では入るのに削除では当たらない」が生まれる
+    let card_id = normalize_card_id(&body.card_id);
+    if !is_valid_bulk_card_id(&card_id) {
+        return Ok((
+            StatusCode::OK,
+            Json(TimecardCardDeleteResult {
+                deleted: 0,
+                reason: "invalid_card_id".to_string(),
+                code: None,
+            }),
+        ));
+    }
+
+    let result = state
+        .timecard
+        .delete_card_by_card_id_from_sync(tenant.0 .0, &card_id, body.dry_run)
+        .await
+        .map_err(|e| {
+            // ★ card_id はログにも出さない (応答と同じ理由)
+            tracing::error!("delete_card_by_card_id error: {e}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal error".to_string(),
+            )
+        })?;
+
+    Ok((StatusCode::OK, Json(result)))
 }
 
 #[derive(Debug, serde::Deserialize)]

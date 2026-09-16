@@ -4,8 +4,24 @@ use uuid::Uuid;
 
 use crate::models::{
     TimePunch, TimePunchWithDevice, TimecardCard, TimecardCardConflictPolicy,
-    TimecardCardUpsertItem, TimecardCardUpsertSkipped, TimecardCardUpsertSummary,
+    TimecardCardDeleteResult, TimecardCardUpsertItem, TimecardCardUpsertSkipped,
+    TimecardCardUpsertSummary,
 };
+
+/// 一括取り込み (`PUT /timecard/cards/bulk-by-code`) が入れた行に刻む出所
+/// (Refs ippoan/rust-alc-api#644)。
+///
+/// **`POST /timecard/cards/delete-by-card` が消してよい範囲はこの値ちょうど。**
+/// `timecard_cards` には alc 側で直接登録されたカード (`source IS NULL`) が在り得るので、
+/// 無条件に消すとそれを巻き込む。
+///
+/// **`label` を根拠にしてはいけない** — 自由文で誰でも書けるうえ、
+/// `bulk_upsert_cards_by_code` の `ON CONFLICT ... DO UPDATE` は `label` を更新しないので
+/// 「同期が触った行なのに label が違う」が既に在り得る。だから**サーバ側の定数**を別列に刻む。
+///
+/// 値は初回移行で使った label (`timecard-cf-worker` の `IMPORT_LABEL`) と同じ文字列で、
+/// migration 145 の backfill がその label の行に刻んだものと一致する。
+pub const CARD_SOURCE_LEDGER_SYNC: &str = "timecard-ic-ledger-import";
 
 /// CSV エクスポート用の行データ
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -69,6 +85,21 @@ pub trait TimecardRepository: Send + Sync {
 
     /// Delete a card. Returns true if a row was affected.
     async fn delete_card(&self, tenant_id: Uuid, id: Uuid) -> Result<bool, sqlx::Error>;
+
+    /// `POST /timecard/cards/delete-by-card` の書き込み側 (Refs ippoan/rust-alc-api#644)。
+    ///
+    /// **消すのは `source = CARD_SOURCE_LEDGER_SYNC` の行だけ** — 出所を実装側の定数で
+    /// 縛るため、`source` は引数に取らない (body 由来の値が届く経路を作らない)。
+    ///
+    /// `card_id` は `normalize_card_id` 通過後の値を渡すこと。
+    /// `dry_run` は `bulk_upsert_cards_by_code` と同じ「判定は最後まで同じコードを通し、
+    /// commit しない」形。
+    async fn delete_card_by_card_id_from_sync(
+        &self,
+        tenant_id: Uuid,
+        card_id: &str,
+        dry_run: bool,
+    ) -> Result<TimecardCardDeleteResult, sqlx::Error>;
 
     /// Find a card by card_id (for punch lookup).
     async fn find_card_by_card_id(

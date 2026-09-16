@@ -1515,6 +1515,12 @@ pub struct MockTimecardRepository {
     pub bulk_employees: std::sync::Mutex<std::collections::HashMap<String, Uuid>>,
     /// 同じく カード台帳: **正規化済み** card_id → employee_id
     pub bulk_cards: std::sync::Mutex<std::collections::HashMap<String, Uuid>>,
+    /// 削除 (Refs ippoan/rust-alc-api#644) が返す `(deleted, reason, code)`。
+    /// 既定は「そもそも無い」
+    pub delete_by_card_result: std::sync::Mutex<(usize, String, Option<String>)>,
+    /// 削除に渡された `(card_id, dry_run)`。**card_id は handler で正規化された後の値** —
+    /// 正規化が効いていること・形不正で repository を呼ばないことを固定するために記録する
+    pub delete_by_card_calls: std::sync::Mutex<Vec<(String, bool)>>,
 }
 
 impl Default for MockTimecardRepository {
@@ -1534,6 +1540,8 @@ impl Default for MockTimecardRepository {
             punch_card_ids: std::sync::Mutex::new(vec![]),
             bulk_employees: std::sync::Mutex::new(std::collections::HashMap::new()),
             bulk_cards: std::sync::Mutex::new(std::collections::HashMap::new()),
+            delete_by_card_result: std::sync::Mutex::new((0, "not_found".to_string(), None)),
+            delete_by_card_calls: std::sync::Mutex::new(vec![]),
         }
     }
 }
@@ -1560,6 +1568,7 @@ impl TimecardRepository for MockTimecardRepository {
             employee_id,
             card_id: card_id.to_string(),
             label: label.map(|s| s.to_string()),
+            source: None,
             created_at: Utc::now(),
         })
     }
@@ -1647,6 +1656,31 @@ impl TimecardRepository for MockTimecardRepository {
     async fn delete_card(&self, _tenant_id: Uuid, _id: Uuid) -> Result<bool, sqlx::Error> {
         check_fail!(self);
         Ok(self.delete_returns_true.load(Ordering::SeqCst))
+    }
+
+    /// 削除の in-memory 版 (Refs ippoan/rust-alc-api#644)。
+    ///
+    /// **SQL は 1 行も通らない** — `source` で射程を縛る `WHERE` と、DELETE と
+    /// 「そもそも在るか」を 1 文で分ける CTE の実挙動は
+    /// `tests/timecard_cards_bulk_test.rs` (実 DB) が固定する。ここで固定するのは
+    /// handler 側 (正規化・形の検査・応答の形・dry_run の受け渡し) だけ。
+    async fn delete_card_by_card_id_from_sync(
+        &self,
+        _tenant_id: Uuid,
+        card_id: &str,
+        dry_run: bool,
+    ) -> Result<TimecardCardDeleteResult, sqlx::Error> {
+        self.delete_by_card_calls
+            .lock()
+            .unwrap()
+            .push((card_id.to_string(), dry_run));
+        check_fail!(self);
+        let (deleted, reason, code) = self.delete_by_card_result.lock().unwrap().clone();
+        Ok(TimecardCardDeleteResult {
+            deleted,
+            reason,
+            code,
+        })
     }
 
     async fn find_card_by_card_id(

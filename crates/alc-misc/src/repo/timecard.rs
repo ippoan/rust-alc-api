@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use alc_core::models::{
     TimePunch, TimePunchWithDevice, TimecardCard, TimecardCardConflictPolicy,
-    TimecardCardUpsertSkipped, TimecardCardUpsertSummary,
+    TimecardCardDeleteResult, TimecardCardUpsertSkipped, TimecardCardUpsertSummary,
 };
 
 use alc_core::tenant::TenantConn;
@@ -202,13 +202,22 @@ impl TimecardRepository for PgTimecardRepository {
             // `xmax = 0` で INSERT と UPDATE を見分ける。DO UPDATE の WHERE が
             // 外れた (= 既に同じ社員に付いている / 付け替えない指定) ときは
             // 1 行も返らないので、その 3 通りを 1 文で分けられる。
+            //
+            // ★ **`DO UPDATE` の SET に `source` を足さないこと** (Refs ippoan/rust-alc-api#644)。
+            // 足すと「同じ持ち主だから何もしない」経路が 1 行も書かない前提が崩れ、
+            // 実測済みの冪等性 (2 回目が `created:0 / unchanged:120`) が後退する。
+            // その帰結として **alc 側で先に登録された行 (`source IS NULL`) は、同期が
+            // 同じ社員のまま再確認しても NULL のまま = 削除の射程外**になるが、
+            // これは fail-closed 側 (消せないだけ) なので仕様。
+            // `tests/timecard_cards_bulk_test.rs` の
+            // `test_unchanged_row_keeps_null_source_by_design` が固定している。
             let written: Option<(bool,)> = sqlx::query_as(
                 r#"
-                INSERT INTO timecard_cards (tenant_id, employee_id, card_id, label)
-                VALUES ($1, $2, $3, $4)
+                INSERT INTO timecard_cards (tenant_id, employee_id, card_id, label, source)
+                VALUES ($1, $2, $3, $4, $5)
                 ON CONFLICT (tenant_id, card_id) DO UPDATE
                     SET employee_id = EXCLUDED.employee_id
-                    WHERE $5::boolean AND timecard_cards.employee_id <> EXCLUDED.employee_id
+                    WHERE $6::boolean AND timecard_cards.employee_id <> EXCLUDED.employee_id
                 RETURNING (xmax = 0) AS inserted
                 "#,
             )
@@ -216,6 +225,10 @@ impl TimecardRepository for PgTimecardRepository {
             .bind(employee_id)
             .bind(&item.card_id)
             .bind(&item.label)
+            // ★ 出所はサーバ側の定数。**body から取らない** — 削除
+            // (`POST /timecard/cards/delete-by-card`) の射程を決める値なので、
+            // 送り手が書けると alc 側で直接登録したカードまで消せるようになる
+            .bind(CARD_SOURCE_LEDGER_SYNC)
             .bind(reassign)
             .fetch_optional(&mut *tx)
             .await?;
@@ -296,6 +309,77 @@ impl TimecardRepository for PgTimecardRepository {
             .execute(&mut *tc.conn)
             .await?;
         Ok(result.rows_affected() > 0)
+    }
+
+    /// 同期で入れたカード 1 枚を外す (Refs ippoan/rust-alc-api#644)。
+    ///
+    /// **判定も削除も 1 文で当てる。** 「あるか調べてから消す」だと、間に
+    /// 付け替え (`bulk-by-code` の reassign) や別経路の削除が入り得る。
+    /// CTE の中では `gone` の DELETE の結果が `present` からは見えない
+    /// (同じスナップショットを見る) ので、次の 3 通りが 1 往復で分かれる:
+    ///
+    /// * `gone` に行がある → 消えた (`deleted`)。`code` は**誰のカードを外したか**
+    /// * `gone` は空で `present` に行がある → 出所が違う (`out_of_scope`)
+    /// * どちらも空 → そもそも無い (`not_found`)
+    async fn delete_card_by_card_id_from_sync(
+        &self,
+        tenant_id: Uuid,
+        card_id: &str,
+        dry_run: bool,
+    ) -> Result<TimecardCardDeleteResult, sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
+        alc_core::tenant::set_current_tenant(&mut tx, &tenant_id.to_string()).await?;
+
+        let (deleted, present, code): (bool, bool, Option<String>) = sqlx::query_as(
+            r#"
+            WITH gone AS (
+                DELETE FROM timecard_cards
+                WHERE tenant_id = $1 AND card_id = $2 AND source = $3
+                RETURNING employee_id
+            ),
+            present AS (
+                SELECT 1 FROM timecard_cards WHERE tenant_id = $1 AND card_id = $2
+            )
+            SELECT
+                EXISTS (SELECT 1 FROM gone)    AS deleted,
+                EXISTS (SELECT 1 FROM present) AS present,
+                (SELECT e.code FROM gone JOIN employees e ON e.id = gone.employee_id) AS code
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(card_id)
+        // ★ 射程はサーバ側の定数ちょうど。alc 側で直接登録した行 (source IS NULL) は
+        // `= $3` に当たらないので巻き込まない
+        .bind(CARD_SOURCE_LEDGER_SYNC)
+        .fetch_one(&mut *tx)
+        .await?;
+
+        // dry_run は**判定を最後まで同じコードで通してから commit しない**形
+        // (`bulk_upsert_cards_by_code` と同じ理由 — 判定を 2 本持つと
+        // 「試したときと本番で結果が違う」が必ず生まれる)
+        if dry_run {
+            tx.rollback().await?;
+        } else {
+            tx.commit().await?;
+        }
+
+        Ok(match (deleted, present) {
+            (true, _) => TimecardCardDeleteResult {
+                deleted: 1,
+                reason: "deleted".to_string(),
+                code,
+            },
+            (false, true) => TimecardCardDeleteResult {
+                deleted: 0,
+                reason: "out_of_scope".to_string(),
+                code: None,
+            },
+            (false, false) => TimecardCardDeleteResult {
+                deleted: 0,
+                reason: "not_found".to_string(),
+                code: None,
+            },
+        })
     }
 
     async fn find_card_by_card_id(

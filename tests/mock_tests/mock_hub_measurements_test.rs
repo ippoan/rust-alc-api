@@ -577,6 +577,7 @@ async fn test_timecard_freezes_resolved_employee_in_payload() {
         employee_id,
         card_id: "01401d0b1d37b660".to_string(),
         label: None,
+        source: None,
         created_at: chrono::Utc::now(),
     });
     let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
@@ -605,6 +606,7 @@ async fn test_timecard_normalizes_card_id_before_lookup() {
         employee_id,
         card_id: "01401d0b1d37b660".to_string(),
         label: None,
+        source: None,
         created_at: chrono::Utc::now(),
     });
     let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
