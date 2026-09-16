@@ -201,6 +201,12 @@ jobs:
           # ci.yml の bazel-test-db と cache-warm.yml を同じ内容にすること
           # (check_bazel_test_matrix.sh が pair 一致を検査する)
           - { name: db-device-bp-enabled, target: "//:device_bp_enabled_test" }
+          # Refs ippoan/alc-app-s3#135: 自動点呼タブの血圧必須化 + 遠隔点呼への切り替え
+          # (migration 144)。CHECK 制約の拡張 (tenko_method に '遠隔点呼' を追加) と
+          # escalate-remote の UPDATE は mock では 1 行も通らない。
+          # ci.yml の bazel-test-db と cache-warm.yml を同じ内容にすること
+          # (check_bazel_test_matrix.sh が pair 一致を検査する)
+          - { name: db-tenko-bp-required-escalate, target: "//:tenko_bp_required_escalate_test" }
     services:
       postgres:
         image: postgres:16

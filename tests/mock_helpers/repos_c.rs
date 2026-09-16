@@ -710,6 +710,8 @@ pub struct MockTenkoSessionRepository {
     pub session_status: std::sync::Mutex<String>,
     /// Controls the tenko_type of the session returned by get()
     pub session_tenko_type: std::sync::Mutex<String>,
+    /// Controls the tenko_method of the session returned by get() (Refs ippoan/alc-app-s3#135)
+    pub session_tenko_method: std::sync::Mutex<String>,
     /// Controls the employee_id of sessions returned by get()
     pub session_employee_id: std::sync::Mutex<Uuid>,
     /// When true, get() returns Some session; when false, returns None
@@ -748,6 +750,7 @@ impl Default for MockTenkoSessionRepository {
             fail_on_update: AtomicBool::new(false),
             session_status: std::sync::Mutex::new("identity_verified".to_string()),
             session_tenko_type: std::sync::Mutex::new("pre_operation".to_string()),
+            session_tenko_method: std::sync::Mutex::new("自動点呼".to_string()),
             session_employee_id: std::sync::Mutex::new(emp_id),
             return_session: AtomicBool::new(true),
             return_schedule: AtomicBool::new(true),
@@ -782,6 +785,8 @@ fn make_mock_session(
         employee_id,
         schedule_id: Some(Uuid::new_v4()),
         tenko_type: tenko_type.to_string(),
+        // get() だけが session_tenko_method で上書きする。他の呼び出し元は既定 (自動点呼)
+        tenko_method: "自動点呼".to_string(),
         status: status.to_string(),
         identity_verified_at: Some(now),
         identity_face_photo_url: None,
@@ -830,6 +835,8 @@ fn make_mock_session(
         carins_vehicle_id: None,
         carins_expires_on: None,
         carins_matched_by: None,
+        remote_escalated_at: None,
+        remote_escalation_reason: None,
         created_at: now,
         updated_at: now,
     }
@@ -888,7 +895,7 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
         let employee_id = *self.session_employee_id.lock().unwrap();
         let has_di = self.session_has_daily_inspection.load(Ordering::SeqCst);
         let has_sd = self.session_has_self_declaration.load(Ordering::SeqCst);
-        Ok(Some(make_mock_session(
+        let mut session = make_mock_session(
             _tenant_id,
             _id,
             employee_id,
@@ -896,7 +903,9 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
             &tenko_type,
             has_di,
             has_sd,
-        )))
+        );
+        session.tenko_method = self.session_tenko_method.lock().unwrap().clone();
+        Ok(Some(session))
     }
 
     async fn list(
@@ -1271,6 +1280,31 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
         session.resumed_at = Some(Utc::now());
         session.resume_reason = Some(_reason.to_string());
         session.resumed_by_user_id = _resumed_by_user_id;
+        Ok(session)
+    }
+
+    async fn escalate_to_remote(
+        &self,
+        _tenant_id: Uuid,
+        _id: Uuid,
+        _reason: &str,
+    ) -> Result<TenkoSession, sqlx::Error> {
+        check_fail_update!(self);
+        let employee_id = *self.session_employee_id.lock().unwrap();
+        let status = self.session_status.lock().unwrap().clone();
+        let tenko_type = self.session_tenko_type.lock().unwrap().clone();
+        let mut session = make_mock_session(
+            _tenant_id,
+            _id,
+            employee_id,
+            &status,
+            &tenko_type,
+            false,
+            false,
+        );
+        session.tenko_method = "遠隔点呼".to_string();
+        session.remote_escalated_at = Some(Utc::now());
+        session.remote_escalation_reason = Some(_reason.to_string());
         Ok(session)
     }
 

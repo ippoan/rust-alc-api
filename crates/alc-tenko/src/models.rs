@@ -72,6 +72,10 @@ pub struct TenkoSession {
     pub employee_id: Uuid,
     pub schedule_id: Option<Uuid>,
     pub tenko_type: String,
+    /// 自動点呼 / 通常点呼 / 遠隔点呼 (migration 141 で追加、144 で遠隔点呼を追加)。
+    /// 既定は '自動点呼'。通常点呼は normal_tenko 経路が明示的に立てる。
+    /// 遠隔点呼は escalate-remote (下記) でのみ立つ
+    pub tenko_method: String,
     pub status: String,
     pub identity_verified_at: Option<DateTime<Utc>>,
     pub identity_face_photo_url: Option<String>,
@@ -120,6 +124,11 @@ pub struct TenkoSession {
     /// `cert_no` / `car_id` / `none`。NULL = 番号なし、または照合に失敗
     #[serde(default)]
     pub carins_matched_by: Option<String>,
+    // 遠隔点呼への切り替え (migration 144、Refs ippoan/alc-app-s3#135)
+    #[serde(default)]
+    pub remote_escalated_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub remote_escalation_reason: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -356,6 +365,14 @@ pub struct InterruptSession {
 
 #[derive(Debug, Deserialize)]
 pub struct ResumeSession {
+    pub reason: String,
+}
+
+/// 遠隔点呼への切り替え (Refs ippoan/alc-app-s3#135)。
+/// 画面側 (#c135-41) と形が決まるまでの最小形: 理由の文字列のみ。
+/// 切り替え時刻はサーバー側で NOW() を刻む
+#[derive(Debug, Deserialize)]
+pub struct EscalateToRemote {
     pub reason: String,
 }
 

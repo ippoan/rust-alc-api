@@ -14,8 +14,8 @@ use alc_core::auth_middleware::{AuthUser, TenantId};
 use alc_core::models::SubmitCarryingItemChecks;
 
 use crate::models::{
-    CancelTenkoSession, InterruptSession, MedicalDiffs, ResumeSession, SafetyJudgment,
-    SelfDeclaration, StartTenkoSession, SubmitAlcoholResult, SubmitDailyInspection,
+    CancelTenkoSession, EscalateToRemote, InterruptSession, MedicalDiffs, ResumeSession,
+    SafetyJudgment, SelfDeclaration, StartTenkoSession, SubmitAlcoholResult, SubmitDailyInspection,
     SubmitMedicalData, SubmitOperationReport, SubmitSelfDeclaration, TenkoDashboard, TenkoRecord,
     TenkoSession, TenkoSessionFilter, TenkoSessionsResponse,
 };
@@ -37,6 +37,7 @@ where
         .route("/tenko/sessions/{id}", get(get_session))
         .route("/tenko/sessions/{id}/alcohol", put(submit_alcohol))
         .route("/tenko/sessions/{id}/medical", put(submit_medical))
+        .route("/tenko/sessions/{id}/escalate-remote", put(escalate_remote))
         .route(
             "/tenko/sessions/{id}/instruction-confirm",
             put(confirm_instruction),
@@ -251,6 +252,14 @@ async fn submit_medical(
         return Err(StatusCode::BAD_REQUEST);
     }
 
+    // 自動点呼のときだけ血圧 (最高・最低) を必須にする。通常点呼・遠隔点呼は
+    // 従来どおり空でも通す (Refs ippoan/alc-app-s3#135)。測れないときは
+    // escalate-remote で遠隔点呼へ切り替えてから提出する
+    if session.tenko_method == "自動点呼" && (body.systolic.is_none() || body.diastolic.is_none())
+    {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
     let session = repo
         .update_medical(
             tenant_id,
@@ -265,6 +274,47 @@ async fn submit_medical(
         .await
         .map_err(|e| {
             tracing::error!("submit_medical DB error: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    Ok(Json(session))
+}
+
+/// 自動点呼 → 遠隔点呼への切り替え (血圧が測れないとき、Refs ippoan/alc-app-s3#135)。
+/// tenko_method を「遠隔点呼」にし、切り替え時刻・理由を記録する。
+/// status は変えない — 血圧を必須にしない状態で医療データ提出へ進める
+async fn escalate_remote(
+    State(state): State<TenkoState>,
+    tenant: axum::Extension<TenantId>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<EscalateToRemote>,
+) -> Result<Json<TenkoSession>, StatusCode> {
+    let tenant_id = tenant.0 .0;
+    let repo = &*state.tenko_sessions;
+
+    if body.reason.trim().is_empty() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    let session = repo
+        .get(tenant_id, id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    // 血圧必須の対象は業務前のみ。通常点呼はこの口の対象外 (別経路の振る舞いを変えない)
+    if session.tenko_type != "pre_operation" || session.tenko_method == "通常点呼" {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    if matches!(session.status.as_str(), "completed" | "cancelled") {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    let session = repo
+        .escalate_to_remote(tenant_id, id, &body.reason)
+        .await
+        .map_err(|e| {
+            tracing::error!("escalate_remote DB error: {e}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 

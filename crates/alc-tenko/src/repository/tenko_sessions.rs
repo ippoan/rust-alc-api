@@ -168,6 +168,16 @@ pub trait TenkoSessionRepository: Send + Sync {
         resumed_by_user_id: Option<Uuid>,
     ) -> Result<TenkoSession, sqlx::Error>;
 
+    /// 自動点呼 → 遠隔点呼への切り替え (Refs ippoan/alc-app-s3#135)。
+    /// tenko_method を '遠隔点呼' にし、切り替え時刻・理由を記録する。
+    /// status は変えない (血圧待ちのまま次の医療データ提出へ進める)
+    async fn escalate_to_remote(
+        &self,
+        tenant_id: Uuid,
+        id: Uuid,
+        reason: &str,
+    ) -> Result<TenkoSession, sqlx::Error>;
+
     // --- Carrying items helpers ---
 
     async fn get_carrying_item_name(
