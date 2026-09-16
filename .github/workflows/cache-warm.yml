@@ -188,6 +188,12 @@ jobs:
           # cache-warm.yml を同じ内容にすること
           # (check_bazel_test_matrix.sh が pair 一致を検査する)
           - { name: db-normal-tenko-record, target: "//:normal_tenko_record_test" }
+          # Refs ippoan/alc-app-s3#110: 車検期限照合の和暦フォールバック。
+          # alc-core の repo/car_inspections.rs::lookup_expiry は正規表現・
+          # LATERAL JOIN・make_date を含む生 SQL なので mock では 1 行も通らない。
+          # ci.yml の bazel-test-db と cache-warm.yml を同じ内容にすること
+          # (check_bazel_test_matrix.sh が pair 一致を検査する)
+          - { name: db-car-inspections, target: "//:car_inspections_expiry_test" }
     services:
       postgres:
         image: postgres:16
