@@ -357,6 +357,18 @@ fn csv_kind_label(kind: &str) -> String {
     }
 }
 
+/// CSV の「カード」列の表示名。`csv_kind_label` と同じ作法で、
+/// **未知の値はそのまま出す** (隠すと診断できない)。
+/// ブラウザ打刻と旧行は `card_kind` が None なので空欄。
+fn csv_card_kind_label(card_kind: Option<&str>) -> String {
+    match card_kind {
+        Some("license") => "免許証".to_string(),
+        Some("felica_idm") | Some("nfca_uid") => "ICカード".to_string(),
+        Some(other) => other.to_string(),
+        None => String::new(),
+    }
+}
+
 async fn export_csv(
     State(state): State<AppState>,
     tenant: axum::Extension<TenantId>,
@@ -378,13 +390,22 @@ async fn export_csv(
     let mut wtr = csv::Writer::from_writer(vec![]);
     // **区分列は必須。** 一覧は打刻 (timecard) と点呼 (license) を両方返すので、
     // 列が無いと点呼が打刻として集計される
-    wtr.write_record(["ID", "区分", "社員コード", "社員名", "打刻日時", "デバイス"])
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    wtr.write_record([
+        "ID",
+        "区分",
+        "カード",
+        "社員コード",
+        "社員名",
+        "打刻日時",
+        "デバイス",
+    ])
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     for r in &rows {
         wtr.write_record([
             r.id.to_string(),
             csv_kind_label(&r.kind),
+            csv_card_kind_label(r.card_kind.as_deref()),
             r.employee_code.clone().unwrap_or_default(),
             r.employee_name.clone().unwrap_or_default(),
             r.punched_at

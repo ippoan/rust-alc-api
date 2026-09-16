@@ -1658,6 +1658,11 @@ async fn test_export_csv_success_empty() {
     // Check CSV header after BOM
     let csv_content = std::str::from_utf8(&bytes[3..]).unwrap();
     assert!(csv_content.starts_with("ID,"));
+    // 「区分」(打刻/点呼) と「カード」(免許証/ICカード) は別の軸。
+    // **どちらも消さない** — 片方だけだと「点呼の免許証」と「打刻の免許証」が
+    // 区別できなくなる (Refs ippoan/rust-alc-api#644)
+    assert!(csv_content.contains("区分"));
+    assert!(csv_content.contains("カード"));
     assert!(csv_content.contains("社員コード"));
     assert!(csv_content.contains("社員名"));
     assert!(csv_content.contains("打刻日時"));
@@ -1676,6 +1681,7 @@ async fn test_export_csv_with_data_jst_timezone() {
         employee_code: Some("EMP001".to_string()),
         device_name: Some("Kiosk-A".to_string()),
         kind: "timecard".to_string(),
+        card_kind: None,
     }];
 
     let (base_url, jwt) = spawn_with_mock(mock).await;
@@ -1710,6 +1716,7 @@ async fn test_export_csv_with_null_fields() {
         employee_code: None,
         device_name: None,
         kind: "timecard".to_string(),
+        card_kind: None,
     }];
 
     let (base_url, jwt) = spawn_with_mock(mock).await;
@@ -1933,6 +1940,7 @@ async fn test_export_csv_keeps_unresolved_tap_with_blank_employee() {
         employee_code: None,
         device_name: Some("timecard-dev-1".to_string()),
         kind: "timecard".to_string(),
+        card_kind: None,
     }];
 
     let (base_url, jwt) = spawn_with_mock(mock).await;
@@ -1966,6 +1974,7 @@ async fn test_export_csv_unknown_kind_is_shown_verbatim() {
         employee_code: Some("EMP001".to_string()),
         device_name: Some("hub-1".to_string()),
         kind: "some_future_kind".to_string(),
+        card_kind: None,
     }];
 
     let (base_url, jwt) = spawn_with_mock(mock).await;
@@ -1993,6 +2002,7 @@ async fn test_export_csv_license_kind_is_labelled_tenko() {
         employee_code: None,
         device_name: None,
         kind: "license".to_string(),
+        card_kind: None,
     }];
 
     let (base_url, jwt) = spawn_with_mock(mock).await;
@@ -2007,6 +2017,76 @@ async fn test_export_csv_license_kind_is_labelled_tenko() {
     let bytes = res.bytes().await.unwrap();
     let csv = std::str::from_utf8(&bytes[3..]).unwrap();
     assert!(csv.contains(",点呼,"), "{csv}");
+}
+
+// ------------------------------------------------------------
+// 「カード」列 — csv_card_kind_label の 4 分岐
+// (免許証か他の IC カードか。`kind` (打刻か点呼か) とは別の軸)
+// Refs ippoan/rust-alc-api#644
+// ------------------------------------------------------------
+
+/// 免許証のタップは「免許証」と出す
+#[tokio::test]
+async fn test_export_csv_card_kind_license_is_labelled() {
+    let csv = export_csv_with_card_kind(Some("license")).await;
+    assert!(csv.contains(",免許証,"), "{csv}");
+}
+
+/// FeliCa (社員証など) は「ICカード」
+#[tokio::test]
+async fn test_export_csv_card_kind_felica_is_labelled_ic() {
+    let csv = export_csv_with_card_kind(Some("felica_idm")).await;
+    assert!(csv.contains(",ICカード,"), "{csv}");
+}
+
+/// NFC-A (MIFARE など) も同じく「ICカード」
+#[tokio::test]
+async fn test_export_csv_card_kind_nfca_is_labelled_ic() {
+    let csv = export_csv_with_card_kind(Some("nfca_uid")).await;
+    assert!(csv.contains(",ICカード,"), "{csv}");
+}
+
+/// **未知の card_kind はそのまま出す** (`csv_kind_label` と同じ作法)。
+/// 空欄や「ICカード」に丸めると、新しい読み取り方式が増えたときに診断できない
+#[tokio::test]
+async fn test_export_csv_unknown_card_kind_is_shown_verbatim() {
+    let csv = export_csv_with_card_kind(Some("some_future_card")).await;
+    assert!(csv.contains(",some_future_card,"), "{csv}");
+}
+
+/// ブラウザ打刻と旧行は `card_kind` が None ⇒ 空欄。
+/// **行は落とさない** (区分は出るので、カードだけ分からない状態で並ぶ)
+#[tokio::test]
+async fn test_export_csv_card_kind_none_is_blank() {
+    let csv = export_csv_with_card_kind(None).await;
+    // 「打刻」の次が空欄 (,, が連続する)
+    assert!(csv.contains(",打刻,,"), "{csv}");
+}
+
+/// 上の 5 本の共通部分。`card_kind` だけ差し替えて CSV 本文を返す
+async fn export_csv_with_card_kind(card_kind: Option<&str>) -> String {
+    let mock = Arc::new(crate::mock_helpers::MockTimecardRepository::default());
+    *mock.csv_rows.lock().unwrap() = vec![TimePunchCsvRow {
+        id: Uuid::new_v4(),
+        punched_at: Utc.with_ymd_and_hms(2026, 1, 15, 0, 30, 0).unwrap(),
+        employee_name: Some("Taro Test".to_string()),
+        employee_code: Some("EMP001".to_string()),
+        device_name: Some("hub-1".to_string()),
+        kind: "timecard".to_string(),
+        card_kind: card_kind.map(|s| s.to_string()),
+    }];
+
+    let (base_url, jwt) = spawn_with_mock(mock).await;
+    let res = reqwest::Client::new()
+        .get(format!("{base_url}/api/timecard/punches/csv"))
+        .header("Authorization", auth(&jwt))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+
+    let bytes = res.bytes().await.unwrap();
+    std::str::from_utf8(&bytes[3..]).unwrap().to_string()
 }
 
 // ============================================================

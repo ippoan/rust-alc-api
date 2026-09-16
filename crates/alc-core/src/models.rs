@@ -499,6 +499,12 @@ pub struct TimePunchWithDevice {
     /// **一覧は両方を返すので、区別はこの列でしかできない** — 始業点呼 = 始業打刻
     /// として同じ表に並べる運用のため (Refs ippoan/alc-app-s3#134)
     pub kind: String,
+    /// かざしたカードの種別。`license` (免許証) / `felica_idm` / `nfca_uid`、
+    /// ブラウザ打刻と旧行は None。**`kind` とは別の軸** — `kind` は「打刻か点呼か」、
+    /// こちらは「免許証か他の IC カードか」。端末のファームは打刻の `kind` を
+    /// 常に `timecard` で送るので、種別はこの列でしか分からない。
+    /// **表示専用。社員の解決 (照合) には使わない** (ブラウザ版と挙動が割れる)
+    pub card_kind: Option<String>,
     pub employee_name: Option<String>,
     pub punched_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
