@@ -163,6 +163,7 @@ struct Device {
     last_re_pair_at: Option<String>,
     re_pair_count: i32,
     hardware_id: Option<String>,
+    bp_enabled: bool,
 }
 
 impl From<DeviceRow> for Device {
@@ -196,6 +197,7 @@ impl From<DeviceRow> for Device {
             last_re_pair_at: r.last_re_pair_at,
             re_pair_count: r.re_pair_count,
             hardware_id: r.hardware_id,
+            bp_enabled: r.bp_enabled,
         }
     }
 }
@@ -857,6 +859,7 @@ struct DeviceSettingsResponse {
     last_login_employee_name: Option<String>,
     last_login_employee_role: Option<Vec<String>>,
     always_on: bool,
+    bp_enabled: bool,
 }
 
 impl From<DeviceSettingsRow> for DeviceSettingsResponse {
@@ -869,6 +872,7 @@ impl From<DeviceSettingsRow> for DeviceSettingsResponse {
             last_login_employee_name: r.last_login_employee_name,
             last_login_employee_role: r.last_login_employee_role,
             always_on: r.always_on,
+            bp_enabled: r.bp_enabled,
         }
     }
 }
@@ -912,6 +916,7 @@ struct UpdateCallSettingsBody {
     call_enabled: bool,
     call_schedule: Option<serde_json::Value>,
     always_on: Option<bool>,
+    bp_enabled: Option<bool>,
 }
 
 async fn update_call_settings(
@@ -921,8 +926,8 @@ async fn update_call_settings(
     Json(body): Json<UpdateCallSettingsBody>,
 ) -> Result<StatusCode, StatusCode> {
     let msg = format!(
-        "update_call_settings: device={id} call_enabled={} always_on={:?}",
-        body.call_enabled, body.always_on
+        "update_call_settings: device={id} call_enabled={} always_on={:?} bp_enabled={:?}",
+        body.call_enabled, body.always_on, body.bp_enabled
     );
     tracing::info!("{msg}");
 
@@ -934,6 +939,7 @@ async fn update_call_settings(
             body.call_enabled,
             body.call_schedule.as_ref(),
             body.always_on,
+            body.bp_enabled,
         )
         .await
         .map_err(|e| {
@@ -945,8 +951,9 @@ async fn update_call_settings(
         return Err(StatusCode::NOT_FOUND);
     }
 
-    // always_on が変更された場合、FCM で端末に通知して設定を再取得させる
-    if let (true, Some(fcm)) = (body.always_on.is_some(), state.fcm.as_ref()) {
+    // always_on / bp_enabled が変更された場合、FCM で端末に通知して設定を再取得させる
+    let settings_changed = body.always_on.is_some() || body.bp_enabled.is_some();
+    if let (true, Some(fcm)) = (settings_changed, state.fcm.as_ref()) {
         // RLS を回避して fcm_token を取得
         let token_row = state
             .devices

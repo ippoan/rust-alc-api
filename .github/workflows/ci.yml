@@ -420,6 +420,13 @@ jobs:
           # ci.yml の bazel-test-db と cache-warm.yml を同じ内容にすること
           # (check_bazel_test_matrix.sh が pair 一致を検査する)
           - { name: db-car-inspections, target: "//:car_inspections_expiry_test" }
+          # Refs ippoan/alc-app-s3#135: 端末ごとの血圧計 (Omron) 使用設定。
+          # GET /api/devices/settings/{id} は 063/114 の SECURITY DEFINER 関数
+          # get_device_settings_by_id() 経由でしか devices を読めないので、mock
+          # (repository 差し替え) では関数の列挙漏れを検出できない。
+          # ci.yml の bazel-test-db と cache-warm.yml を同じ内容にすること
+          # (check_bazel_test_matrix.sh が pair 一致を検査する)
+          - { name: db-device-bp-enabled, target: "//:device_bp_enabled_test" }
     services:
       postgres:
         image: postgres:16

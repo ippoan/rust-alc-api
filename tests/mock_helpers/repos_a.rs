@@ -1041,6 +1041,8 @@ pub struct MockDeviceRepository {
     pub return_code_exists_once: AtomicBool,
     /// get_device_settings / get_registration_status で settings_token (nil UUID) を返す
     pub return_settings_token: AtomicBool,
+    /// get_device_settings / list_devices で bp_enabled = true を返す (Refs ippoan/alc-app-s3#135)
+    pub return_bp_enabled: AtomicBool,
     /// get_device_re_pair_state が返す行 (Refs #495)。None なら 404 相当。
     pub re_pair_state: std::sync::Mutex<Option<RePairStateRow>>,
     /// record_re_pair_success の CAS が「他リクエストに先を越された」を
@@ -1076,6 +1078,7 @@ impl Default for MockDeviceRepository {
             return_schedule_overnight: AtomicBool::new(false),
             return_code_exists_once: AtomicBool::new(false),
             return_settings_token: AtomicBool::new(false),
+            return_bp_enabled: AtomicBool::new(false),
             re_pair_state: std::sync::Mutex::new(None),
             re_pair_window_already_consumed: AtomicBool::new(false),
         }
@@ -1219,6 +1222,7 @@ impl DeviceRepository for MockDeviceRepository {
                 last_login_employee_role: None,
                 always_on: false,
                 settings_token,
+                bp_enabled: self.return_bp_enabled.load(Ordering::SeqCst),
             }))
         } else {
             Ok(None)
@@ -1468,6 +1472,7 @@ impl DeviceRepository for MockDeviceRepository {
                 last_re_pair_at: None,
                 re_pair_count: 0,
                 hardware_id: None,
+                bp_enabled: false,
             }])
         } else {
             Ok(vec![])
@@ -1641,6 +1646,7 @@ impl DeviceRepository for MockDeviceRepository {
         _call_enabled: bool,
         _call_schedule: Option<&serde_json::Value>,
         _always_on: Option<bool>,
+        _bp_enabled: Option<bool>,
     ) -> Result<bool, sqlx::Error> {
         check_fail!(self);
         Ok(self.return_data.load(Ordering::SeqCst))

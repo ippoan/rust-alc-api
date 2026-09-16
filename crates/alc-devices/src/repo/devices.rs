@@ -400,7 +400,8 @@ impl DeviceRepository for PgDeviceRepository {
                    last_login_employee_id, last_login_employee_name, last_login_employee_role,
                    app_version_code, app_version_name, is_device_owner, is_dev_device,
                    always_on, watchdog_running, created_at::text, updated_at::text,
-                   re_pair_authorized_until::text, last_re_pair_at::text, re_pair_count, hardware_id
+                   re_pair_authorized_until::text, last_re_pair_at::text, re_pair_count, hardware_id,
+                   bp_enabled
             FROM devices
             ORDER BY created_at DESC
             "#,
@@ -736,14 +737,16 @@ impl DeviceRepository for PgDeviceRepository {
         call_enabled: bool,
         call_schedule: Option<&serde_json::Value>,
         always_on: Option<bool>,
+        bp_enabled: Option<bool>,
     ) -> Result<bool, sqlx::Error> {
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
         let result = sqlx::query(
-            "UPDATE devices SET call_enabled = $1, call_schedule = $2, always_on = COALESCE($3, always_on), updated_at = NOW() WHERE id = $4",
+            "UPDATE devices SET call_enabled = $1, call_schedule = $2, always_on = COALESCE($3, always_on), bp_enabled = COALESCE($4, bp_enabled), updated_at = NOW() WHERE id = $5",
         )
         .bind(call_enabled)
         .bind(call_schedule)
         .bind(always_on)
+        .bind(bp_enabled)
         .bind(id)
         .execute(&mut *tc.conn)
         .await?;

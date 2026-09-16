@@ -37,6 +37,8 @@ pub struct DeviceRow {
     pub last_re_pair_at: Option<String>,
     pub re_pair_count: i32,
     pub hardware_id: Option<String>,
+    /// 血圧計 (Omron) を使うかどうかの端末設定 (Refs ippoan/alc-app-s3#135)。
+    pub bp_enabled: bool,
 }
 
 /// 登録リクエスト情報
@@ -112,6 +114,8 @@ pub struct DeviceSettingsRow {
     pub always_on: bool,
     /// X-Device-Token 検証用 (Refs #388)。response には echo しない。
     pub settings_token: Option<Uuid>,
+    /// 血圧計 (Omron) を使うかどうかの端末設定 (Refs ippoan/alc-app-s3#135)。
+    pub bp_enabled: bool,
 }
 
 /// re-pair 判定用のデバイス状態 (認証不要エンドポイント、Refs #495)。
@@ -399,6 +403,7 @@ pub trait DeviceRepository: Send + Sync {
         call_enabled: bool,
         call_schedule: Option<&serde_json::Value>,
         always_on: Option<bool>,
+        bp_enabled: Option<bool>,
     ) -> Result<bool, sqlx::Error>;
 
     /// re-pair: 管理者が時限 window を開ける (tenant-scoped、Refs #495)。
