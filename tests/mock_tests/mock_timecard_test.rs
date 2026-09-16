@@ -6,8 +6,12 @@ use std::sync::Arc;
 use chrono::{TimeZone, Utc};
 use serde_json::Value;
 
-use rust_alc_api::db::models::TimecardCard;
-use rust_alc_api::db::repository::timecard::{TimePunchCsvRow, TimecardRepository};
+use rust_alc_api::db::models::{
+    TimecardCard, TimecardCardConflictPolicy, TimecardCardUpsertSummary,
+};
+use rust_alc_api::db::repository::timecard::{
+    PreparedCardUpsert, TimePunchCsvRow, TimecardRepository,
+};
 
 // ============================================================
 // Helper: spawn server with a given TimecardRepository mock
@@ -59,6 +63,15 @@ impl TimecardRepository for PunchCardFoundMock {
         unreachable!()
     }
     async fn list_cards(&self, _: Uuid, _: Option<Uuid>) -> Result<Vec<TimecardCard>, sqlx::Error> {
+        unreachable!()
+    }
+    async fn bulk_upsert_cards_by_code(
+        &self,
+        _: Uuid,
+        _: &[PreparedCardUpsert],
+        _: TimecardCardConflictPolicy,
+        _: bool,
+    ) -> Result<TimecardCardUpsertSummary, sqlx::Error> {
         unreachable!()
     }
     async fn get_card(&self, _: Uuid, _: Uuid) -> Result<Option<TimecardCard>, sqlx::Error> {
@@ -177,6 +190,15 @@ impl TimecardRepository for PunchNfcFallbackMock {
     async fn list_cards(&self, _: Uuid, _: Option<Uuid>) -> Result<Vec<TimecardCard>, sqlx::Error> {
         unreachable!()
     }
+    async fn bulk_upsert_cards_by_code(
+        &self,
+        _: Uuid,
+        _: &[PreparedCardUpsert],
+        _: TimecardCardConflictPolicy,
+        _: bool,
+    ) -> Result<TimecardCardUpsertSummary, sqlx::Error> {
+        unreachable!()
+    }
     async fn get_card(&self, _: Uuid, _: Uuid) -> Result<Option<TimecardCard>, sqlx::Error> {
         unreachable!()
     }
@@ -283,6 +305,15 @@ impl TimecardRepository for PunchCreateFailMock {
     async fn list_cards(&self, _: Uuid, _: Option<Uuid>) -> Result<Vec<TimecardCard>, sqlx::Error> {
         unreachable!()
     }
+    async fn bulk_upsert_cards_by_code(
+        &self,
+        _: Uuid,
+        _: &[PreparedCardUpsert],
+        _: TimecardCardConflictPolicy,
+        _: bool,
+    ) -> Result<TimecardCardUpsertSummary, sqlx::Error> {
+        unreachable!()
+    }
     async fn get_card(&self, _: Uuid, _: Uuid) -> Result<Option<TimecardCard>, sqlx::Error> {
         unreachable!()
     }
@@ -385,6 +416,15 @@ impl TimecardRepository for PunchGetNameFailMock {
         unreachable!()
     }
     async fn list_cards(&self, _: Uuid, _: Option<Uuid>) -> Result<Vec<TimecardCard>, sqlx::Error> {
+        unreachable!()
+    }
+    async fn bulk_upsert_cards_by_code(
+        &self,
+        _: Uuid,
+        _: &[PreparedCardUpsert],
+        _: TimecardCardConflictPolicy,
+        _: bool,
+    ) -> Result<TimecardCardUpsertSummary, sqlx::Error> {
         unreachable!()
     }
     async fn get_card(&self, _: Uuid, _: Uuid) -> Result<Option<TimecardCard>, sqlx::Error> {
@@ -497,6 +537,15 @@ impl TimecardRepository for PunchListTodayFailMock {
         unreachable!()
     }
     async fn list_cards(&self, _: Uuid, _: Option<Uuid>) -> Result<Vec<TimecardCard>, sqlx::Error> {
+        unreachable!()
+    }
+    async fn bulk_upsert_cards_by_code(
+        &self,
+        _: Uuid,
+        _: &[PreparedCardUpsert],
+        _: TimecardCardConflictPolicy,
+        _: bool,
+    ) -> Result<TimecardCardUpsertSummary, sqlx::Error> {
         unreachable!()
     }
     async fn get_card(&self, _: Uuid, _: Uuid) -> Result<Option<TimecardCard>, sqlx::Error> {
@@ -612,6 +661,15 @@ impl TimecardRepository for PunchFindCardDbErrorMock {
     async fn list_cards(&self, _: Uuid, _: Option<Uuid>) -> Result<Vec<TimecardCard>, sqlx::Error> {
         unreachable!()
     }
+    async fn bulk_upsert_cards_by_code(
+        &self,
+        _: Uuid,
+        _: &[PreparedCardUpsert],
+        _: TimecardCardConflictPolicy,
+        _: bool,
+    ) -> Result<TimecardCardUpsertSummary, sqlx::Error> {
+        unreachable!()
+    }
     async fn get_card(&self, _: Uuid, _: Uuid) -> Result<Option<TimecardCard>, sqlx::Error> {
         unreachable!()
     }
@@ -708,6 +766,15 @@ impl TimecardRepository for PunchNfcDbErrorMock {
     async fn list_cards(&self, _: Uuid, _: Option<Uuid>) -> Result<Vec<TimecardCard>, sqlx::Error> {
         unreachable!()
     }
+    async fn bulk_upsert_cards_by_code(
+        &self,
+        _: Uuid,
+        _: &[PreparedCardUpsert],
+        _: TimecardCardConflictPolicy,
+        _: bool,
+    ) -> Result<TimecardCardUpsertSummary, sqlx::Error> {
+        unreachable!()
+    }
     async fn get_card(&self, _: Uuid, _: Uuid) -> Result<Option<TimecardCard>, sqlx::Error> {
         unreachable!()
     }
@@ -802,6 +869,15 @@ impl TimecardRepository for ListPunchesCountFailMock {
         unreachable!()
     }
     async fn list_cards(&self, _: Uuid, _: Option<Uuid>) -> Result<Vec<TimecardCard>, sqlx::Error> {
+        unreachable!()
+    }
+    async fn bulk_upsert_cards_by_code(
+        &self,
+        _: Uuid,
+        _: &[PreparedCardUpsert],
+        _: TimecardCardConflictPolicy,
+        _: bool,
+    ) -> Result<TimecardCardUpsertSummary, sqlx::Error> {
         unreachable!()
     }
     async fn get_card(&self, _: Uuid, _: Uuid) -> Result<Option<TimecardCard>, sqlx::Error> {
@@ -1862,4 +1938,277 @@ async fn test_export_csv_license_kind_is_labelled_tenko() {
     let bytes = res.bytes().await.unwrap();
     let csv = std::str::from_utf8(&bytes[3..]).unwrap();
     assert!(csv.contains(",点呼,"), "{csv}");
+}
+
+// ============================================================
+// PUT /api/timecard/cards/bulk-by-code — bulk_upsert_cards_by_code
+// (Refs ippoan/rust-alc-api#644)
+//
+// ★ mock は repository を丸ごと差し替えるので **SQL を 1 行も通らない**。
+//   `ON CONFLICT` の実挙動は tests/timecard_cards_bulk_test.rs (実 DB) が固定する。
+//   ここで固定するのは handler の分岐 — 上限の 400、skip 理由の合流と index 順、
+//   dry_run の素通し、DB error。
+// ============================================================
+
+/// 社員台帳を積んだ mock を返す。
+fn bulk_mock(employees: &[(&str, Uuid)]) -> Arc<crate::mock_helpers::MockTimecardRepository> {
+    let mock = Arc::new(crate::mock_helpers::MockTimecardRepository::default());
+    {
+        let mut store = mock.bulk_employees.lock().unwrap();
+        for (code, id) in employees {
+            store.insert((*code).to_string(), *id);
+        }
+    }
+    mock
+}
+
+async fn put_bulk(base_url: &str, jwt: &str, body: Value) -> reqwest::Response {
+    reqwest::Client::new()
+        .put(format!("{base_url}/api/timecard/cards/bulk-by-code"))
+        .header("Authorization", auth(jwt))
+        .json(&body)
+        .send()
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn bulk_cards_creates_then_reports_unchanged_on_replay() {
+    let emp = Uuid::new_v4();
+    let mock = bulk_mock(&[("E001", emp)]);
+    let (base_url, jwt) = spawn_with_mock(mock).await;
+    let body = serde_json::json!({
+        "items": [{"code": "E001", "card_id": "01401D0B1D37B660", "label": null}]
+    });
+
+    let res = put_bulk(&base_url, &jwt, body.clone()).await;
+    assert_eq!(res.status(), 200);
+    let first: Value = res.json().await.unwrap();
+    assert_eq!(first["created"], 1);
+    assert_eq!(first["updated"], 0);
+    assert_eq!(first["unchanged"], 0);
+    assert!(first["skipped"].as_array().unwrap().is_empty());
+
+    // 同じ body の 2 回目は 1 行も書かない (移行の再実行が安全)
+    let second: Value = put_bulk(&base_url, &jwt, body).await.json().await.unwrap();
+    assert_eq!(second["created"], 0);
+    assert_eq!(second["updated"], 0);
+    assert_eq!(second["unchanged"], 1);
+}
+
+#[tokio::test]
+async fn bulk_cards_rejects_empty_items() {
+    let (base_url, jwt) = spawn_with_mock(bulk_mock(&[])).await;
+    let res = put_bulk(&base_url, &jwt, serde_json::json!({"items": []})).await;
+    assert_eq!(res.status(), 400);
+}
+
+#[tokio::test]
+async fn bulk_cards_rejects_too_many_items() {
+    let (base_url, jwt) = spawn_with_mock(bulk_mock(&[])).await;
+    let items: Vec<Value> = (0..501)
+        .map(|i| serde_json::json!({"code": format!("E{i}"), "card_id": "01401d0b1d37b660"}))
+        .collect();
+    let res = put_bulk(&base_url, &jwt, serde_json::json!({"items": items})).await;
+    assert_eq!(res.status(), 400);
+}
+
+#[tokio::test]
+async fn bulk_cards_skips_invalid_card_id_and_keeps_the_rest() {
+    let mock = bulk_mock(&[("E001", Uuid::new_v4()), ("E002", Uuid::new_v4())]);
+    let (base_url, jwt) = spawn_with_mock(mock).await;
+
+    let res = put_bulk(
+        &base_url,
+        &jwt,
+        serde_json::json!({"items": [
+            {"code": "E001", "card_id": "01401D0B1D37B660112233"},
+            {"code": "E002", "card_id": "04A1B2C3D4E5F6"}
+        ]}),
+    )
+    .await;
+    // **200 のまま**。1 件の不正で数百件の移行を止めない
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(body["created"], 1, "他の行は入る: {body}");
+    let skipped = body["skipped"].as_array().unwrap();
+    assert_eq!(skipped.len(), 1);
+    assert_eq!(skipped[0]["index"], 0);
+    assert_eq!(skipped[0]["code"], "E001");
+    assert_eq!(skipped[0]["reason"], "invalid_card_id");
+    // ★ 応答に card_id を載せない (呼び出し元は public repo の Worker)
+    assert!(skipped[0].get("card_id").is_none(), "{body}");
+}
+
+#[tokio::test]
+async fn bulk_cards_skips_unknown_code_and_keeps_the_rest() {
+    let mock = bulk_mock(&[("E002", Uuid::new_v4())]);
+    let (base_url, jwt) = spawn_with_mock(mock).await;
+
+    let res = put_bulk(
+        &base_url,
+        &jwt,
+        serde_json::json!({"items": [
+            {"code": "UNKNOWN", "card_id": "01401d0b1d37b660"},
+            {"code": "E002", "card_id": "04a1b2c3d4e5f6"}
+        ]}),
+    )
+    .await;
+    assert_eq!(res.status(), 200, "未知の code で 500 にしない");
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(body["created"], 1);
+    let skipped = body["skipped"].as_array().unwrap();
+    assert_eq!(skipped.len(), 1);
+    assert_eq!(skipped[0]["reason"], "employee_not_found");
+    assert_eq!(skipped[0]["index"], 0);
+}
+
+#[tokio::test]
+async fn bulk_cards_skips_duplicate_card_id_in_same_batch() {
+    let mock = bulk_mock(&[("E001", Uuid::new_v4()), ("E002", Uuid::new_v4())]);
+    let (base_url, jwt) = spawn_with_mock(mock).await;
+
+    let body: Value = put_bulk(
+        &base_url,
+        &jwt,
+        serde_json::json!({"items": [
+            {"code": "E001", "card_id": "01401D0B1D37B660"},
+            {"code": "E002", "card_id": "01:40:1d:0b:1d:37:b6:60"}
+        ]}),
+    )
+    .await
+    .json()
+    .await
+    .unwrap();
+    assert_eq!(body["created"], 1);
+    let skipped = body["skipped"].as_array().unwrap();
+    assert_eq!(skipped.len(), 1);
+    assert_eq!(skipped[0]["index"], 1, "後勝ちにしない: {body}");
+    assert_eq!(skipped[0]["reason"], "duplicate_in_batch");
+}
+
+#[tokio::test]
+async fn bulk_cards_keeps_owner_by_default_and_reassigns_on_request() {
+    let alice = Uuid::new_v4();
+    let bob = Uuid::new_v4();
+    let mock = bulk_mock(&[("ALICE", alice), ("BOB", bob)]);
+    let (base_url, jwt) = spawn_with_mock(mock).await;
+
+    let created: Value = put_bulk(
+        &base_url,
+        &jwt,
+        serde_json::json!({"items": [{"code": "ALICE", "card_id": "01401d0b1d37b660"}]}),
+    )
+    .await
+    .json()
+    .await
+    .unwrap();
+    assert_eq!(created["created"], 1);
+
+    // 既定 (on_conflict 省略 = skip) は持ち主を奪わない
+    let kept: Value = put_bulk(
+        &base_url,
+        &jwt,
+        serde_json::json!({"items": [{"code": "BOB", "card_id": "01401d0b1d37b660"}]}),
+    )
+    .await
+    .json()
+    .await
+    .unwrap();
+    assert_eq!(kept["created"], 0);
+    assert_eq!(kept["updated"], 0);
+    let skipped = kept["skipped"].as_array().unwrap();
+    assert_eq!(skipped[0]["reason"], "card_owner_conflict");
+    assert_eq!(skipped[0]["code"], "BOB");
+
+    // 明示したときだけ付け替える
+    let moved: Value = put_bulk(
+        &base_url,
+        &jwt,
+        serde_json::json!({
+            "on_conflict": "reassign",
+            "items": [{"code": "BOB", "card_id": "01401d0b1d37b660"}]
+        }),
+    )
+    .await
+    .json()
+    .await
+    .unwrap();
+    assert_eq!(moved["updated"], 1);
+    assert!(moved["skipped"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn bulk_cards_dry_run_writes_nothing_but_reports_the_same_summary() {
+    let emp = Uuid::new_v4();
+    let mock = bulk_mock(&[("E001", emp)]);
+    let (base_url, jwt) = spawn_with_mock(mock.clone()).await;
+    let items = serde_json::json!([{"code": "E001", "card_id": "01401d0b1d37b660"}]);
+
+    let dry: Value = put_bulk(
+        &base_url,
+        &jwt,
+        serde_json::json!({"dry_run": true, "items": items}),
+    )
+    .await
+    .json()
+    .await
+    .unwrap();
+    assert_eq!(dry["created"], 1);
+    assert!(
+        mock.bulk_cards.lock().unwrap().is_empty(),
+        "dry_run は 1 行も書かない"
+    );
+
+    let applied: Value = put_bulk(&base_url, &jwt, serde_json::json!({"items": items}))
+        .await
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(applied, dry, "dry_run と apply の summary は同一");
+    assert_eq!(mock.bulk_cards.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn bulk_cards_skipped_entries_are_ordered_by_index() {
+    let mock = bulk_mock(&[("E001", Uuid::new_v4())]);
+    let (base_url, jwt) = spawn_with_mock(mock).await;
+
+    let body: Value = put_bulk(
+        &base_url,
+        &jwt,
+        serde_json::json!({"items": [
+            {"code": "UNKNOWN", "card_id": "01401d0b1d37b660"},
+            {"code": "E001", "card_id": "未登録"},
+            {"code": "E001", "card_id": "04a1b2c3d4e5f6"}
+        ]}),
+    )
+    .await
+    .json()
+    .await
+    .unwrap();
+    let skipped = body["skipped"].as_array().unwrap();
+    // repo 側 (employee_not_found) と handler 側 (invalid_card_id) の合流でも
+    // items の並び順で返す — 送り手は index で行を突き合わせる
+    assert_eq!(skipped.len(), 2, "{body}");
+    assert_eq!(skipped[0]["index"], 0);
+    assert_eq!(skipped[0]["reason"], "employee_not_found");
+    assert_eq!(skipped[1]["index"], 1);
+    assert_eq!(skipped[1]["reason"], "invalid_card_id");
+    assert_eq!(body["created"], 1);
+}
+
+#[tokio::test]
+async fn bulk_cards_db_error_is_500() {
+    let mock = bulk_mock(&[("E001", Uuid::new_v4())]);
+    mock.fail_next.store(true, Ordering::SeqCst);
+    let (base_url, jwt) = spawn_with_mock(mock).await;
+
+    let res = put_bulk(
+        &base_url,
+        &jwt,
+        serde_json::json!({"items": [{"code": "E001", "card_id": "01401d0b1d37b660"}]}),
+    )
+    .await;
+    assert_eq!(res.status(), 500);
 }

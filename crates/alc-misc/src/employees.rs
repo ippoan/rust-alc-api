@@ -9,12 +9,9 @@ use uuid::Uuid;
 use alc_core::auth_middleware::TenantId;
 use alc_core::models::{
     CreateEmployee, Employee, EmployeeBulkUpsert, EmployeeUpsertItem, EmployeeUpsertSummary,
-    FaceDataEntry, UpdateEmployee, UpdateFace, UpdateLicense, UpdateNfcId,
+    FaceDataEntry, UpdateEmployee, UpdateFace, UpdateLicense, UpdateNfcId, MAX_BULK_UPSERT_ITEMS,
 };
 use alc_core::AppState;
-
-/// `PUT /employees/bulk-by-code` で 1 リクエストに詰められる items の上限。
-const MAX_BULK_UPSERT_ITEMS: usize = 500;
 
 /// code / name の長さ上限、nfc_id は「交付日8桁+有効期限8桁」の固定 16 桁。
 const MAX_CODE_LEN: usize = 64;

@@ -3,7 +3,10 @@ use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use alc_core::models::{TimePunch, TimePunchWithDevice, TimecardCard};
+use alc_core::models::{
+    TimePunch, TimePunchWithDevice, TimecardCard, TimecardCardConflictPolicy,
+    TimecardCardUpsertSkipped, TimecardCardUpsertSummary,
+};
 
 use alc_core::tenant::TenantConn;
 
@@ -152,6 +155,107 @@ impl TimecardRepository for PgTimecardRepository {
             .fetch_all(&mut *tc.conn)
             .await
         }
+    }
+
+    /// 社員番号 (code) キーの一括 upsert (Refs ippoan/rust-alc-api#644)。
+    ///
+    /// 既存タイムカード (別システム) の中央 DB にあるカード台帳を、こちらへ
+    /// 初回移行するための口。`items` は `prepare_bulk_cards` 通過後 = 正規化済み・
+    /// 形が正しい・バッチ内で card_id が一意、が前提。
+    ///
+    /// **1 件の不備でトランザクションごと落とさない**のが眼目:
+    /// 社員の解決は SELECT、書き込みは `ON CONFLICT` なので制約違反が起きる余地が無く、
+    /// savepoint を使わずに「skip して次へ」が成り立つ。
+    async fn bulk_upsert_cards_by_code(
+        &self,
+        tenant_id: Uuid,
+        items: &[PreparedCardUpsert],
+        on_conflict: TimecardCardConflictPolicy,
+        dry_run: bool,
+    ) -> Result<TimecardCardUpsertSummary, sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
+        alc_core::tenant::set_current_tenant(&mut tx, &tenant_id.to_string()).await?;
+
+        let reassign = on_conflict == TimecardCardConflictPolicy::Reassign;
+        let mut summary = TimecardCardUpsertSummary::default();
+
+        for item in items {
+            // 社員の解決。**`deleted_at` は問わない** (`upsert_by_code` と同じ理由 —
+            // `idx_employees_code` が deleted_at を見ない一意制約なので、削除済みの
+            // 行を無視すると「居ないのに code が使われている」状態になる)
+            let employee: Option<(Uuid,)> =
+                sqlx::query_as("SELECT id FROM employees WHERE tenant_id = $1 AND code = $2")
+                    .bind(tenant_id)
+                    .bind(&item.code)
+                    .fetch_optional(&mut *tx)
+                    .await?;
+
+            let Some((employee_id,)) = employee else {
+                summary.skipped.push(TimecardCardUpsertSkipped {
+                    index: item.index,
+                    code: item.code.clone(),
+                    reason: "employee_not_found".to_string(),
+                });
+                continue;
+            };
+
+            // `xmax = 0` で INSERT と UPDATE を見分ける。DO UPDATE の WHERE が
+            // 外れた (= 既に同じ社員に付いている / 付け替えない指定) ときは
+            // 1 行も返らないので、その 3 通りを 1 文で分けられる。
+            let written: Option<(bool,)> = sqlx::query_as(
+                r#"
+                INSERT INTO timecard_cards (tenant_id, employee_id, card_id, label)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT (tenant_id, card_id) DO UPDATE
+                    SET employee_id = EXCLUDED.employee_id
+                    WHERE $5::boolean AND timecard_cards.employee_id <> EXCLUDED.employee_id
+                RETURNING (xmax = 0) AS inserted
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(employee_id)
+            .bind(&item.card_id)
+            .bind(&item.label)
+            .bind(reassign)
+            .fetch_optional(&mut *tx)
+            .await?;
+
+            match written {
+                Some((true,)) => summary.created += 1,
+                Some((false,)) => summary.updated += 1,
+                None => {
+                    // 書かなかった = 同じ card_id の行が既にある。持ち主が同じなら
+                    // 何もしないのが正 (unchanged)、別人なら見送った行
+                    let owner: Option<(Uuid,)> = sqlx::query_as(
+                        "SELECT employee_id FROM timecard_cards WHERE tenant_id = $1 AND card_id = $2",
+                    )
+                    .bind(tenant_id)
+                    .bind(&item.card_id)
+                    .fetch_optional(&mut *tx)
+                    .await?;
+
+                    if owner == Some((employee_id,)) {
+                        summary.unchanged += 1;
+                    } else {
+                        summary.skipped.push(TimecardCardUpsertSkipped {
+                            index: item.index,
+                            code: item.code.clone(),
+                            reason: "card_owner_conflict".to_string(),
+                        });
+                    }
+                }
+            }
+        }
+
+        // dry_run は**判定を最後まで同じコードで通してから commit しない**形。
+        // 判定を 2 本持つと「試したときと本番で結果が違う」が必ず生まれる
+        if dry_run {
+            tx.rollback().await?;
+        } else {
+            tx.commit().await?;
+        }
+
+        Ok(summary)
     }
 
     async fn get_card(

@@ -2,7 +2,7 @@ use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
-    routing::{get, post},
+    routing::{get, post, put},
     Json, Router,
 };
 use uuid::Uuid;
@@ -10,15 +10,24 @@ use uuid::Uuid;
 use alc_core::auth_middleware::TenantId;
 use alc_core::models::{
     CreateTimePunchByCard, CreateTimecardCard, TimePunchFilter, TimePunchWithEmployee,
-    TimePunchesResponse, TimecardCard,
+    TimePunchesResponse, TimecardCard, TimecardCardBulkUpsert, TimecardCardUpsertSummary,
+    MAX_BULK_UPSERT_ITEMS,
 };
-use alc_core::repository::timecard::normalize_card_id;
+use alc_core::repository::timecard::{normalize_card_id, prepare_bulk_cards};
 use alc_core::AppState;
 
 pub fn tenant_router() -> Router<AppState> {
     Router::new()
         .route("/timecard/cards", post(create_card).get(list_cards))
         .route("/timecard/cards/{id}", get(get_card).delete(delete_card))
+        // 社員番号キーの一括取り込み (Refs ippoan/rust-alc-api#644)。
+        // **tenant_router に置く** — 呼び出し元 (Worker) は auth-worker の
+        // forwardAlcTenantData 経由で来て X-Tenant-ID は auth-worker が注入する。
+        // `PUT /employees/bulk-by-code` とまったく同じ経路
+        .route(
+            "/timecard/cards/bulk-by-code",
+            put(bulk_upsert_cards_by_code),
+        )
         .route(
             "/timecard/cards/by-card/{card_id}",
             get(get_card_by_card_id),
@@ -57,6 +66,49 @@ async fn create_card(
         })?;
 
     Ok((StatusCode::CREATED, Json(card)))
+}
+
+/// `PUT /timecard/cards/bulk-by-code` — 社員番号 (code) キーのカード台帳一括 upsert
+/// (Refs ippoan/rust-alc-api#644)。
+///
+/// 既存タイムカード (別システム) の中央 DB にある台帳を、こちらの `timecard_cards`
+/// へ初回移行するための口。**単発 CRUD をループで叩かせない**のが眼目で、
+/// 「既にある / 別人に付いている / 新規」の判定と code→UUID の解決を受け側に閉じる
+/// (呼び出し元は public repo の Worker なので、判定を向こうに持たせると二重化する)。
+///
+/// **skip があっても 200。** 1 件の不備で全体を落とすと、数百件の移行が
+/// 1 行のせいで前に進まなくなる。
+async fn bulk_upsert_cards_by_code(
+    State(state): State<AppState>,
+    tenant: axum::Extension<TenantId>,
+    Json(body): Json<TimecardCardBulkUpsert>,
+) -> Result<(StatusCode, Json<TimecardCardUpsertSummary>), (StatusCode, String)> {
+    if body.items.is_empty() || body.items.len() > MAX_BULK_UPSERT_ITEMS {
+        return Err((StatusCode::BAD_REQUEST, "items が不正です".to_string()));
+    }
+
+    // 正規化・形の検査・バッチ内重複は DB を引かずに決まる (pure)。
+    // **card_id の正規化点はここ 1 か所** — 送り手は大文字の生値を送ってくる
+    let (prepared, invalid) = prepare_bulk_cards(&body.items);
+
+    let mut summary = state
+        .timecard
+        .bulk_upsert_cards_by_code(tenant.0 .0, &prepared, body.on_conflict, body.dry_run)
+        .await
+        .map_err(|e| {
+            // ★ card_id はログにも出さない (応答と同じ理由)
+            tracing::error!("bulk_upsert_cards_by_code error: {e}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal error".to_string(),
+            )
+        })?;
+
+    // 送り手が items を走査しながら突き合わせられるよう index 順に戻す
+    summary.skipped.extend(invalid);
+    summary.skipped.sort_by_key(|s| s.index);
+
+    Ok((StatusCode::OK, Json(summary)))
 }
 
 #[derive(Debug, serde::Deserialize)]
