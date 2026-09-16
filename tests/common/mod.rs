@@ -405,6 +405,45 @@ pub fn create_test_jwt(tenant_id: Uuid, role: &str) -> String {
     encode_test_token(Uuid::new_v4(), tenant_id, "test@example.com", role)
 }
 
+/// url 登録フローで端末を 1 台作る (管理者がトークン発行 → 端末がクレーム)。
+/// devices テーブルは RLS + SECURITY DEFINER 関数経由の SELECT しか許さないため
+/// (063/114)、DB 直 INSERT ではなく実際のハンドラ経由で作る。
+/// 戻り値は (device_id, registration_code)。
+pub async fn create_device_via_url_flow(
+    client: &reqwest::Client,
+    base_url: &str,
+    auth: &str,
+) -> (String, String) {
+    let res = client
+        .post(format!("{base_url}/api/devices/register/create-token"))
+        .header("Authorization", auth)
+        .json(&serde_json::json!({ "device_name": "Test Device" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    let code = body["registration_code"].as_str().unwrap().to_string();
+
+    let res = client
+        .post(format!("{base_url}/api/devices/register/claim"))
+        .json(&serde_json::json!({
+            "registration_code": code,
+            "phone_number": "090-1234-5678",
+            "device_name": "Test Device"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["success"], true);
+    assert_eq!(body["flow_type"], "url");
+    let device_id = body["device_id"].as_str().unwrap().to_string();
+
+    (device_id, code)
+}
+
 /// 内部 API 用のテスト token を返す (aud=alc-api-internal)。
 ///
 /// #479 で `require_internal_jwt` は Google OIDC 一本化 (HS256 dual-accept 撤去)

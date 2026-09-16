@@ -1,48 +1,7 @@
 #[macro_use]
 mod common;
 
-use serde_json::Value;
-
-// ============================================================
-// ヘルパー
-// ============================================================
-
-async fn create_device_via_url_flow(
-    client: &reqwest::Client,
-    base_url: &str,
-    auth: &str,
-) -> (String, String) {
-    // 管理者がトークン生成
-    let res = client
-        .post(format!("{base_url}/api/devices/register/create-token"))
-        .header("Authorization", auth)
-        .json(&serde_json::json!({ "device_name": "Test Device" }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 200);
-    let body: Value = res.json().await.unwrap();
-    let code = body["registration_code"].as_str().unwrap().to_string();
-
-    // 端末がクレーム
-    let res = client
-        .post(format!("{base_url}/api/devices/register/claim"))
-        .json(&serde_json::json!({
-            "registration_code": code,
-            "phone_number": "090-1234-5678",
-            "device_name": "Test Device"
-        }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 200);
-    let body: Value = res.json().await.unwrap();
-    assert_eq!(body["success"], true);
-    assert_eq!(body["flow_type"], "url");
-    let device_id = body["device_id"].as_str().unwrap().to_string();
-
-    (device_id, code)
-}
+use common::create_device_via_url_flow;
 
 // ============================================================
 // クロステナント操作テスト

@@ -189,6 +189,26 @@ rust_test(
     ),
 )
 
+# 端末ごとの血圧計 (Omron) 使用設定 (Refs ippoan/alc-app-s3#135)。**実 DB でしか
+# 検証できない** — GET /api/devices/settings/{id} は 063/114 の SECURITY DEFINER
+# 関数 get_device_settings_by_id() 経由でしか devices を読めず、列を DB に足した
+# だけでは関数の列挙に乗らない限り応答に出てこない。mock テストは repository を
+# 丸ごと差し替えるのでこの関数を経由せず、列挙漏れを検出できない。
+rust_test(
+    name = "device_bp_enabled_test",
+    srcs = ["tests/device_bp_enabled_test.rs"] + glob(["tests/common/**/*.rs"]),
+    crate_root = "tests/device_bp_enabled_test.rs",
+    compile_data = glob(["migrations/**"]),
+    deps = [":rust_alc_api_lib"] + all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ) + _WORKSPACE_CRATES,
+    proc_macro_deps = all_crate_deps(
+        proc_macro = True,
+        proc_macro_dev = True,
+    ),
+)
+
 rust_test(
     name = "dvr_notifications_test",
     srcs = ["tests/dvr_notifications_test.rs"] + glob(["tests/common/**/*.rs"]),

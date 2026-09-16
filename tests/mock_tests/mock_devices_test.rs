@@ -277,6 +277,32 @@ async fn test_device_settings_found() {
     assert_eq!(body["call_enabled"], true);
     assert_eq!(body["status"], "active");
     assert_eq!(body["always_on"], false);
+    // 既定 false (Refs ippoan/alc-app-s3#135)
+    assert_eq!(body["bp_enabled"], false);
+}
+
+#[tokio::test]
+async fn test_device_settings_bp_enabled_true() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+
+    let mock = Arc::new(MockDeviceRepository::default());
+    mock.return_data.store(true, Ordering::SeqCst);
+    mock.return_bp_enabled.store(true, Ordering::SeqCst);
+    let mut state = setup_mock_app_state();
+    state.devices = mock;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+
+    let device_id = Uuid::new_v4();
+    let client = reqwest::Client::new();
+    let res = client
+        .get(format!("{base_url}/api/devices/settings/{device_id}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(body["bp_enabled"], true);
 }
 
 #[tokio::test]
@@ -1358,7 +1384,8 @@ async fn test_update_call_settings_success() {
         .json(&serde_json::json!({
             "call_enabled": true,
             "call_schedule": { "enabled": true, "startHour": 8, "endHour": 18 },
-            "always_on": true
+            "always_on": true,
+            "bp_enabled": true
         }))
         .send()
         .await
@@ -2389,6 +2416,41 @@ async fn test_update_call_settings_no_always_on() {
         .put(format!("{base_url}/api/devices/{id}/call-settings"))
         .header("Authorization", format!("Bearer {jwt}"))
         .json(&serde_json::json!({ "call_enabled": false }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 204);
+}
+
+// ============================================================
+// update_call_settings: bp_enabled だけが Some でも FCM 通知が走る
+// (always_on は None のまま。Refs ippoan/alc-app-s3#135)
+// ============================================================
+
+#[tokio::test]
+async fn test_update_call_settings_bp_enabled_only_triggers_fcm() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+
+    let mock = Arc::new(MockDeviceRepository::default());
+    mock.return_data.store(true, Ordering::SeqCst);
+    let mut state = setup_mock_app_state();
+    state.devices = mock;
+    state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+
+    let tenant_id = Uuid::new_v4();
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+    let client = reqwest::Client::new();
+    let id = Uuid::new_v4();
+
+    let res = client
+        .put(format!("{base_url}/api/devices/{id}/call-settings"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .json(&serde_json::json!({
+            "call_enabled": false,
+            "bp_enabled": true
+        }))
         .send()
         .await
         .unwrap();
