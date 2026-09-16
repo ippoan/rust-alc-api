@@ -95,6 +95,12 @@ WITH p AS (
         -- 同じ式なので、片方だけ変えると表示と照合がずれる
         COALESCE(hm.payload->>'card_id', hm.payload->>'nfc_id') AS card_id,
         hm.kind,
+        -- そのタップが免許証だったか、他の IC カードだったか。**表示専用** —
+        -- 端末のファームは打刻の kind を常に 'timecard' で送るので、種別は
+        -- payload の card_kind にしか入っていない。kind = 'license' (点呼) の行も
+        -- 免許証として出すため CASE を噛ませる。
+        -- **社員の解決 (照合) には使わないこと** — 使った瞬間ブラウザ版と挙動が割れる
+        COALESCE(hm.payload->>'card_kind', CASE WHEN hm.kind = 'license' THEN 'license' END) AS card_kind,
         COALESCE(hm.recorded_at, hm.created_at) AS punched_at,
         hm.created_at
     FROM hub_measurements hm
@@ -526,7 +532,7 @@ impl TimecardRepository for PgTimecardRepository {
         let sql = format!(
             r#"{PUNCHES_CTE}
                SELECT p.id, p.tenant_id, p.employee_id, NULL::uuid AS device_id,
-                      p.hub_device_id AS device_name, p.card_id, p.kind,
+                      p.hub_device_id AS device_name, p.card_id, p.kind, p.card_kind,
                       e.name AS employee_name, p.punched_at, p.created_at
                FROM p
                LEFT JOIN employees e ON e.id = p.employee_id
@@ -565,7 +571,7 @@ impl TimecardRepository for PgTimecardRepository {
         let sql = format!(
             r#"{PUNCHES_CTE}
             SELECT p.id, p.punched_at, e.name AS employee_name, e.code AS employee_code,
-                   p.hub_device_id AS device_name, p.kind
+                   p.hub_device_id AS device_name, p.kind, p.card_kind
             FROM p
             LEFT JOIN employees e ON e.id = p.employee_id
             WHERE {where_clause}

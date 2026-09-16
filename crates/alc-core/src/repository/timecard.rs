@@ -36,6 +36,10 @@ pub struct TimePunchCsvRow {
     /// `timecard` / `license`。CSV の「区分」列になる — 混ぜたまま出すと
     /// 点呼が打刻として集計される
     pub kind: String,
+    /// かざしたカードの種別 (`license` / `felica_idm` / `nfca_uid`)。CSV の
+    /// 「カード」列になる。ブラウザ打刻と旧行は None (空欄)。
+    /// **`kind` とは別の軸** — あちらは「打刻か点呼か」
+    pub card_kind: Option<String>,
 }
 
 #[async_trait]

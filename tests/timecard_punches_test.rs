@@ -489,3 +489,187 @@ async fn test_browser_punch_seq_does_not_collide() {
         assert_eq!(n, 3);
     });
 }
+
+/// 端末が送る `payload.card_kind` を一覧と CSV まで通す (Refs ippoan/rust-alc-api#644)。
+///
+/// **ファームは打刻の `kind` を常に `timecard` で送る**ので、免許証か他の IC カードかは
+/// `payload.card_kind` にしか入っていない。`PUNCHES_CTE` がこれを SELECT していないと
+/// API が返さず、画面にも CSV にも届かない (データは入っているのに出ない状態だった)。
+///
+/// `kind` (打刻 / 点呼) とは**別の軸**なので、両方の列が同時に出ることを固定する。
+async fn post_hub_item(
+    client: &reqwest::Client,
+    base_url: &str,
+    tenant_id: Uuid,
+    seq: i64,
+    kind: &str,
+    payload: Value,
+) -> reqwest::Response {
+    client
+        .post(format!("{base_url}/api/hub/measurements"))
+        .header(
+            "X-Internal-Shared-Secret",
+            common::TEST_INTERNAL_SHARED_SECRET,
+        )
+        .header("X-Tenant-ID", tenant_id.to_string())
+        .json(&json!([{
+            "device_id": "timecard-dev-1",
+            "kind": kind,
+            "seq": seq,
+            "payload": payload,
+        }]))
+        .send()
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn test_punches_expose_card_kind() {
+    test_group!("timecard punches (カード種別)");
+
+    test_case!(
+        "免許証 / IC カード / 点呼 / ブラウザ打刻をカード種別で見分けられる",
+        {
+            let state = common::setup_app_state().await;
+            let base_url = common::spawn_test_server(state.clone()).await;
+            let tenant = common::create_test_tenant(state.pool(), "Punch Card Kind").await;
+            let auth = format!("Bearer {}", common::create_test_jwt(tenant, "admin"));
+            let client = reqwest::Client::new();
+
+            let emp =
+                common::create_test_employee(&client, &base_url, &auth, "種別 太郎", "E030").await;
+            let employee_id = emp["id"].as_str().unwrap().to_string();
+            let res = client
+                .post(format!("{base_url}/api/timecard/cards"))
+                .header("Authorization", &auth)
+                .json(&json!({ "employee_id": employee_id, "card_id": "FEEDFACEFEEDFACE" }))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 201);
+            // ブラウザ打刻用は**別のカード**にする。同じ card_id だと端末のタップと
+            // ブラウザの行が card_id で引けなくなる
+            let res = client
+                .post(format!("{base_url}/api/timecard/cards"))
+                .header("Authorization", &auth)
+                .json(&json!({ "employee_id": employee_id, "card_id": "BROWSERONLY01" }))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 201);
+
+            // ① FeliCa (社員証など) のタップ
+            assert_eq!(
+                post_hub_item(
+                    &client,
+                    &base_url,
+                    tenant,
+                    1,
+                    "timecard",
+                    json!({ "card_id": "FEEDFACEFEEDFACE", "card_kind": "felica_idm" }),
+                )
+                .await
+                .status(),
+                201
+            );
+            // ② 免許証のタップ。**kind は timecard のまま** (ファームが常にそう送る)
+            assert_eq!(
+                post_hub_item(
+                    &client,
+                    &base_url,
+                    tenant,
+                    2,
+                    "timecard",
+                    json!({ "card_id": "LICENSECARD01", "card_kind": "license" }),
+                )
+                .await
+                .status(),
+                201
+            );
+            // ③ 点呼開始時の免許証読み取り (kind = license)。payload に card_kind は
+            //    載らないので、CTE の CASE が免許証として補う
+            assert_eq!(
+                post_hub_item(
+                    &client,
+                    &base_url,
+                    tenant,
+                    3,
+                    "license",
+                    json!({ "nfc_id": "TENKOLICENSE01" }),
+                )
+                .await
+                .status(),
+                201
+            );
+            // ④ ブラウザ打刻 (card_kind を載せない経路)
+            let res = client
+                .post(format!("{base_url}/api/timecard/punch"))
+                .header("Authorization", &auth)
+                .json(&json!({ "card_id": "BROWSERONLY01" }))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 201);
+
+            let body = list_punches(&client, &base_url, &auth).await;
+            let punches = body["punches"].as_array().unwrap();
+            assert_eq!(punches.len(), 4, "4 行とも一覧に出る: {body}");
+
+            let card_kind_of = |card: &str| -> Value {
+                punches
+                    .iter()
+                    .find(|p| p["card_id"].as_str() == Some(card))
+                    .unwrap_or_else(|| panic!("{card} の行が無い: {body}"))["card_kind"]
+                    .clone()
+            };
+
+            assert_eq!(card_kind_of("FEEDFACEFEEDFACE"), "felica_idm");
+            assert_eq!(card_kind_of("LICENSECARD01"), "license");
+            // 点呼の行も「免許証」として出る
+            assert_eq!(card_kind_of("TENKOLICENSE01"), "license");
+
+            // ブラウザ打刻は card_kind が null のまま (これが正しい。
+            // ブラウザは何のカードで打ったかを知らない)
+            assert!(card_kind_of("BROWSERONLY01").is_null(), "{body}");
+            let browser = punches
+                .iter()
+                .find(|p| p["card_id"].as_str() == Some("BROWSERONLY01"))
+                .unwrap();
+            assert_eq!(browser["kind"], "timecard");
+
+            // **`kind` は別の軸。点呼の行だけが license** —
+            // card_kind を kind に流用していないことの担保
+            assert_eq!(
+                punches.iter().filter(|p| p["kind"] == "license").count(),
+                1,
+                "{body}"
+            );
+
+            // --- CSV 側 ---
+            let res = client
+                .get(format!("{base_url}/api/timecard/punches/csv"))
+                .header("Authorization", &auth)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 200);
+            let bytes = res.bytes().await.unwrap();
+            let csv = std::str::from_utf8(&bytes[3..]).unwrap();
+
+            let header = csv.lines().next().unwrap();
+            // **「区分」列は消さない。「カード」列を足すだけ**
+            assert!(header.contains("区分"), "{csv}");
+            assert!(header.contains("カード"), "{csv}");
+
+            // 免許証の行は「免許証」、FeliCa は「ICカード」
+            assert_eq!(
+                csv.lines().filter(|l| l.contains(",免許証,")).count(),
+                2,
+                "免許証のタップと点呼の 2 行が免許証になっていない: {csv}"
+            );
+            assert!(csv.contains(",ICカード,"), "{csv}");
+            // ブラウザ打刻は空欄 (「打刻」の直後が空)
+            assert!(csv.lines().any(|l| l.contains(",打刻,,")), "{csv}");
+        }
+    );
+}
