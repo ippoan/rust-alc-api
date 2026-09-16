@@ -94,6 +94,13 @@ pub struct UpdateNfcId {
     pub nfc_id: String,
 }
 
+/// 一括 upsert (`PUT /employees/bulk-by-code` と
+/// `PUT /timecard/cards/bulk-by-code`) で 1 リクエストに詰められる items の上限。
+///
+/// **2 つの口で共有する。** 送り手 (relay / Worker) は同じ分割ロジックで投げるので、
+/// 片方だけ広げるともう片方が黙って 400 を返す側になる。
+pub const MAX_BULK_UPSERT_ITEMS: usize = 500;
+
 /// `PUT /api/employees/bulk-by-code` の 1 件分 (Refs ippoan/alc-app-s3#125)。
 /// theearth の乗務員マスタを relay 経由で取り込む用途で、乗務員CD (code) を
 /// キーに upsert する。
@@ -335,6 +342,64 @@ pub struct CreateTimecardCard {
     pub employee_id: Uuid,
     pub card_id: String,
     pub label: Option<String>,
+}
+
+/// `PUT /api/timecard/cards/bulk-by-code` の 1 件分 (Refs ippoan/rust-alc-api#644)。
+/// 既存タイムカード (別システム) のカード台帳を社員番号 (`code`) をキーに
+/// こちらへ初回移行するための形。**送り手は社員の UUID を知らない。**
+///
+/// `card_id` は**読み取った生値のまま**でよい (大文字・`:` 区切りも可)。
+/// 正規化は受け側の `normalize_card_id` 1 か所で行う。
+#[derive(Debug, Deserialize)]
+pub struct TimecardCardUpsertItem {
+    pub code: String,
+    pub card_id: String,
+    pub label: Option<String>,
+}
+
+/// 既に**別の社員**に付いているカードをどう扱うか。既定は `skip`。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TimecardCardConflictPolicy {
+    /// 付け替えない (`card_owner_conflict` として skipped に載せる)。
+    #[default]
+    Skip,
+    /// `employee_id` を送られてきた社員へ付け替える。
+    Reassign,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TimecardCardBulkUpsert {
+    /// true なら**1 行も書かない**。判定は本番と同じコードを通し、
+    /// トランザクションを commit しない形で実現する。
+    #[serde(default)]
+    pub dry_run: bool,
+    #[serde(default)]
+    pub on_conflict: TimecardCardConflictPolicy,
+    pub items: Vec<TimecardCardUpsertItem>,
+}
+
+/// 取り込めなかった 1 件。
+///
+/// **`card_id` は載せない。** 呼び出し元は public repo の Worker で、応答が
+/// そのままログや issue に写る。`index` (リクエストの items 内の位置) と
+/// `code` があれば送り手は行を特定できる。
+#[derive(Debug, Serialize)]
+pub struct TimecardCardUpsertSkipped {
+    pub index: usize,
+    pub code: String,
+    /// `employee_not_found` / `invalid_card_id` / `card_owner_conflict` /
+    /// `duplicate_in_batch` の 4 種。
+    pub reason: String,
+}
+
+#[derive(Debug, Default, Serialize)]
+pub struct TimecardCardUpsertSummary {
+    pub created: usize,
+    pub updated: usize,
+    /// 既に**同じ社員**に同じカードが付いていて、何も書かなかった件数。
+    pub unchanged: usize,
+    pub skipped: Vec<TimecardCardUpsertSkipped>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]

@@ -16,7 +16,9 @@ use rust_alc_api::db::repository::tenko_records::TenkoRecordsRepository;
 use rust_alc_api::db::repository::tenko_schedules::{ScheduleListResult, TenkoSchedulesRepository};
 use rust_alc_api::db::repository::tenko_sessions::{SessionListResult, TenkoSessionRepository};
 use rust_alc_api::db::repository::tenko_webhooks::TenkoWebhooksRepository;
-use rust_alc_api::db::repository::timecard::{TimePunchCsvRow, TimecardRepository};
+use rust_alc_api::db::repository::timecard::{
+    PreparedCardUpsert, TimePunchCsvRow, TimecardRepository,
+};
 
 macro_rules! check_fail {
     ($self:expr) => {
@@ -1509,6 +1511,10 @@ pub struct MockTimecardRepository {
     /// create_punch に渡された card_id。**打刻の payload に凍結される値**なので、
     /// 照合に使った値とずれていないかを固定する (Refs ippoan/alc-app-s3#134)
     pub punch_card_ids: std::sync::Mutex<Vec<String>>,
+    /// 一括取り込み (Refs ippoan/rust-alc-api#644) 用の社員台帳: code → employee_id
+    pub bulk_employees: std::sync::Mutex<std::collections::HashMap<String, Uuid>>,
+    /// 同じく カード台帳: **正規化済み** card_id → employee_id
+    pub bulk_cards: std::sync::Mutex<std::collections::HashMap<String, Uuid>>,
 }
 
 impl Default for MockTimecardRepository {
@@ -1526,6 +1532,8 @@ impl Default for MockTimecardRepository {
             punches: std::sync::Mutex::new(vec![]),
             card_lookups: std::sync::Mutex::new(vec![]),
             punch_card_ids: std::sync::Mutex::new(vec![]),
+            bulk_employees: std::sync::Mutex::new(std::collections::HashMap::new()),
+            bulk_cards: std::sync::Mutex::new(std::collections::HashMap::new()),
         }
     }
 }
@@ -1563,6 +1571,59 @@ impl TimecardRepository for MockTimecardRepository {
     ) -> Result<Vec<TimecardCard>, sqlx::Error> {
         check_fail!(self);
         Ok(self.cards_list.lock().unwrap().clone())
+    }
+
+    /// 一括取り込みの in-memory 版 (Refs ippoan/rust-alc-api#644)。
+    ///
+    /// **SQL は 1 行も通らない** — `ON CONFLICT` の実挙動は `tests/timecard_cards_bulk_test.rs`
+    /// (実 DB) が固定する。ここで固定するのは handler 側の受け渡し
+    /// (skip 理由の合流と index 順、dry_run の素通し、DB error) だけ。
+    async fn bulk_upsert_cards_by_code(
+        &self,
+        _tenant_id: Uuid,
+        items: &[PreparedCardUpsert],
+        on_conflict: TimecardCardConflictPolicy,
+        dry_run: bool,
+    ) -> Result<TimecardCardUpsertSummary, sqlx::Error> {
+        check_fail!(self);
+        let employees = self.bulk_employees.lock().unwrap();
+        let mut cards = self.bulk_cards.lock().unwrap();
+        // dry_run は「判定は同じ、書かない」。実装 (Pg 側) は tx を commit しない
+        let mut staged = cards.clone();
+        let mut summary = TimecardCardUpsertSummary::default();
+
+        for item in items {
+            let Some(&employee_id) = employees.get(&item.code) else {
+                summary.skipped.push(TimecardCardUpsertSkipped {
+                    index: item.index,
+                    code: item.code.clone(),
+                    reason: "employee_not_found".to_string(),
+                });
+                continue;
+            };
+
+            match staged.get(&item.card_id).copied() {
+                None => {
+                    staged.insert(item.card_id.clone(), employee_id);
+                    summary.created += 1;
+                }
+                Some(owner) if owner == employee_id => summary.unchanged += 1,
+                Some(_) if on_conflict == TimecardCardConflictPolicy::Reassign => {
+                    staged.insert(item.card_id.clone(), employee_id);
+                    summary.updated += 1;
+                }
+                Some(_) => summary.skipped.push(TimecardCardUpsertSkipped {
+                    index: item.index,
+                    code: item.code.clone(),
+                    reason: "card_owner_conflict".to_string(),
+                }),
+            }
+        }
+
+        if !dry_run {
+            *cards = staged;
+        }
+        Ok(summary)
     }
 
     async fn get_card(
