@@ -543,6 +543,31 @@ impl TenkoSessionRepository for PgTenkoSessionRepository {
         .await
     }
 
+    async fn escalate_to_remote(
+        &self,
+        tenant_id: Uuid,
+        id: Uuid,
+        reason: &str,
+    ) -> Result<TenkoSession, sqlx::Error> {
+        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
+        sqlx::query_as::<_, TenkoSession>(
+            r#"
+            UPDATE tenko_sessions SET
+                tenko_method = '遠隔点呼',
+                escalated_to_remote_at = NOW(),
+                remote_escalation_reason = $1,
+                updated_at = NOW()
+            WHERE id = $2 AND tenant_id = $3
+            RETURNING *
+            "#,
+        )
+        .bind(reason)
+        .bind(id)
+        .bind(tenant_id)
+        .fetch_one(&mut *tc.conn)
+        .await
+    }
+
     async fn get_carrying_item_name(
         &self,
         tenant_id: Uuid,
@@ -638,7 +663,9 @@ impl TenkoSessionRepository for PgTenkoSessionRepository {
             instruction,
             record_data,
             record_hash,
-            "自動点呼",
+            // 決め打ちにしない — 遠隔点呼へ切り替えた session は自動点呼として
+            // 記録されてはいけない (Refs ippoan/alc-app-s3#135)
+            &session.tenko_method,
         )
         .await
     }

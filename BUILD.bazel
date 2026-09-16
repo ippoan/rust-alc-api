@@ -209,6 +209,25 @@ rust_test(
     ),
 )
 
+# 自動点呼タブの血圧必須化 + 遠隔点呼への切り替え (migration 144、
+# Refs ippoan/alc-app-s3#135)。**実 DB でしか検証できない** — CHECK 制約の
+# 拡張 (tenko_method に '遠隔点呼' を追加) と escalate-remote の UPDATE は、
+# repository を丸ごと差し替える mock テストでは SQL を 1 行も通らない。
+rust_test(
+    name = "tenko_bp_required_escalate_test",
+    srcs = ["tests/tenko_bp_required_escalate_test.rs"] + glob(["tests/common/**/*.rs"]),
+    crate_root = "tests/tenko_bp_required_escalate_test.rs",
+    compile_data = glob(["migrations/**"]),
+    deps = [":rust_alc_api_lib"] + all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ) + _WORKSPACE_CRATES,
+    proc_macro_deps = all_crate_deps(
+        proc_macro = True,
+        proc_macro_dev = True,
+    ),
+)
+
 rust_test(
     name = "dvr_notifications_test",
     srcs = ["tests/dvr_notifications_test.rs"] + glob(["tests/common/**/*.rs"]),

@@ -641,6 +641,300 @@ async fn test_submit_medical_db_error() {
     assert_eq!(res.status(), 500);
 }
 
+// --- 自動点呼のときだけ血圧必須 (Refs ippoan/alc-app-s3#135) ---
+
+#[tokio::test]
+async fn test_submit_medical_auto_missing_bp_returns_400() {
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_status.lock().unwrap() = "medical_pending".to_string();
+    *mock.session_tenko_type.lock().unwrap() = "pre_operation".to_string();
+    *mock.session_tenko_method.lock().unwrap() = "自動点呼".to_string();
+    let (base_url, auth_header, _) = setup_with_mock(mock).await;
+
+    let res = client()
+        .put(format!(
+            "{base_url}/api/tenko/sessions/{}/medical",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({
+            "temperature": 36.5,
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 400);
+}
+
+#[tokio::test]
+async fn test_submit_medical_remote_missing_bp_returns_200() {
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_status.lock().unwrap() = "medical_pending".to_string();
+    *mock.session_tenko_type.lock().unwrap() = "pre_operation".to_string();
+    *mock.session_tenko_method.lock().unwrap() = "遠隔点呼".to_string();
+    let (base_url, auth_header, _) = setup_with_mock(mock).await;
+
+    let res = client()
+        .put(format!(
+            "{base_url}/api/tenko/sessions/{}/medical",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({
+            "temperature": 36.5,
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+}
+
+#[tokio::test]
+async fn test_submit_medical_normal_missing_bp_returns_200() {
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_status.lock().unwrap() = "medical_pending".to_string();
+    *mock.session_tenko_type.lock().unwrap() = "pre_operation".to_string();
+    *mock.session_tenko_method.lock().unwrap() = "通常点呼".to_string();
+    let (base_url, auth_header, _) = setup_with_mock(mock).await;
+
+    let res = client()
+        .put(format!(
+            "{base_url}/api/tenko/sessions/{}/medical",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({
+            "temperature": 36.5,
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+}
+
+// =========================================================================
+// PUT /api/tenko/sessions/{id}/escalate-remote
+// =========================================================================
+
+#[tokio::test]
+async fn test_escalate_remote_success() {
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_status.lock().unwrap() = "medical_pending".to_string();
+    *mock.session_tenko_type.lock().unwrap() = "pre_operation".to_string();
+    *mock.session_tenko_method.lock().unwrap() = "自動点呼".to_string();
+    let (base_url, auth_header, _) = setup_with_mock(mock).await;
+
+    let res = client()
+        .put(format!(
+            "{base_url}/api/tenko/sessions/{}/escalate-remote",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({
+            "reason": "血圧計が故障している",
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["tenko_method"], "遠隔点呼");
+    assert_eq!(body["remote_escalation_reason"], "血圧計が故障している");
+    // JSON キーは escalated_to_remote_at (親の決定 — 画面側の管理者バッジがこの名前を見る)
+    assert!(body["escalated_to_remote_at"].is_string());
+}
+
+#[tokio::test]
+async fn test_escalate_remote_reason_too_long() {
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_status.lock().unwrap() = "medical_pending".to_string();
+    *mock.session_tenko_type.lock().unwrap() = "pre_operation".to_string();
+    *mock.session_tenko_method.lock().unwrap() = "自動点呼".to_string();
+    let (base_url, auth_header, _) = setup_with_mock(mock).await;
+
+    let too_long = "あ".repeat(201);
+    let res = client()
+        .put(format!(
+            "{base_url}/api/tenko/sessions/{}/escalate-remote",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({ "reason": too_long }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 400);
+}
+
+#[tokio::test]
+async fn test_escalate_remote_empty_reason() {
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_status.lock().unwrap() = "medical_pending".to_string();
+    *mock.session_tenko_type.lock().unwrap() = "pre_operation".to_string();
+    let (base_url, auth_header, _) = setup_with_mock(mock).await;
+
+    let res = client()
+        .put(format!(
+            "{base_url}/api/tenko/sessions/{}/escalate-remote",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({ "reason": "  " }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 400);
+}
+
+#[tokio::test]
+async fn test_escalate_remote_not_found() {
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    mock.return_session.store(false, Ordering::SeqCst);
+    let (base_url, auth_header, _) = setup_with_mock(mock).await;
+
+    let res = client()
+        .put(format!(
+            "{base_url}/api/tenko/sessions/{}/escalate-remote",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({ "reason": "測定不能" }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 404);
+}
+
+#[tokio::test]
+async fn test_escalate_remote_wrong_tenko_type() {
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_status.lock().unwrap() = "identity_verified".to_string();
+    *mock.session_tenko_type.lock().unwrap() = "post_operation".to_string();
+    let (base_url, auth_header, _) = setup_with_mock(mock).await;
+
+    let res = client()
+        .put(format!(
+            "{base_url}/api/tenko/sessions/{}/escalate-remote",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({ "reason": "測定不能" }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 400);
+}
+
+#[tokio::test]
+async fn test_escalate_remote_already_normal_tenko() {
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_status.lock().unwrap() = "medical_pending".to_string();
+    *mock.session_tenko_type.lock().unwrap() = "pre_operation".to_string();
+    *mock.session_tenko_method.lock().unwrap() = "通常点呼".to_string();
+    let (base_url, auth_header, _) = setup_with_mock(mock).await;
+
+    let res = client()
+        .put(format!(
+            "{base_url}/api/tenko/sessions/{}/escalate-remote",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({ "reason": "測定不能" }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 400);
+}
+
+#[tokio::test]
+async fn test_escalate_remote_already_escalated() {
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_status.lock().unwrap() = "medical_pending".to_string();
+    *mock.session_tenko_type.lock().unwrap() = "pre_operation".to_string();
+    *mock.session_tenko_method.lock().unwrap() = "遠隔点呼".to_string();
+    let (base_url, auth_header, _) = setup_with_mock(mock).await;
+
+    let res = client()
+        .put(format!(
+            "{base_url}/api/tenko/sessions/{}/escalate-remote",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({ "reason": "測定不能" }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 400, "二重の切り替えは弾くはず");
+}
+
+#[tokio::test]
+async fn test_escalate_remote_completed_status() {
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_status.lock().unwrap() = "completed".to_string();
+    *mock.session_tenko_type.lock().unwrap() = "pre_operation".to_string();
+    let (base_url, auth_header, _) = setup_with_mock(mock).await;
+
+    let res = client()
+        .put(format!(
+            "{base_url}/api/tenko/sessions/{}/escalate-remote",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({ "reason": "測定不能" }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 400);
+}
+
+#[tokio::test]
+async fn test_escalate_remote_get_db_error() {
+    let (base_url, auth_header) = setup_failing().await;
+
+    let res = client()
+        .put(format!(
+            "{base_url}/api/tenko/sessions/{}/escalate-remote",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({ "reason": "測定不能" }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 500);
+}
+
+#[tokio::test]
+async fn test_escalate_remote_update_db_error() {
+    let (base_url, auth_header) =
+        setup_with_update_failing("medical_pending", "pre_operation").await;
+
+    let res = client()
+        .put(format!(
+            "{base_url}/api/tenko/sessions/{}/escalate-remote",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({ "reason": "測定不能" }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 500);
+}
+
 // =========================================================================
 // PUT /api/tenko/sessions/{id}/instruction-confirm
 // =========================================================================
