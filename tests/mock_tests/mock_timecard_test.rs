@@ -1243,63 +1243,6 @@ async fn test_get_card_db_error() {
 }
 
 // ============================================================
-// GET /api/timecard/cards/by-card/{card_id} — get_card_by_card_id
-// ============================================================
-
-#[tokio::test]
-async fn test_get_card_by_card_id_found() {
-    let tenant_id = Uuid::new_v4();
-    let employee_id = Uuid::new_v4();
-    let mock = Arc::new(crate::mock_helpers::MockTimecardRepository::default());
-    *mock.card_data.lock().unwrap() = Some(make_card(tenant_id, employee_id, "NFC-FIND"));
-
-    let (base_url, jwt) = spawn_with_mock(mock).await;
-    let client = reqwest::Client::new();
-
-    let res = client
-        .get(format!("{base_url}/api/timecard/cards/by-card/NFC-FIND"))
-        .header("Authorization", auth(&jwt))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 200);
-
-    let body: Value = res.json().await.unwrap();
-    assert_eq!(body["card_id"], "NFC-FIND");
-}
-
-#[tokio::test]
-async fn test_get_card_by_card_id_not_found() {
-    let mock = Arc::new(crate::mock_helpers::MockTimecardRepository::default());
-    let (base_url, jwt) = spawn_with_mock(mock).await;
-    let client = reqwest::Client::new();
-
-    let res = client
-        .get(format!("{base_url}/api/timecard/cards/by-card/NONEXISTENT"))
-        .header("Authorization", auth(&jwt))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 404);
-}
-
-#[tokio::test]
-async fn test_get_card_by_card_id_db_error() {
-    let mock = Arc::new(crate::mock_helpers::MockTimecardRepository::default());
-    mock.fail_next.store(true, Ordering::SeqCst);
-    let (base_url, jwt) = spawn_with_mock(mock).await;
-    let client = reqwest::Client::new();
-
-    let res = client
-        .get(format!("{base_url}/api/timecard/cards/by-card/SOME-CARD"))
-        .header("Authorization", auth(&jwt))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 500);
-}
-
-// ============================================================
 // DELETE /api/timecard/cards/{id} — delete_card
 // ============================================================
 
@@ -1794,14 +1737,6 @@ async fn test_no_auth_returns_401() {
         .unwrap();
     assert_eq!(res.status(), 401);
 
-    // GET /timecard/cards/by-card/{card_id}
-    let res = client
-        .get(format!("{base_url}/api/timecard/cards/by-card/NFC-001"))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 401);
-
     // DELETE /timecard/cards/{id}
     let res = client
         .delete(format!("{base_url}/api/timecard/cards/{id}"))
@@ -1898,32 +1833,6 @@ async fn test_punch_normalizes_card_id_before_lookup() {
         mock.card_lookups.lock().unwrap().as_slice(),
         ["0123456789abcdef"]
     );
-}
-
-#[tokio::test]
-async fn test_get_card_by_card_id_normalizes_path_param() {
-    let tenant_id = Uuid::new_v4();
-    let employee_id = Uuid::new_v4();
-    let mock = Arc::new(crate::mock_helpers::MockTimecardRepository::default());
-    *mock.card_data.lock().unwrap() = Some(make_card(tenant_id, employee_id, "0123456789abcdef"));
-
-    let (base_url, jwt) = spawn_with_mock(mock).await;
-    let client = reqwest::Client::new();
-
-    // 登録照会は punch と同じ choke point を通らない 3 本目の経路。
-    // ここが漏れると「登録済みなのに管理画面で引けない」になる
-    let res = client
-        .get(format!(
-            "{base_url}/api/timecard/cards/by-card/0123456789ABCDEF"
-        ))
-        .header("Authorization", auth(&jwt))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 200);
-
-    let body: Value = res.json().await.unwrap();
-    assert_eq!(body["card_id"], "0123456789abcdef");
 }
 
 /// **未登録カードのタップも CSV に出す (社員名は空欄)。**
