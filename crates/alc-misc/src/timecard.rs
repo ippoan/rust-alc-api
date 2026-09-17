@@ -38,10 +38,6 @@ pub fn tenant_router() -> Router<AppState> {
             "/timecard/cards/delete-by-card",
             post(delete_card_by_card_id),
         )
-        .route(
-            "/timecard/cards/by-card/{card_id}",
-            get(get_card_by_card_id),
-        )
         .route("/timecard/punch", post(punch))
         .route("/timecard/punches", get(list_punches))
         .route("/timecard/punches/csv", get(export_csv))
@@ -202,23 +198,6 @@ async fn get_card(
     let card = state
         .timecard
         .get_card(tenant_id, id)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .ok_or(StatusCode::NOT_FOUND)?;
-
-    Ok(Json(card))
-}
-
-async fn get_card_by_card_id(
-    State(state): State<AppState>,
-    tenant: axum::Extension<TenantId>,
-    Path(card_id): Path<String>,
-) -> Result<Json<TimecardCard>, StatusCode> {
-    let tenant_id = tenant.0 .0;
-
-    let card = state
-        .timecard
-        .get_card_by_card_id(tenant_id, &normalize_card_id(&card_id))
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;

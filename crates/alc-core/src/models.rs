@@ -401,6 +401,16 @@ pub struct TimecardCardUpsertSkipped {
     pub reason: String,
 }
 
+/// `POST /employees/lookup` のリクエスト (Refs ippoan/rust-alc-api#644)。
+///
+/// 旧来の NFC ID をパス直書きで受けていた口の置き換え。NFC ID は免許証 IC 由来の
+/// 16 桁で個人に直結するため、URL (アクセスログ・Referer・devtools・
+/// エラートラッキング) に平文で残さないよう body で受け取る。
+#[derive(Debug, Deserialize)]
+pub struct EmployeeLookupByNfc {
+    pub nfc_id: String,
+}
+
 /// `POST /api/timecard/cards/delete-by-card` のリクエスト (Refs ippoan/rust-alc-api#644)。
 ///
 /// 外部の画面でカードを外したときに 1 枚ずつ反映するための口。`card_id` は

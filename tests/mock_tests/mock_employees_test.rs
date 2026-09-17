@@ -685,17 +685,19 @@ async fn reject_face_db_error_returns_500() {
 }
 
 // ===========================================================================
-// GET /api/employees/by-nfc/{nfc_id} — get_employee_by_nfc
+// POST /api/employees/lookup — lookup_employee_by_nfc
+// (Refs ippoan/rust-alc-api#644。旧 `GET .../{nfc_id}` の置き換え)
 // ===========================================================================
 
 #[tokio::test]
-async fn get_employee_by_nfc_found() {
+async fn lookup_employee_by_nfc_found() {
     let mock = Arc::new(MockEmployeeRepository::default());
     mock.return_some.store(true, Ordering::SeqCst);
     let (base, auth) = setup_with_mock(mock).await;
     let res = client()
-        .get(format!("{base}/api/employees/by-nfc/nfc-abc-123"))
+        .post(format!("{base}/api/employees/lookup"))
         .header("Authorization", &auth)
+        .json(&serde_json::json!({"nfc_id": "nfc-abc-123"}))
         .send()
         .await
         .unwrap();
@@ -705,11 +707,12 @@ async fn get_employee_by_nfc_found() {
 }
 
 #[tokio::test]
-async fn get_employee_by_nfc_not_found() {
+async fn lookup_employee_by_nfc_not_found() {
     let (base, auth) = setup().await;
     let res = client()
-        .get(format!("{base}/api/employees/by-nfc/nonexistent"))
+        .post(format!("{base}/api/employees/lookup"))
         .header("Authorization", &auth)
+        .json(&serde_json::json!({"nfc_id": "nonexistent"}))
         .send()
         .await
         .unwrap();
@@ -717,17 +720,69 @@ async fn get_employee_by_nfc_not_found() {
 }
 
 #[tokio::test]
-async fn get_employee_by_nfc_db_error_returns_500() {
+async fn lookup_employee_by_nfc_db_error_returns_500() {
     let mock = Arc::new(MockEmployeeRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
     let (base, auth) = setup_with_mock(mock).await;
     let res = client()
-        .get(format!("{base}/api/employees/by-nfc/nfc-fail"))
+        .post(format!("{base}/api/employees/lookup"))
         .header("Authorization", &auth)
+        .json(&serde_json::json!({"nfc_id": "nfc-fail"}))
         .send()
         .await
         .unwrap();
     assert_eq!(res.status(), 500);
+}
+
+#[tokio::test]
+async fn lookup_employee_by_nfc_malformed_json_is_400() {
+    let (base, auth) = setup().await;
+    let res = client()
+        .post(format!("{base}/api/employees/lookup"))
+        .header("Authorization", &auth)
+        .header("Content-Type", "application/json")
+        .body("{invalid json")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 400);
+}
+
+#[tokio::test]
+async fn lookup_employee_by_nfc_missing_field_is_422() {
+    let (base, auth) = setup().await;
+    let res = client()
+        .post(format!("{base}/api/employees/lookup"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 422);
+}
+
+#[tokio::test]
+async fn lookup_employee_by_nfc_rejects_every_method_but_post() {
+    // ★ 呼び出し元 (auth-worker) の転送 allowlist は method を見ないので、
+    //   1 つ path を許すとその path は全 method で通る。閉じるのはこちら側の責務
+    let (base, auth) = setup().await;
+    let url = format!("{base}/api/employees/lookup");
+
+    for method in [
+        reqwest::Method::GET,
+        reqwest::Method::PUT,
+        reqwest::Method::PATCH,
+        reqwest::Method::DELETE,
+    ] {
+        let res = client()
+            .request(method.clone(), &url)
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({"nfc_id": "nfc-abc-123"}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 405, "{method} は 405 のはず");
+    }
 }
 
 // ===========================================================================

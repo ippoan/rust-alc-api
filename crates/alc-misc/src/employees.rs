@@ -8,8 +8,9 @@ use uuid::Uuid;
 
 use alc_core::auth_middleware::TenantId;
 use alc_core::models::{
-    CreateEmployee, Employee, EmployeeBulkUpsert, EmployeeUpsertItem, EmployeeUpsertSummary,
-    FaceDataEntry, UpdateEmployee, UpdateFace, UpdateLicense, UpdateNfcId, MAX_BULK_UPSERT_ITEMS,
+    CreateEmployee, Employee, EmployeeBulkUpsert, EmployeeLookupByNfc, EmployeeUpsertItem,
+    EmployeeUpsertSummary, FaceDataEntry, UpdateEmployee, UpdateFace, UpdateLicense, UpdateNfcId,
+    MAX_BULK_UPSERT_ITEMS,
 };
 use alc_core::AppState;
 
@@ -36,7 +37,14 @@ pub fn tenant_router() -> Router<AppState> {
         .route("/employees/face-data", get(list_face_data))
         .route("/employees/{id}/face/approve", put(approve_face))
         .route("/employees/{id}/face/reject", put(reject_face))
-        .route("/employees/by-nfc/{nfc_id}", get(get_employee_by_nfc))
+        // NFC ID をパスに乗せない照会口 (Refs ippoan/rust-alc-api#644)。
+        // **POST だけを登録する** — `crates/alc-misc/src/timecard.rs` の
+        // `delete-by-card` と同じ趣旨: 呼び出し元 (auth-worker の転送 allowlist) は
+        // method を見ず path だけで通すので、閉じるのはこちら側の責務。
+        // 登録が POST 1 つなら axum が他 method に 405 を返す。
+        // パスは NFC を名前に含めない `POST /car-inspections/lookup` に命名を揃えてあり、
+        // 将来 `by-code` も同じ口へ寄せられる想定
+        .route("/employees/lookup", post(lookup_employee_by_nfc))
         .route("/employees/by-code/{code}", get(get_employee_by_code))
         .route("/employees/bulk-by-code", put(bulk_upsert_by_code))
 }
@@ -86,14 +94,22 @@ async fn get_employee(
     Ok(Json(employee))
 }
 
-async fn get_employee_by_nfc(
+/// `POST /employees/lookup` — NFC ID で社員を照会する (Refs ippoan/rust-alc-api#644)。
+/// 旧来の NFC ID をパス直書きで受けていた口の置き換え。応答は旧口と同一 (`Employee`)。
+///
+/// **`nfc_id` は応答にも `tracing` にも出さない** (`delete-by-card` と同じ理由)。
+///
+/// ★ **この口に書き込みを足すな。** auth-worker 側でこの口を
+/// `ALC_PROXY_DEV_WRITE_ALLOWLIST` に載せる予定 (#c644-26) で、その安全性は
+/// 「この口が永久に読み取り専用であること」に依存している。
+async fn lookup_employee_by_nfc(
     State(state): State<AppState>,
     tenant: axum::Extension<TenantId>,
-    Path(nfc_id): Path<String>,
+    Json(body): Json<EmployeeLookupByNfc>,
 ) -> Result<Json<Employee>, StatusCode> {
     let employee = state
         .employees
-        .get_by_nfc(tenant.0 .0, &nfc_id)
+        .get_by_nfc(tenant.0 .0, &body.nfc_id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
