@@ -139,8 +139,10 @@ pub struct TenkoSession {
     pub manager_judgment: Option<String>,
     #[serde(default)]
     pub manager_judgment_reason: Option<String>,
+    /// 判定した運行管理者 (employees.id への FK)。テナント管理者アカウントの
+    /// user_id ではない — 「どの運行管理者が判断したか」を表す値が要るため
     #[serde(default)]
-    pub manager_judgment_by: Option<String>,
+    pub manager_judgment_by: Option<Uuid>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -255,6 +257,10 @@ pub struct TenkoRecord {
     pub manager_judgment: Option<String>,
     #[sqlx(default)]
     pub manager_judgment_reason: Option<String>,
+    /// 判定した運行管理者の氏名 (employees.name)。id のままでは帳票として読めないため、
+    /// CSV 用の JOIN で名前まで引いておく
+    #[sqlx(default)]
+    pub manager_judgment_by_name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -391,12 +397,17 @@ pub struct ResumeSession {
 
 /// 運行管理者による点呼 OK/NG 判定 (Refs ippoan/alc-app#315)。
 /// `judgment` は "ok" / "ng" のみ許す (ハンドラ側でバリデーション)。
-/// `reason` は NG の理由。任意入力 (オーナー決定 3)
+/// `reason` は NG の理由。任意入力 (オーナー決定 3)。
+/// `judged_by_employee_id` は判定した運行管理者の employee id — alc-app が顔認証で
+/// 特定済みの employee を送る (テナント管理者アカウントの user_id ではない)。
+/// ハンドラ側で同テナント・`deleted_at IS NULL`・`role` に `manager`/`admin` を
+/// 含むことを検証する
 #[derive(Debug, Deserialize)]
 pub struct RecordManagerJudgment {
     pub judgment: String,
     #[serde(default)]
     pub reason: Option<String>,
+    pub judged_by_employee_id: Uuid,
 }
 
 /// 遠隔点呼への切り替え (Refs ippoan/alc-app-s3#135)。

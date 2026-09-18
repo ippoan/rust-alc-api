@@ -1152,32 +1152,46 @@ async fn resume_session(
 /// safety_judgment (自動計算。日次健康集計・webhook が依存) や cancel_session
 /// (押すと即 cancelled) には流用しない — 別ファイルの理由をそのまま踏襲する。
 ///
-/// ★ ロール検査 (オーナー決定 2): `AuthUser.role` は auth-worker が発行する
-/// tenant admin JWT の `role` claim = `alc_api.users.role` 由来で、値は
-/// admin/viewer/payroll のみ (`migrations/003_create_users.sql`,
-/// `migrations/131_add_payroll_role.sql`)。`employees.role` (driver/manager/admin,
-/// `migrations/024`, `028`) とは別テーブル・別ドメイン — migration 131 のコメントが
-/// 明記している。alc-app 側でも運行管理者の識別は顔認証 (`RoleAuthGate
-/// requiredRole="manager"`, `employees.role` 参照) で完結しており、backend の
-/// AuthUser には渡らない。よって `AuthUser.role` に `"manager"` が入ることは無く、
-/// 既存前例 (`crates/alc-misc/src/bot_admin.rs` の `auth_user.role != "admin"`) と
-/// 同じ判定にする (= テナント管理者アカウントでログイン済みか)。
+/// ★ ロール検査 (オーナー決定 2、親レビューの [回答] で確定): 当初 `AuthUser.role`
+/// (`alc_api.users.role` = admin/viewer/payroll、`migrations/131` 参照) での判定を
+/// 検討したが 2 つの穴があった — (a) 運行管理者が `admin` でログインしているとは
+/// 限らず正当な利用者を弾く可能性がある、(b) `manager_judgment` は「どの運行管理者が
+/// 判断したか」の法定記録で、テナント管理者アカウントの識別子はその答えにならない。
+/// **2 段構えにする**:
+///   1. `AuthUser` が入っていること (= ブラウザ経由の利用者。乗務員キオスク端末の
+///      トークンを弾く) を必須にし、`role` の値では絞らない
+///   2. body の `judged_by_employee_id` が同テナントの `employees` に存在し
+///      (`deleted_at IS NULL`)、`role` (TEXT[]) に `manager` または `admin` を
+///      含むことをサーバ側で検証する。`manager_judgment_by` にはこの employee id
+///      を保存する (テナント管理者アカウントの user_id ではない)
 async fn record_manager_judgment(
     State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
-    auth_user: axum::Extension<AuthUser>,
+    auth_user: Option<axum::Extension<AuthUser>>,
     Path(id): Path<Uuid>,
     Json(body): Json<RecordManagerJudgment>,
 ) -> Result<Json<TenkoSession>, StatusCode> {
-    if auth_user.role != "admin" {
-        return Err(StatusCode::FORBIDDEN);
-    }
+    // ブラウザ経由の利用者であること (端末トークンには X-User-* が無く AuthUser が
+    // 入らない、crates/alc-core/src/auth_middleware.rs 参照)
+    let _ = auth_user.ok_or(StatusCode::UNAUTHORIZED)?;
 
     if body.judgment != "ok" && body.judgment != "ng" {
         return Err(StatusCode::BAD_REQUEST);
     }
 
     let tenant_id = tenant.0 .0;
+
+    let judge = state
+        .driver_info
+        .get_employee(tenant_id, body.judged_by_employee_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::FORBIDDEN)?;
+
+    if !judge.role.iter().any(|r| r == "manager" || r == "admin") {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
     let repo = &*state.tenko_sessions;
 
     repo.get(tenant_id, id)
@@ -1191,7 +1205,7 @@ async fn record_manager_judgment(
             id,
             &body.judgment,
             &body.reason,
-            &auth_user.email,
+            body.judged_by_employee_id,
         )
         .await
         .map_err(|e| {

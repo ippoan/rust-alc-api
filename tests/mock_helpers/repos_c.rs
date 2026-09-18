@@ -480,6 +480,7 @@ fn make_mock_tenko_record_for_list(tenant_id: Uuid, id: Uuid) -> TenkoRecord {
         resume_reason: None,
         manager_judgment: None,
         manager_judgment_reason: None,
+        manager_judgment_by_name: None,
     }
 }
 
@@ -549,6 +550,7 @@ impl TenkoRecordsRepository for MockTenkoRecordsRepository {
             let mut record = make_mock_tenko_record_for_list(_tenant_id, Uuid::new_v4());
             record.manager_judgment = Some("ng".to_string());
             record.manager_judgment_reason = Some("体調不良の申告あり".to_string());
+            record.manager_judgment_by_name = Some("Manager Taro".to_string());
             return Ok(vec![record]);
         }
         if self.return_ng_data.load(Ordering::SeqCst) {
@@ -757,9 +759,9 @@ pub struct MockTenkoSessionRepository {
     pub fail_on_update_carrying_items: AtomicBool,
     /// create_session に渡された tenko_method を検証用に記録する (Refs ippoan/rust-alc-api#655)
     pub created_session_tenko_method: std::sync::Mutex<Option<String>>,
-    /// record_manager_judgment に渡された (judgment, reason, judged_by) を検証用に記録する
-    /// (Refs ippoan/alc-app#315)
-    pub recorded_manager_judgment: std::sync::Mutex<Option<(String, Option<String>, String)>>,
+    /// record_manager_judgment に渡された (judgment, reason, judged_by_employee_id) を
+    /// 検証用に記録する (Refs ippoan/alc-app#315)
+    pub recorded_manager_judgment: std::sync::Mutex<Option<(String, Option<String>, Uuid)>>,
 }
 
 impl Default for MockTenkoSessionRepository {
@@ -907,6 +909,7 @@ fn make_mock_tenko_record(tenant_id: Uuid, session: &TenkoSession) -> TenkoRecor
         resume_reason: session.resume_reason.clone(),
         manager_judgment: session.manager_judgment.clone(),
         manager_judgment_reason: session.manager_judgment_reason.clone(),
+        manager_judgment_by_name: None,
     }
 }
 
@@ -1345,11 +1348,11 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
         _id: Uuid,
         judgment: &str,
         reason: &Option<String>,
-        judged_by: &str,
+        judged_by_employee_id: Uuid,
     ) -> Result<TenkoSession, sqlx::Error> {
         check_fail_update!(self);
         *self.recorded_manager_judgment.lock().unwrap() =
-            Some((judgment.to_string(), reason.clone(), judged_by.to_string()));
+            Some((judgment.to_string(), reason.clone(), judged_by_employee_id));
         let employee_id = *self.session_employee_id.lock().unwrap();
         let status = self.session_status.lock().unwrap().clone();
         let tenko_type = self.session_tenko_type.lock().unwrap().clone();
@@ -1364,7 +1367,7 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
         );
         session.manager_judgment = Some(judgment.to_string());
         session.manager_judgment_reason = reason.clone();
-        session.manager_judgment_by = Some(judged_by.to_string());
+        session.manager_judgment_by = Some(judged_by_employee_id);
         Ok(session)
     }
 

@@ -2089,28 +2089,62 @@ async fn test_cancel_session_db_error() {
 // POST /api/tenko/sessions/{id}/judgment (Refs ippoan/alc-app#315)
 // =========================================================================
 
-/// Setup with a custom mock + role (for judgment role-check tests).
-async fn setup_with_mock_and_role(
-    mock: Arc<MockTenkoSessionRepository>,
+/// 判定した運行管理者役の mock employee (Refs ippoan/alc-app#315)。role に
+/// manager/admin を含むかで判定 API のロール検査が分岐する
+fn judge_employee(
+    tenant_id: uuid::Uuid,
+    id: uuid::Uuid,
     role: &str,
-) -> (String, String, uuid::Uuid) {
+) -> rust_alc_api::db::models::Employee {
+    let now = chrono::Utc::now();
+    rust_alc_api::db::models::Employee {
+        id,
+        tenant_id,
+        code: None,
+        nfc_id: None,
+        name: "Test Manager".to_string(),
+        face_photo_url: None,
+        face_embedding: None,
+        face_embedding_at: None,
+        face_model_version: None,
+        face_approval_status: "none".to_string(),
+        face_approved_by: None,
+        face_approved_at: None,
+        license_issue_date: None,
+        license_expiry_date: None,
+        role: vec![role.to_string()],
+        created_at: now,
+        updated_at: now,
+        deleted_at: None,
+    }
+}
+
+/// Setup with a custom tenko_sessions mock + a valid 運行管理者 employee
+/// (driver_info.get_employee が role=manager の Employee を返す)。
+async fn setup_with_mock_and_judge(
+    mock: Arc<MockTenkoSessionRepository>,
+) -> (String, String, uuid::Uuid, uuid::Uuid) {
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
     tenko_state.tenko_sessions = mock;
     let tenant_id = uuid::Uuid::new_v4();
+    let judge_id = uuid::Uuid::new_v4();
+    let driver_info = Arc::new(crate::mock_helpers::MockDriverInfoRepository::default());
+    *driver_info.employee.lock().unwrap() = Some(judge_employee(tenant_id, judge_id, "manager"));
+    tenko_state.driver_info = driver_info;
     let base_url =
         crate::mock_helpers::app_state::spawn_mock_server_with_tenko(state, tenko_state.clone())
             .await;
-    let jwt = crate::common::create_test_jwt(tenant_id, role);
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let auth_header = format!("Bearer {jwt}");
-    (base_url, auth_header, tenant_id)
+    (base_url, auth_header, tenant_id, judge_id)
 }
 
 #[tokio::test]
 async fn test_record_manager_judgment_ok_success() {
     let mock = Arc::new(MockTenkoSessionRepository::default());
     *mock.session_status.lock().unwrap() = "completed".to_string();
-    let (base_url, auth_header, _) = setup_with_mock(mock.clone()).await;
+    let (base_url, auth_header, _, judge_id) = setup_with_mock_and_judge(mock.clone()).await;
 
     let res = client()
         .post(format!(
@@ -2118,7 +2152,7 @@ async fn test_record_manager_judgment_ok_success() {
             Uuid::new_v4()
         ))
         .header("Authorization", &auth_header)
-        .json(&serde_json::json!({ "judgment": "ok" }))
+        .json(&serde_json::json!({ "judgment": "ok", "judged_by_employee_id": judge_id }))
         .send()
         .await
         .unwrap();
@@ -2136,13 +2170,14 @@ async fn test_record_manager_judgment_ok_success() {
         .unwrap();
     assert_eq!(recorded.0, "ok");
     assert_eq!(recorded.1, None);
+    assert_eq!(recorded.2, judge_id);
 }
 
 #[tokio::test]
 async fn test_record_manager_judgment_ng_with_reason_success() {
     let mock = Arc::new(MockTenkoSessionRepository::default());
     *mock.session_status.lock().unwrap() = "completed".to_string();
-    let (base_url, auth_header, _) = setup_with_mock(mock.clone()).await;
+    let (base_url, auth_header, _, judge_id) = setup_with_mock_and_judge(mock.clone()).await;
 
     let res = client()
         .post(format!(
@@ -2150,7 +2185,11 @@ async fn test_record_manager_judgment_ng_with_reason_success() {
             Uuid::new_v4()
         ))
         .header("Authorization", &auth_header)
-        .json(&serde_json::json!({ "judgment": "ng", "reason": "顔色が優れなかったため" }))
+        .json(&serde_json::json!({
+            "judgment": "ng",
+            "reason": "顔色が優れなかったため",
+            "judged_by_employee_id": judge_id,
+        }))
         .send()
         .await
         .unwrap();
@@ -2175,7 +2214,7 @@ async fn test_record_manager_judgment_ng_with_reason_success() {
 async fn test_record_manager_judgment_ng_without_reason_success() {
     // 理由は任意入力 (オーナー決定 3) — 無くても通る
     let mock = Arc::new(MockTenkoSessionRepository::default());
-    let (base_url, auth_header, _) = setup_with_mock(mock).await;
+    let (base_url, auth_header, _, judge_id) = setup_with_mock_and_judge(mock).await;
 
     let res = client()
         .post(format!(
@@ -2183,7 +2222,39 @@ async fn test_record_manager_judgment_ng_without_reason_success() {
             Uuid::new_v4()
         ))
         .header("Authorization", &auth_header)
-        .json(&serde_json::json!({ "judgment": "ng" }))
+        .json(&serde_json::json!({ "judgment": "ng", "judged_by_employee_id": judge_id }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+}
+
+#[tokio::test]
+async fn test_record_manager_judgment_admin_role_employee_allowed() {
+    // employees.role が admin (兼務) でも通る (manager だけに限定しない)
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    let state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
+    tenko_state.tenko_sessions = mock;
+    let tenant_id = uuid::Uuid::new_v4();
+    let judge_id = uuid::Uuid::new_v4();
+    let driver_info = Arc::new(crate::mock_helpers::MockDriverInfoRepository::default());
+    *driver_info.employee.lock().unwrap() = Some(judge_employee(tenant_id, judge_id, "admin"));
+    tenko_state.driver_info = driver_info;
+    let base_url =
+        crate::mock_helpers::app_state::spawn_mock_server_with_tenko(state, tenko_state.clone())
+            .await;
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+    let auth_header = format!("Bearer {jwt}");
+
+    let res = client()
+        .post(format!(
+            "{base_url}/api/tenko/sessions/{}/judgment",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({ "judgment": "ok", "judged_by_employee_id": judge_id }))
         .send()
         .await
         .unwrap();
@@ -2193,6 +2264,8 @@ async fn test_record_manager_judgment_ng_without_reason_success() {
 
 #[tokio::test]
 async fn test_record_manager_judgment_invalid_value_rejected() {
+    // judgment のバリデーションは判定者の検証より前に行うので driver_info の
+    // 設定は不要 (既定の setup_with_mock = driver_info は None を返す)
     let mock = Arc::new(MockTenkoSessionRepository::default());
     let (base_url, auth_header, _) = setup_with_mock(mock).await;
 
@@ -2202,7 +2275,7 @@ async fn test_record_manager_judgment_invalid_value_rejected() {
             Uuid::new_v4()
         ))
         .header("Authorization", &auth_header)
-        .json(&serde_json::json!({ "judgment": "maybe" }))
+        .json(&serde_json::json!({ "judgment": "maybe", "judged_by_employee_id": Uuid::new_v4() }))
         .send()
         .await
         .unwrap();
@@ -2211,49 +2284,39 @@ async fn test_record_manager_judgment_invalid_value_rejected() {
 }
 
 #[tokio::test]
-async fn test_record_manager_judgment_forbidden_for_viewer() {
+async fn test_record_manager_judgment_forbidden_no_auth_user() {
+    // ★ 決定変更の核: role では絞らず、ブラウザ利用者 (AuthUser) が居るかだけを見る。
+    // AuthUser が全く無い (端末トークン相当) 呼び出しは 401 で弾く
     let mock = Arc::new(MockTenkoSessionRepository::default());
-    let (base_url, auth_header, _) = setup_with_mock_and_role(mock, "viewer").await;
+    let state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
+    tenko_state.tenko_sessions = mock;
+    let tenant_id = uuid::Uuid::new_v4();
+    let base_url =
+        crate::mock_helpers::app_state::spawn_mock_server_with_tenko(state, tenko_state.clone())
+            .await;
 
+    // X-Tenant-ID のみ (X-User-* 無し) = require_tenant_header は通すが AuthUser は
+    // extension に入らない。テストハーネスの JWT decode 経由ではこの状態を作れないため
+    // 生ヘッダーで直接叩く (tests/common/mod.rs のヘッダー変換シムを経由しない)
     let res = client()
         .post(format!(
             "{base_url}/api/tenko/sessions/{}/judgment",
             Uuid::new_v4()
         ))
-        .header("Authorization", &auth_header)
-        .json(&serde_json::json!({ "judgment": "ok" }))
+        .header("X-Tenant-ID", tenant_id.to_string())
+        .json(&serde_json::json!({ "judgment": "ok", "judged_by_employee_id": Uuid::new_v4() }))
         .send()
         .await
         .unwrap();
 
-    assert_eq!(res.status(), 403);
+    assert_eq!(res.status(), 401);
 }
 
 #[tokio::test]
-async fn test_record_manager_judgment_forbidden_for_manager_role_string() {
-    // ★ 罠の regression: employees.role の "manager" 文字列がそのまま AuthUser.role に
-    // 来たとしても (実際には来ない値だが)、admin 以外なので弾かれることを固定する
+async fn test_record_manager_judgment_forbidden_employee_not_found() {
+    // 既定 (setup_with_mock) の driver_info は get_employee で None を返す
     let mock = Arc::new(MockTenkoSessionRepository::default());
-    let (base_url, auth_header, _) = setup_with_mock_and_role(mock, "manager").await;
-
-    let res = client()
-        .post(format!(
-            "{base_url}/api/tenko/sessions/{}/judgment",
-            Uuid::new_v4()
-        ))
-        .header("Authorization", &auth_header)
-        .json(&serde_json::json!({ "judgment": "ok" }))
-        .send()
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), 403);
-}
-
-#[tokio::test]
-async fn test_record_manager_judgment_not_found() {
-    let mock = Arc::new(MockTenkoSessionRepository::default());
-    mock.return_session.store(false, Ordering::SeqCst);
     let (base_url, auth_header, _) = setup_with_mock(mock).await;
 
     let res = client()
@@ -2262,17 +2325,31 @@ async fn test_record_manager_judgment_not_found() {
             Uuid::new_v4()
         ))
         .header("Authorization", &auth_header)
-        .json(&serde_json::json!({ "judgment": "ok" }))
+        .json(&serde_json::json!({ "judgment": "ok", "judged_by_employee_id": Uuid::new_v4() }))
         .send()
         .await
         .unwrap();
 
-    assert_eq!(res.status(), 404);
+    assert_eq!(res.status(), 403);
 }
 
 #[tokio::test]
-async fn test_record_manager_judgment_not_found_db_error() {
-    let (base_url, auth_header) = setup_failing().await;
+async fn test_record_manager_judgment_forbidden_employee_role_driver() {
+    // employees.role が driver のみ (manager/admin を含まない) は 403
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    let state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
+    tenko_state.tenko_sessions = mock;
+    let tenant_id = uuid::Uuid::new_v4();
+    let judge_id = uuid::Uuid::new_v4();
+    let driver_info = Arc::new(crate::mock_helpers::MockDriverInfoRepository::default());
+    *driver_info.employee.lock().unwrap() = Some(judge_employee(tenant_id, judge_id, "driver"));
+    tenko_state.driver_info = driver_info;
+    let base_url =
+        crate::mock_helpers::app_state::spawn_mock_server_with_tenko(state, tenko_state.clone())
+            .await;
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+    let auth_header = format!("Bearer {jwt}");
 
     let res = client()
         .post(format!(
@@ -2280,7 +2357,39 @@ async fn test_record_manager_judgment_not_found_db_error() {
             Uuid::new_v4()
         ))
         .header("Authorization", &auth_header)
-        .json(&serde_json::json!({ "judgment": "ok" }))
+        .json(&serde_json::json!({ "judgment": "ok", "judged_by_employee_id": judge_id }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 403);
+}
+
+#[tokio::test]
+async fn test_record_manager_judgment_employee_lookup_db_error() {
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    let state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
+    tenko_state.tenko_sessions = mock;
+    let tenant_id = uuid::Uuid::new_v4();
+    let driver_info = Arc::new(crate::mock_helpers::MockDriverInfoRepository::default());
+    driver_info
+        .fail_next
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    tenko_state.driver_info = driver_info;
+    let base_url =
+        crate::mock_helpers::app_state::spawn_mock_server_with_tenko(state, tenko_state.clone())
+            .await;
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+    let auth_header = format!("Bearer {jwt}");
+
+    let res = client()
+        .post(format!(
+            "{base_url}/api/tenko/sessions/{}/judgment",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({ "judgment": "ok", "judged_by_employee_id": Uuid::new_v4() }))
         .send()
         .await
         .unwrap();
@@ -2289,10 +2398,10 @@ async fn test_record_manager_judgment_not_found_db_error() {
 }
 
 #[tokio::test]
-async fn test_record_manager_judgment_update_db_error() {
-    // get() は成功し、record_manager_judgment の UPDATE だけが失敗するケース
-    // (line "record_manager_judgment DB error" の tracing::error! 分岐を通す)
-    let (base_url, auth_header) = setup_with_update_failing("completed", "pre_operation").await;
+async fn test_record_manager_judgment_not_found() {
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    mock.return_session.store(false, Ordering::SeqCst);
+    let (base_url, auth_header, _, judge_id) = setup_with_mock_and_judge(mock).await;
 
     let res = client()
         .post(format!(
@@ -2300,7 +2409,30 @@ async fn test_record_manager_judgment_update_db_error() {
             Uuid::new_v4()
         ))
         .header("Authorization", &auth_header)
-        .json(&serde_json::json!({ "judgment": "ok" }))
+        .json(&serde_json::json!({ "judgment": "ok", "judged_by_employee_id": judge_id }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 404);
+}
+
+#[tokio::test]
+async fn test_record_manager_judgment_update_db_error() {
+    // get() は成功し、record_manager_judgment の UPDATE だけが失敗するケース
+    // (line "record_manager_judgment DB error" の tracing::error! 分岐を通す)
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    mock.fail_on_update.store(true, Ordering::SeqCst);
+    *mock.session_status.lock().unwrap() = "completed".to_string();
+    let (base_url, auth_header, _, judge_id) = setup_with_mock_and_judge(mock).await;
+
+    let res = client()
+        .post(format!(
+            "{base_url}/api/tenko/sessions/{}/judgment",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({ "judgment": "ok", "judged_by_employee_id": judge_id }))
         .send()
         .await
         .unwrap();

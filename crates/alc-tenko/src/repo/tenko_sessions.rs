@@ -576,7 +576,7 @@ impl TenkoSessionRepository for PgTenkoSessionRepository {
         id: Uuid,
         judgment: &str,
         reason: &Option<String>,
-        judged_by: &str,
+        judged_by_employee_id: Uuid,
     ) -> Result<TenkoSession, sqlx::Error> {
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
         sqlx::query_as::<_, TenkoSession>(
@@ -592,7 +592,7 @@ impl TenkoSessionRepository for PgTenkoSessionRepository {
         )
         .bind(judgment)
         .bind(reason)
-        .bind(judged_by)
+        .bind(judged_by_employee_id)
         .bind(id)
         .bind(tenant_id)
         .fetch_one(&mut *tc.conn)

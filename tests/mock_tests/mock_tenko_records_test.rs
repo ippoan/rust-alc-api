@@ -490,10 +490,12 @@ async fn test_export_csv_manager_judgment_columns_with_values() {
     let header: Vec<&str> = csv_str.lines().next().unwrap().split(',').collect();
     assert!(header.contains(&"manager_judgment"));
     assert!(header.contains(&"manager_judgment_reason"));
+    assert!(header.contains(&"manager_judgment_by_name"));
 
     let row = csv_row(csv_str);
     assert_eq!(row["manager_judgment"], "ng");
     assert_eq!(row["manager_judgment_reason"], "体調不良の申告あり");
+    assert_eq!(row["manager_judgment_by_name"], "Manager Taro");
 }
 
 #[tokio::test]
@@ -511,6 +513,7 @@ async fn test_export_csv_manager_judgment_columns_without_values() {
     let row = csv_row(std::str::from_utf8(&bytes[3..]).unwrap());
     assert_eq!(row["manager_judgment"], "");
     assert_eq!(row["manager_judgment_reason"], "");
+    assert_eq!(row["manager_judgment_by_name"], "");
 }
 
 #[tokio::test]
