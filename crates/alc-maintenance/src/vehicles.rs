@@ -294,11 +294,16 @@ impl VehiclesRepository for PgVehiclesRepository {
         cert_no: &str,
     ) -> Result<Option<String>, sqlx::Error> {
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
+        // RLS (FORCE ROW LEVEL SECURITY) だけに任せず、この repo の作法通り
+        // WHERE 句にも tenant_id を明示する (多重防御。`get`/`update`/
+        // `unlink_carins` と揃える)。
         let row: Option<Option<String>> = sqlx::query_scalar(
-            r#"SELECT NULLIF("CarId", '') FROM car_inspection WHERE "ElectCertMgNo" = $1
+            r#"SELECT NULLIF("CarId", '') FROM car_inspection
+            WHERE "ElectCertMgNo" = $1 AND tenant_id = $2
             ORDER BY "GrantdateY" DESC, "GrantdateM" DESC, "GrantdateD" DESC LIMIT 1"#,
         )
         .bind(cert_no)
+        .bind(tenant_id)
         .fetch_optional(&mut *tc.conn)
         .await?;
         Ok(row.flatten())
@@ -318,17 +323,24 @@ impl VehiclesRepository for PgVehiclesRepository {
         //
         // 同一 CarId は最新の交付日の 1 行に畳む (`alc-carins` の
         // `repo/car_inspections.rs:34` の DISTINCT ON が手本)。
+        // RLS (FORCE ROW LEVEL SECURITY) だけに任せず、この repo の作法通り
+        // WHERE 句にも tenant_id を明示する (多重防御。`get`/`update`/
+        // `unlink_carins`/`fetch_car_id_by_cert_no` と揃える)。
         sqlx::query_as::<_, CarinsCandidate>(
             r#"SELECT DISTINCT ON (ci."CarId")
                 ci."CarId" AS car_id,
                 ci."ElectCertMgNo" AS cert_no,
                 COALESCE(NULLIF(ci."EntryNoCarNo", ''), ci."CarNo") AS car_no
             FROM car_inspection ci
-            WHERE (ci."EntryNoCarNo" <> '' AND $1 ILIKE '%' || translate(ci."EntryNoCarNo", '０１２３４５６７８９－ー', '0123456789--') || '%')
-               OR (ci."CarNo" <> '' AND $1 ILIKE '%' || translate(ci."CarNo", '０１２３４５６７８９－ー', '0123456789--') || '%')
+            WHERE ci.tenant_id = $2
+              AND (
+                (ci."EntryNoCarNo" <> '' AND $1 ILIKE '%' || translate(ci."EntryNoCarNo", '０１２３４５６７８９－ー', '0123456789--') || '%')
+                OR (ci."CarNo" <> '' AND $1 ILIKE '%' || translate(ci."CarNo", '０１２３４５６７８９－ー', '0123456789--') || '%')
+              )
             ORDER BY ci."CarId", ci."GrantdateY" DESC, ci."GrantdateM" DESC, ci."GrantdateD" DESC"#,
         )
         .bind(normalized_registration_number)
+        .bind(tenant_id)
         .fetch_all(&mut *tc.conn)
         .await
     }
