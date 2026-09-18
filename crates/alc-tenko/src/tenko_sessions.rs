@@ -14,10 +14,10 @@ use alc_core::auth_middleware::{AuthUser, TenantId};
 use alc_core::models::SubmitCarryingItemChecks;
 
 use crate::models::{
-    CancelTenkoSession, EscalateToRemote, InterruptSession, MedicalDiffs, ResumeSession,
-    SafetyJudgment, SelfDeclaration, StartTenkoSession, SubmitAlcoholResult, SubmitDailyInspection,
-    SubmitMedicalData, SubmitOperationReport, SubmitSelfDeclaration, TenkoDashboard, TenkoRecord,
-    TenkoSession, TenkoSessionFilter, TenkoSessionsResponse,
+    CancelTenkoSession, EscalateToRemote, InterruptSession, MedicalDiffs, RecordManagerJudgment,
+    ResumeSession, SafetyJudgment, SelfDeclaration, StartTenkoSession, SubmitAlcoholResult,
+    SubmitDailyInspection, SubmitMedicalData, SubmitOperationReport, SubmitSelfDeclaration,
+    TenkoDashboard, TenkoRecord, TenkoSession, TenkoSessionFilter, TenkoSessionsResponse,
 };
 use crate::repository::TenkoSessionRepository;
 
@@ -33,6 +33,10 @@ where
         .route("/tenko/dashboard", get(dashboard))
         .route("/tenko/sessions/{id}/interrupt", post(interrupt_session))
         .route("/tenko/sessions/{id}/resume", post(resume_session))
+        .route(
+            "/tenko/sessions/{id}/judgment",
+            post(record_manager_judgment),
+        )
         .route("/tenko/sessions/start", post(start_session))
         .route("/tenko/sessions/{id}", get(get_session))
         .route("/tenko/sessions/{id}/alcohol", put(submit_alcohol))
@@ -1136,6 +1140,62 @@ async fn resume_session(
         .await
         .map_err(|e| {
             tracing::error!("resume_session DB error: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    Ok(Json(session))
+}
+
+/// 運行管理者による点呼 OK/NG 判定 (Refs ippoan/alc-app#315)。
+///
+/// status は変えない (オーナー決定 1: NG でも点呼は完了扱いのまま)。
+/// safety_judgment (自動計算。日次健康集計・webhook が依存) や cancel_session
+/// (押すと即 cancelled) には流用しない — 別ファイルの理由をそのまま踏襲する。
+///
+/// ★ ロール検査 (オーナー決定 2): `AuthUser.role` は auth-worker が発行する
+/// tenant admin JWT の `role` claim = `alc_api.users.role` 由来で、値は
+/// admin/viewer/payroll のみ (`migrations/003_create_users.sql`,
+/// `migrations/131_add_payroll_role.sql`)。`employees.role` (driver/manager/admin,
+/// `migrations/024`, `028`) とは別テーブル・別ドメイン — migration 131 のコメントが
+/// 明記している。alc-app 側でも運行管理者の識別は顔認証 (`RoleAuthGate
+/// requiredRole="manager"`, `employees.role` 参照) で完結しており、backend の
+/// AuthUser には渡らない。よって `AuthUser.role` に `"manager"` が入ることは無く、
+/// 既存前例 (`crates/alc-misc/src/bot_admin.rs` の `auth_user.role != "admin"`) と
+/// 同じ判定にする (= テナント管理者アカウントでログイン済みか)。
+async fn record_manager_judgment(
+    State(state): State<TenkoState>,
+    tenant: axum::Extension<TenantId>,
+    auth_user: axum::Extension<AuthUser>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<RecordManagerJudgment>,
+) -> Result<Json<TenkoSession>, StatusCode> {
+    if auth_user.role != "admin" {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    if body.judgment != "ok" && body.judgment != "ng" {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    let tenant_id = tenant.0 .0;
+    let repo = &*state.tenko_sessions;
+
+    repo.get(tenant_id, id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    let session = repo
+        .record_manager_judgment(
+            tenant_id,
+            id,
+            &body.judgment,
+            &body.reason,
+            &auth_user.email,
+        )
+        .await
+        .map_err(|e| {
+            tracing::error!("record_manager_judgment DB error: {e}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 

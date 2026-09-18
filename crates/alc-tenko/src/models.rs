@@ -133,6 +133,14 @@ pub struct TenkoSession {
     pub escalated_to_remote_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub remote_escalation_reason: Option<String>,
+    // 運行管理者による OK/NG 判定 (migration 148、Refs ippoan/alc-app#315)。
+    // status は変えない — NG でも点呼は完了扱いのまま。NULL = 未判定
+    #[serde(default)]
+    pub manager_judgment: Option<String>,
+    #[serde(default)]
+    pub manager_judgment_reason: Option<String>,
+    #[serde(default)]
+    pub manager_judgment_by: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -238,6 +246,15 @@ pub struct TenkoRecord {
     pub interrupted_at: Option<DateTime<Utc>>,
     pub resumed_at: Option<DateTime<Utc>>,
     pub resume_reason: Option<String>,
+    // 運行管理者による OK/NG 判定 (Refs ippoan/alc-app#315)。tenko_records は
+    // 挿入後 UPDATE 不可 (migration 015 のトリガー) なので、判定が記録時点より
+    // 後に付くケースもカバーできるよう、CSV エクスポートの JOIN で都度
+    // tenko_sessions から引く (= 固定値のスナップショットにしない)。他の
+    // クエリ (list/get) はこの列を SELECT しないので常に None
+    #[sqlx(default)]
+    pub manager_judgment: Option<String>,
+    #[sqlx(default)]
+    pub manager_judgment_reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -370,6 +387,16 @@ pub struct InterruptSession {
 #[derive(Debug, Deserialize)]
 pub struct ResumeSession {
     pub reason: String,
+}
+
+/// 運行管理者による点呼 OK/NG 判定 (Refs ippoan/alc-app#315)。
+/// `judgment` は "ok" / "ng" のみ許す (ハンドラ側でバリデーション)。
+/// `reason` は NG の理由。任意入力 (オーナー決定 3)
+#[derive(Debug, Deserialize)]
+pub struct RecordManagerJudgment {
+    pub judgment: String,
+    #[serde(default)]
+    pub reason: Option<String>,
 }
 
 /// 遠隔点呼への切り替え (Refs ippoan/alc-app-s3#135)。

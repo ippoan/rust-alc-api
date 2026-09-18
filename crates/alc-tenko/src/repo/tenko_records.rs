@@ -162,8 +162,14 @@ impl TenkoRecordsRepository for PgTenkoRecordsRepository {
     ) -> Result<Vec<TenkoRecord>, sqlx::Error> {
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
         let fq = FilterQuery::new(filter);
+        // CSV エクスポート (法定様式) 向け。manager_judgment は tenko_records には無い
+        // (挿入後 UPDATE 不可のため) ので、都度 tenko_sessions から JOIN で引く。
+        // 判定前に completed になったセッションでも、後から判定すれば反映される
         let sql = format!(
-            "SELECT r.* FROM tenko_records r WHERE {} ORDER BY r.recorded_at DESC",
+            "SELECT r.*, s.manager_judgment, s.manager_judgment_reason \
+             FROM tenko_records r \
+             LEFT JOIN tenko_sessions s ON s.id = r.session_id AND s.tenant_id = r.tenant_id \
+             WHERE {} ORDER BY r.recorded_at DESC",
             fq.where_clause()
         );
         let query = sqlx::query_as::<_, TenkoRecord>(&sql);

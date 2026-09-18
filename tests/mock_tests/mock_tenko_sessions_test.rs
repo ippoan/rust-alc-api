@@ -2086,6 +2086,229 @@ async fn test_cancel_session_db_error() {
 }
 
 // =========================================================================
+// POST /api/tenko/sessions/{id}/judgment (Refs ippoan/alc-app#315)
+// =========================================================================
+
+/// Setup with a custom mock + role (for judgment role-check tests).
+async fn setup_with_mock_and_role(
+    mock: Arc<MockTenkoSessionRepository>,
+    role: &str,
+) -> (String, String, uuid::Uuid) {
+    let state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
+    tenko_state.tenko_sessions = mock;
+    let tenant_id = uuid::Uuid::new_v4();
+    let base_url =
+        crate::mock_helpers::app_state::spawn_mock_server_with_tenko(state, tenko_state.clone())
+            .await;
+    let jwt = crate::common::create_test_jwt(tenant_id, role);
+    let auth_header = format!("Bearer {jwt}");
+    (base_url, auth_header, tenant_id)
+}
+
+#[tokio::test]
+async fn test_record_manager_judgment_ok_success() {
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_status.lock().unwrap() = "completed".to_string();
+    let (base_url, auth_header, _) = setup_with_mock(mock.clone()).await;
+
+    let res = client()
+        .post(format!(
+            "{base_url}/api/tenko/sessions/{}/judgment",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({ "judgment": "ok" }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    // 判定を記録しても status は変わらない (オーナー決定 1 の核)
+    assert_eq!(body["status"], "completed");
+    assert_eq!(body["manager_judgment"], "ok");
+    let recorded = mock
+        .recorded_manager_judgment
+        .lock()
+        .unwrap()
+        .clone()
+        .unwrap();
+    assert_eq!(recorded.0, "ok");
+    assert_eq!(recorded.1, None);
+}
+
+#[tokio::test]
+async fn test_record_manager_judgment_ng_with_reason_success() {
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_status.lock().unwrap() = "completed".to_string();
+    let (base_url, auth_header, _) = setup_with_mock(mock.clone()).await;
+
+    let res = client()
+        .post(format!(
+            "{base_url}/api/tenko/sessions/{}/judgment",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({ "judgment": "ng", "reason": "顔色が優れなかったため" }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    // NG でも status は completed のまま (中止にしない)
+    assert_eq!(body["status"], "completed");
+    assert_eq!(body["manager_judgment"], "ng");
+    assert_eq!(body["manager_judgment_reason"], "顔色が優れなかったため");
+    let recorded = mock
+        .recorded_manager_judgment
+        .lock()
+        .unwrap()
+        .clone()
+        .unwrap();
+    assert_eq!(recorded.0, "ng");
+    assert_eq!(recorded.1, Some("顔色が優れなかったため".to_string()));
+}
+
+#[tokio::test]
+async fn test_record_manager_judgment_ng_without_reason_success() {
+    // 理由は任意入力 (オーナー決定 3) — 無くても通る
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    let (base_url, auth_header, _) = setup_with_mock(mock).await;
+
+    let res = client()
+        .post(format!(
+            "{base_url}/api/tenko/sessions/{}/judgment",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({ "judgment": "ng" }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+}
+
+#[tokio::test]
+async fn test_record_manager_judgment_invalid_value_rejected() {
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    let (base_url, auth_header, _) = setup_with_mock(mock).await;
+
+    let res = client()
+        .post(format!(
+            "{base_url}/api/tenko/sessions/{}/judgment",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({ "judgment": "maybe" }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 400);
+}
+
+#[tokio::test]
+async fn test_record_manager_judgment_forbidden_for_viewer() {
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    let (base_url, auth_header, _) = setup_with_mock_and_role(mock, "viewer").await;
+
+    let res = client()
+        .post(format!(
+            "{base_url}/api/tenko/sessions/{}/judgment",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({ "judgment": "ok" }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 403);
+}
+
+#[tokio::test]
+async fn test_record_manager_judgment_forbidden_for_manager_role_string() {
+    // ★ 罠の regression: employees.role の "manager" 文字列がそのまま AuthUser.role に
+    // 来たとしても (実際には来ない値だが)、admin 以外なので弾かれることを固定する
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    let (base_url, auth_header, _) = setup_with_mock_and_role(mock, "manager").await;
+
+    let res = client()
+        .post(format!(
+            "{base_url}/api/tenko/sessions/{}/judgment",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({ "judgment": "ok" }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 403);
+}
+
+#[tokio::test]
+async fn test_record_manager_judgment_not_found() {
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    mock.return_session.store(false, Ordering::SeqCst);
+    let (base_url, auth_header, _) = setup_with_mock(mock).await;
+
+    let res = client()
+        .post(format!(
+            "{base_url}/api/tenko/sessions/{}/judgment",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({ "judgment": "ok" }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 404);
+}
+
+#[tokio::test]
+async fn test_record_manager_judgment_not_found_db_error() {
+    let (base_url, auth_header) = setup_failing().await;
+
+    let res = client()
+        .post(format!(
+            "{base_url}/api/tenko/sessions/{}/judgment",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({ "judgment": "ok" }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 500);
+}
+
+#[tokio::test]
+async fn test_record_manager_judgment_update_db_error() {
+    // get() は成功し、record_manager_judgment の UPDATE だけが失敗するケース
+    // (line "record_manager_judgment DB error" の tracing::error! 分岐を通す)
+    let (base_url, auth_header) = setup_with_update_failing("completed", "pre_operation").await;
+
+    let res = client()
+        .post(format!(
+            "{base_url}/api/tenko/sessions/{}/judgment",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({ "judgment": "ok" }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 500);
+}
+
+// =========================================================================
 // Unauthorized (no JWT → 401)
 // =========================================================================
 

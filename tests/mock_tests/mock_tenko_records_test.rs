@@ -466,6 +466,54 @@ async fn test_export_csv_carins_columns_without_values() {
 }
 
 #[tokio::test]
+async fn test_export_csv_manager_judgment_columns_with_values() {
+    // Refs ippoan/alc-app#315: 運行管理者の OK/NG 判定が CSV に出ること
+    let mock = Arc::new(MockTenkoRecordsRepository::default());
+    mock.return_manager_judgment.store(true, Ordering::SeqCst);
+    let state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
+    tenko_state.tenko_records = mock;
+    let base_url =
+        crate::mock_helpers::app_state::spawn_mock_server_with_tenko(state, tenko_state).await;
+    let jwt = crate::common::create_test_jwt(uuid::Uuid::new_v4(), "admin");
+
+    let res = reqwest::Client::new()
+        .get(format!("{base_url}/api/tenko/records/csv"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let bytes = res.bytes().await.unwrap();
+    let csv_str = std::str::from_utf8(&bytes[3..]).unwrap();
+
+    let header: Vec<&str> = csv_str.lines().next().unwrap().split(',').collect();
+    assert!(header.contains(&"manager_judgment"));
+    assert!(header.contains(&"manager_judgment_reason"));
+
+    let row = csv_row(csv_str);
+    assert_eq!(row["manager_judgment"], "ng");
+    assert_eq!(row["manager_judgment_reason"], "体調不良の申告あり");
+}
+
+#[tokio::test]
+async fn test_export_csv_manager_judgment_columns_without_values() {
+    // 未判定の記録では空欄 (オーナー決定: 未判定は NULL のまま)
+    let (base_url, auth_header) = setup_with_data().await;
+    let res = reqwest::Client::new()
+        .get(format!("{base_url}/api/tenko/records/csv"))
+        .header("Authorization", &auth_header)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let bytes = res.bytes().await.unwrap();
+    let row = csv_row(std::str::from_utf8(&bytes[3..]).unwrap());
+    assert_eq!(row["manager_judgment"], "");
+    assert_eq!(row["manager_judgment_reason"], "");
+}
+
+#[tokio::test]
 async fn test_export_csv_with_filters() {
     let (base_url, auth_header, _) = setup().await;
     let client = reqwest::Client::new();

@@ -418,6 +418,10 @@ pub struct MockTenkoRecordsRepository {
     pub return_ng_data: AtomicBool,
     /// list_all の記録の record_data に電子車検証の 4 値を載せる (CSV 末尾 4 列)
     pub return_carins_data: AtomicBool,
+    /// list_all の記録に運行管理者判定 (manager_judgment/reason) を載せる
+    /// (Refs ippoan/alc-app#315。CSV は tenko_sessions との JOIN で埋まる列なので、
+    /// mock でも record 本体ではなくこのフラグで再現する)
+    pub return_manager_judgment: AtomicBool,
 }
 
 impl Default for MockTenkoRecordsRepository {
@@ -428,6 +432,7 @@ impl Default for MockTenkoRecordsRepository {
             return_data: AtomicBool::new(false),
             return_ng_data: AtomicBool::new(false),
             return_carins_data: AtomicBool::new(false),
+            return_manager_judgment: AtomicBool::new(false),
         }
     }
 }
@@ -473,6 +478,8 @@ fn make_mock_tenko_record_for_list(tenant_id: Uuid, id: Uuid) -> TenkoRecord {
         interrupted_at: None,
         resumed_at: None,
         resume_reason: None,
+        manager_judgment: None,
+        manager_judgment_reason: None,
     }
 }
 
@@ -536,6 +543,12 @@ impl TenkoRecordsRepository for MockTenkoRecordsRepository {
                 "carins_expires_on": "2030-12-31",
                 "carins_matched_by": "cert_no",
             });
+            return Ok(vec![record]);
+        }
+        if self.return_manager_judgment.load(Ordering::SeqCst) {
+            let mut record = make_mock_tenko_record_for_list(_tenant_id, Uuid::new_v4());
+            record.manager_judgment = Some("ng".to_string());
+            record.manager_judgment_reason = Some("体調不良の申告あり".to_string());
             return Ok(vec![record]);
         }
         if self.return_ng_data.load(Ordering::SeqCst) {
@@ -744,6 +757,9 @@ pub struct MockTenkoSessionRepository {
     pub fail_on_update_carrying_items: AtomicBool,
     /// create_session に渡された tenko_method を検証用に記録する (Refs ippoan/rust-alc-api#655)
     pub created_session_tenko_method: std::sync::Mutex<Option<String>>,
+    /// record_manager_judgment に渡された (judgment, reason, judged_by) を検証用に記録する
+    /// (Refs ippoan/alc-app#315)
+    pub recorded_manager_judgment: std::sync::Mutex<Option<(String, Option<String>, String)>>,
 }
 
 impl Default for MockTenkoSessionRepository {
@@ -770,6 +786,7 @@ impl Default for MockTenkoSessionRepository {
             fail_on_safety_judgment: AtomicBool::new(false),
             fail_on_update_carrying_items: AtomicBool::new(false),
             created_session_tenko_method: std::sync::Mutex::new(None),
+            recorded_manager_judgment: std::sync::Mutex::new(None),
         }
     }
 }
@@ -842,6 +859,9 @@ fn make_mock_session(
         carins_matched_by: None,
         escalated_to_remote_at: None,
         remote_escalation_reason: None,
+        manager_judgment: None,
+        manager_judgment_reason: None,
+        manager_judgment_by: None,
         created_at: now,
         updated_at: now,
     }
@@ -885,6 +905,8 @@ fn make_mock_tenko_record(tenant_id: Uuid, session: &TenkoSession) -> TenkoRecor
         interrupted_at: session.interrupted_at,
         resumed_at: session.resumed_at,
         resume_reason: session.resume_reason.clone(),
+        manager_judgment: session.manager_judgment.clone(),
+        manager_judgment_reason: session.manager_judgment_reason.clone(),
     }
 }
 
@@ -1314,6 +1336,35 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
         session.tenko_method = "遠隔点呼".to_string();
         session.escalated_to_remote_at = Some(Utc::now());
         session.remote_escalation_reason = Some(_reason.to_string());
+        Ok(session)
+    }
+
+    async fn record_manager_judgment(
+        &self,
+        _tenant_id: Uuid,
+        _id: Uuid,
+        judgment: &str,
+        reason: &Option<String>,
+        judged_by: &str,
+    ) -> Result<TenkoSession, sqlx::Error> {
+        check_fail_update!(self);
+        *self.recorded_manager_judgment.lock().unwrap() =
+            Some((judgment.to_string(), reason.clone(), judged_by.to_string()));
+        let employee_id = *self.session_employee_id.lock().unwrap();
+        let status = self.session_status.lock().unwrap().clone();
+        let tenko_type = self.session_tenko_type.lock().unwrap().clone();
+        let mut session = make_mock_session(
+            _tenant_id,
+            _id,
+            employee_id,
+            &status,
+            &tenko_type,
+            false,
+            false,
+        );
+        session.manager_judgment = Some(judgment.to_string());
+        session.manager_judgment_reason = reason.clone();
+        session.manager_judgment_by = Some(judged_by.to_string());
         Ok(session)
     }
 
