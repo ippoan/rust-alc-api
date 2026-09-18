@@ -3,12 +3,59 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::models::{CreateTroubleCategory, TroubleCategory};
-use alc_core::tenant::TenantConn;
+use alc_core::master_data::{self, MasterCreateInput, MasterRow, MasterTable};
 
 pub use crate::repository::trouble_categories::*;
 
+// `TroubleCategory`/`CreateTroubleCategory` は trouble_task_types.rs (テーブルは
+// 別の trouble_task_types だが同じ Row/Create 型を再利用している) からも使うが、
+// これらの impl は crate 内のどこか 1 箇所にあれば十分 (Rust のトレイト解決は
+// 定義モジュールを問わない)。
+impl MasterCreateInput for CreateTroubleCategory {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn sort_order(&self) -> Option<i32> {
+        self.sort_order
+    }
+}
+
+/// `tests/mock_helpers` の Mock 実装 (in-memory) が list/create/update_sort_order
+/// を共通ロジックに寄せるための実装 (Refs #651)。
+impl MasterRow for TroubleCategory {
+    fn master_id(&self) -> uuid::Uuid {
+        self.id
+    }
+
+    fn set_master_sort_order(&mut self, sort_order: i32) {
+        self.sort_order = sort_order;
+    }
+
+    fn new_master_row(
+        id: uuid::Uuid,
+        tenant_id: uuid::Uuid,
+        name: String,
+        sort_order: i32,
+        created_at: chrono::DateTime<chrono::Utc>,
+    ) -> Self {
+        Self {
+            id,
+            tenant_id,
+            name,
+            sort_order,
+            created_at,
+        }
+    }
+}
+
 pub struct PgTroubleCategoriesRepository {
     pool: PgPool,
+}
+
+/// SQL に埋め込むテーブル名はこのリテラルだけ (Refs #651 — SQL injection の境界)。
+impl MasterTable for PgTroubleCategoriesRepository {
+    const TABLE: &'static str = "trouble_categories";
 }
 
 impl PgTroubleCategoriesRepository {
@@ -20,13 +67,7 @@ impl PgTroubleCategoriesRepository {
 #[async_trait]
 impl TroubleCategoriesRepository for PgTroubleCategoriesRepository {
     async fn list(&self, tenant_id: Uuid) -> Result<Vec<TroubleCategory>, sqlx::Error> {
-        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
-        sqlx::query_as::<_, TroubleCategory>(
-            "SELECT * FROM trouble_categories WHERE tenant_id = $1 ORDER BY sort_order, name",
-        )
-        .bind(tenant_id)
-        .fetch_all(&mut *tc.conn)
-        .await
+        master_data::list::<Self, _>(&self.pool, tenant_id).await
     }
 
     async fn create(
@@ -34,27 +75,11 @@ impl TroubleCategoriesRepository for PgTroubleCategoriesRepository {
         tenant_id: Uuid,
         input: &CreateTroubleCategory,
     ) -> Result<TroubleCategory, sqlx::Error> {
-        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
-        sqlx::query_as::<_, TroubleCategory>(
-            r#"INSERT INTO trouble_categories (tenant_id, name, sort_order)
-            VALUES ($1, $2, $3)
-            RETURNING *"#,
-        )
-        .bind(tenant_id)
-        .bind(&input.name)
-        .bind(input.sort_order.unwrap_or(0))
-        .fetch_one(&mut *tc.conn)
-        .await
+        master_data::create::<Self, _, _>(&self.pool, tenant_id, input).await
     }
 
     async fn delete(&self, tenant_id: Uuid, id: Uuid) -> Result<bool, sqlx::Error> {
-        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
-        let result = sqlx::query("DELETE FROM trouble_categories WHERE id = $1 AND tenant_id = $2")
-            .bind(id)
-            .bind(tenant_id)
-            .execute(&mut *tc.conn)
-            .await?;
-        Ok(result.rows_affected() > 0)
+        master_data::delete::<Self>(&self.pool, tenant_id, id).await
     }
 
     async fn update_sort_order(
@@ -63,14 +88,6 @@ impl TroubleCategoriesRepository for PgTroubleCategoriesRepository {
         id: Uuid,
         sort_order: i32,
     ) -> Result<Option<TroubleCategory>, sqlx::Error> {
-        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
-        sqlx::query_as::<_, TroubleCategory>(
-            "UPDATE trouble_categories SET sort_order = $3 WHERE id = $1 AND tenant_id = $2 RETURNING *",
-        )
-        .bind(id)
-        .bind(tenant_id)
-        .bind(sort_order)
-        .fetch_optional(&mut *tc.conn)
-        .await
+        master_data::update_sort_order::<Self, _>(&self.pool, tenant_id, id, sort_order).await
     }
 }

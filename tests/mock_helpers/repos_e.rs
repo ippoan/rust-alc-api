@@ -29,6 +29,59 @@ macro_rules! check_fail {
 }
 
 // ============================================================
+// categories/task_types/offices/progress_statuses の Mock 4 本が
+// 逐語複製していた list/create/update_sort_order の中身をここへ寄せた
+// (Refs ippoan/rust-alc-api#651)。fail_next のチェックだけは各 impl 側に
+// 残す (macro が呼び出し元の関数から直接 return するため)。
+// ============================================================
+
+/// [`alc_core::master_data::MasterRow`] を実装した Row の in-memory 一覧を返す。
+fn mock_master_list<Row: Clone>(rows: &std::sync::Mutex<Vec<Row>>) -> Vec<Row> {
+    rows.lock().unwrap().clone()
+}
+
+/// 新しい Row を組み立てて in-memory 一覧に積む。
+fn mock_master_create<Row, Input>(
+    rows: &std::sync::Mutex<Vec<Row>>,
+    tenant_id: Uuid,
+    input: &Input,
+) -> Row
+where
+    Row: alc_core::master_data::MasterRow + Clone,
+    Input: alc_core::master_data::MasterCreateInput,
+{
+    let row = Row::new_master_row(
+        Uuid::new_v4(),
+        tenant_id,
+        input.name().to_string(),
+        input.sort_order().unwrap_or(0),
+        Utc::now(),
+    );
+    rows.lock().unwrap().push(row.clone());
+    row
+}
+
+/// `delete_returns_false` フラグを見るだけ (in-memory なので実削除はしない —
+/// 元の 4 本の Mock 実装もこの挙動だった)。
+fn mock_master_delete(delete_returns_false: &AtomicBool) -> bool {
+    !delete_returns_false.load(Ordering::SeqCst)
+}
+
+/// id で見つけた Row の sort_order を書き換えて返す。見つからなければ None。
+fn mock_master_update_sort_order<Row: alc_core::master_data::MasterRow + Clone>(
+    rows: &std::sync::Mutex<Vec<Row>>,
+    id: Uuid,
+    sort_order: i32,
+) -> Option<Row> {
+    let mut rows = rows.lock().unwrap();
+    if let Some(row) = rows.iter_mut().find(|r| r.master_id() == id) {
+        row.set_master_sort_order(sort_order);
+        return Some(row.clone());
+    }
+    None
+}
+
+// ============================================================
 // MockTroubleTicketsRepository
 // ============================================================
 
@@ -545,7 +598,7 @@ impl Default for MockTroubleCategoriesRepository {
 impl TroubleCategoriesRepository for MockTroubleCategoriesRepository {
     async fn list(&self, _tenant_id: Uuid) -> Result<Vec<TroubleCategory>, sqlx::Error> {
         check_fail!(self);
-        Ok(self.categories.lock().unwrap().clone())
+        Ok(mock_master_list(&self.categories))
     }
 
     async fn create(
@@ -554,23 +607,12 @@ impl TroubleCategoriesRepository for MockTroubleCategoriesRepository {
         input: &CreateTroubleCategory,
     ) -> Result<TroubleCategory, sqlx::Error> {
         check_fail!(self);
-        let cat = TroubleCategory {
-            id: Uuid::new_v4(),
-            tenant_id,
-            name: input.name.clone(),
-            sort_order: input.sort_order.unwrap_or(0),
-            created_at: Utc::now(),
-        };
-        self.categories.lock().unwrap().push(cat.clone());
-        Ok(cat)
+        Ok(mock_master_create(&self.categories, tenant_id, input))
     }
 
     async fn delete(&self, _tenant_id: Uuid, _id: Uuid) -> Result<bool, sqlx::Error> {
         check_fail!(self);
-        if self.delete_returns_false.load(Ordering::SeqCst) {
-            return Ok(false);
-        }
-        Ok(true)
+        Ok(mock_master_delete(&self.delete_returns_false))
     }
 
     async fn update_sort_order(
@@ -580,12 +622,11 @@ impl TroubleCategoriesRepository for MockTroubleCategoriesRepository {
         sort_order: i32,
     ) -> Result<Option<TroubleCategory>, sqlx::Error> {
         check_fail!(self);
-        let mut cats = self.categories.lock().unwrap();
-        if let Some(cat) = cats.iter_mut().find(|c| c.id == id) {
-            cat.sort_order = sort_order;
-            return Ok(Some(cat.clone()));
-        }
-        Ok(None)
+        Ok(mock_master_update_sort_order(
+            &self.categories,
+            id,
+            sort_order,
+        ))
     }
 }
 
@@ -613,7 +654,7 @@ impl Default for MockTroubleTaskTypesRepository {
 impl TroubleTaskTypesRepository for MockTroubleTaskTypesRepository {
     async fn list(&self, _tenant_id: Uuid) -> Result<Vec<TroubleCategory>, sqlx::Error> {
         check_fail!(self);
-        Ok(self.task_types.lock().unwrap().clone())
+        Ok(mock_master_list(&self.task_types))
     }
 
     async fn create(
@@ -622,23 +663,12 @@ impl TroubleTaskTypesRepository for MockTroubleTaskTypesRepository {
         input: &CreateTroubleCategory,
     ) -> Result<TroubleCategory, sqlx::Error> {
         check_fail!(self);
-        let cat = TroubleCategory {
-            id: Uuid::new_v4(),
-            tenant_id,
-            name: input.name.clone(),
-            sort_order: input.sort_order.unwrap_or(0),
-            created_at: Utc::now(),
-        };
-        self.task_types.lock().unwrap().push(cat.clone());
-        Ok(cat)
+        Ok(mock_master_create(&self.task_types, tenant_id, input))
     }
 
     async fn delete(&self, _tenant_id: Uuid, _id: Uuid) -> Result<bool, sqlx::Error> {
         check_fail!(self);
-        if self.delete_returns_false.load(Ordering::SeqCst) {
-            return Ok(false);
-        }
-        Ok(true)
+        Ok(mock_master_delete(&self.delete_returns_false))
     }
 
     async fn update_sort_order(
@@ -648,12 +678,11 @@ impl TroubleTaskTypesRepository for MockTroubleTaskTypesRepository {
         sort_order: i32,
     ) -> Result<Option<TroubleCategory>, sqlx::Error> {
         check_fail!(self);
-        let mut cats = self.task_types.lock().unwrap();
-        if let Some(cat) = cats.iter_mut().find(|c| c.id == id) {
-            cat.sort_order = sort_order;
-            return Ok(Some(cat.clone()));
-        }
-        Ok(None)
+        Ok(mock_master_update_sort_order(
+            &self.task_types,
+            id,
+            sort_order,
+        ))
     }
 }
 
@@ -681,7 +710,7 @@ impl Default for MockTroubleOfficesRepository {
 impl TroubleOfficesRepository for MockTroubleOfficesRepository {
     async fn list(&self, _tenant_id: Uuid) -> Result<Vec<TroubleOffice>, sqlx::Error> {
         check_fail!(self);
-        Ok(self.offices.lock().unwrap().clone())
+        Ok(mock_master_list(&self.offices))
     }
 
     async fn create(
@@ -690,23 +719,12 @@ impl TroubleOfficesRepository for MockTroubleOfficesRepository {
         input: &CreateTroubleOffice,
     ) -> Result<TroubleOffice, sqlx::Error> {
         check_fail!(self);
-        let office = TroubleOffice {
-            id: Uuid::new_v4(),
-            tenant_id,
-            name: input.name.clone(),
-            sort_order: input.sort_order.unwrap_or(0),
-            created_at: Utc::now(),
-        };
-        self.offices.lock().unwrap().push(office.clone());
-        Ok(office)
+        Ok(mock_master_create(&self.offices, tenant_id, input))
     }
 
     async fn delete(&self, _tenant_id: Uuid, _id: Uuid) -> Result<bool, sqlx::Error> {
         check_fail!(self);
-        if self.delete_returns_false.load(Ordering::SeqCst) {
-            return Ok(false);
-        }
-        Ok(true)
+        Ok(mock_master_delete(&self.delete_returns_false))
     }
 
     async fn update_sort_order(
@@ -716,12 +734,7 @@ impl TroubleOfficesRepository for MockTroubleOfficesRepository {
         sort_order: i32,
     ) -> Result<Option<TroubleOffice>, sqlx::Error> {
         check_fail!(self);
-        let mut offices = self.offices.lock().unwrap();
-        if let Some(office) = offices.iter_mut().find(|o| o.id == id) {
-            office.sort_order = sort_order;
-            return Ok(Some(office.clone()));
-        }
-        Ok(None)
+        Ok(mock_master_update_sort_order(&self.offices, id, sort_order))
     }
 }
 
@@ -749,7 +762,7 @@ impl Default for MockTroubleProgressStatusesRepository {
 impl TroubleProgressStatusesRepository for MockTroubleProgressStatusesRepository {
     async fn list(&self, _tenant_id: Uuid) -> Result<Vec<TroubleProgressStatus>, sqlx::Error> {
         check_fail!(self);
-        Ok(self.statuses.lock().unwrap().clone())
+        Ok(mock_master_list(&self.statuses))
     }
 
     async fn create(
@@ -758,23 +771,12 @@ impl TroubleProgressStatusesRepository for MockTroubleProgressStatusesRepository
         input: &CreateTroubleProgressStatus,
     ) -> Result<TroubleProgressStatus, sqlx::Error> {
         check_fail!(self);
-        let status = TroubleProgressStatus {
-            id: Uuid::new_v4(),
-            tenant_id,
-            name: input.name.clone(),
-            sort_order: input.sort_order.unwrap_or(0),
-            created_at: Utc::now(),
-        };
-        self.statuses.lock().unwrap().push(status.clone());
-        Ok(status)
+        Ok(mock_master_create(&self.statuses, tenant_id, input))
     }
 
     async fn delete(&self, _tenant_id: Uuid, _id: Uuid) -> Result<bool, sqlx::Error> {
         check_fail!(self);
-        if self.delete_returns_false.load(Ordering::SeqCst) {
-            return Ok(false);
-        }
-        Ok(true)
+        Ok(mock_master_delete(&self.delete_returns_false))
     }
 
     async fn update_sort_order(
@@ -784,12 +786,11 @@ impl TroubleProgressStatusesRepository for MockTroubleProgressStatusesRepository
         sort_order: i32,
     ) -> Result<Option<TroubleProgressStatus>, sqlx::Error> {
         check_fail!(self);
-        let mut statuses = self.statuses.lock().unwrap();
-        if let Some(status) = statuses.iter_mut().find(|s| s.id == id) {
-            status.sort_order = sort_order;
-            return Ok(Some(status.clone()));
-        }
-        Ok(None)
+        Ok(mock_master_update_sort_order(
+            &self.statuses,
+            id,
+            sort_order,
+        ))
     }
 }
 
