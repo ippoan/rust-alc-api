@@ -11,6 +11,8 @@ pub mod auth_middleware;
 pub mod constant_time;
 pub mod device_pair_client;
 pub mod fcm;
+pub mod master_data;
+pub mod master_handlers;
 pub mod middleware;
 pub mod models;
 pub mod realtime_bus;

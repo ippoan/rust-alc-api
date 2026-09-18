@@ -9,6 +9,7 @@ use uuid::Uuid;
 use crate::models::{CreateTroubleCategory, TroubleCategory};
 use crate::TroubleState;
 use alc_core::auth_middleware::TenantId;
+use alc_core::master_handlers::{is_conflict, UpdateSortOrder};
 
 pub fn tenant_router<S>() -> Router<S>
 where
@@ -71,20 +72,13 @@ async fn create_task_type(
         .create(tenant.0 .0, &body)
         .await
         .map_err(|e| {
-            if let sqlx::Error::Database(ref db_err) = e {
-                if db_err.constraint().is_some() {
-                    return StatusCode::CONFLICT;
-                }
+            if is_conflict(&e) {
+                return StatusCode::CONFLICT;
             }
             tracing::error!("create_task_type error: {e}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
     Ok((StatusCode::CREATED, Json(task_type)))
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct UpdateSortOrder {
-    sort_order: i32,
 }
 
 async fn update_task_type_sort(
