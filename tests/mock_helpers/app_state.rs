@@ -254,6 +254,25 @@ impl alc_maintenance::vehicles::VehiclesRepository for MockVehiclesRepository {
     ) -> Result<Vec<alc_maintenance::models::CarinsCandidate>, sqlx::Error> {
         Ok(vec![])
     }
+
+    async fn carins_import_candidates(
+        &self,
+        _tenant_id: Uuid,
+    ) -> Result<Vec<alc_maintenance::models::CarinsImportCandidate>, sqlx::Error> {
+        Ok(vec![])
+    }
+
+    async fn carins_import(
+        &self,
+        _tenant_id: Uuid,
+        _car_ids: &[String],
+    ) -> Result<alc_maintenance::models::CarinsImportResult, sqlx::Error> {
+        Ok(alc_maintenance::models::CarinsImportResult {
+            created: 0,
+            linked: 0,
+            skipped: 0,
+        })
+    }
 }
 
 /// MaintenanceCategoriesRepository のスタブ (Refs #651 — generic master の 5 番目の

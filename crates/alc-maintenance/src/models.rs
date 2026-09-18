@@ -84,6 +84,43 @@ pub struct CarinsCandidate {
     pub car_no: String,
 }
 
+/// `GET /api/maintenance/vehicles/carins-import-candidates` の候補 1 件。
+/// **まだ `maintenance_vehicles` に取り込まれていない**電子車検証を返す
+/// (`CarinsCandidate` の「この車両に一致する候補」の反転、Refs #662)。
+/// 所有者・住所・車台番号は返さない (`CarinsCandidate` と同じ最小方針)。
+#[derive(Debug, Clone, Serialize, FromRow, TS)]
+#[ts(export)]
+pub struct CarinsImportCandidate {
+    pub car_id: String,
+    pub cert_no: String,
+    /// 電子車検証側の登録番号相当 (`EntryNoCarNo` / `CarNo` のうち非空の方)
+    pub car_no: String,
+    /// 正規化した登録番号で一致した既存車両。`None` = 未登録 (取り込みで新規作成)、
+    /// `Some` = 既存行に `car_id` を紐づけるだけで済む。
+    pub existing_vehicle_id: Option<Uuid>,
+}
+
+/// `POST /api/maintenance/vehicles/carins-import` の body。
+/// `carins-import-candidates` が返した `car_id` のうち、利用者が選んだものを渡す。
+#[derive(Debug, Clone, Deserialize, TS)]
+#[ts(export)]
+pub struct CarinsImportRequest {
+    pub car_ids: Vec<String>,
+}
+
+/// `POST /api/maintenance/vehicles/carins-import` の応答。**件数のみ** — 行は返さない
+/// (取り込み後の一覧は `GET /api/maintenance/vehicles` で取り直す、Refs #662)。
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export)]
+pub struct CarinsImportResult {
+    /// 登録番号一致の既存車両が無く、新規作成した件数
+    pub created: i64,
+    /// 既存車両に `car_id` を紐づけた件数
+    pub linked: i64,
+    /// 既に紐づけ済み / 一致先が別の車検証に紐づけ済み / このテナントに無い `car_id`
+    pub skipped: i64,
+}
+
 /// 整備カテゴリ 1 行 (`maintenance_categories`)。`alc-trouble` の
 /// `TroubleCategory` と同じ形の generic master (`alc_core::master_data`) で
 /// CRUD する (Refs #651)。

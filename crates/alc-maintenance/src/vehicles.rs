@@ -14,7 +14,7 @@ use axum::{
     http::StatusCode,
     Json, Router,
 };
-use sqlx::PgPool;
+use sqlx::{Acquire, PgPool};
 use uuid::Uuid;
 
 use alc_core::auth_middleware::TenantId;
@@ -22,13 +22,17 @@ use alc_core::repository::car_inspections::normalize_carins_numbers;
 use alc_core::tenant::TenantConn;
 
 use crate::models::{
-    CarinsCandidate, CreateMaintenanceVehicle, LinkCarinsRequest, MaintenanceVehicle,
-    UpdateMaintenanceVehicle, VehicleListFilter, VehicleListResponse,
+    CarinsCandidate, CarinsImportCandidate, CarinsImportRequest, CarinsImportResult,
+    CreateMaintenanceVehicle, LinkCarinsRequest, MaintenanceVehicle, UpdateMaintenanceVehicle,
+    VehicleListFilter, VehicleListResponse,
 };
 use crate::MaintenanceState;
 
 const DEFAULT_PER_PAGE: i64 = 20;
 const MAX_PER_PAGE: i64 = 100;
+/// `POST .../carins-import` の 1 リクエストあたりの上限。1 トランザクションで回すため
+/// 際限なく受けない (候補一覧は通常テナントあたり数十件、Refs #662)。
+const MAX_IMPORT_CAR_IDS: usize = 500;
 
 /// 全角の数字・ダッシュを半角へ正規化する。SQL 側 (`crates/alc-trouble/src/repo/
 /// trouble_tickets.rs:153` の一覧検索 `translate(...)`) と同じ文字集合を Rust 側で
@@ -112,6 +116,22 @@ pub trait VehiclesRepository: Send + Sync {
         tenant_id: Uuid,
         normalized_registration_number: &str,
     ) -> Result<Vec<CarinsCandidate>, sqlx::Error>;
+
+    /// まだ `maintenance_vehicles` に取り込まれていない carins を全件返す
+    /// (`carins_candidates` の反転、Refs #662)。同一 `CarId` は最新の交付日の
+    /// 1 行に畳む。
+    async fn carins_import_candidates(
+        &self,
+        tenant_id: Uuid,
+    ) -> Result<Vec<CarinsImportCandidate>, sqlx::Error>;
+
+    /// 選ばれた `car_id` を **1 トランザクションで**取り込む (Refs #662)。
+    /// 登録番号一致の既存車両が在れば紐づけ、無ければ作成、既に紐づけ済みなら skip。
+    async fn carins_import(
+        &self,
+        tenant_id: Uuid,
+        car_ids: &[String],
+    ) -> Result<CarinsImportResult, sqlx::Error>;
 }
 
 pub fn is_unique_violation(e: &sqlx::Error) -> bool {
@@ -344,6 +364,191 @@ impl VehiclesRepository for PgVehiclesRepository {
         .fetch_all(&mut *tc.conn)
         .await
     }
+
+    async fn carins_import_candidates(
+        &self,
+        tenant_id: Uuid,
+    ) -> Result<Vec<CarinsImportCandidate>, sqlx::Error> {
+        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
+        // `carins_candidates` の反転 — あちらは「この車両の登録番号に一致する候補」、
+        // こちらは「まだ取り込まれていない carins 全部」(Refs #662)。
+        //
+        // 同一 CarId は最新の交付日の 1 行に畳む (`car_inspection` は車検証 1 枚ごとの
+        // 履歴表。`alc-carins` の `repo/car_inspections.rs:34` の DISTINCT ON が手本)。
+        // 突き合わせは SQL 側の translate で行う — Rust 側の
+        // `normalize_registration_number` は単体の候補検索用で、N 件を SQL 内で畳む
+        // こちらでは使わない。
+        //
+        // RLS (FORCE ROW LEVEL SECURITY) だけに任せず、この repo の作法通り
+        // WHERE 句にも tenant_id を明示する (多重防御)。JOIN する
+        // `maintenance_vehicles` 側にも同じく明示して片肺にしない。
+        sqlx::query_as::<_, CarinsImportCandidate>(
+            r#"SELECT DISTINCT ON (ci."CarId")
+                ci."CarId" AS car_id,
+                ci."ElectCertMgNo" AS cert_no,
+                COALESCE(NULLIF(ci."EntryNoCarNo", ''), ci."CarNo") AS car_no,
+                mv.id AS existing_vehicle_id
+            FROM car_inspection ci
+            LEFT JOIN maintenance_vehicles mv
+              ON mv.tenant_id = $1
+             AND mv.deleted_at IS NULL
+             AND translate(mv.registration_number, '０１２３４５６７８９－ー', '0123456789--')
+                 = translate(COALESCE(NULLIF(ci."EntryNoCarNo", ''), ci."CarNo"), '０１２３４５６７８９－ー', '0123456789--')
+            WHERE ci.tenant_id = $1
+              AND ci."CarId" <> ''
+              AND COALESCE(NULLIF(ci."EntryNoCarNo", ''), ci."CarNo") <> ''
+              AND NOT EXISTS (
+                SELECT 1 FROM maintenance_vehicles linked
+                WHERE linked.tenant_id = $1 AND linked.car_id = ci."CarId"
+              )
+            ORDER BY ci."CarId", ci."GrantdateY" DESC, ci."GrantdateM" DESC, ci."GrantdateD" DESC,
+                     mv.created_at"#,
+        )
+        .bind(tenant_id)
+        .fetch_all(&mut *tc.conn)
+        .await
+    }
+
+    async fn carins_import(
+        &self,
+        tenant_id: Uuid,
+        car_ids: &[String],
+    ) -> Result<CarinsImportResult, sqlx::Error> {
+        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
+        // 「POST で作成 → PUT .../carins で紐づけ」をフロントに 2 コールさせると、
+        // 間で失敗したとき裸の車両行が残る。`registration_number` の index は
+        // UNIQUE ではない (migrations/147:34。UNIQUE は :30 の
+        // `(tenant_id, car_id) WHERE car_id IS NOT NULL` だけ) ため再試行のたびに
+        // 重複行が増えるので、1 トランザクションに寄せる (Refs #662)。
+        let mut tx = tc.conn.begin().await?;
+        let mut result = CarinsImportResult {
+            created: 0,
+            linked: 0,
+            skipped: 0,
+        };
+
+        for car_id in car_ids {
+            let car_id = car_id.trim();
+            if car_id.is_empty() {
+                result.skipped += 1;
+                continue;
+            }
+
+            // (1) 既にこの car_id を持つ車両が在れば skip (冪等)。deleted_at は見ない
+            // — partial unique (migrations/147:30) も見ないので、soft delete 済みの
+            // 行が持つ car_id は依然として後続の INSERT/UPDATE を弾く。
+            let already: Option<Uuid> = sqlx::query_scalar(
+                "SELECT id FROM maintenance_vehicles WHERE tenant_id = $1 AND car_id = $2 LIMIT 1",
+            )
+            .bind(tenant_id)
+            .bind(car_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+            if already.is_some() {
+                result.skipped += 1;
+                continue;
+            }
+
+            // (2) 最新 1 枚の車検証から登録番号相当を引く。このテナントに無い car_id
+            // (他テナントの値を投げられた場合を含む) はここで skip になる。
+            let car_no: Option<String> = sqlx::query_scalar(
+                r#"SELECT COALESCE(NULLIF(ci."EntryNoCarNo", ''), ci."CarNo")
+                FROM car_inspection ci
+                WHERE ci.tenant_id = $1 AND ci."CarId" = $2
+                ORDER BY ci."GrantdateY" DESC, ci."GrantdateM" DESC, ci."GrantdateD" DESC
+                LIMIT 1"#,
+            )
+            .bind(tenant_id)
+            .bind(car_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+            let Some(car_no) = car_no.filter(|v| !v.trim().is_empty()) else {
+                result.skipped += 1;
+                continue;
+            };
+
+            // (3) 正規化した登録番号で既存車両を探す。未紐づけ (car_id IS NULL) を
+            // 優先し、同点は古い順 — 登録番号は移転で再割当てされるため UNIQUE では
+            // なく (migrations/147:34)、複数行あり得るので順序を決定的にする。
+            let existing: Option<(Uuid, Option<String>)> = sqlx::query_as(
+                r#"SELECT id, car_id FROM maintenance_vehicles
+                WHERE tenant_id = $1 AND deleted_at IS NULL
+                  AND translate(registration_number, '０１２３４５６７８９－ー', '0123456789--')
+                      = translate($2, '０１２３４５６７８９－ー', '0123456789--')
+                ORDER BY (car_id IS NOT NULL), created_at
+                LIMIT 1"#,
+            )
+            .bind(tenant_id)
+            .bind(&car_no)
+            .fetch_optional(&mut *tx)
+            .await?;
+
+            // UNIQUE 違反 (同時実行) は skip 扱いにするが、transaction 全体を
+            // abort させないよう SAVEPOINT (sqlx の入れ子 transaction) で囲む
+            // (`alc-misc::repo::measurements` の `record_as_tenko_if_marked` と同じ作法)。
+            match existing {
+                // 一致先が既に別の車検証に紐づいている → 上書きせず skip
+                Some((_, Some(_))) => {
+                    result.skipped += 1;
+                }
+                Some((id, None)) => {
+                    let mut sp = tx.begin().await?;
+                    let updated = sqlx::query(
+                        r#"UPDATE maintenance_vehicles
+                        SET car_id = $3, carins_linked_at = now(), updated_at = now()
+                        WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL"#,
+                    )
+                    .bind(id)
+                    .bind(tenant_id)
+                    .bind(car_id)
+                    .execute(&mut *sp)
+                    .await;
+                    match updated {
+                        Ok(r) if r.rows_affected() > 0 => {
+                            sp.commit().await?;
+                            result.linked += 1;
+                        }
+                        Ok(_) => {
+                            sp.rollback().await?;
+                            result.skipped += 1;
+                        }
+                        Err(e) if is_unique_violation(&e) => {
+                            sp.rollback().await?;
+                            result.skipped += 1;
+                        }
+                        Err(e) => return Err(e),
+                    }
+                }
+                None => {
+                    let mut sp = tx.begin().await?;
+                    let inserted = sqlx::query(
+                        r#"INSERT INTO maintenance_vehicles
+                            (tenant_id, registration_number, car_id, carins_linked_at)
+                        VALUES ($1, $2, $3, now())"#,
+                    )
+                    .bind(tenant_id)
+                    .bind(&car_no)
+                    .bind(car_id)
+                    .execute(&mut *sp)
+                    .await;
+                    match inserted {
+                        Ok(_) => {
+                            sp.commit().await?;
+                            result.created += 1;
+                        }
+                        Err(e) if is_unique_violation(&e) => {
+                            sp.rollback().await?;
+                            result.skipped += 1;
+                        }
+                        Err(e) => return Err(e),
+                    }
+                }
+            }
+        }
+
+        tx.commit().await?;
+        Ok(result)
+    }
 }
 
 pub fn tenant_router<S>() -> Router<S>
@@ -355,6 +560,17 @@ where
         .route(
             "/maintenance/vehicles",
             axum::routing::get(list_vehicles).post(create_vehicle),
+        )
+        // 静的セグメントは `/{id}` (Path<Uuid>) より **前** に並べる
+        // (`alc-carins` の `car_inspections.rs:30-32` と同じ作法。matchit は静的を
+        // 優先するので衝突はしないが、読み手が順序で判断できるようにしておく)。
+        .route(
+            "/maintenance/vehicles/carins-import-candidates",
+            axum::routing::get(carins_import_candidates),
+        )
+        .route(
+            "/maintenance/vehicles/carins-import",
+            axum::routing::post(carins_import),
         )
         .route(
             "/maintenance/vehicles/{id}",
@@ -583,4 +799,38 @@ async fn carins_candidates(
         })?;
 
     Ok(Json(candidates))
+}
+
+async fn carins_import_candidates(
+    State(state): State<MaintenanceState>,
+    tenant: axum::Extension<TenantId>,
+) -> Result<Json<Vec<CarinsImportCandidate>>, StatusCode> {
+    let candidates = state
+        .vehicles
+        .carins_import_candidates(tenant.0 .0)
+        .await
+        .map_err(|e| {
+            tracing::error!("carins_import_candidates error: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    Ok(Json(candidates))
+}
+
+async fn carins_import(
+    State(state): State<MaintenanceState>,
+    tenant: axum::Extension<TenantId>,
+    Json(body): Json<CarinsImportRequest>,
+) -> Result<Json<CarinsImportResult>, StatusCode> {
+    if body.car_ids.is_empty() || body.car_ids.len() > MAX_IMPORT_CAR_IDS {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let result = state
+        .vehicles
+        .carins_import(tenant.0 .0, &body.car_ids)
+        .await
+        .map_err(|e| {
+            tracing::error!("carins_import error: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    Ok(Json(result))
 }
