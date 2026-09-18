@@ -1061,3 +1061,370 @@ async fn test_maintenance_records_tenant_isolation() {
         }
     );
 }
+
+// ===========================================================================
+// 整備記録の添付ファイル (Refs #651、#c651-6)。
+//
+// `records.rs` (#c651-5) の実装には依存しない — `maintenance_records` の表は
+// migrations/147 で既にあるので、ここでは SQL で直接 1 行用意する。
+// ===========================================================================
+
+/// `maintenance_records` に検証用の 1 行を直接 INSERT する (vehicle / category も
+/// 合成して用意する)。`records.rs` の API を待たずに並列で書けるようにするための
+/// SQL 直叩き (このタスクの親指示どおり)。
+async fn insert_maintenance_record(pool: &sqlx::PgPool, tenant_id: Uuid) -> Uuid {
+    let vehicle_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO alc_api.maintenance_vehicles (tenant_id, registration_number) \
+         VALUES ($1, $2) RETURNING id",
+    )
+    .bind(tenant_id)
+    .bind(format!("テスト車両-{}", Uuid::new_v4()))
+    .fetch_one(pool)
+    .await
+    .expect("maintenance_vehicles の合成行を入れられない");
+
+    let category_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO alc_api.maintenance_categories (tenant_id, name) \
+         VALUES ($1, $2) RETURNING id",
+    )
+    .bind(tenant_id)
+    .bind(format!("テストカテゴリ-{}", Uuid::new_v4()))
+    .fetch_one(pool)
+    .await
+    .expect("maintenance_categories の合成行を入れられない");
+
+    sqlx::query_scalar(
+        "INSERT INTO alc_api.maintenance_records (tenant_id, vehicle_id, category_id, performed_on) \
+         VALUES ($1, $2, $3, CURRENT_DATE) RETURNING id",
+    )
+    .bind(tenant_id)
+    .bind(vehicle_id)
+    .bind(category_id)
+    .fetch_one(pool)
+    .await
+    .expect("maintenance_records の合成行を入れられない")
+}
+
+#[tokio::test]
+async fn test_maintenance_files_attach_list_download_delete_cycle() {
+    test_group!("整備記録の添付ファイル: 一巡");
+    test_case!(
+        "添付 → 一覧 → download → ソフト削除 → 一覧から消える",
+        {
+            let state = common::setup_app_state().await;
+            let base_url = common::spawn_test_server(state.clone()).await;
+            let tenant_id =
+                common::create_test_tenant(state.pool(), "Maintenance Files Tenant").await;
+            let jwt = common::create_test_jwt(tenant_id, "admin");
+            let client = reqwest::Client::new();
+            let auth = format!("Bearer {jwt}");
+
+            let record_id = insert_maintenance_record(state.pool(), tenant_id).await;
+
+            // 添付
+            let form = reqwest::multipart::Form::new().part(
+                "file",
+                reqwest::multipart::Part::bytes(b"hello maintenance".to_vec())
+                    .file_name("photo.jpg")
+                    .mime_str("image/jpeg")
+                    .unwrap(),
+            );
+            let res = client
+                .post(format!(
+                    "{base_url}/api/maintenance/records/{record_id}/files"
+                ))
+                .header("Authorization", &auth)
+                .multipart(form)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 201);
+            let created: Value = res.json().await.unwrap();
+            assert_eq!(created["filename"], "photo.jpg");
+            assert_eq!(created["content_type"], "image/jpeg");
+            assert_eq!(created["size_bytes"], 17);
+            let file_id = created["id"].as_str().unwrap().to_string();
+
+            // 一覧
+            let res = client
+                .get(format!(
+                    "{base_url}/api/maintenance/records/{record_id}/files"
+                ))
+                .header("Authorization", &auth)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 200);
+            let list: Value = res.json().await.unwrap();
+            let items = list.as_array().unwrap();
+            assert_eq!(items.len(), 1);
+            assert_eq!(items[0]["id"], file_id);
+
+            // download
+            let res = client
+                .get(format!(
+                    "{base_url}/api/maintenance/files/{file_id}/download"
+                ))
+                .header("Authorization", &auth)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 200);
+            assert_eq!(res.headers().get("content-type").unwrap(), "image/jpeg");
+            let body = res.bytes().await.unwrap();
+            assert_eq!(body.as_ref(), b"hello maintenance");
+
+            // ソフト削除
+            let res = client
+                .delete(format!("{base_url}/api/maintenance/files/{file_id}"))
+                .header("Authorization", &auth)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 204);
+
+            // 削除後は一覧から消える
+            let res = client
+                .get(format!(
+                    "{base_url}/api/maintenance/records/{record_id}/files"
+                ))
+                .header("Authorization", &auth)
+                .send()
+                .await
+                .unwrap();
+            let list: Value = res.json().await.unwrap();
+            assert!(list.as_array().unwrap().is_empty());
+
+            // 削除後の download は 404 (get の deleted_at IS NULL 述語)
+            let res = client
+                .get(format!(
+                    "{base_url}/api/maintenance/files/{file_id}/download"
+                ))
+                .header("Authorization", &auth)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 404);
+
+            // 2 回目の削除は 404
+            let res = client
+                .delete(format!("{base_url}/api/maintenance/files/{file_id}"))
+                .header("Authorization", &auth)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 404);
+        }
+    );
+}
+
+#[tokio::test]
+async fn test_maintenance_files_upload_to_foreign_tenant_record_404() {
+    test_group!("整備記録の添付ファイル: テナント境界");
+    test_case!(
+        "他テナントの record_id に添付しようとすると 404",
+        {
+            let state = common::setup_app_state().await;
+            let base_url = common::spawn_test_server(state.clone()).await;
+            let tenant_a =
+                common::create_test_tenant(state.pool(), "Maintenance Files Tenant A").await;
+            let tenant_b =
+                common::create_test_tenant(state.pool(), "Maintenance Files Tenant B").await;
+            let jwt_b = common::create_test_jwt(tenant_b, "admin");
+            let client = reqwest::Client::new();
+
+            // record は tenant A のもの
+            let record_id = insert_maintenance_record(state.pool(), tenant_a).await;
+
+            // tenant B の JWT で添付しようとする
+            let form = reqwest::multipart::Form::new().part(
+                "file",
+                reqwest::multipart::Part::bytes(b"hello".to_vec())
+                    .file_name("test.txt")
+                    .mime_str("text/plain")
+                    .unwrap(),
+            );
+            let res = client
+                .post(format!(
+                    "{base_url}/api/maintenance/records/{record_id}/files"
+                ))
+                .header("Authorization", format!("Bearer {jwt_b}"))
+                .multipart(form)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 404);
+
+            // 一覧も同様に 404 (record_id が自テナントのものか確認してから一覧する)
+            let res = client
+                .get(format!(
+                    "{base_url}/api/maintenance/records/{record_id}/files"
+                ))
+                .header("Authorization", format!("Bearer {jwt_b}"))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 404);
+
+            // 存在しない record_id (どのテナントにも属さない) でも 404
+            let res = client
+                .post(format!(
+                    "{base_url}/api/maintenance/records/{}/files",
+                    Uuid::new_v4()
+                ))
+                .header("Authorization", format!("Bearer {jwt_b}"))
+                .multipart(
+                    reqwest::multipart::Form::new().part(
+                        "file",
+                        reqwest::multipart::Part::bytes(b"hello".to_vec())
+                            .file_name("test.txt")
+                            .mime_str("text/plain")
+                            .unwrap(),
+                    ),
+                )
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 404);
+        }
+    );
+}
+
+#[tokio::test]
+async fn test_maintenance_files_foreign_tenant_file_id_404() {
+    test_group!("整備記録の添付ファイル: テナント境界");
+    test_case!(
+        "他テナントの file_id を download / delete しようとすると 404",
+        {
+            let state = common::setup_app_state().await;
+            let base_url = common::spawn_test_server(state.clone()).await;
+            let tenant_a =
+                common::create_test_tenant(state.pool(), "Maintenance Files Owner Tenant").await;
+            let tenant_b =
+                common::create_test_tenant(state.pool(), "Maintenance Files Stranger Tenant").await;
+            let jwt_a = common::create_test_jwt(tenant_a, "admin");
+            let jwt_b = common::create_test_jwt(tenant_b, "admin");
+            let client = reqwest::Client::new();
+
+            let record_id = insert_maintenance_record(state.pool(), tenant_a).await;
+
+            let form = reqwest::multipart::Form::new().part(
+                "file",
+                reqwest::multipart::Part::bytes(b"secret".to_vec())
+                    .file_name("secret.txt")
+                    .mime_str("text/plain")
+                    .unwrap(),
+            );
+            let res = client
+                .post(format!(
+                    "{base_url}/api/maintenance/records/{record_id}/files"
+                ))
+                .header("Authorization", format!("Bearer {jwt_a}"))
+                .multipart(form)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 201);
+            let created: Value = res.json().await.unwrap();
+            let file_id = created["id"].as_str().unwrap().to_string();
+            // storage_key にテナント ID が入っていることを確かめる (認可の根拠には
+            // しないが、prefix の形は固定しておく)
+            let storage_key = created["storage_key"].as_str().unwrap();
+            assert!(storage_key.starts_with(&format!("{tenant_a}/maintenance/{record_id}/")));
+
+            // tenant B から download しようとすると 404
+            let res = client
+                .get(format!(
+                    "{base_url}/api/maintenance/files/{file_id}/download"
+                ))
+                .header("Authorization", format!("Bearer {jwt_b}"))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 404);
+
+            // tenant B から delete しようとすると 404 (ファイルは消えない)
+            let res = client
+                .delete(format!("{base_url}/api/maintenance/files/{file_id}"))
+                .header("Authorization", format!("Bearer {jwt_b}"))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 404);
+
+            // tenant A からは引き続き download できる (tenant B の操作で消えていない)
+            let res = client
+                .get(format!(
+                    "{base_url}/api/maintenance/files/{file_id}/download"
+                ))
+                .header("Authorization", format!("Bearer {jwt_a}"))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 200);
+        }
+    );
+}
+
+#[tokio::test]
+async fn test_maintenance_files_tenant_isolation_in_list() {
+    test_group!("整備記録の添付ファイル: RLS");
+    test_case!("別テナントのファイルは一覧に出ない", {
+        let state = common::setup_app_state().await;
+        let base_url = common::spawn_test_server(state.clone()).await;
+        let tenant_a =
+            common::create_test_tenant(state.pool(), "Maintenance Files RLS Tenant A").await;
+        let tenant_b =
+            common::create_test_tenant(state.pool(), "Maintenance Files RLS Tenant B").await;
+        let jwt_a = common::create_test_jwt(tenant_a, "admin");
+        let jwt_b = common::create_test_jwt(tenant_b, "admin");
+        let client = reqwest::Client::new();
+
+        let record_a = insert_maintenance_record(state.pool(), tenant_a).await;
+        let record_b = insert_maintenance_record(state.pool(), tenant_b).await;
+
+        // tenant A の記録に添付
+        let form = reqwest::multipart::Form::new().part(
+            "file",
+            reqwest::multipart::Part::bytes(b"a-file".to_vec())
+                .file_name("a.txt")
+                .mime_str("text/plain")
+                .unwrap(),
+        );
+        let res = client
+            .post(format!(
+                "{base_url}/api/maintenance/records/{record_a}/files"
+            ))
+            .header("Authorization", format!("Bearer {jwt_a}"))
+            .multipart(form)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 201);
+
+        // tenant B 自身の記録の一覧には tenant A のファイルは出ない (そもそも
+        // 別の record_id なので空のまま)
+        let res = client
+            .get(format!(
+                "{base_url}/api/maintenance/records/{record_b}/files"
+            ))
+            .header("Authorization", format!("Bearer {jwt_b}"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200);
+        let list: Value = res.json().await.unwrap();
+        assert!(list.as_array().unwrap().is_empty());
+
+        // tenant B が tenant A の record_id を直接指定しても 404 (RLS + 明示述語)
+        let res = client
+            .get(format!(
+                "{base_url}/api/maintenance/records/{record_a}/files"
+            ))
+            .header("Authorization", format!("Bearer {jwt_b}"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 404);
+    });
+}

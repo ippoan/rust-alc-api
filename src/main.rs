@@ -409,6 +409,12 @@ async fn main() -> anyhow::Result<()> {
         categories: Arc::new(
             alc_maintenance::categories::PgMaintenanceCategoriesRepository::new(pool.clone()),
         ),
+        // 写真添付 (Refs #651) — 新しい *_R2_BUCKET は足さず、既定の共有 storage に
+        // prefix (`{tenant_id}/maintenance/{record_id}/{uuid}.{ext}`) で相乗りする。
+        files: Arc::new(alc_maintenance::files::PgMaintenanceFilesRepository::new(
+            pool.clone(),
+        )),
+        storage: Some(storage.clone()),
     };
 
     let state = AppState {
