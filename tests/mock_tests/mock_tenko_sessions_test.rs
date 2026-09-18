@@ -816,6 +816,16 @@ async fn test_submit_medical_device_bp_enabled_true_returns_400() {
         400,
         "bp_enabled=true の端末は従来どおり血圧なしを弾くはず (回帰)"
     );
+    let body: serde_json::Value = res.json().await.unwrap();
+    let message = body["message"].as_str().unwrap();
+    assert!(
+        message.contains("端末設定"),
+        "根拠は「端末設定」であるはず、断定 (血圧計あり/検出) にしないこと: {message}"
+    );
+    assert!(
+        !message.contains("検出") && !message.contains("特定できなかった"),
+        "端末設定が根拠のときにボンド検出や不明の文言を出さないこと: {message}"
+    );
 }
 
 #[tokio::test]
@@ -949,6 +959,55 @@ async fn test_submit_medical_device_get_settings_db_error_returns_500() {
     assert_eq!(res.status(), 500);
 }
 
+#[tokio::test]
+async fn test_submit_medical_device_settings_not_found_returns_400() {
+    // device_id あり・テナント一致・devices に設定行が無い (SettingsNotFound、
+    // Refs ippoan/rust-alc-api#668 の 2) — フェイルクローズで 400 のまま、
+    // message は「端末を特定できなかった」の不明側になる (断定しないこと)
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_status.lock().unwrap() = "medical_pending".to_string();
+    *mock.session_tenko_type.lock().unwrap() = "pre_operation".to_string();
+    *mock.session_tenko_method.lock().unwrap() = "自動点呼".to_string();
+
+    let devices = Arc::new(MockDeviceRepository::default());
+    // lookup_device_tenant は成功させ (テナント一致)、get_device_settings だけ None を返す
+    devices.return_data.store(true, Ordering::SeqCst);
+    devices.return_no_settings_row.store(true, Ordering::SeqCst);
+
+    let (base_url, auth_header) = setup_with_mock_and_devices(mock, devices, Uuid::nil()).await;
+
+    let res = client()
+        .put(format!(
+            "{base_url}/api/tenko/sessions/{}/medical",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({
+            "temperature": 36.5,
+            "device_id": Uuid::new_v4(),
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        res.status(),
+        400,
+        "devices に設定行が無い端末は血圧必須のまま (フェイルクローズ)"
+    );
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["error"], "bp_required");
+    let message = body["message"].as_str().unwrap();
+    assert!(
+        message.contains("端末の設定 (devices) が見つかりません"),
+        "根拠は「不明 (設定行なし)」であるはず: {message}"
+    );
+    assert!(
+        !message.contains("血圧計があります") && !message.contains("端末設定で血圧測定が必須"),
+        "ボンド検出・端末設定の文言 (断定) を出さないこと: {message}"
+    );
+}
+
 // --- ボンド状態は X-Device-Bp-Bonded ヘッダーが正本 (Refs ippoan/alc-app#322,
 // ippoan/rust-alc-api#668)。CoreS3 経由の端末は devices テーブルに行を持たないため
 // devices.bp_enabled を引けず、ヘッダーが無いと従来どおり血圧必須 (フェイルクローズ) に
@@ -1011,6 +1070,16 @@ async fn test_submit_medical_bp_bonded_header_1_returns_400() {
         400,
         "X-Device-Bp-Bonded: 1 (ボンドされている) は血圧必須のまま"
     );
+    let body: serde_json::Value = res.json().await.unwrap();
+    let message = body["message"].as_str().unwrap();
+    assert!(
+        message.contains("X-Device-Bp-Bonded: 1"),
+        "根拠は「ボンド検出」であるはず: {message}"
+    );
+    assert!(
+        !message.contains("端末設定") && !message.contains("特定できなかった"),
+        "ボンド検出が根拠のときに端末設定や不明の文言を出さないこと: {message}"
+    );
 }
 
 #[tokio::test]
@@ -1040,6 +1109,16 @@ async fn test_submit_medical_bp_bonded_header_missing_fails_closed() {
         res.status(),
         400,
         "X-Device-Bp-Bonded ヘッダーが無いときは不明 → 血圧必須 (フェイルクローズ)"
+    );
+    let body: serde_json::Value = res.json().await.unwrap();
+    let message = body["message"].as_str().unwrap();
+    assert!(
+        message.contains("特定できなかった"),
+        "根拠は「不明 (fail-closed)」であるはず。血圧計あり等と断定しないこと: {message}"
+    );
+    assert!(
+        !message.contains("血圧計があります") && !message.contains("端末設定"),
+        "不明が根拠のときにボンド検出や端末設定の文言 (断定) を出さないこと: {message}"
     );
 }
 

@@ -1,6 +1,6 @@
 ---
 name: rust-alc-api-map
-generated-from: rust-alc-api:257d7b4de546611852df2b5df7a5354fbc118e95
+generated-from: rust-alc-api:f9301ccdf7adc206afc43be3577a6a36ba9d74c2
 paths: [crates/, src/, migrations/, tests/]
 description: rust-alc-api (アルコールチェッカー基盤の Rust/Axum Cargo workspace — domain crate 群 + monolith 単一バイナリ、PostgreSQL+RLS、Cloud Run) の構造ナビゲーション。どの crate に何のルートがあるか / monolith (rust-alc-api) 一本化 (gateway + per-domain は #556 で廃止) / RLS・migration・deploy/release 分離の gotcha を 1 枚にまとめる。トリガー:「rust-alc-api」「alc-api」「alc-notify」「alc-tenko」「alc-trouble」「alc-carins」「alc-dtako」「gateway」「tenko-api」「carins-api」「dtako-api」「trouble-api」「RLS テナント」「sqlx migration」「ts-rs」「Release Wave」「Bazel」等。
 ---
@@ -155,6 +155,12 @@ router 実装として存続。旧 per-domain は同じ domain crate を単独 m
   auth-worker が CoreS3 の署名を検証して転送する。ヘッダーが無いときだけ
   `body.device_id` → `devices.bp_enabled` (登録済み端末向け) にフォールバックする。
   クライアント (body) には血圧要否を申告させない設計 — フィールドを足さないこと。
+  **400 の message は根拠ごとに言い分ける (Refs #668 の 2)**: `bp_required` (真偽) だけで
+  判定していた頃は 400 の message が「ボンド検出」「端末設定」「不明 (fail-closed)」の
+  どの経路でも同じ断定文になっていた (#670 で理由を足した直後にこれが再発)。
+  `submit_medical` 内の `BpRequiredReason` (`Bonded` / `DeviceSetting` /
+  `Unknown(UnknownBpReason)`) が判定条件そのものは変えずに message だけを分ける。
+  `error` コード (`bp_required`) は不変。
 
 ## CI / deploy から見た立ち位置
 
