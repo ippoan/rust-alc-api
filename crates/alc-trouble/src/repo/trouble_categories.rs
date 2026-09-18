@@ -3,13 +3,13 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::models::{CreateTroubleCategory, TroubleCategory};
-use alc_core::master_data::{self, MasterCreateInput, MasterTable};
+use alc_core::master_data::{self, MasterCreateInput, MasterRow, MasterTable};
 
 pub use crate::repository::trouble_categories::*;
 
 // `TroubleCategory`/`CreateTroubleCategory` は trouble_task_types.rs (テーブルは
 // 別の trouble_task_types だが同じ Row/Create 型を再利用している) からも使うが、
-// この impl は crate 内のどこか 1 箇所にあれば十分 (Rust のトレイト解決は
+// これらの impl は crate 内のどこか 1 箇所にあれば十分 (Rust のトレイト解決は
 // 定義モジュールを問わない)。
 impl MasterCreateInput for CreateTroubleCategory {
     fn name(&self) -> &str {
@@ -18,6 +18,34 @@ impl MasterCreateInput for CreateTroubleCategory {
 
     fn sort_order(&self) -> Option<i32> {
         self.sort_order
+    }
+}
+
+/// `tests/mock_helpers` の Mock 実装 (in-memory) が list/create/update_sort_order
+/// を共通ロジックに寄せるための実装 (Refs #651)。
+impl MasterRow for TroubleCategory {
+    fn master_id(&self) -> uuid::Uuid {
+        self.id
+    }
+
+    fn set_master_sort_order(&mut self, sort_order: i32) {
+        self.sort_order = sort_order;
+    }
+
+    fn new_master_row(
+        id: uuid::Uuid,
+        tenant_id: uuid::Uuid,
+        name: String,
+        sort_order: i32,
+        created_at: chrono::DateTime<chrono::Utc>,
+    ) -> Self {
+        Self {
+            id,
+            tenant_id,
+            name,
+            sort_order,
+            created_at,
+        }
     }
 }
 

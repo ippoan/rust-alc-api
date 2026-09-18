@@ -17,6 +17,7 @@
 //! **`TABLE` にはソースコード上のリテラル以外を割り当てないこと** — 動的に
 //! 組み立てた文字列を代入すると、この前提が壊れる。
 
+use chrono::{DateTime, Utc};
 use sqlx::{postgres::PgRow, FromRow, PgPool};
 use uuid::Uuid;
 
@@ -33,6 +34,22 @@ pub trait MasterTable {
 pub trait MasterCreateInput {
     fn name(&self) -> &str;
     fn sort_order(&self) -> Option<i32>;
+}
+
+/// Mock 実装 (`tests/mock_helpers`) が list/create/update_sort_order の
+/// ロジックを共通化するための、Row 型に求める最小限の操作 (Refs #651)。
+/// 本番の Pg 実装は SQL の `RETURNING *` (`FromRow`) で組み立てるので
+/// 使わない — こちらは実 DB を持たない Mock (in-memory `Vec<Row>`) 専用。
+pub trait MasterRow: Sized {
+    fn master_id(&self) -> Uuid;
+    fn set_master_sort_order(&mut self, sort_order: i32);
+    fn new_master_row(
+        id: Uuid,
+        tenant_id: Uuid,
+        name: String,
+        sort_order: i32,
+        created_at: DateTime<Utc>,
+    ) -> Self;
 }
 
 fn list_sql(table: &str) -> String {
@@ -185,5 +202,46 @@ mod tests {
             sort_order: Some(7),
         };
         assert_eq!(input.sort_order().unwrap_or(0), 7);
+    }
+
+    #[derive(Clone)]
+    struct FakeRow {
+        id: Uuid,
+        sort_order: i32,
+    }
+    impl MasterRow for FakeRow {
+        fn master_id(&self) -> Uuid {
+            self.id
+        }
+        fn set_master_sort_order(&mut self, sort_order: i32) {
+            self.sort_order = sort_order;
+        }
+        fn new_master_row(
+            id: Uuid,
+            _tenant_id: Uuid,
+            _name: String,
+            sort_order: i32,
+            _created_at: DateTime<Utc>,
+        ) -> Self {
+            Self { id, sort_order }
+        }
+    }
+
+    #[test]
+    fn master_row_new_carries_id_and_sort_order() {
+        let id = Uuid::new_v4();
+        let row = FakeRow::new_master_row(id, Uuid::new_v4(), "x".to_string(), 3, Utc::now());
+        assert_eq!(row.master_id(), id);
+        assert_eq!(row.sort_order, 3);
+    }
+
+    #[test]
+    fn master_row_set_master_sort_order_updates_in_place() {
+        let mut row = FakeRow {
+            id: Uuid::new_v4(),
+            sort_order: 0,
+        };
+        row.set_master_sort_order(9);
+        assert_eq!(row.sort_order, 9);
     }
 }

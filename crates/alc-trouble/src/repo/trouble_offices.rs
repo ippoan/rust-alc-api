@@ -3,7 +3,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::models::{CreateTroubleOffice, TroubleOffice};
-use alc_core::master_data::{self, MasterCreateInput, MasterTable};
+use alc_core::master_data::{self, MasterCreateInput, MasterRow, MasterTable};
 
 pub use crate::repository::trouble_offices::*;
 
@@ -14,6 +14,34 @@ impl MasterCreateInput for CreateTroubleOffice {
 
     fn sort_order(&self) -> Option<i32> {
         self.sort_order
+    }
+}
+
+/// `tests/mock_helpers` の Mock 実装 (in-memory) が list/create/update_sort_order
+/// を共通ロジックに寄せるための実装 (Refs #651)。
+impl MasterRow for TroubleOffice {
+    fn master_id(&self) -> Uuid {
+        self.id
+    }
+
+    fn set_master_sort_order(&mut self, sort_order: i32) {
+        self.sort_order = sort_order;
+    }
+
+    fn new_master_row(
+        id: Uuid,
+        tenant_id: Uuid,
+        name: String,
+        sort_order: i32,
+        created_at: chrono::DateTime<chrono::Utc>,
+    ) -> Self {
+        Self {
+            id,
+            tenant_id,
+            name,
+            sort_order,
+            created_at,
+        }
     }
 }
 
