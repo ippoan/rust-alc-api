@@ -698,6 +698,9 @@ pub fn pg_maintenance_state(state: &AppState) -> alc_maintenance::MaintenanceSta
         vehicles: Arc::new(alc_maintenance::vehicles::PgVehiclesRepository::new(
             pool.clone(),
         )),
+        records: Arc::new(alc_maintenance::records::PgRecordsRepository::new(
+            pool.clone(),
+        )),
         car_inspections: state.car_inspections.clone(),
         categories: Arc::new(
             alc_maintenance::categories::PgMaintenanceCategoriesRepository::new(pool),

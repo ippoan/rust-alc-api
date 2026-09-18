@@ -402,6 +402,9 @@ async fn main() -> anyhow::Result<()> {
         vehicles: Arc::new(alc_maintenance::vehicles::PgVehiclesRepository::new(
             pool.clone(),
         )),
+        records: Arc::new(alc_maintenance::records::PgRecordsRepository::new(
+            pool.clone(),
+        )),
         car_inspections: car_inspections.clone(),
         categories: Arc::new(
             alc_maintenance::categories::PgMaintenanceCategoriesRepository::new(pool.clone()),

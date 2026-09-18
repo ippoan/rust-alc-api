@@ -24,6 +24,7 @@ pub use alc_dtako::dtako_y_time_export;
 pub use alc_dtako::dvr_notifications;
 pub use alc_dtako::vehicle_settings_dumps;
 pub use alc_maintenance::categories as maintenance_categories;
+pub use alc_maintenance::records as maintenance_records;
 pub use alc_maintenance::vehicles as maintenance_vehicles;
 pub use alc_misc::access_requests;
 pub use alc_misc::api_tokens;
@@ -246,6 +247,7 @@ pub fn router(
     let maintenance_tenant: Router<AppState> = Router::new()
         .merge(maintenance_vehicles::tenant_router())
         .merge(maintenance_categories::tenant_router())
+        .merge(maintenance_records::tenant_router())
         .layer(axum_middleware::from_fn(require_tenant_header))
         .with_state(maintenance_state);
 
