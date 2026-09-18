@@ -402,3 +402,19 @@ rust_test(
         proc_macro_dev = True,
     ),
 )
+
+rust_test(
+    name = "mock_maintenance",
+    srcs = ["tests/mock_maintenance/main.rs"] + _MOCK_TEST_SRCS,
+    crate_root = "tests/mock_maintenance/main.rs",
+    # tests/common/mod.rs の sqlx::migrate! が compile 時に migrations/ を読む
+    compile_data = glob(["migrations/**"]),
+    deps = [":rust_alc_api_lib"] + all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ) + _WORKSPACE_CRATES,
+    proc_macro_deps = all_crate_deps(
+        proc_macro = True,
+        proc_macro_dev = True,
+    ),
+)

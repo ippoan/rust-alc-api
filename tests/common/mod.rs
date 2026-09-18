@@ -703,8 +703,12 @@ pub fn pg_maintenance_state(state: &AppState) -> alc_maintenance::MaintenanceSta
         )),
         car_inspections: state.car_inspections.clone(),
         categories: Arc::new(
-            alc_maintenance::categories::PgMaintenanceCategoriesRepository::new(pool),
+            alc_maintenance::categories::PgMaintenanceCategoriesRepository::new(pool.clone()),
         ),
+        files: Arc::new(alc_maintenance::files::PgMaintenanceFilesRepository::new(
+            pool,
+        )),
+        storage: Some(Arc::new(MockStorage::new("maintenance-bucket"))),
     }
 }
 

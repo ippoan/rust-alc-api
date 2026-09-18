@@ -14,6 +14,7 @@
 //! このタスクでは車両マスタ API (`vehicles`) のみを持つ。整備カテゴリ / 整備記録 /
 //! 添付ファイルの handler は後続タスクが足す (テーブルは migrations/147 で先に用意済み)。
 
+pub mod files;
 pub mod models;
 pub mod records;
 pub mod vehicles;
@@ -21,7 +22,9 @@ pub mod vehicles;
 use std::sync::Arc;
 
 use alc_core::repository::car_inspections::CarInspectionRepository;
+use alc_core::storage::StorageBackend;
 
+use crate::files::MaintenanceFilesRepository;
 use crate::records::RecordsRepository;
 use crate::vehicles::VehiclesRepository;
 
@@ -40,6 +43,13 @@ pub struct MaintenanceState {
     /// 整備カテゴリの読み書き (Refs ippoan/rust-alc-api#651 — generic master の
     /// 5 番目の利用者)。
     pub categories: Arc<dyn categories::MaintenanceCategoriesRepository>,
+    /// 整備記録の添付ファイル (Refs #651)。
+    pub files: Arc<dyn MaintenanceFilesRepository>,
+    /// 写真添付用の storage。新しい `*_R2_BUCKET` は足さず、`src/main.rs` で
+    /// 組み立てている既定の共有 storage に prefix で相乗りする
+    /// (`crates/alc-trouble` の `trouble_storage` と同じ `Option` 設計 — 未設定なら
+    /// handler 側で 503 fail-closed にする)。
+    pub storage: Option<Arc<dyn StorageBackend>>,
 }
 
 pub mod categories;

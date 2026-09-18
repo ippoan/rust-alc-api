@@ -295,6 +295,7 @@ jobs:
           - { name: mock-misc, target: "//:mock_misc", coverage: "cov-mock-misc" }
           - { name: mock-tenko, target: "//:mock_tenko", coverage: "cov-mock-tenko" }
           - { name: mock-trouble, target: "//:mock_trouble", coverage: "cov-mock-trouble" }
+          - { name: mock-maintenance, target: "//:mock_maintenance" }
           - { name: auth, target: "//crates/alc-auth:alc-auth_test" }
           - { name: auth-jwt, target: "//crates/alc-auth-jwt:alc-auth-jwt_test", coverage: "cov-auth-jwt" }
           - { name: camera, target: "//crates/alc-camera:alc-camera_test" }

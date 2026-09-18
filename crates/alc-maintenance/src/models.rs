@@ -189,3 +189,21 @@ pub struct MaintenanceRecordsResponse {
     pub page: i64,
     pub per_page: i64,
 }
+
+/// 整備記録の添付ファイル (`maintenance_files`)。`crates/alc-trouble/src/models.rs`
+/// の `TroubleFile` と同じ列構成 (migrations/147:72 のコメント通り、Refs #651)。
+/// サムネイルは生成しない — `content_type` をそのまま保存・返却する
+/// (フロントが原寸を縮小表示する)。
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, TS)]
+#[ts(export)]
+pub struct MaintenanceFile {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub record_id: Uuid,
+    pub filename: String,
+    pub content_type: String,
+    pub size_bytes: i64,
+    pub storage_key: String,
+    pub created_at: DateTime<Utc>,
+    pub deleted_at: Option<DateTime<Utc>>,
+}
