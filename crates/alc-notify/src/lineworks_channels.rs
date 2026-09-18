@@ -15,6 +15,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use alc_core::api_error::{bad_request, internal_error_msg, not_found, upstream_error, ApiError};
 use alc_core::auth_lineworks::decrypt_secret;
 use alc_core::auth_middleware::TenantId;
 use alc_core::repository::bot_admin::BotAdminRepository;
@@ -53,49 +54,19 @@ pub fn internal_router() -> Router<AppState> {
         .route("/internal/lineworks/send", post(send_text_internal))
 }
 
-fn internal_error(msg: &str) -> (StatusCode, Json<serde_json::Value>) {
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(serde_json::json!({"error": "internal_error", "message": msg})),
-    )
-}
-
-fn encryption_key() -> Result<String, (StatusCode, Json<serde_json::Value>)> {
+fn encryption_key() -> Result<String, ApiError> {
     std::env::var("SSO_ENCRYPTION_KEY").map_err(|_| {
         tracing::error!("SSO_ENCRYPTION_KEY not set");
-        internal_error("encryption_key_missing")
+        internal_error_msg("encryption_key_missing")
     })
 }
 
-/// ハンドラの共通エラー形 (`{"error": ..., "message": ...}`)
-type ApiError = (StatusCode, Json<serde_json::Value>);
-
 fn channel_not_found() -> ApiError {
-    (
-        StatusCode::NOT_FOUND,
-        Json(serde_json::json!({"error": "channel_not_found"})),
-    )
+    not_found("channel_not_found")
 }
 
 fn recipient_not_found() -> ApiError {
-    (
-        StatusCode::NOT_FOUND,
-        Json(serde_json::json!({"error": "recipient_not_found"})),
-    )
-}
-
-fn bad_request(error: &str, message: &str) -> ApiError {
-    (
-        StatusCode::BAD_REQUEST,
-        Json(serde_json::json!({"error": error, "message": message})),
-    )
-}
-
-fn upstream_error(e: impl std::fmt::Display) -> ApiError {
-    (
-        StatusCode::BAD_GATEWAY,
-        Json(serde_json::json!({"error": "upstream_error", "message": e.to_string()})),
-    )
+    not_found("recipient_not_found")
 }
 
 // ---------- shared: 復号 + 送信 ----------
@@ -119,20 +90,20 @@ async fn resolve_bot_config(
         .await
         .map_err(|e| {
             tracing::error!("get_config_with_secrets: {e}");
-            internal_error("get_bot_config_failed")
+            internal_error_msg("get_bot_config_failed")
         })?
-        .ok_or_else(|| internal_error("bot_config_not_found"))?;
+        .ok_or_else(|| internal_error_msg("bot_config_not_found"))?;
 
     let key = encryption_key()?;
     let client_secret = decrypt_secret(&full.client_secret_encrypted, &key).map_err(|e| {
         tracing::error!("decrypt client_secret: {e}");
-        internal_error("decrypt_failed")
+        internal_error_msg("decrypt_failed")
     })?;
     let private_key =
         alc_core::auth_lineworks::decrypt_pem_secret(&full.private_key_encrypted, &key).map_err(
             |e| {
                 tracing::error!("decrypt private_key: {e}");
-                internal_error("decrypt_failed")
+                internal_error_msg("decrypt_failed")
             },
         )?;
 
@@ -221,14 +192,14 @@ async fn pick_lineworks_bot_config_id(
 ) -> Result<Uuid, ApiError> {
     let configs = bot_admin.list_configs(tenant_id).await.map_err(|e| {
         tracing::error!("list_configs: {e}");
-        internal_error("list_bot_configs_failed")
+        internal_error_msg("list_bot_configs_failed")
     })?;
 
     configs
         .iter()
         .find(|c| c.provider == "lineworks" && c.enabled)
         .map(|c| c.id)
-        .ok_or_else(|| internal_error("bot_config_not_found"))
+        .ok_or_else(|| internal_error_msg("bot_config_not_found"))
 }
 
 /// recipient (個人) 宛に LINE WORKS のダイレクトメッセージを送る。
@@ -265,7 +236,7 @@ async fn list_channels(
         .await
         .map_err(|e| {
             tracing::error!("list_active lineworks_channels: {e}");
-            internal_error("list_failed")
+            internal_error_msg("list_failed")
         })?;
     Ok(Json(rows))
 }
@@ -283,7 +254,7 @@ async fn delete_channel(
         .await
         .map_err(|e| {
             tracing::error!("delete lineworks_channel: {e}");
-            internal_error("delete_failed")
+            internal_error_msg("delete_failed")
         })?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -307,7 +278,7 @@ async fn test_send_channel(
         .await
         .map_err(|e| {
             tracing::error!("get lineworks_channel: {e}");
-            internal_error("get_failed")
+            internal_error_msg("get_failed")
         })?
         .ok_or_else(channel_not_found)?;
 
@@ -340,14 +311,14 @@ pub struct BotSecretEncryptedResponse {
 async fn get_bot_secret_internal(
     State(state): State<AppState>,
     Path(bot_id): Path<String>,
-) -> Result<Json<BotSecretEncryptedResponse>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Json<BotSecretEncryptedResponse>, ApiError> {
     let cfg = state
         .lineworks_channels
         .lookup_bot_config_for_webhook(&bot_id)
         .await
         .map_err(|e| {
             tracing::error!("lookup_bot_config_for_webhook (internal): {e}");
-            internal_error("lookup_failed")
+            internal_error_msg("lookup_failed")
         })?
         .ok_or((
             StatusCode::NOT_FOUND,
@@ -393,7 +364,7 @@ pub async fn process_internal_event(
         .await
         .map_err(|e| {
             tracing::error!("lookup_bot_config_for_webhook (event): {e}");
-            internal_error("lookup_failed")
+            internal_error_msg("lookup_failed")
         })?
         .ok_or((
             StatusCode::NOT_FOUND,
@@ -419,7 +390,7 @@ pub async fn process_internal_event(
                 .await
                 .map_err(|e| {
                     tracing::error!("upsert_joined (internal): {e}");
-                    internal_error("upsert_failed")
+                    internal_error_msg("upsert_failed")
                 })?;
         }
         "leave" | "left" => {
@@ -429,7 +400,7 @@ pub async fn process_internal_event(
                 .await
                 .map_err(|e| {
                     tracing::error!("mark_left (internal): {e}");
-                    internal_error("mark_left_failed")
+                    internal_error_msg("mark_left_failed")
                 })?;
         }
         _ => {}
@@ -513,7 +484,7 @@ async fn send_text_internal(
                 .await
                 .map_err(|e| {
                     tracing::error!("get_for_send lineworks_channel: {e}");
-                    internal_error("get_failed")
+                    internal_error_msg("get_failed")
                 })?
                 .ok_or_else(channel_not_found)?;
 
@@ -533,7 +504,7 @@ async fn send_text_internal(
                 .await
                 .map_err(|e| {
                     tracing::error!("get_for_send notify_recipient: {e}");
-                    internal_error("get_failed")
+                    internal_error_msg("get_failed")
                 })?
                 .ok_or_else(recipient_not_found)?;
 

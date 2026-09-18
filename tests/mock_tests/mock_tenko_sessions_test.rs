@@ -595,6 +595,11 @@ async fn test_submit_medical_wrong_tenko_type() {
         .unwrap();
 
     assert_eq!(res.status(), 400);
+    // 本文ゼロの 400 (「API エラー (400):」しか出ない) が 2 回本番で再現した
+    // (Refs yhonda-ohishi-alc/alc-app#322)。本文に理由が載ることを確かめる
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["error"], "invalid_tenko_type");
+    assert!(body["message"].as_str().is_some_and(|m| !m.is_empty()));
 }
 
 #[tokio::test]
@@ -618,6 +623,9 @@ async fn test_submit_medical_wrong_status() {
         .unwrap();
 
     assert_eq!(res.status(), 400);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["error"], "invalid_session_status");
+    assert!(body["message"].as_str().is_some_and(|m| !m.is_empty()));
 }
 
 #[tokio::test]
@@ -640,6 +648,8 @@ async fn test_submit_medical_not_found() {
         .unwrap();
 
     assert_eq!(res.status(), 404);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["error"], "session_not_found");
 }
 
 #[tokio::test]
@@ -686,6 +696,8 @@ async fn test_submit_medical_auto_missing_bp_returns_400() {
         .unwrap();
 
     assert_eq!(res.status(), 400);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["error"], "bp_required");
 }
 
 #[tokio::test]
@@ -935,6 +947,137 @@ async fn test_submit_medical_device_get_settings_db_error_returns_500() {
         .unwrap();
 
     assert_eq!(res.status(), 500);
+}
+
+// --- ボンド状態は X-Device-Bp-Bonded ヘッダーが正本 (Refs ippoan/alc-app#322,
+// ippoan/rust-alc-api#668)。CoreS3 経由の端末は devices テーブルに行を持たないため
+// devices.bp_enabled を引けず、ヘッダーが無いと従来どおり血圧必須 (フェイルクローズ) に
+// 倒れる。auth-worker (Refs ippoan/auth-worker#571) が CoreS3 (Refs
+// ippoan/alc-app-s3#249) の署名を検証したうえで転送する。 ---
+
+#[tokio::test]
+async fn test_submit_medical_bp_bonded_header_0_returns_200() {
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_status.lock().unwrap() = "medical_pending".to_string();
+    *mock.session_tenko_type.lock().unwrap() = "pre_operation".to_string();
+    *mock.session_tenko_method.lock().unwrap() = "自動点呼".to_string();
+    let (base_url, auth_header, _) = setup_with_mock(mock).await;
+
+    let res = client()
+        .put(format!(
+            "{base_url}/api/tenko/sessions/{}/medical",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .header("X-Device-Bp-Bonded", "0")
+        .json(&serde_json::json!({
+            "temperature": 36.5,
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        res.status(),
+        200,
+        "X-Device-Bp-Bonded: 0 (ボンドされていない) は血圧なしで通るはず"
+    );
+}
+
+#[tokio::test]
+async fn test_submit_medical_bp_bonded_header_1_returns_400() {
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_status.lock().unwrap() = "medical_pending".to_string();
+    *mock.session_tenko_type.lock().unwrap() = "pre_operation".to_string();
+    *mock.session_tenko_method.lock().unwrap() = "自動点呼".to_string();
+    let (base_url, auth_header, _) = setup_with_mock(mock).await;
+
+    let res = client()
+        .put(format!(
+            "{base_url}/api/tenko/sessions/{}/medical",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .header("X-Device-Bp-Bonded", "1")
+        .json(&serde_json::json!({
+            "temperature": 36.5,
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        res.status(),
+        400,
+        "X-Device-Bp-Bonded: 1 (ボンドされている) は血圧必須のまま"
+    );
+}
+
+#[tokio::test]
+async fn test_submit_medical_bp_bonded_header_missing_fails_closed() {
+    // ヘッダー自体が無い (古いファーム / CoreS3 以外の経路) = 不明 → 血圧必須のまま
+    // (device_id も送らないので devices.bp_enabled 経路も引けない、二重にフェイルクローズ)
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_status.lock().unwrap() = "medical_pending".to_string();
+    *mock.session_tenko_type.lock().unwrap() = "pre_operation".to_string();
+    *mock.session_tenko_method.lock().unwrap() = "自動点呼".to_string();
+    let (base_url, auth_header, _) = setup_with_mock(mock).await;
+
+    let res = client()
+        .put(format!(
+            "{base_url}/api/tenko/sessions/{}/medical",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({
+            "temperature": 36.5,
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        res.status(),
+        400,
+        "X-Device-Bp-Bonded ヘッダーが無いときは不明 → 血圧必須 (フェイルクローズ)"
+    );
+}
+
+#[tokio::test]
+async fn test_submit_medical_bp_bonded_header_overrides_device_bp_enabled() {
+    // ヘッダーが正本: devices.bp_enabled=true (登録済み端末では血圧必須) でも、
+    // ヘッダーが「ボンドされていない (0)」と言えばそちらを信じる
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_status.lock().unwrap() = "medical_pending".to_string();
+    *mock.session_tenko_type.lock().unwrap() = "pre_operation".to_string();
+    *mock.session_tenko_method.lock().unwrap() = "自動点呼".to_string();
+
+    let devices = Arc::new(MockDeviceRepository::default());
+    devices.return_data.store(true, Ordering::SeqCst);
+    devices.return_bp_enabled.store(true, Ordering::SeqCst);
+
+    let (base_url, auth_header) = setup_with_mock_and_devices(mock, devices, Uuid::nil()).await;
+
+    let res = client()
+        .put(format!(
+            "{base_url}/api/tenko/sessions/{}/medical",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .header("X-Device-Bp-Bonded", "0")
+        .json(&serde_json::json!({
+            "temperature": 36.5,
+            "device_id": Uuid::new_v4(),
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        res.status(),
+        200,
+        "X-Device-Bp-Bonded ヘッダーが devices.bp_enabled より優先されるはず"
+    );
 }
 
 // =========================================================================

@@ -9,11 +9,12 @@ use axum::{extract::State, http::StatusCode, Extension, Json, Router};
 use serde::Serialize;
 use std::collections::HashSet;
 
+use alc_core::api_error::internal_error_msg;
 use alc_core::auth_middleware::TenantId;
 use alc_core::AppState;
 
 use crate::clients::lineworks::LineworksBotClient;
-use crate::lineworks_config::{internal_error, resolve_lineworks_config};
+use crate::lineworks_config::resolve_lineworks_config;
 
 pub fn tenant_router() -> Router<AppState> {
     Router::new().route("/notify/lineworks/users", axum::routing::get(list_users))
@@ -64,7 +65,7 @@ async fn list_users(
     // Build set of already-registered lineworks_user_ids.
     let existing = state.notify_recipients.list(tenant.0).await.map_err(|e| {
         tracing::error!("list notify_recipients: {e}");
-        internal_error("list_recipients_failed")
+        internal_error_msg("list_recipients_failed")
     })?;
     let registered: HashSet<String> = existing
         .into_iter()

@@ -25,11 +25,9 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use alc_core::api_error::{internal_error, not_found, ApiError, ApiResult};
 use alc_core::models::User;
 use alc_core::AppState;
-
-type ErrorResponse = (StatusCode, Json<serde_json::Value>);
-type ApiResult<T> = Result<Json<T>, ErrorResponse>;
 
 /// internal レスポンス用に `User` から秘匿フィールド (`password_hash` /
 /// `refresh_token_*`) を除いた DTO。auth-worker は本 DTO + `slug` から access JWT を
@@ -88,26 +86,6 @@ pub struct RecipientTenant {
     pub name: String,
 }
 
-fn internal_error(context: &str, err: impl std::fmt::Display) -> ErrorResponse {
-    let detail = err.to_string();
-    tracing::error!("internal auth endpoint error ({context}): {detail}");
-    // staging (揮発 DB) でのみ DB エラー詳細を response に載せて診断を高速化する。
-    // 本番は内部エラー文言を隠す (情報漏洩防止)。
-    let body = if std::env::var("STAGING_MODE").as_deref() == Ok("true") {
-        serde_json::json!({ "error": "internal_error", "context": context, "detail": detail })
-    } else {
-        serde_json::json!({ "error": "internal_error" })
-    };
-    (StatusCode::INTERNAL_SERVER_ERROR, Json(body))
-}
-
-fn not_found(error: &str) -> ErrorResponse {
-    (
-        StatusCode::NOT_FOUND,
-        Json(serde_json::json!({ "error": error })),
-    )
-}
-
 /// `require_internal_jwt` 配下に nest される internal 認証データ route 群。
 pub fn internal_router() -> Router<AppState> {
     Router::new()
@@ -138,7 +116,7 @@ pub fn internal_router() -> Router<AppState> {
 /// `users_tenant_id_fkey` 違反で 500 になる。STAGING_MODE 限定で tenant を先に
 /// 冪等作成して救済する (Google login の自動 tenant 作成と同方針)。本番では
 /// tenant が永続なので dangling は起きず、この救済は走らない (no-op)。
-async fn ensure_tenant_for_staging(state: &AppState, tenant_id: Uuid) -> Result<(), ErrorResponse> {
+async fn ensure_tenant_for_staging(state: &AppState, tenant_id: Uuid) -> Result<(), ApiError> {
     if crate::is_staging_mode() {
         state
             .auth
@@ -372,7 +350,7 @@ struct RegisterRecipientBody {
 async fn register_line_recipient(
     State(state): State<AppState>,
     Json(b): Json<RegisterRecipientBody>,
-) -> Result<StatusCode, ErrorResponse> {
+) -> Result<StatusCode, ApiError> {
     state
         .auth
         .register_line_recipient(b.tenant_id, &b.name, &b.line_user_id)
@@ -396,7 +374,7 @@ struct SaveRefreshTokenBody {
 async fn save_refresh_token(
     State(state): State<AppState>,
     Json(b): Json<SaveRefreshTokenBody>,
-) -> Result<StatusCode, ErrorResponse> {
+) -> Result<StatusCode, ApiError> {
     state
         .auth
         .save_refresh_token(b.user_id, &b.refresh_hash, b.expires_at)
