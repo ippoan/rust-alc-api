@@ -1,5 +1,6 @@
-//! dtako 取り込みの乗務員解決 (`code` 優先) と、既存の二重登録を畳む migration 149 を
-//! 実 DB で固定する (Refs ippoan/rust-alc-api#669)。
+//! dtako 取り込みの乗務員解決 (`code` 優先、Refs ippoan/rust-alc-api#669)、復活時の
+//! `driver_cd` 衝突ガード、および migration 150 の部分一意 index
+//! (Refs ippoan/rust-alc-api#673) を実 DB で固定する。
 //!
 //! employees への書き込み経路は 2 つあり、キーが噛み合っていなかった:
 //!
@@ -25,10 +26,9 @@ use alc_core::repository::dtako_upload::DtakoUploadRepository;
 use alc_core::repository::employees::EmployeeRepository;
 use rust_alc_api::db::repository::{PgDtakoUploadRepository, PgEmployeeRepository};
 
-/// migration 149 の本体。テスト DB には起動時に既に適用済みなので、**同じファイルを
-/// もう一度流して**仕込んだ重複に対する振る舞いを見る (DO ブロックは「今ある重複を
-/// 畳む」ので何度流しても同じ意味になる)。
-const DEDUP_MIGRATION: &str = include_str!("../migrations/149_employees_dedup_by_driver_cd.sql");
+/// migration 150 が張る部分一意 index の名前
+/// (`UNIQUE (tenant_id, driver_cd) WHERE driver_cd IS NOT NULL AND deleted_at IS NULL`)。
+const LIVE_DRIVER_CD_INDEX: &str = "idx_employees_tenant_driver_cd_live";
 
 async fn setup_pool() -> sqlx::PgPool {
     let url = common::test_database_url();
@@ -55,6 +55,21 @@ async fn insert_employee(
     created_at: &str,
     deleted: bool,
 ) -> Uuid {
+    try_insert_employee(pool, tenant_id, code, driver_cd, name, created_at, deleted)
+        .await
+        .expect("Failed to insert employee")
+}
+
+/// `insert_employee` の Result 版。migration 150 の一意 index に当てて Err を見るテストが使う。
+async fn try_insert_employee(
+    pool: &sqlx::PgPool,
+    tenant_id: Uuid,
+    code: Option<&str>,
+    driver_cd: Option<&str>,
+    name: &str,
+    created_at: &str,
+    deleted: bool,
+) -> Result<Uuid, sqlx::Error> {
     let row: (Uuid,) = sqlx::query_as(
         "INSERT INTO alc_api.employees \
              (tenant_id, nfc_id, name, code, driver_cd, created_at, deleted_at) \
@@ -70,9 +85,8 @@ async fn insert_employee(
     .bind(created_at)
     .bind(deleted)
     .fetch_one(pool)
-    .await
-    .expect("Failed to insert employee");
-    row.0
+    .await?;
+    Ok(row.0)
 }
 
 async fn driver_cd_of(pool: &sqlx::PgPool, id: Uuid) -> Option<String> {
@@ -308,62 +322,23 @@ async fn get_employee_id_by_driver_cd_resolves_by_code_without_writing() {
 }
 
 // ---------------------------------------------------------------------------
-// D. migration 149 の振る舞い
+// D. migration 149 の振る舞い — **テストは置かない** (Refs ippoan/rust-alc-api#673)
 // ---------------------------------------------------------------------------
-
-async fn insert_operation(pool: &sqlx::PgPool, tenant_id: Uuid, driver_id: Uuid, unko_no: &str) {
-    sqlx::query(
-        "INSERT INTO alc_api.dtako_operations \
-             (tenant_id, unko_no, crew_role, reading_date, driver_id, raw_data) \
-         VALUES ($1, $2, 1, '2026-06-19', $3, '{}'::JSONB)",
-    )
-    .bind(tenant_id)
-    .bind(unko_no)
-    .bind(driver_id)
-    .execute(pool)
-    .await
-    .expect("Failed to insert operation");
-}
-
-async fn insert_daily_work_hours(
-    pool: &sqlx::PgPool,
-    tenant_id: Uuid,
-    driver_id: Uuid,
-    work_date: &str,
-) {
-    sqlx::query(
-        "INSERT INTO alc_api.dtako_daily_work_hours \
-             (tenant_id, driver_id, work_date, start_time) \
-         VALUES ($1, $2, $3::DATE, '08:00:00')",
-    )
-    .bind(tenant_id)
-    .bind(driver_id)
-    .bind(work_date)
-    .execute(pool)
-    .await
-    .expect("Failed to insert daily work hours");
-}
-
-async fn insert_work_segment(pool: &sqlx::PgPool, tenant_id: Uuid, driver_id: Uuid, unko_no: &str) {
-    sqlx::query(
-        "INSERT INTO alc_api.dtako_daily_work_segments \
-             (tenant_id, driver_id, work_date, unko_no, segment_index, start_at, end_at, work_minutes) \
-         VALUES ($1, $2, '2026-06-19', $3, 0, '2026-06-19T08:00:00Z', '2026-06-19T17:00:00Z', 540)",
-    )
-    .bind(tenant_id)
-    .bind(driver_id)
-    .bind(unko_no)
-    .execute(pool)
-    .await
-    .expect("Failed to insert work segment");
-}
-
-async fn run_dedup_migration(pool: &sqlx::PgPool) {
-    sqlx::raw_sql(DEDUP_MIGRATION)
-        .execute(pool)
-        .await
-        .expect("dedup migration failed");
-}
+//
+// ここには 149 (`149_employees_dedup_by_driver_cd.sql`) を実 DB で流し直して畳み方を
+// 見るテストが 3 本あったが、migration 150 で部分一意 index を張ったので削除した。
+//
+//   * **149 は適用済みで、sqlx の checksum (SHA-384) に凍結されている。** 中身を書き換える
+//     ことが機械的に不可能なので、「149 のロジックが壊れる」回帰は発生しない
+//   * **150 の index が在ると 149 のシナリオは構造的に再現できない。** 149 の step 1 は
+//     敗者 (同じ driver_cd の生存行) を soft-delete する**前に**勝者へ driver_cd を
+//     バックフィルするので、その UPDATE が必ず index に違反する。149 の冒頭コメントが
+//     「一意 index は張らない … 復活経路を塞ぐのとセットで別 PR にする」と書いた制約そのもの
+//   * **まっさらな DB では 149 は空の `employees` に対して走る**ので無害
+//     (重複が 0 件なら step 1 の `EXISTS` が 1 行も一致せず、違反しない)
+//
+// ⇒ 残せる回帰が無く、維持するにはテストの中から本番の制約を DROP するしかないので置かない。
+// 再発防止として今後効いているのは F 節 (index そのもの) と E 節 (復活時のガード)。
 
 async fn deleted_at_is_set(pool: &sqlx::PgPool, id: Uuid) -> bool {
     let row: Option<(bool,)> =
@@ -373,172 +348,6 @@ async fn deleted_at_is_set(pool: &sqlx::PgPool, id: Uuid) -> bool {
             .await
             .expect("Failed to read deleted_at");
     row.expect("行が物理削除されている (soft-delete のはず)").0
-}
-
-async fn operation_driver(pool: &sqlx::PgPool, unko_no: &str) -> Option<Uuid> {
-    sqlx::query_scalar("SELECT driver_id FROM alc_api.dtako_operations WHERE unko_no = $1")
-        .bind(unko_no)
-        .fetch_one(pool)
-        .await
-        .expect("Failed to read operation driver_id")
-}
-
-#[tokio::test]
-async fn migration_collapses_code_and_driver_cd_pair_and_moves_dtako_rows() {
-    let pool = setup_pool().await;
-    let tenant_id = common::create_test_tenant(&pool, "dedup migration pair").await;
-    // 正本 (code のみ) と dtako 由来の重複 (driver_cd のみ)。実際の症状そのもの。
-    let canonical = insert_employee(
-        &pool,
-        tenant_id,
-        Some("7101"),
-        None,
-        "正本 7101",
-        "2026-01-01T00:00:00Z",
-        false,
-    )
-    .await;
-    let duplicate = insert_employee(
-        &pool,
-        tenant_id,
-        None,
-        Some("7101"),
-        "dtako 7101",
-        "2026-02-01T00:00:00Z",
-        false,
-    )
-    .await;
-    let unko_no = format!("A{}", Uuid::new_v4().simple());
-    insert_operation(&pool, tenant_id, duplicate, &unko_no).await;
-    insert_daily_work_hours(&pool, tenant_id, duplicate, "2026-06-19").await;
-    insert_work_segment(&pool, tenant_id, duplicate, &unko_no).await;
-
-    run_dedup_migration(&pool).await;
-
-    assert_eq!(
-        live_employee_count(&pool, tenant_id).await,
-        1,
-        "1 行に畳まれる"
-    );
-    assert_eq!(
-        driver_cd_of(&pool, canonical).await,
-        Some("7101".to_string()),
-        "正本に driver_cd がバックフィルされる"
-    );
-    assert!(
-        deleted_at_is_set(&pool, duplicate).await,
-        "敗者は soft-delete"
-    );
-    assert_eq!(
-        operation_driver(&pool, &unko_no).await,
-        Some(canonical),
-        "dtako_operations.driver_id が勝者を指す"
-    );
-    let hours_driver: Uuid = sqlx::query_scalar(
-        "SELECT driver_id FROM alc_api.dtako_daily_work_hours \
-         WHERE tenant_id = $1 AND work_date = '2026-06-19'",
-    )
-    .bind(tenant_id)
-    .fetch_one(&pool)
-    .await
-    .expect("Failed to read daily work hours driver_id");
-    assert_eq!(
-        hours_driver, canonical,
-        "dtako_daily_work_hours も勝者を指す"
-    );
-    let segment_driver: Uuid = sqlx::query_scalar(
-        "SELECT driver_id FROM alc_api.dtako_daily_work_segments WHERE unko_no = $1",
-    )
-    .bind(&unko_no)
-    .fetch_one(&pool)
-    .await
-    .expect("Failed to read segment driver_id");
-    assert_eq!(
-        segment_driver, canonical,
-        "dtako_daily_work_segments も勝者を指す"
-    );
-}
-
-#[tokio::test]
-async fn migration_collapses_group_without_code_row() {
-    let pool = setup_pool().await;
-    let tenant_id = common::create_test_tenant(&pool, "dedup migration no code").await;
-    // code を持つ行が 1 つも無い重複 (取り込みの競合などで dtako 側だけが 2 行できた形)。
-    // 「code 側に対がある重複」に限定すると畳めないので、ここも対象にする。
-    let older = insert_employee(
-        &pool,
-        tenant_id,
-        None,
-        Some("7102"),
-        "dtako 7102 (古)",
-        "2026-01-01T00:00:00Z",
-        false,
-    )
-    .await;
-    let newer = insert_employee(
-        &pool,
-        tenant_id,
-        None,
-        Some("7102"),
-        "dtako 7102 (新)",
-        "2026-02-01T00:00:00Z",
-        false,
-    )
-    .await;
-    let unko_no = format!("B{}", Uuid::new_v4().simple());
-    insert_operation(&pool, tenant_id, newer, &unko_no).await;
-
-    run_dedup_migration(&pool).await;
-
-    assert_eq!(live_employee_count(&pool, tenant_id).await, 1);
-    assert!(
-        !deleted_at_is_set(&pool, older).await,
-        "created_at が古い方が勝者"
-    );
-    assert!(deleted_at_is_set(&pool, newer).await);
-    assert_eq!(operation_driver(&pool, &unko_no).await, Some(older));
-}
-
-#[tokio::test]
-async fn migration_soft_deletes_losers_without_physical_delete() {
-    let pool = setup_pool().await;
-    let tenant_id = common::create_test_tenant(&pool, "dedup migration soft delete").await;
-    let canonical = insert_employee(
-        &pool,
-        tenant_id,
-        Some("7103"),
-        None,
-        "正本 7103",
-        "2026-01-01T00:00:00Z",
-        false,
-    )
-    .await;
-    let duplicate = insert_employee(
-        &pool,
-        tenant_id,
-        None,
-        Some("7103"),
-        "dtako 7103",
-        "2026-02-01T00:00:00Z",
-        false,
-    )
-    .await;
-
-    run_dedup_migration(&pool).await;
-
-    // 物理削除していれば fetch_optional が None になり deleted_at_is_set が panic する
-    assert!(
-        deleted_at_is_set(&pool, duplicate).await,
-        "敗者は残っている"
-    );
-    assert!(!deleted_at_is_set(&pool, canonical).await, "勝者は生存");
-    let total: i64 =
-        sqlx::query_scalar("SELECT COUNT(*)::BIGINT FROM alc_api.employees WHERE tenant_id = $1")
-            .bind(tenant_id)
-            .fetch_one(&pool)
-            .await
-            .expect("Failed to count employees");
-    assert_eq!(total, 2, "行数は減らない (deleted_at を入れるだけ)");
 }
 
 // ---------------------------------------------------------------------------
@@ -552,9 +361,8 @@ async fn migration_soft_deletes_losers_without_physical_delete() {
 // `UNIQUE (tenant_id, driver_cd) WHERE driver_cd IS NOT NULL AND deleted_at IS NULL`
 // に違反して **1 人のせいでバッチ全体が 500** になる。
 //
-// **index はまだ張っていない**ので、ここで縛るのは「制約違反しないこと」ではなく
-// **driver_cd が NULL に落ちること**と **skipped の中身**。制約そのもののテストは
-// index を足す後続 PR の担当。
+// ここで縛るのは **driver_cd が NULL に落ちること**と **skipped の中身**。
+// index そのもの (述語が効いているか) は下の F 節が縛る。
 
 /// 既知の nfc_id を後から入れる (insert_employee は衝突回避のため毎回ランダムを入れる)。
 async fn set_nfc_id(pool: &sqlx::PgPool, id: Uuid, nfc_id: &str) {
@@ -776,5 +584,120 @@ async fn upsert_driver_does_not_error_when_insert_hits_a_unique_index() {
         live_employee_count(&pool, tenant_id).await,
         0,
         "行は増えない"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// F. migration 150 の部分一意 index (Refs ippoan/rust-alc-api#673)
+// ---------------------------------------------------------------------------
+//
+// 149 は既存の重複を畳んだだけで再発は止めていなかった。違反しうる書き手 (復活 2 経路と
+// dtako の新規 INSERT) を #674 で塞いだので、150 で
+// `UNIQUE (tenant_id, driver_cd) WHERE driver_cd IS NOT NULL AND deleted_at IS NULL`
+// を張った。ここで縛るのは**述語が効いていること**:
+//   * 生存 2 行が同じ (tenant_id, driver_cd) を持てない (再発防止そのもの)
+//   * 片方が soft-delete 済みなら通る (`deleted_at IS NULL` が無いと退職者の行が
+//     driver_cd を握ったままになる)
+//   * driver_cd 未設定の行は何行でも並ぶ (theearth 同期だけで作られた行を弾かない)
+
+#[tokio::test]
+async fn unique_index_rejects_second_live_row_with_same_driver_cd() {
+    let pool = setup_pool().await;
+    let tenant_id = common::create_test_tenant(&pool, "unique driver_cd live").await;
+    insert_employee(
+        &pool,
+        tenant_id,
+        None,
+        Some("7301"),
+        "dtako 7301",
+        "2026-01-01T00:00:00Z",
+        false,
+    )
+    .await;
+
+    let err = try_insert_employee(
+        &pool,
+        tenant_id,
+        None,
+        Some("7301"),
+        "二重登録 7301",
+        "2026-02-01T00:00:00Z",
+        false,
+    )
+    .await
+    .expect_err("生存 2 行が同じ (tenant_id, driver_cd) を持てない");
+
+    let db_err = err
+        .as_database_error()
+        .expect("一意違反は database error として返る");
+    assert_eq!(
+        db_err.constraint(),
+        Some(LIVE_DRIVER_CD_INDEX),
+        "落とすのは 150 の index (code や nfc_id の一意制約ではない)"
+    );
+    assert_eq!(
+        live_employee_count(&pool, tenant_id).await,
+        1,
+        "2 行目は入らない"
+    );
+}
+
+#[tokio::test]
+async fn unique_index_allows_same_driver_cd_when_the_other_row_is_soft_deleted() {
+    let pool = setup_pool().await;
+    let tenant_id = common::create_test_tenant(&pool, "unique driver_cd deleted").await;
+    // 退職して soft-delete された行が driver_cd を握っている状態。
+    insert_employee(
+        &pool,
+        tenant_id,
+        None,
+        Some("7302"),
+        "退職 7302",
+        "2026-01-01T00:00:00Z",
+        true,
+    )
+    .await;
+
+    let live = insert_employee(
+        &pool,
+        tenant_id,
+        None,
+        Some("7302"),
+        "dtako 7302",
+        "2026-02-01T00:00:00Z",
+        false,
+    )
+    .await;
+
+    assert_eq!(
+        driver_cd_of(&pool, live).await,
+        Some("7302".to_string()),
+        "deleted_at IS NULL の述語が効いているので、削除済みの行とは衝突しない"
+    );
+    assert_eq!(live_employee_count(&pool, tenant_id).await, 1);
+}
+
+#[tokio::test]
+async fn unique_index_allows_many_live_rows_without_driver_cd() {
+    let pool = setup_pool().await;
+    let tenant_id = common::create_test_tenant(&pool, "unique driver_cd null").await;
+    // theearth 同期だけで作られた行は driver_cd が NULL のまま並ぶ。
+    for (i, code) in ["7401", "7402", "7403"].iter().enumerate() {
+        insert_employee(
+            &pool,
+            tenant_id,
+            Some(code),
+            None,
+            &format!("正本 {code}"),
+            &format!("2026-01-0{}T00:00:00Z", i + 1),
+            false,
+        )
+        .await;
+    }
+
+    assert_eq!(
+        live_employee_count(&pool, tenant_id).await,
+        3,
+        "driver_cd IS NOT NULL の述語が効いているので、未設定の行同士は衝突しない"
     );
 }
