@@ -23,6 +23,7 @@ pub use alc_dtako::dtako_work_times;
 pub use alc_dtako::dtako_y_time_export;
 pub use alc_dtako::dvr_notifications;
 pub use alc_dtako::vehicle_settings_dumps;
+pub use alc_maintenance::categories as maintenance_categories;
 pub use alc_maintenance::vehicles as maintenance_vehicles;
 pub use alc_misc::access_requests;
 pub use alc_misc::api_tokens;
@@ -244,6 +245,7 @@ pub fn router(
     // マウントする。tenant 系ルートには monolith 本体と同じ require_tenant_header を張る。
     let maintenance_tenant: Router<AppState> = Router::new()
         .merge(maintenance_vehicles::tenant_router())
+        .merge(maintenance_categories::tenant_router())
         .layer(axum_middleware::from_fn(require_tenant_header))
         .with_state(maintenance_state);
 

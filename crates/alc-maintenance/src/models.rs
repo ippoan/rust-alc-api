@@ -83,3 +83,24 @@ pub struct CarinsCandidate {
     /// 電子車検証側の登録番号相当 (`EntryNoCarNo` / `CarNo` のうち非空の方)
     pub car_no: String,
 }
+
+/// 整備カテゴリ 1 行 (`maintenance_categories`)。`alc-trouble` の
+/// `TroubleCategory` と同じ形の generic master (`alc_core::master_data`) で
+/// CRUD する (Refs #651)。
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, TS)]
+#[ts(export)]
+pub struct MaintenanceCategory {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub name: String,
+    pub sort_order: i32,
+    pub created_at: DateTime<Utc>,
+}
+
+/// `POST /api/maintenance/categories` の body。
+#[derive(Debug, Deserialize, TS)]
+#[ts(export)]
+pub struct CreateMaintenanceCategory {
+    pub name: String,
+    pub sort_order: Option<i32>,
+}

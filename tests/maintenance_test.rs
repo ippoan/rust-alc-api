@@ -416,3 +416,171 @@ async fn test_maintenance_vehicles_tenant_isolation() {
         }
     );
 }
+
+// ===========================================================================
+// 整備カテゴリ (maintenance_categories) — generic master の 5 番目の利用者
+// (Refs ippoan/rust-alc-api#651)
+// ===========================================================================
+
+#[tokio::test]
+async fn test_maintenance_categories_auto_seed_when_empty() {
+    test_group!("整備カテゴリ: auto-seed");
+    test_case!(
+        "空のテナントで一覧を取ると既定 5 件が seed されて返る",
+        {
+            let state = common::setup_app_state().await;
+            let base_url = common::spawn_test_server(state.clone()).await;
+            let tenant_id =
+                common::create_test_tenant(state.pool(), "Maintenance Categories Seed Tenant")
+                    .await;
+            let jwt = common::create_test_jwt(tenant_id, "admin");
+            let client = reqwest::Client::new();
+            let auth = format!("Bearer {jwt}");
+
+            let res = client
+                .get(format!("{base_url}/api/maintenance/categories"))
+                .header("Authorization", &auth)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 200);
+            let categories: Value = res.json().await.unwrap();
+            let categories = categories.as_array().unwrap();
+            assert_eq!(categories.len(), 5);
+            let names: Vec<&str> = categories
+                .iter()
+                .map(|c| c["name"].as_str().unwrap())
+                .collect();
+            assert_eq!(
+                names,
+                vec!["定期点検", "修理", "部品交換", "タイヤ交換", "オイル交換"]
+            );
+        }
+    );
+}
+
+#[tokio::test]
+async fn test_maintenance_categories_no_reseed_when_not_empty() {
+    test_group!("整備カテゴリ: auto-seed");
+    test_case!(
+        "既にカテゴリがあれば既定 seed は走らず、追加分だけが返る",
+        {
+            let state = common::setup_app_state().await;
+            let base_url = common::spawn_test_server(state.clone()).await;
+            let tenant_id =
+                common::create_test_tenant(state.pool(), "Maintenance Categories No Reseed Tenant")
+                    .await;
+            let jwt = common::create_test_jwt(tenant_id, "admin");
+            let client = reqwest::Client::new();
+            let auth = format!("Bearer {jwt}");
+
+            let res = client
+                .post(format!("{base_url}/api/maintenance/categories"))
+                .header("Authorization", &auth)
+                .json(&serde_json::json!({ "name": "独自カテゴリ" }))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 201);
+
+            let res = client
+                .get(format!("{base_url}/api/maintenance/categories"))
+                .header("Authorization", &auth)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 200);
+            let categories: Value = res.json().await.unwrap();
+            let categories = categories.as_array().unwrap();
+            assert_eq!(categories.len(), 1);
+            assert_eq!(categories[0]["name"], "独自カテゴリ");
+        }
+    );
+}
+
+#[tokio::test]
+async fn test_maintenance_categories_duplicate_name_returns_409() {
+    test_group!("整備カテゴリ: 409");
+    test_case!("同名で作成すると 409", {
+        let state = common::setup_app_state().await;
+        let base_url = common::spawn_test_server(state.clone()).await;
+        let tenant_id =
+            common::create_test_tenant(state.pool(), "Maintenance Categories Conflict Tenant")
+                .await;
+        let jwt = common::create_test_jwt(tenant_id, "admin");
+        let client = reqwest::Client::new();
+        let auth = format!("Bearer {jwt}");
+
+        let res = client
+            .post(format!("{base_url}/api/maintenance/categories"))
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({ "name": "板金塗装" }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 201);
+
+        let res = client
+            .post(format!("{base_url}/api/maintenance/categories"))
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({ "name": "板金塗装" }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 409);
+    });
+}
+
+#[tokio::test]
+async fn test_maintenance_categories_tenant_isolation() {
+    test_group!("整備カテゴリ: RLS");
+    test_case!(
+        "別テナントのカテゴリは一覧にも sort_order 更新にも出ない",
+        {
+            let state = common::setup_app_state().await;
+            let base_url = common::spawn_test_server(state.clone()).await;
+            let tenant_a =
+                common::create_test_tenant(state.pool(), "Maintenance Categories RLS Tenant A")
+                    .await;
+            let tenant_b =
+                common::create_test_tenant(state.pool(), "Maintenance Categories RLS Tenant B")
+                    .await;
+            let jwt_a = common::create_test_jwt(tenant_a, "admin");
+            let jwt_b = common::create_test_jwt(tenant_b, "admin");
+            let client = reqwest::Client::new();
+
+            let res = client
+                .post(format!("{base_url}/api/maintenance/categories"))
+                .header("Authorization", format!("Bearer {jwt_a}"))
+                .json(&serde_json::json!({ "name": "テナントA専用カテゴリ" }))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 201);
+            let category_a: Value = res.json().await.unwrap();
+            let id_a = category_a["id"].as_str().unwrap();
+
+            // tenant B の一覧には出ない (tenant B は auto-seed の既定 5 件のみ)
+            let res = client
+                .get(format!("{base_url}/api/maintenance/categories"))
+                .header("Authorization", format!("Bearer {jwt_b}"))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 200);
+            let list: Value = res.json().await.unwrap();
+            let items = list.as_array().unwrap();
+            assert!(!items.iter().any(|c| c["id"] == id_a));
+
+            // tenant B から tenant A のカテゴリを sort_order 更新しようとすると 404
+            let res = client
+                .put(format!("{base_url}/api/maintenance/categories/{id_a}"))
+                .header("Authorization", format!("Bearer {jwt_b}"))
+                .json(&serde_json::json!({ "sort_order": 9 }))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 404);
+        }
+    );
+}
