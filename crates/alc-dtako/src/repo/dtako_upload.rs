@@ -303,6 +303,49 @@ impl DtakoUploadRepository for PgDtakoUploadRepository {
             return Ok(None);
         }
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
+
+        // 乗務員CD は theearth 乗務員マスタ同期が `code` 列に、dtako 取り込みが
+        // `driver_cd` 列に入れる (Refs ippoan/rust-alc-api#669)。dtako 側は値しか
+        // 持たないので **両方の列に突き合わせる**。正本である `code` を先に見て、
+        // 無いときだけ従来どおり `driver_cd` を見る。
+        // 2 列を `OR` で繋いだ 1 クエリにはしない — 重複が残っている間
+        // どちらがヒットするか不定になるため、upsert_by_code と同じ順序付きの
+        // 解決ラダーにする。
+        let by_code = sqlx::query_as::<_, (Uuid, Option<String>)>(
+            "SELECT id, driver_cd FROM alc_api.employees WHERE tenant_id = $1 AND code = $2 AND deleted_at IS NULL",
+        )
+        .bind(tenant_id)
+        .bind(driver_cd)
+        .fetch_optional(&mut *tc.conn)
+        .await?;
+
+        if let Some((id, existing_driver_cd)) = by_code {
+            if existing_driver_cd.is_some() {
+                return Ok(Some(id));
+            }
+            // 正本に driver_cd を埋めておくと、以後は下の driver_cd 検索で直接引ける。
+            // ただし同じ tenant に同じ driver_cd を持つ**別の生存行**が居るときは
+            // 埋めない — 埋めると重複を 1 つ増やしてしまうので、その行へ落とす。
+            let updated = sqlx::query(
+                r#"UPDATE alc_api.employees SET driver_cd = $2, updated_at = NOW()
+                   WHERE id = $3 AND tenant_id = $1
+                     AND driver_cd IS NULL AND deleted_at IS NULL
+                     AND NOT EXISTS (
+                         SELECT 1 FROM alc_api.employees o
+                          WHERE o.tenant_id = $1 AND o.driver_cd = $2
+                            AND o.deleted_at IS NULL AND o.id <> $3
+                     )"#,
+            )
+            .bind(tenant_id)
+            .bind(driver_cd)
+            .bind(id)
+            .execute(&mut *tc.conn)
+            .await?;
+            if updated.rows_affected() > 0 {
+                return Ok(Some(id));
+            }
+        }
+
         let existing = sqlx::query_as::<_, (Uuid,)>(
             "SELECT id FROM alc_api.employees WHERE tenant_id = $1 AND driver_cd = $2 AND deleted_at IS NULL",
         )
@@ -478,6 +521,19 @@ impl DtakoUploadRepository for PgDtakoUploadRepository {
         driver_cd: &str,
     ) -> Result<Option<Uuid>, sqlx::Error> {
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
+        // upsert_driver と同じ解決順 (正本の `code` → `driver_cd`)。
+        // ここは読み取り関数なので **driver_cd のバックフィルはしない** (副作用を持たせない)。
+        let by_code = sqlx::query_as::<_, (Uuid,)>(
+            "SELECT id FROM alc_api.employees WHERE tenant_id = $1 AND code = $2 AND deleted_at IS NULL",
+        )
+        .bind(tenant_id)
+        .bind(driver_cd)
+        .fetch_optional(&mut *tc.conn)
+        .await?;
+        if let Some(rec) = by_code {
+            return Ok(Some(rec.0));
+        }
+
         let rec = sqlx::query_as::<_, (Uuid,)>(
             "SELECT id FROM alc_api.employees WHERE tenant_id = $1 AND driver_cd = $2 AND deleted_at IS NULL",
         )
