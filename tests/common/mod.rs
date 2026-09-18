@@ -695,8 +695,13 @@ pub fn pg_maintenance_state(state: &AppState) -> alc_maintenance::MaintenanceSta
         .clone()
         .expect("spawn_test_server: state.pool is None — mock state は spawn_test_server_with_states を使うこと");
     alc_maintenance::MaintenanceState {
-        vehicles: Arc::new(alc_maintenance::vehicles::PgVehiclesRepository::new(pool)),
+        vehicles: Arc::new(alc_maintenance::vehicles::PgVehiclesRepository::new(
+            pool.clone(),
+        )),
         car_inspections: state.car_inspections.clone(),
+        categories: Arc::new(
+            alc_maintenance::categories::PgMaintenanceCategoriesRepository::new(pool),
+        ),
     }
 }
 

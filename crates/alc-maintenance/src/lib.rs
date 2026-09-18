@@ -33,4 +33,9 @@ pub struct MaintenanceState {
     /// `alc-carins` の `PgCarInspectionRepository` を呼び出し元 (main.rs / テスト) が
     /// 注入する — `alc-maintenance` は `alc-carins` に依存しない (trait は `alc-core`)。
     pub car_inspections: Arc<dyn CarInspectionRepository>,
+    /// 整備カテゴリの読み書き (Refs ippoan/rust-alc-api#651 — generic master の
+    /// 5 番目の利用者)。
+    pub categories: Arc<dyn categories::MaintenanceCategoriesRepository>,
 }
+
+pub mod categories;

@@ -403,6 +403,9 @@ async fn main() -> anyhow::Result<()> {
             pool.clone(),
         )),
         car_inspections: car_inspections.clone(),
+        categories: Arc::new(
+            alc_maintenance::categories::PgMaintenanceCategoriesRepository::new(pool.clone()),
+        ),
     };
 
     let state = AppState {

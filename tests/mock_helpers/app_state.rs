@@ -256,12 +256,53 @@ impl alc_maintenance::vehicles::VehiclesRepository for MockVehiclesRepository {
     }
 }
 
+/// MaintenanceCategoriesRepository のスタブ (Refs #651 — generic master の 5 番目の
+/// 利用者)。`MockVehiclesRepository` と同じ方針で、handler の mock test は用意せず
+/// (検証は実 DB 統合テスト `tests/maintenance_test.rs` 側)、MaintenanceState の型を
+/// 揃えるためだけのダミー — 読み出しは空 / write はエラーを返す。
+#[derive(Default)]
+pub struct MockMaintenanceCategoriesRepository;
+
+#[async_trait]
+impl alc_maintenance::categories::MaintenanceCategoriesRepository
+    for MockMaintenanceCategoriesRepository
+{
+    async fn list(
+        &self,
+        _tenant_id: Uuid,
+    ) -> Result<Vec<alc_maintenance::models::MaintenanceCategory>, sqlx::Error> {
+        Ok(vec![])
+    }
+
+    async fn create(
+        &self,
+        _tenant_id: Uuid,
+        _input: &alc_maintenance::models::CreateMaintenanceCategory,
+    ) -> Result<alc_maintenance::models::MaintenanceCategory, sqlx::Error> {
+        Err(sqlx::Error::RowNotFound)
+    }
+
+    async fn delete(&self, _tenant_id: Uuid, _id: Uuid) -> Result<bool, sqlx::Error> {
+        Ok(false)
+    }
+
+    async fn update_sort_order(
+        &self,
+        _tenant_id: Uuid,
+        _id: Uuid,
+        _sort_order: i32,
+    ) -> Result<Option<alc_maintenance::models::MaintenanceCategory>, sqlx::Error> {
+        Ok(None)
+    }
+}
+
 /// maintenance ドメインの mock MaintenanceState (Refs #651)。carins 照合は既存の
 /// `MockCarInspectionRepository` (デフォルトで matched_by="none" 相当) をそのまま使う。
 pub fn setup_mock_maintenance_state() -> alc_maintenance::MaintenanceState {
     alc_maintenance::MaintenanceState {
         vehicles: Arc::new(MockVehiclesRepository),
         car_inspections: Arc::new(MockCarInspectionRepository::default()),
+        categories: Arc::new(MockMaintenanceCategoriesRepository),
     }
 }
 
