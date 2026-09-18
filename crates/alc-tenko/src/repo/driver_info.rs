@@ -155,4 +155,55 @@ impl DriverInfoRepository for PgDriverInfoRepository {
         .fetch_all(&mut *tc.conn)
         .await
     }
+
+    async fn get_recent_maintenance_records(
+        &self,
+        tenant_id: Uuid,
+        employee_id: Uuid,
+    ) -> Result<Vec<MaintenanceRecordSummary>, sqlx::Error> {
+        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
+        // 直近の点呼セッションの carins_vehicle_id → maintenance_vehicles.car_id →
+        // maintenance_records を 1 CTE で解決する (N+1 にしない)。`alc-tenko` と
+        // `alc-maintenance` は兄弟 crate で直接依存しない規約 (crates/alc-maintenance/
+        // src/lib.rs) のため、ここは alc-maintenance に頼らず生 SQL で直接引く
+        // (前例: crates/alc-maintenance/src/vehicles.rs の carins_candidates が
+        // 他ドメインの car_inspection を crate 依存なしで叩いている)。
+        //
+        // carins_vehicle_id が NULL/空文字、または一致する maintenance_vehicles が
+        // 無ければ latest_session.car_id / vehicle が空になり、結果も自然に空配列に
+        // なる (404/500 にしない。carins を紐づけていないテナントでは解決しないのが
+        // 仕様)。空文字列ガードは crates/alc-maintenance/src/vehicles.rs の
+        // carins_candidates と同じ作法 (NULLIF で '' を NULL 扱いにする)。
+        // RLS だけに任せず WHERE 句にも tenant_id を明示する (この repo の作法)。
+        sqlx::query_as::<_, MaintenanceRecordSummary>(
+            r#"WITH latest_session AS (
+                   SELECT NULLIF(carins_vehicle_id, '') AS car_id
+                   FROM alc_api.tenko_sessions
+                   WHERE tenant_id = $1 AND employee_id = $2
+                   ORDER BY created_at DESC
+                   LIMIT 1
+               ),
+               vehicle AS (
+                   SELECT mv.id
+                   FROM alc_api.maintenance_vehicles mv, latest_session ls
+                   WHERE mv.tenant_id = $1
+                     AND mv.car_id = ls.car_id
+                     AND mv.deleted_at IS NULL
+               )
+               SELECT mr.id, mr.vehicle_id, mc.name AS category_name, mr.performed_on,
+                      mr.odometer_km, mr.vendor, mr.description, mr.cost::text AS cost,
+                      mr.next_due_on
+               FROM alc_api.maintenance_records mr
+               JOIN alc_api.maintenance_categories mc
+                   ON mc.id = mr.category_id AND mc.tenant_id = $1
+               JOIN vehicle v ON v.id = mr.vehicle_id
+               WHERE mr.tenant_id = $1 AND mr.deleted_at IS NULL
+               ORDER BY mr.performed_on DESC
+               LIMIT 5"#,
+        )
+        .bind(tenant_id)
+        .bind(employee_id)
+        .fetch_all(&mut *tc.conn)
+        .await
+    }
 }

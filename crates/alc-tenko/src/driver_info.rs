@@ -12,7 +12,7 @@ use alc_core::models::{CarryingItem, DtakoDailyWorkHours, Employee};
 
 use crate::models::{EmployeeHealthBaseline, EquipmentFailure, TenkoRecord};
 use crate::repository::driver_info::{
-    DailyInspectionSummary, InstructionSummary, MeasurementSummary,
+    DailyInspectionSummary, InstructionSummary, MaintenanceRecordSummary, MeasurementSummary,
 };
 use crate::TenkoState;
 
@@ -48,6 +48,7 @@ pub struct DriverInfo {
     // ト 車両整備状況
     pub recent_daily_inspections: Vec<DailyInspectionSummary>,
     pub equipment_failures: Vec<EquipmentFailure>,
+    pub recent_maintenance_records: Vec<MaintenanceRecordSummary>,
 }
 
 async fn get_driver_info(
@@ -121,6 +122,13 @@ async fn get_driver_info(
         .await
         .unwrap_or_default();
 
+    // ト 直近の車両整備記録 (carins 未紐づけ等で解決しなければ空配列)
+    let recent_maintenance_records = state
+        .driver_info
+        .get_recent_maintenance_records(tenant_id, employee_id)
+        .await
+        .unwrap_or_default();
+
     Ok(Json(DriverInfo {
         health_baseline,
         recent_measurements,
@@ -131,5 +139,6 @@ async fn get_driver_info(
         past_tenko_records,
         recent_daily_inspections,
         equipment_failures,
+        recent_maintenance_records,
     }))
 }

@@ -9,7 +9,7 @@ use crate::mock_helpers::app_state::setup_mock_app_state;
 use rust_alc_api::db::models::*;
 use rust_alc_api::db::repository::driver_info::DriverInfoRepository;
 use rust_alc_api::db::repository::driver_info::{
-    DailyInspectionSummary, InstructionSummary, MeasurementSummary,
+    DailyInspectionSummary, InstructionSummary, MaintenanceRecordSummary, MeasurementSummary,
 };
 
 // ============================================================
@@ -47,6 +47,7 @@ struct MockDriverInfoWithEmployee {
     fail_get_employee: AtomicBool,
     fail_get_health_baseline: AtomicBool,
     fail_get_recent_measurements: AtomicBool,
+    maintenance_records: std::sync::Mutex<Vec<MaintenanceRecordSummary>>,
 }
 
 impl MockDriverInfoWithEmployee {
@@ -57,6 +58,7 @@ impl MockDriverInfoWithEmployee {
             fail_get_employee: AtomicBool::new(false),
             fail_get_health_baseline: AtomicBool::new(false),
             fail_get_recent_measurements: AtomicBool::new(false),
+            maintenance_records: std::sync::Mutex::new(vec![]),
         }
     }
 }
@@ -145,6 +147,14 @@ impl DriverInfoRepository for MockDriverInfoWithEmployee {
     ) -> Result<Vec<EquipmentFailure>, sqlx::Error> {
         Ok(vec![])
     }
+
+    async fn get_recent_maintenance_records(
+        &self,
+        _tenant_id: Uuid,
+        _employee_id: Uuid,
+    ) -> Result<Vec<MaintenanceRecordSummary>, sqlx::Error> {
+        Ok(self.maintenance_records.lock().unwrap().clone())
+    }
 }
 
 // ============================================================
@@ -197,7 +207,86 @@ async fn test_get_driver_info_success() {
         .unwrap()
         .is_empty());
     assert!(body["equipment_failures"].as_array().unwrap().is_empty());
+    assert!(body["recent_maintenance_records"]
+        .as_array()
+        .unwrap()
+        .is_empty());
     assert!(body["health_baseline"].is_null());
+}
+
+/// GET /api/tenko/driver-info/{employee_id} — carins 未紐づけ等で整備記録が
+/// 解決しない場合、404/500 にならず recent_maintenance_records が空配列で返る
+/// (repository 側は unwrap_or_default() の作法。Refs #651)
+#[tokio::test]
+async fn test_get_driver_info_maintenance_unresolved_returns_empty() {
+    let tenant_id = Uuid::new_v4();
+    let employee_id = Uuid::new_v4();
+    let (state, tenko_state) = setup_state_with_employee(tenant_id, employee_id).await;
+    let base_url =
+        crate::mock_helpers::app_state::spawn_mock_server_with_tenko(state, tenko_state.clone())
+            .await;
+
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+    let client = reqwest::Client::new();
+    let res = client
+        .get(format!("{base_url}/api/tenko/driver-info/{employee_id}"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert!(body["recent_maintenance_records"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+}
+
+/// GET /api/tenko/driver-info/{employee_id} — 整備記録が解決した場合、
+/// recent_maintenance_records に内容がそのまま乗る (JSON へのフィールド名・型の
+/// マッピングを固定する。Refs #651)
+#[tokio::test]
+async fn test_get_driver_info_maintenance_records_present() {
+    let tenant_id = Uuid::new_v4();
+    let employee_id = Uuid::new_v4();
+    let mock = Arc::new(MockDriverInfoWithEmployee::new(tenant_id, employee_id));
+    *mock.maintenance_records.lock().unwrap() = vec![MaintenanceRecordSummary {
+        id: Uuid::new_v4(),
+        vehicle_id: Uuid::new_v4(),
+        category_name: "定期点検".to_string(),
+        performed_on: chrono::NaiveDate::from_ymd_opt(2026, 9, 1).unwrap(),
+        odometer_km: Some(12345),
+        vendor: Some("Test Motors".to_string()),
+        description: Some("オイル交換".to_string()),
+        cost: Some("5500.00".to_string()),
+        next_due_on: chrono::NaiveDate::from_ymd_opt(2026, 12, 1),
+    }];
+
+    let state = setup_mock_app_state();
+    let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
+    tenko_state.driver_info = mock;
+    let base_url =
+        crate::mock_helpers::app_state::spawn_mock_server_with_tenko(state, tenko_state.clone())
+            .await;
+
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+    let client = reqwest::Client::new();
+    let res = client
+        .get(format!("{base_url}/api/tenko/driver-info/{employee_id}"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    let records = body["recent_maintenance_records"].as_array().unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0]["category_name"], "定期点検");
+    assert_eq!(records[0]["vendor"], "Test Motors");
+    assert_eq!(records[0]["cost"], "5500.00");
+    assert_eq!(records[0]["performed_on"], "2026-09-01");
 }
 
 /// GET /api/tenko/driver-info/{employee_id} — employee not found → 404

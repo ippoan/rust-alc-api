@@ -27,7 +27,7 @@ use rust_alc_api::db::repository::devices::{
 };
 use rust_alc_api::db::repository::driver_info::DriverInfoRepository;
 use rust_alc_api::db::repository::driver_info::{
-    DailyInspectionSummary, InstructionSummary, MeasurementSummary,
+    DailyInspectionSummary, InstructionSummary, MaintenanceRecordSummary, MeasurementSummary,
 };
 use rust_alc_api::db::repository::dtako_csv_proxy::DtakoCsvProxyRepository;
 use rust_alc_api::db::repository::dtako_daily_hours::DtakoDailyHoursRepository;
@@ -1878,6 +1878,15 @@ impl DriverInfoRepository for MockDriverInfoRepository {
         &self,
         _tenant_id: Uuid,
     ) -> Result<Vec<EquipmentFailure>, sqlx::Error> {
+        check_fail!(self);
+        Ok(vec![])
+    }
+
+    async fn get_recent_maintenance_records(
+        &self,
+        _tenant_id: Uuid,
+        _employee_id: Uuid,
+    ) -> Result<Vec<MaintenanceRecordSummary>, sqlx::Error> {
         check_fail!(self);
         Ok(vec![])
     }
