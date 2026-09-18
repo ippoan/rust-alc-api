@@ -179,6 +179,20 @@ pub trait TenkoSessionRepository: Send + Sync {
         reason: &str,
     ) -> Result<TenkoSession, sqlx::Error>;
 
+    /// 運行管理者による点呼 OK/NG 判定を記録する (Refs ippoan/alc-app#315)。
+    /// status は変えない (オーナー決定: NG でも点呼は完了扱いのまま)。
+    /// `judged_by_employee_id` は判定した運行管理者 (employees.id)。呼び出し側が
+    /// 同テナント・`deleted_at IS NULL`・`role` に manager/admin を含むことを
+    /// 検証済みであること
+    async fn record_manager_judgment(
+        &self,
+        tenant_id: Uuid,
+        id: Uuid,
+        judgment: &str,
+        reason: &Option<String>,
+        judged_by_employee_id: Uuid,
+    ) -> Result<TenkoSession, sqlx::Error>;
+
     // --- Carrying items helpers ---
 
     async fn get_carrying_item_name(

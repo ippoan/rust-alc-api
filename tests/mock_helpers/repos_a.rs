@@ -1794,12 +1794,16 @@ impl rust_alc_api::device_pair_client::DevicePairClient for MockDevicePairClient
 
 pub struct MockDriverInfoRepository {
     pub fail_next: AtomicBool,
+    /// get_employee が返す Employee (Refs ippoan/alc-app#315: 判定した運行管理者の
+    /// ロール検証用)。None (既定) なら get_employee は Ok(None) を返す
+    pub employee: std::sync::Mutex<Option<Employee>>,
 }
 
 impl Default for MockDriverInfoRepository {
     fn default() -> Self {
         Self {
             fail_next: AtomicBool::new(false),
+            employee: std::sync::Mutex::new(None),
         }
     }
 }
@@ -1812,7 +1816,7 @@ impl DriverInfoRepository for MockDriverInfoRepository {
         _employee_id: Uuid,
     ) -> Result<Option<Employee>, sqlx::Error> {
         check_fail!(self);
-        Ok(None)
+        Ok(self.employee.lock().unwrap().clone())
     }
 
     async fn get_health_baseline(

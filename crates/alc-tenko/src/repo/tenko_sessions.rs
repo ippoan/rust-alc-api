@@ -570,6 +570,35 @@ impl TenkoSessionRepository for PgTenkoSessionRepository {
         .await
     }
 
+    async fn record_manager_judgment(
+        &self,
+        tenant_id: Uuid,
+        id: Uuid,
+        judgment: &str,
+        reason: &Option<String>,
+        judged_by_employee_id: Uuid,
+    ) -> Result<TenkoSession, sqlx::Error> {
+        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
+        sqlx::query_as::<_, TenkoSession>(
+            r#"
+            UPDATE tenko_sessions SET
+                manager_judgment = $1,
+                manager_judgment_reason = $2,
+                manager_judgment_by = $3,
+                updated_at = NOW()
+            WHERE id = $4 AND tenant_id = $5
+            RETURNING *
+            "#,
+        )
+        .bind(judgment)
+        .bind(reason)
+        .bind(judged_by_employee_id)
+        .bind(id)
+        .bind(tenant_id)
+        .fetch_one(&mut *tc.conn)
+        .await
+    }
+
     async fn get_carrying_item_name(
         &self,
         tenant_id: Uuid,

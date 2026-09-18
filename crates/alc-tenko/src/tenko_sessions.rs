@@ -14,10 +14,10 @@ use alc_core::auth_middleware::{AuthUser, TenantId};
 use alc_core::models::SubmitCarryingItemChecks;
 
 use crate::models::{
-    CancelTenkoSession, EscalateToRemote, InterruptSession, MedicalDiffs, ResumeSession,
-    SafetyJudgment, SelfDeclaration, StartTenkoSession, SubmitAlcoholResult, SubmitDailyInspection,
-    SubmitMedicalData, SubmitOperationReport, SubmitSelfDeclaration, TenkoDashboard, TenkoRecord,
-    TenkoSession, TenkoSessionFilter, TenkoSessionsResponse,
+    CancelTenkoSession, EscalateToRemote, InterruptSession, MedicalDiffs, RecordManagerJudgment,
+    ResumeSession, SafetyJudgment, SelfDeclaration, StartTenkoSession, SubmitAlcoholResult,
+    SubmitDailyInspection, SubmitMedicalData, SubmitOperationReport, SubmitSelfDeclaration,
+    TenkoDashboard, TenkoRecord, TenkoSession, TenkoSessionFilter, TenkoSessionsResponse,
 };
 use crate::repository::TenkoSessionRepository;
 
@@ -33,6 +33,10 @@ where
         .route("/tenko/dashboard", get(dashboard))
         .route("/tenko/sessions/{id}/interrupt", post(interrupt_session))
         .route("/tenko/sessions/{id}/resume", post(resume_session))
+        .route(
+            "/tenko/sessions/{id}/judgment",
+            post(record_manager_judgment),
+        )
         .route("/tenko/sessions/start", post(start_session))
         .route("/tenko/sessions/{id}", get(get_session))
         .route("/tenko/sessions/{id}/alcohol", put(submit_alcohol))
@@ -1136,6 +1140,76 @@ async fn resume_session(
         .await
         .map_err(|e| {
             tracing::error!("resume_session DB error: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    Ok(Json(session))
+}
+
+/// 運行管理者による点呼 OK/NG 判定 (Refs ippoan/alc-app#315)。
+///
+/// status は変えない (オーナー決定 1: NG でも点呼は完了扱いのまま)。
+/// safety_judgment (自動計算。日次健康集計・webhook が依存) や cancel_session
+/// (押すと即 cancelled) には流用しない — 別ファイルの理由をそのまま踏襲する。
+///
+/// ★ ロール検査 (オーナー決定 2、親レビューの [回答] で確定): 当初 `AuthUser.role`
+/// (`alc_api.users.role` = admin/viewer/payroll、`migrations/131` 参照) での判定を
+/// 検討したが 2 つの穴があった — (a) 運行管理者が `admin` でログインしているとは
+/// 限らず正当な利用者を弾く可能性がある、(b) `manager_judgment` は「どの運行管理者が
+/// 判断したか」の法定記録で、テナント管理者アカウントの識別子はその答えにならない。
+/// **2 段構えにする**:
+///   1. `AuthUser` が入っていること (= ブラウザ経由の利用者。乗務員キオスク端末の
+///      トークンを弾く) を必須にし、`role` の値では絞らない
+///   2. body の `judged_by_employee_id` が同テナントの `employees` に存在し
+///      (`deleted_at IS NULL`)、`role` (TEXT[]) に `manager` または `admin` を
+///      含むことをサーバ側で検証する。`manager_judgment_by` にはこの employee id
+///      を保存する (テナント管理者アカウントの user_id ではない)
+async fn record_manager_judgment(
+    State(state): State<TenkoState>,
+    tenant: axum::Extension<TenantId>,
+    auth_user: Option<axum::Extension<AuthUser>>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<RecordManagerJudgment>,
+) -> Result<Json<TenkoSession>, StatusCode> {
+    // ブラウザ経由の利用者であること (端末トークンには X-User-* が無く AuthUser が
+    // 入らない、crates/alc-core/src/auth_middleware.rs 参照)
+    let _ = auth_user.ok_or(StatusCode::UNAUTHORIZED)?;
+
+    if body.judgment != "ok" && body.judgment != "ng" {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    let tenant_id = tenant.0 .0;
+
+    let judge = state
+        .driver_info
+        .get_employee(tenant_id, body.judged_by_employee_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::FORBIDDEN)?;
+
+    if !judge.role.iter().any(|r| r == "manager" || r == "admin") {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    let repo = &*state.tenko_sessions;
+
+    repo.get(tenant_id, id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    let session = repo
+        .record_manager_judgment(
+            tenant_id,
+            id,
+            &body.judgment,
+            &body.reason,
+            body.judged_by_employee_id,
+        )
+        .await
+        .map_err(|e| {
+            tracing::error!("record_manager_judgment DB error: {e}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
