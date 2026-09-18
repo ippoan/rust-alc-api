@@ -1428,3 +1428,231 @@ async fn test_maintenance_files_tenant_isolation_in_list() {
         assert_eq!(res.status(), 404);
     });
 }
+
+#[tokio::test]
+async fn test_carins_import_candidates_and_import() {
+    test_group!("車両マスタ: carins 取り込み");
+    test_case!(
+        "未取り込みの carins を一覧し、1 トランザクションで作成/紐づけ/skip する",
+        {
+            let state = common::setup_app_state().await;
+            let base_url = common::spawn_test_server(state.clone()).await;
+            let tenant_id =
+                common::create_test_tenant(state.pool(), "Maintenance Carins Import Tenant").await;
+            let jwt = common::create_test_jwt(tenant_id, "admin");
+            let client = reqwest::Client::new();
+            let auth = format!("Bearer {jwt}");
+
+            // (a) 既存車両と登録番号が一致する車検証 (全角 — SQL 側 translate で突き合わせる)
+            let car_id_link = test_car_id();
+            insert_car_inspection(
+                &state,
+                tenant_id,
+                &test_cert_no(),
+                &car_id_link,
+                "品川３３０あ１２－３４",
+            )
+            .await;
+            // (b) 一致する車両が無い車検証
+            let car_id_create = test_car_id();
+            insert_car_inspection(
+                &state,
+                tenant_id,
+                &test_cert_no(),
+                &car_id_create,
+                "足立300さ99-99",
+            )
+            .await;
+
+            let res = client
+                .post(format!("{base_url}/api/maintenance/vehicles"))
+                .header("Authorization", &auth)
+                .json(&serde_json::json!({ "registration_number": "品川330あ12-34" }))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 201);
+            let existing: Value = res.json().await.unwrap();
+            let existing_id = existing["id"].as_str().unwrap().to_string();
+
+            // 候補一覧: 2 件とも未取り込みで出る。(a) だけ existing_vehicle_id が付く
+            let res = client
+                .get(format!(
+                    "{base_url}/api/maintenance/vehicles/carins-import-candidates"
+                ))
+                .header("Authorization", &auth)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 200);
+            let candidates: Value = res.json().await.unwrap();
+            let candidates = candidates.as_array().unwrap().clone();
+            let link_row = candidates
+                .iter()
+                .find(|c| c["car_id"] == car_id_link)
+                .unwrap_or_else(|| panic!("紐づけ対象が候補に出ること: {candidates:?}"));
+            assert_eq!(
+                link_row["existing_vehicle_id"],
+                Value::String(existing_id.clone())
+            );
+            assert_eq!(link_row["car_no"], "品川３３０あ１２－３４");
+            // 最小方針: 所有者・住所・車台番号は返さない。
+            // JSON オブジェクトのキー順は契約ではない (serde_json は preserve_order
+            // 無しだと BTreeMap = アルファベット順) ので、集合として比べる。
+            let keys: std::collections::BTreeSet<&str> = link_row
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect();
+            assert_eq!(
+                keys,
+                ["car_id", "cert_no", "car_no", "existing_vehicle_id"]
+                    .into_iter()
+                    .collect::<std::collections::BTreeSet<&str>>(),
+                "所有者・住所・車台番号を含まない最小の 4 フィールドちょうどであること"
+            );
+            let create_row = candidates
+                .iter()
+                .find(|c| c["car_id"] == car_id_create)
+                .unwrap_or_else(|| panic!("新規作成対象が候補に出ること: {candidates:?}"));
+            assert!(create_row["existing_vehicle_id"].is_null());
+
+            // 取り込み: 1 件は既存に紐づけ、1 件は新規作成
+            let res = client
+                .post(format!("{base_url}/api/maintenance/vehicles/carins-import"))
+                .header("Authorization", &auth)
+                .json(&serde_json::json!({ "car_ids": [car_id_link, car_id_create] }))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 200);
+            let result: Value = res.json().await.unwrap();
+            assert_eq!(result["created"], 1);
+            assert_eq!(result["linked"], 1);
+            assert_eq!(result["skipped"], 0);
+
+            // 既存行が新しく作られず、その場で紐づいていること
+            let res = client
+                .get(format!("{base_url}/api/maintenance/vehicles/{existing_id}"))
+                .header("Authorization", &auth)
+                .send()
+                .await
+                .unwrap();
+            let vehicle: Value = res.json().await.unwrap();
+            assert_eq!(vehicle["car_id"], car_id_link);
+            assert!(!vehicle["carins_linked_at"].is_null());
+
+            let res = client
+                .get(format!(
+                    "{base_url}/api/maintenance/vehicles?q=足立300さ99-99"
+                ))
+                .header("Authorization", &auth)
+                .send()
+                .await
+                .unwrap();
+            let list: Value = res.json().await.unwrap();
+            assert_eq!(list["total"], 1, "新規作成は 1 行だけ: {list:?}");
+            assert_eq!(list["items"][0]["car_id"], car_id_create);
+
+            // 取り込み済みは候補に出ない
+            let res = client
+                .get(format!(
+                    "{base_url}/api/maintenance/vehicles/carins-import-candidates"
+                ))
+                .header("Authorization", &auth)
+                .send()
+                .await
+                .unwrap();
+            let candidates: Value = res.json().await.unwrap();
+            assert!(
+                candidates.as_array().unwrap().is_empty(),
+                "取り込み済みは候補から消えること: {candidates:?}"
+            );
+
+            // 再実行しても重複行は増えない (冪等 — 全部 skip)
+            let res = client
+                .post(format!("{base_url}/api/maintenance/vehicles/carins-import"))
+                .header("Authorization", &auth)
+                .json(&serde_json::json!({ "car_ids": [car_id_link, car_id_create] }))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 200);
+            let result: Value = res.json().await.unwrap();
+            assert_eq!(result["created"], 0);
+            assert_eq!(result["linked"], 0);
+            assert_eq!(result["skipped"], 2);
+
+            // 空の car_ids は 400
+            let res = client
+                .post(format!("{base_url}/api/maintenance/vehicles/carins-import"))
+                .header("Authorization", &auth)
+                .json(&serde_json::json!({ "car_ids": [] }))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 400);
+        }
+    );
+}
+
+#[tokio::test]
+async fn test_carins_import_tenant_isolation() {
+    test_group!("車両マスタ: carins 取り込みの RLS");
+    test_case!(
+        "他テナントの CarId は候補に出ず、直接指定しても取り込まれない",
+        {
+            let state = common::setup_app_state().await;
+            let base_url = common::spawn_test_server(state.clone()).await;
+            let tenant_a =
+                common::create_test_tenant(state.pool(), "Maintenance Import RLS Tenant A").await;
+            let tenant_b =
+                common::create_test_tenant(state.pool(), "Maintenance Import RLS Tenant B").await;
+            let jwt_b = common::create_test_jwt(tenant_b, "admin");
+            let client = reqwest::Client::new();
+
+            let car_id_a = test_car_id();
+            insert_car_inspection(
+                &state,
+                tenant_a,
+                &test_cert_no(),
+                &car_id_a,
+                "横浜500た55-55",
+            )
+            .await;
+
+            let res = client
+                .get(format!(
+                    "{base_url}/api/maintenance/vehicles/carins-import-candidates"
+                ))
+                .header("Authorization", format!("Bearer {jwt_b}"))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 200);
+            let candidates: Value = res.json().await.unwrap();
+            assert!(
+                !candidates
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|c| c["car_id"] == car_id_a),
+                "他テナントの CarId が候補に出ないこと: {candidates:?}"
+            );
+
+            let res = client
+                .post(format!("{base_url}/api/maintenance/vehicles/carins-import"))
+                .header("Authorization", format!("Bearer {jwt_b}"))
+                .json(&serde_json::json!({ "car_ids": [car_id_a] }))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 200);
+            let result: Value = res.json().await.unwrap();
+            assert_eq!(result["created"], 0);
+            assert_eq!(result["linked"], 0);
+            assert_eq!(result["skipped"], 1);
+        }
+    );
+}
