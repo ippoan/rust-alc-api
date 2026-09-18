@@ -857,7 +857,10 @@ async fn test_remote_tenko_session_is_not_caught_by_normal_flow_index() {
                     .fetch_one(state.pool())
                     .await
                     .unwrap();
-            assert_eq!(method, "遠隔点呼", "スケジュール無しの session は遠隔点呼のはず (Refs ippoan/rust-alc-api#655)");
+            assert_eq!(
+                method, "遠隔点呼",
+                "スケジュール無しの session は遠隔点呼のはず (Refs ippoan/rust-alc-api#655)"
+            );
 
             // 同じ測定を遠隔点呼のセッションに付ける
             let res = client
