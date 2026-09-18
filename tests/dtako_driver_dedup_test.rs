@@ -20,8 +20,10 @@ mod common;
 use sqlx::postgres::PgPoolOptions;
 use uuid::Uuid;
 
+use alc_core::models::EmployeeUpsertItem;
 use alc_core::repository::dtako_upload::DtakoUploadRepository;
-use rust_alc_api::db::repository::PgDtakoUploadRepository;
+use alc_core::repository::employees::EmployeeRepository;
+use rust_alc_api::db::repository::{PgDtakoUploadRepository, PgEmployeeRepository};
 
 /// migration 149 の本体。テスト DB には起動時に既に適用済みなので、**同じファイルを
 /// もう一度流して**仕込んだ重複に対する振る舞いを見る (DO ブロックは「今ある重複を
@@ -537,4 +539,242 @@ async fn migration_soft_deletes_losers_without_physical_delete() {
             .await
             .expect("Failed to count employees");
     assert_eq!(total, 2, "行数は減らない (deleted_at を入れるだけ)");
+}
+
+// ---------------------------------------------------------------------------
+// E. upsert_by_code の復活と driver_cd の衝突 (Refs ippoan/rust-alc-api#673)
+// ---------------------------------------------------------------------------
+//
+// `upsert_by_code` の code 検索は **deleted_at を問わない** (idx_employees_code が
+// deleted_at を見ない一意制約なので、削除済み行を無視すると INSERT が衝突する)。
+// そのため論理削除済みの行も `deleted_at = NULL` で復活する。復活行が driver_cd を
+// 持ち、同じ値の生存行が別に居ると、後続 PR で張る
+// `UNIQUE (tenant_id, driver_cd) WHERE driver_cd IS NOT NULL AND deleted_at IS NULL`
+// に違反して **1 人のせいでバッチ全体が 500** になる。
+//
+// **index はまだ張っていない**ので、ここで縛るのは「制約違反しないこと」ではなく
+// **driver_cd が NULL に落ちること**と **skipped の中身**。制約そのもののテストは
+// index を足す後続 PR の担当。
+
+/// 既知の nfc_id を後から入れる (insert_employee は衝突回避のため毎回ランダムを入れる)。
+async fn set_nfc_id(pool: &sqlx::PgPool, id: Uuid, nfc_id: &str) {
+    sqlx::query("UPDATE alc_api.employees SET nfc_id = $2 WHERE id = $1")
+        .bind(id)
+        .bind(nfc_id)
+        .execute(pool)
+        .await
+        .expect("Failed to set nfc_id");
+}
+
+async fn nfc_id_of(pool: &sqlx::PgPool, id: Uuid) -> Option<String> {
+    sqlx::query_scalar("SELECT nfc_id FROM alc_api.employees WHERE id = $1")
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .expect("Failed to read nfc_id")
+}
+
+fn upsert_item(code: &str, name: &str, nfc_id: Option<&str>) -> EmployeeUpsertItem {
+    EmployeeUpsertItem {
+        code: code.to_string(),
+        name: name.to_string(),
+        nfc_id: nfc_id.map(|s| s.to_string()),
+        license_issue_date: None,
+        license_expiry_date: None,
+    }
+}
+
+#[tokio::test]
+async fn upsert_by_code_drops_driver_cd_when_reviving_into_a_conflict() {
+    let pool = setup_pool().await;
+    let tenant_id = common::create_test_tenant(&pool, "revive driver_cd conflict").await;
+    // 復活対象 (code 一致・driver_cd 持ち・論理削除済み)
+    let revived = insert_employee(
+        &pool,
+        tenant_id,
+        Some("7201"),
+        Some("7201"),
+        "退職 7201",
+        "2026-01-01T00:00:00Z",
+        true,
+    )
+    .await;
+    // 同じ driver_cd を持つ生存行 (dtako 取り込みが作った側)
+    let live = insert_employee(
+        &pool,
+        tenant_id,
+        None,
+        Some("7201"),
+        "dtako 7201",
+        "2026-02-01T00:00:00Z",
+        false,
+    )
+    .await;
+    let repo = PgEmployeeRepository::new(pool.clone());
+
+    let summary = repo
+        .upsert_by_code(tenant_id, &[upsert_item("7201", "復職 7201", None)])
+        .await
+        .expect("トランザクションごと落ちない (1 人の衝突で全員分を 500 にしない)");
+
+    assert_eq!(summary.updated, 1, "復活も更新もさせる (continue しない)");
+    assert!(
+        !deleted_at_is_set(&pool, revived).await,
+        "deleted_at = NULL で復活する"
+    );
+    assert_eq!(
+        driver_cd_of(&pool, revived).await,
+        None,
+        "衝突しているので復活行の driver_cd は落とす"
+    );
+    assert_eq!(
+        driver_cd_of(&pool, live).await,
+        Some("7201".to_string()),
+        "生存行の driver_cd は触らない"
+    );
+    let reasons: Vec<&str> = summary.skipped.iter().map(|s| s.reason.as_str()).collect();
+    assert_eq!(reasons, vec!["driver_cd_conflict"]);
+    assert_eq!(summary.skipped[0].code, "7201");
+}
+
+#[tokio::test]
+async fn upsert_by_code_keeps_driver_cd_when_no_conflict() {
+    let pool = setup_pool().await;
+    let tenant_id = common::create_test_tenant(&pool, "revive driver_cd kept").await;
+    let revived = insert_employee(
+        &pool,
+        tenant_id,
+        Some("7202"),
+        Some("7202"),
+        "退職 7202",
+        "2026-01-01T00:00:00Z",
+        true,
+    )
+    .await;
+    let repo = PgEmployeeRepository::new(pool.clone());
+
+    let summary = repo
+        .upsert_by_code(tenant_id, &[upsert_item("7202", "復職 7202", None)])
+        .await
+        .expect("upsert_by_code failed");
+
+    assert_eq!(summary.updated, 1);
+    assert!(!deleted_at_is_set(&pool, revived).await, "復活する");
+    assert_eq!(
+        driver_cd_of(&pool, revived).await,
+        Some("7202".to_string()),
+        "衝突相手が居なければ driver_cd は据え置き"
+    );
+    assert!(
+        summary.skipped.is_empty(),
+        "skipped は空 (衝突していないので理由が無い)"
+    );
+}
+
+#[tokio::test]
+async fn upsert_by_code_reports_nfc_id_and_driver_cd_conflicts_separately() {
+    let pool = setup_pool().await;
+    let tenant_id = common::create_test_tenant(&pool, "revive both conflicts").await;
+    let revived = insert_employee(
+        &pool,
+        tenant_id,
+        Some("7203"),
+        Some("7203"),
+        "退職 7203",
+        "2026-01-01T00:00:00Z",
+        true,
+    )
+    .await;
+    let revived_nfc = nfc_id_of(&pool, revived).await;
+    // nfc_id も driver_cd も抱えている生存行。両方の衝突が同時に立つ。
+    let live = insert_employee(
+        &pool,
+        tenant_id,
+        None,
+        Some("7203"),
+        "dtako 7203",
+        "2026-02-01T00:00:00Z",
+        false,
+    )
+    .await;
+    set_nfc_id(&pool, live, "20260101202612310000").await;
+    let repo = PgEmployeeRepository::new(pool.clone());
+
+    let summary = repo
+        .upsert_by_code(
+            tenant_id,
+            &[upsert_item(
+                "7203",
+                "復職 7203",
+                Some("20260101202612310000"),
+            )],
+        )
+        .await
+        .expect("upsert_by_code failed");
+
+    assert_eq!(summary.updated, 1);
+    assert!(!deleted_at_is_set(&pool, revived).await, "復活する");
+    assert_eq!(
+        nfc_id_of(&pool, revived).await,
+        revived_nfc,
+        "nfc_id は据え置き (衝突している側は触らない)"
+    );
+    assert_eq!(
+        driver_cd_of(&pool, revived).await,
+        None,
+        "nfc_id 衝突の分岐でも driver_cd は落とす"
+    );
+    // ★ 理由ごとに 1 行。運用側が原因を読み分けられるよう、同じ code が 2 エントリ並ぶ。
+    let reasons: Vec<&str> = summary.skipped.iter().map(|s| s.reason.as_str()).collect();
+    assert_eq!(reasons, vec!["nfc_id_conflict", "driver_cd_conflict"]);
+    assert!(summary.skipped.iter().all(|s| s.code == "7203"));
+}
+
+#[tokio::test]
+async fn upsert_driver_does_not_error_when_insert_hits_a_unique_index() {
+    let pool = setup_pool().await;
+    let tenant_id = common::create_test_tenant(&pool, "dtako insert on conflict").await;
+    // 論理削除済みの行が driver_cd を握っている。生存行を見る 2 つの SELECT は
+    // これを拾わないので、解決は INSERT まで進む。
+    insert_employee(
+        &pool,
+        tenant_id,
+        None,
+        Some("7204"),
+        "退職 7204",
+        "2026-01-01T00:00:00Z",
+        true,
+    )
+    .await;
+    // INSERT を確実に衝突させるための **この tenant 限定の代用 index**
+    // (後続 PR が張る本物の index ではない。本物は述語に deleted_at IS NULL を持つ)。
+    // 他のテストと同じ DB を共有するので、tenant_id で閉じて巻き込まないようにする。
+    let index_name = format!("idx_test_driver_cd_{}", Uuid::new_v4().simple());
+    sqlx::query(&format!(
+        "CREATE UNIQUE INDEX {index_name} ON alc_api.employees (tenant_id, driver_cd) \
+         WHERE driver_cd IS NOT NULL AND tenant_id = '{tenant_id}'::UUID"
+    ))
+    .execute(&pool)
+    .await
+    .expect("Failed to create test index");
+
+    let repo = PgDtakoUploadRepository::new(pool.clone());
+    let got = repo.upsert_driver(tenant_id, "7204", "デジタコ 7204").await;
+
+    sqlx::query(&format!("DROP INDEX alc_api.{index_name}"))
+        .execute(&pool)
+        .await
+        .expect("Failed to drop test index");
+
+    // 素の INSERT なら unique 違反で Err になり、取り込み 1 件が 500 になっていた。
+    let got = got.expect("ON CONFLICT DO NOTHING なので Err にならない");
+    assert_eq!(
+        got, None,
+        "衝突して 1 行も入らず、引き直しても生存行が無いので乗務員解決は None"
+    );
+    assert_eq!(
+        live_employee_count(&pool, tenant_id).await,
+        0,
+        "行は増えない"
+    );
 }

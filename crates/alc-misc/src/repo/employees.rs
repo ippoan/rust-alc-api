@@ -299,14 +299,34 @@ impl EmployeeRepository for PgEmployeeRepository {
         for item in items {
             // (a) code 一致 (deleted_at は問わない。idx_employees_code は
             // deleted_at を見ない一意制約なので、削除済み行を無視すると INSERT が衝突する)。
-            let by_code: Option<(Uuid,)> =
-                sqlx::query_as("SELECT id FROM employees WHERE tenant_id = $1 AND code = $2")
-                    .bind(tenant_id)
-                    .bind(&item.code)
-                    .fetch_optional(&mut *tx)
-                    .await?;
+            let by_code: Option<(Uuid, Option<String>)> = sqlx::query_as(
+                "SELECT id, driver_cd FROM employees WHERE tenant_id = $1 AND code = $2",
+            )
+            .bind(tenant_id)
+            .bind(&item.code)
+            .fetch_optional(&mut *tx)
+            .await?;
 
-            if let Some((id,)) = by_code {
+            if let Some((id, existing_driver_cd)) = by_code {
+                // ★ この分岐は削除済み行も拾って `deleted_at = NULL` で復活させる。
+                // `driver_cd` は後続で `UNIQUE (tenant_id, driver_cd)
+                // WHERE driver_cd IS NOT NULL AND deleted_at IS NULL` を張るので、
+                // 同じ値の生存行が別に居ると復活した瞬間に違反し、nfc_id と同じく
+                // **1 人のせいでトランザクションごと 500** になる。衝突しているときは
+                // **driver_cd だけ落として**復活させ、`skipped` に名指しで残す。
+                let driver_cd_conflict = match &existing_driver_cd {
+                    Some(driver_cd) => sqlx::query_as::<_, (i32,)>(
+                        "SELECT 1 FROM employees WHERE tenant_id = $1 AND driver_cd = $2 AND deleted_at IS NULL AND id <> $3",
+                    )
+                    .bind(tenant_id)
+                    .bind(driver_cd)
+                    .bind(id)
+                    .fetch_optional(&mut *tx)
+                    .await?
+                    .is_some(),
+                    None => false,
+                };
+
                 // ★ `nfc_id` は `UNIQUE (tenant_id, nfc_id)` (001_create_tables.sql)。
                 // **他の乗務員が同じ nfc_id を持っていると、その 1 行のせいで
                 // トランザクションごと 500 になる** (2026-09-02 本番、退職者を含めた
@@ -333,6 +353,7 @@ impl EmployeeRepository for PgEmployeeRepository {
                         UPDATE employees SET
                             name = $1,
                             license_issue_date = $2, license_expiry_date = $3,
+                            driver_cd = CASE WHEN $5::BOOLEAN THEN NULL ELSE driver_cd END,
                             deleted_at = NULL, updated_at = NOW()
                         WHERE id = $4
                         "#,
@@ -341,6 +362,7 @@ impl EmployeeRepository for PgEmployeeRepository {
                     .bind(item.license_issue_date)
                     .bind(item.license_expiry_date)
                     .bind(id)
+                    .bind(driver_cd_conflict)
                     .execute(&mut *tx)
                     .await?;
                     updated += 1;
@@ -352,6 +374,12 @@ impl EmployeeRepository for PgEmployeeRepository {
                         code: item.code.clone(),
                         reason: "nfc_id_conflict".to_string(),
                     });
+                    if driver_cd_conflict {
+                        skipped.push(EmployeeUpsertSkipped {
+                            code: item.code.clone(),
+                            reason: "driver_cd_conflict".to_string(),
+                        });
+                    }
                     continue;
                 }
 
@@ -360,6 +388,7 @@ impl EmployeeRepository for PgEmployeeRepository {
                     UPDATE employees SET
                         name = $1, nfc_id = $2,
                         license_issue_date = $3, license_expiry_date = $4,
+                        driver_cd = CASE WHEN $6::BOOLEAN THEN NULL ELSE driver_cd END,
                         deleted_at = NULL, updated_at = NOW()
                     WHERE id = $5
                     "#,
@@ -369,10 +398,17 @@ impl EmployeeRepository for PgEmployeeRepository {
                 .bind(item.license_issue_date)
                 .bind(item.license_expiry_date)
                 .bind(id)
+                .bind(driver_cd_conflict)
                 .execute(&mut *tx)
                 .await?;
                 updated += 1;
                 link_pending_cards(&mut tx, tenant_id, id, &item.code).await?;
+                if driver_cd_conflict {
+                    skipped.push(EmployeeUpsertSkipped {
+                        code: item.code.clone(),
+                        reason: "driver_cd_conflict".to_string(),
+                    });
+                }
                 continue;
             }
 

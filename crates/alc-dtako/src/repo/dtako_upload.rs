@@ -355,20 +355,39 @@ impl DtakoUploadRepository for PgDtakoUploadRepository {
         .await?;
 
         if let Some(rec) = existing {
-            Ok(Some(rec.0))
-        } else {
-            let rec = sqlx::query_as::<_, (Uuid,)>(
-                r#"INSERT INTO alc_api.employees (tenant_id, driver_cd, name)
-                   VALUES ($1, $2, $3)
-                   RETURNING id"#,
-            )
-            .bind(tenant_id)
-            .bind(driver_cd)
-            .bind(driver_name)
-            .fetch_one(&mut *tc.conn)
-            .await?;
-            Ok(Some(rec.0))
+            return Ok(Some(rec.0));
         }
+
+        // 後続で `UNIQUE (tenant_id, driver_cd) WHERE driver_cd IS NOT NULL
+        // AND deleted_at IS NULL` を張るので、素の INSERT は制約違反で落ちうる。
+        // **target 無しの `ON CONFLICT DO NOTHING`** にする — target を書くと
+        // index 述語の再記が要る (employees.rs の upsert_by_code と同じ流儀)。
+        let inserted = sqlx::query_as::<_, (Uuid,)>(
+            r#"INSERT INTO alc_api.employees (tenant_id, driver_cd, name)
+               VALUES ($1, $2, $3)
+               ON CONFLICT DO NOTHING
+               RETURNING id"#,
+        )
+        .bind(tenant_id)
+        .bind(driver_cd)
+        .bind(driver_name)
+        .fetch_optional(&mut *tc.conn)
+        .await?;
+
+        if let Some(rec) = inserted {
+            return Ok(Some(rec.0));
+        }
+
+        // 並行 INSERT に負けた (= 相手が入れた行が在る) ので引き直す。
+        let raced = sqlx::query_as::<_, (Uuid,)>(
+            "SELECT id FROM alc_api.employees WHERE tenant_id = $1 AND driver_cd = $2 AND deleted_at IS NULL",
+        )
+        .bind(tenant_id)
+        .bind(driver_cd)
+        .fetch_optional(&mut *tc.conn)
+        .await?;
+
+        Ok(raced.map(|rec| rec.0))
     }
 
     // --- operations ---
