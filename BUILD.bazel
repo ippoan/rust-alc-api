@@ -121,6 +121,26 @@ rust_test(
     ),
 )
 
+# driver_info の「ト 車両整備状況」節 (recent_maintenance_records、Refs #c651-7)。
+# tenko_sessions.carins_vehicle_id → maintenance_vehicles.car_id → maintenance_records
+# の解決は 1 CTE の生 SQL なので mock テストでは 1 行も通らない。ci.yml の
+# bazel-test-db と cache-warm.yml を同じ内容にすること
+# (check_bazel_test_matrix.sh が pair 一致を検査する)
+rust_test(
+    name = "driver_info_maintenance_test",
+    srcs = ["tests/driver_info_maintenance_test.rs"] + glob(["tests/common/**/*.rs"]),
+    crate_root = "tests/driver_info_maintenance_test.rs",
+    compile_data = glob(["migrations/**"]),
+    deps = [":rust_alc_api_lib"] + all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ) + _WORKSPACE_CRATES,
+    proc_macro_deps = all_crate_deps(
+        proc_macro = True,
+        proc_macro_dev = True,
+    ),
+)
+
 rust_test(
     name = "archive_repo_test",
     srcs = ["tests/archive_repo_test.rs"] + glob(["tests/common/**/*.rs"]),

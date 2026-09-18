@@ -172,6 +172,10 @@ jobs:
           # ci.yml の bazel-test-db と同じ内容にすること
           # (check_bazel_test_matrix.sh が pair 一致を検査する)
           - { name: db-maintenance, target: "//:maintenance_test" }
+          # driver_info の「ト 車両整備状況」節 (Refs #c651-7)。ci.yml の
+          # bazel-test-db と同じ内容にすること
+          # (check_bazel_test_matrix.sh が pair 一致を検査する)
+          - { name: db-driver-info-maintenance, target: "//:driver_info_maintenance_test" }
           - { name: db-archive, target: "//:archive_repo_test", coverage: "cov-db-archive" }
           - { name: db-hub-measurements, target: "//:hub_measurements_test" }
           - { name: db-timecard-punches, target: "//:timecard_punches_test" }
