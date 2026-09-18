@@ -296,13 +296,193 @@ impl alc_maintenance::categories::MaintenanceCategoriesRepository
     }
 }
 
+pub struct MockRecordsRepository;
+
+#[async_trait]
+impl alc_maintenance::records::RecordsRepository for MockRecordsRepository {
+    async fn list(
+        &self,
+        _tenant_id: Uuid,
+        filter: &alc_maintenance::models::MaintenanceRecordListFilter,
+    ) -> Result<alc_maintenance::models::MaintenanceRecordsResponse, sqlx::Error> {
+        Ok(alc_maintenance::models::MaintenanceRecordsResponse {
+            records: vec![],
+            total: 0,
+            page: filter.page.unwrap_or(1),
+            per_page: filter.per_page.unwrap_or(20),
+        })
+    }
+
+    async fn create(
+        &self,
+        _tenant_id: Uuid,
+        _created_by: Option<Uuid>,
+        _input: &alc_maintenance::models::CreateMaintenanceRecord,
+    ) -> Result<alc_maintenance::models::MaintenanceRecord, sqlx::Error> {
+        Err(sqlx::Error::RowNotFound)
+    }
+
+    async fn get(
+        &self,
+        _tenant_id: Uuid,
+        _id: Uuid,
+    ) -> Result<Option<alc_maintenance::models::MaintenanceRecord>, sqlx::Error> {
+        Ok(None)
+    }
+
+    async fn update(
+        &self,
+        _tenant_id: Uuid,
+        _id: Uuid,
+        _input: &alc_maintenance::models::UpdateMaintenanceRecord,
+    ) -> Result<Option<alc_maintenance::models::MaintenanceRecord>, sqlx::Error> {
+        Ok(None)
+    }
+
+    async fn soft_delete(&self, _tenant_id: Uuid, _id: Uuid) -> Result<bool, sqlx::Error> {
+        Ok(false)
+    }
+
+    async fn vehicle_belongs_to_tenant(
+        &self,
+        _tenant_id: Uuid,
+        _vehicle_id: Uuid,
+    ) -> Result<bool, sqlx::Error> {
+        Ok(false)
+    }
+
+    async fn category_belongs_to_tenant(
+        &self,
+        _tenant_id: Uuid,
+        _category_id: Uuid,
+    ) -> Result<bool, sqlx::Error> {
+        Ok(false)
+    }
+}
+
+/// MaintenanceFilesRepository の mock (Refs #651)。`fail_next` を立てると次の
+/// 呼び出しで sqlx::Error、`record_belongs` を false にすると
+/// `record_belongs_to_tenant` が false を返す (他テナントの record_id 相当)。
+/// デフォルトは `record_belongs = true` (=添付・一覧の主経路が通る)。
+pub struct MockMaintenanceFilesRepository {
+    pub fail_next: std::sync::atomic::AtomicBool,
+    pub record_belongs: std::sync::atomic::AtomicBool,
+    pub return_some: std::sync::atomic::AtomicBool,
+    pub delete_returns_false: std::sync::atomic::AtomicBool,
+    pub storage_key: std::sync::Mutex<String>,
+}
+
+impl Default for MockMaintenanceFilesRepository {
+    fn default() -> Self {
+        Self {
+            fail_next: std::sync::atomic::AtomicBool::new(false),
+            record_belongs: std::sync::atomic::AtomicBool::new(true),
+            return_some: std::sync::atomic::AtomicBool::new(false),
+            delete_returns_false: std::sync::atomic::AtomicBool::new(false),
+            storage_key: std::sync::Mutex::new("test-key".to_string()),
+        }
+    }
+}
+
+impl MockMaintenanceFilesRepository {
+    fn check_fail(&self) -> Result<(), sqlx::Error> {
+        if self
+            .fail_next
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            return Err(sqlx::Error::RowNotFound);
+        }
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl alc_maintenance::files::MaintenanceFilesRepository for MockMaintenanceFilesRepository {
+    async fn record_belongs_to_tenant(
+        &self,
+        _tenant_id: Uuid,
+        _record_id: Uuid,
+    ) -> Result<bool, sqlx::Error> {
+        self.check_fail()?;
+        Ok(self
+            .record_belongs
+            .load(std::sync::atomic::Ordering::SeqCst))
+    }
+
+    async fn create(
+        &self,
+        tenant_id: Uuid,
+        record_id: Uuid,
+        filename: &str,
+        content_type: &str,
+        size_bytes: i64,
+        storage_key: &str,
+    ) -> Result<alc_maintenance::models::MaintenanceFile, sqlx::Error> {
+        self.check_fail()?;
+        Ok(alc_maintenance::models::MaintenanceFile {
+            id: Uuid::new_v4(),
+            tenant_id,
+            record_id,
+            filename: filename.to_string(),
+            content_type: content_type.to_string(),
+            size_bytes,
+            storage_key: storage_key.to_string(),
+            created_at: chrono::Utc::now(),
+            deleted_at: None,
+        })
+    }
+
+    async fn list_by_record(
+        &self,
+        _tenant_id: Uuid,
+        _record_id: Uuid,
+    ) -> Result<Vec<alc_maintenance::models::MaintenanceFile>, sqlx::Error> {
+        self.check_fail()?;
+        Ok(vec![])
+    }
+
+    async fn get(
+        &self,
+        tenant_id: Uuid,
+        id: Uuid,
+    ) -> Result<Option<alc_maintenance::models::MaintenanceFile>, sqlx::Error> {
+        self.check_fail()?;
+        if self.return_some.load(std::sync::atomic::Ordering::SeqCst) {
+            let key = self.storage_key.lock().unwrap().clone();
+            Ok(Some(alc_maintenance::models::MaintenanceFile {
+                id,
+                tenant_id,
+                record_id: Uuid::new_v4(),
+                filename: "test.txt".to_string(),
+                content_type: "text/plain".to_string(),
+                size_bytes: 5,
+                storage_key: key,
+                created_at: chrono::Utc::now(),
+                deleted_at: None,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn soft_delete(&self, _tenant_id: Uuid, _id: Uuid) -> Result<bool, sqlx::Error> {
+        self.check_fail()?;
+        Ok(!self
+            .delete_returns_false
+            .load(std::sync::atomic::Ordering::SeqCst))
+    }
+}
+
 /// maintenance ドメインの mock MaintenanceState (Refs #651)。carins 照合は既存の
 /// `MockCarInspectionRepository` (デフォルトで matched_by="none" 相当) をそのまま使う。
 pub fn setup_mock_maintenance_state() -> alc_maintenance::MaintenanceState {
     alc_maintenance::MaintenanceState {
         vehicles: Arc::new(MockVehiclesRepository),
+        records: Arc::new(MockRecordsRepository),
         car_inspections: Arc::new(MockCarInspectionRepository::default()),
         categories: Arc::new(MockMaintenanceCategoriesRepository),
+        files: Arc::new(MockMaintenanceFilesRepository::default()),
+        storage: Some(Arc::new(MockStorage::new("maintenance-bucket"))),
     }
 }
 
