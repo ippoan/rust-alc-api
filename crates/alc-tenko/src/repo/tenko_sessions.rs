@@ -185,6 +185,7 @@ impl TenkoSessionRepository for PgTenkoSessionRepository {
         employee_id: Uuid,
         schedule_id: Option<Uuid>,
         tenko_type: &str,
+        tenko_method: &str,
         initial_status: &str,
         identity_face_photo_url: &Option<String>,
         location: &Option<String>,
@@ -194,11 +195,11 @@ impl TenkoSessionRepository for PgTenkoSessionRepository {
         sqlx::query_as::<_, TenkoSession>(
             r#"
             INSERT INTO tenko_sessions (
-                tenant_id, employee_id, schedule_id, tenko_type, status,
+                tenant_id, employee_id, schedule_id, tenko_type, tenko_method, status,
                 identity_verified_at, identity_face_photo_url, location,
                 responsible_manager_name, started_at
             )
-            VALUES ($1, $2, $3, $4, $8, NOW(), $5, $6, $7, NOW())
+            VALUES ($1, $2, $3, $4, $5, $9, NOW(), $6, $7, $8, NOW())
             RETURNING *
             "#,
         )
@@ -206,6 +207,7 @@ impl TenkoSessionRepository for PgTenkoSessionRepository {
         .bind(employee_id)
         .bind(schedule_id)
         .bind(tenko_type)
+        .bind(tenko_method)
         .bind(identity_face_photo_url)
         .bind(location)
         .bind(responsible_manager_name)

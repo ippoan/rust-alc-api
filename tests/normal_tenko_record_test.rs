@@ -803,10 +803,11 @@ async fn test_old_version_row_still_blocks_typed_resend() {
 }
 
 #[tokio::test]
-async fn test_auto_tenko_session_is_not_caught_by_normal_flow_index() {
+async fn test_remote_tenko_session_is_not_caught_by_normal_flow_index() {
     test_group!("通常点呼 → 点呼記録 (始業・終業)");
     test_case!(
-        "自動点呼の session は '自動点呼' で、通常点呼と同じ測定を付けても unique に当たらない",
+        "スケジュール無し (遠隔点呼) の session は '通常点呼' ではないため、\
+         通常点呼と同じ測定を付けても unique に当たらない (Refs ippoan/rust-alc-api#655)",
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
@@ -835,7 +836,7 @@ async fn test_auto_tenko_session_is_not_caught_by_normal_flow_index() {
             let m: Value = res.json().await.unwrap();
             let m_id = m["id"].as_str().unwrap();
 
-            // 自動点呼 (スケジュール無し) の終業
+            // 遠隔点呼 (スケジュール無し) の終業 (Refs ippoan/rust-alc-api#655)
             let res = client
                 .post(format!("{base_url}/api/tenko/sessions/start"))
                 .header("Authorization", &auth)
@@ -856,9 +857,12 @@ async fn test_auto_tenko_session_is_not_caught_by_normal_flow_index() {
                     .fetch_one(state.pool())
                     .await
                     .unwrap();
-            assert_eq!(method, "自動点呼");
+            assert_eq!(
+                method, "遠隔点呼",
+                "スケジュール無しの session は遠隔点呼のはず (Refs ippoan/rust-alc-api#655)"
+            );
 
-            // 同じ測定を自動点呼に付ける
+            // 同じ測定を遠隔点呼のセッションに付ける
             let res = client
                 .put(format!(
                     "{base_url}/api/tenko/sessions/{session_id}/alcohol"
@@ -875,7 +879,7 @@ async fn test_auto_tenko_session_is_not_caught_by_normal_flow_index() {
             assert_eq!(
                 res.status(),
                 200,
-                "自動点呼の measurement_id の書き込みは部分 unique に当たらない"
+                "遠隔点呼の measurement_id の書き込みは部分 unique に当たらない"
             );
         }
     );

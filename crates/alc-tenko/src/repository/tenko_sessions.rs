@@ -60,6 +60,7 @@ pub trait TenkoSessionRepository: Send + Sync {
         employee_id: Uuid,
         schedule_id: Option<Uuid>,
         tenko_type: &str,
+        tenko_method: &str,
         initial_status: &str,
         identity_face_photo_url: &Option<String>,
         location: &Option<String>,

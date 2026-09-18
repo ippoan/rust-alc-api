@@ -68,7 +68,7 @@ async fn start_session(
     let repo = &*state.tenko_sessions;
 
     // スケジュールあり / なし (遠隔点呼) で分岐
-    let (tenko_type, responsible_manager_name, schedule_id_for_insert) =
+    let (tenko_type, tenko_method, responsible_manager_name, schedule_id_for_insert) =
         if let Some(sid) = body.schedule_id {
             // スケジュール検証: 存在・未消費・乗務員一致
             let schedule = repo
@@ -90,14 +90,16 @@ async fn start_session(
             let rmn = schedule.responsible_manager_name.clone();
             let sid = schedule.id;
 
-            (tt, Some(rmn), Some(sid))
+            (tt, "自動点呼", Some(rmn), Some(sid))
         } else {
-            // 遠隔点呼: スケジュールなし
+            // 遠隔点呼: スケジュールなし。この口 (POST /tenko/sessions/start) を叩くのは
+            // alc-app のフロントのみで、スケジュール無しで開始するのは遠隔点呼の経路だけ
+            // (Refs ippoan/rust-alc-api#655)
             let tt = body
                 .tenko_type
                 .clone()
                 .unwrap_or_else(|| "pre_operation".to_string());
-            (tt, None::<String>, None::<Uuid>)
+            (tt, "遠隔点呼", None::<String>, None::<Uuid>)
         };
 
     // セッション作成 (業務前は体温・血圧から開始)
@@ -112,6 +114,7 @@ async fn start_session(
             body.employee_id,
             schedule_id_for_insert,
             &tenko_type,
+            tenko_method,
             initial_status,
             &body.identity_face_photo_url,
             &body.location,

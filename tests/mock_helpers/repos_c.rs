@@ -742,6 +742,8 @@ pub struct MockTenkoSessionRepository {
     pub fail_on_safety_judgment: AtomicBool,
     /// Fails only on update_carrying_items repo method (line 932-934 coverage)
     pub fail_on_update_carrying_items: AtomicBool,
+    /// create_session に渡された tenko_method を検証用に記録する (Refs ippoan/rust-alc-api#655)
+    pub created_session_tenko_method: std::sync::Mutex<Option<String>>,
 }
 
 impl Default for MockTenkoSessionRepository {
@@ -767,6 +769,7 @@ impl Default for MockTenkoSessionRepository {
             fail_on_create_record: AtomicBool::new(false),
             fail_on_safety_judgment: AtomicBool::new(false),
             fail_on_update_carrying_items: AtomicBool::new(false),
+            created_session_tenko_method: std::sync::Mutex::new(None),
         }
     }
 }
@@ -989,13 +992,15 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
         _employee_id: Uuid,
         _schedule_id: Option<Uuid>,
         _tenko_type: &str,
+        _tenko_method: &str,
         _initial_status: &str,
         _identity_face_photo_url: &Option<String>,
         _location: &Option<String>,
         _responsible_manager_name: &Option<String>,
     ) -> Result<TenkoSession, sqlx::Error> {
         check_fail_update!(self);
-        Ok(make_mock_session(
+        *self.created_session_tenko_method.lock().unwrap() = Some(_tenko_method.to_string());
+        let mut session = make_mock_session(
             _tenant_id,
             Uuid::new_v4(),
             _employee_id,
@@ -1003,7 +1008,9 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
             _tenko_type,
             false,
             false,
-        ))
+        );
+        session.tenko_method = _tenko_method.to_string();
+        Ok(session)
     }
 
     async fn update_alcohol(
