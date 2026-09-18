@@ -1043,6 +1043,10 @@ pub struct MockDeviceRepository {
     pub return_settings_token: AtomicBool,
     /// get_device_settings / list_devices で bp_enabled = true を返す (Refs ippoan/alc-app-s3#135)
     pub return_bp_enabled: AtomicBool,
+    /// get_device_settings だけを失敗させる (lookup_device_tenant は成功させたまま、
+    /// Refs ippoan/alc-app#322 — submit_medical の 2 段クエリを個別に落とすため
+    /// `fail_next` を使うと最初の lookup_device_tenant で消費されてしまう)
+    pub fail_get_device_settings: AtomicBool,
     /// get_device_re_pair_state が返す行 (Refs #495)。None なら 404 相当。
     pub re_pair_state: std::sync::Mutex<Option<RePairStateRow>>,
     /// record_re_pair_success の CAS が「他リクエストに先を越された」を
@@ -1079,6 +1083,7 @@ impl Default for MockDeviceRepository {
             return_code_exists_once: AtomicBool::new(false),
             return_settings_token: AtomicBool::new(false),
             return_bp_enabled: AtomicBool::new(false),
+            fail_get_device_settings: AtomicBool::new(false),
             re_pair_state: std::sync::Mutex::new(None),
             re_pair_window_already_consumed: AtomicBool::new(false),
         }
@@ -1207,6 +1212,9 @@ impl DeviceRepository for MockDeviceRepository {
         _device_id: Uuid,
     ) -> Result<Option<DeviceSettingsRow>, sqlx::Error> {
         check_fail!(self);
+        if self.fail_get_device_settings.swap(false, Ordering::SeqCst) {
+            return Err(sqlx::Error::RowNotFound);
+        }
         if self.return_data.load(Ordering::SeqCst) {
             let settings_token = if self.return_settings_token.load(Ordering::SeqCst) {
                 Some(Uuid::nil())

@@ -20,6 +20,7 @@ use crate::repository::{
     HealthBaselinesRepository, TenkoCallRepository, TenkoRecordsRepository,
     TenkoSchedulesRepository, TenkoSessionRepository, TenkoWebhooksRepository,
 };
+use alc_core::repository::DeviceRepository;
 use alc_core::webhook::WebhookService;
 
 /// tenko ドメインの State。tenko-api はこれをそのまま使い、
@@ -36,5 +37,8 @@ pub struct TenkoState {
     pub health_baselines: Arc<dyn HealthBaselinesRepository>,
     pub equipment_failures: Arc<dyn EquipmentFailuresRepository>,
     pub driver_info: Arc<dyn DriverInfoRepository>,
+    /// submit_medical で端末の `bp_enabled` (血圧計の有無) を正本から引くために使う
+    /// (Refs ippoan/alc-app#322)。それ以外の tenko ドメインでは今のところ未使用
+    pub devices: Arc<dyn DeviceRepository>,
     pub webhook: Option<Arc<dyn WebhookService>>,
 }

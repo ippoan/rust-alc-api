@@ -597,6 +597,7 @@ pub fn setup_mock_tenko_state() -> alc_tenko::TenkoState {
         health_baselines: Arc::new(MockHealthBaselinesRepository::default()),
         equipment_failures: Arc::new(MockEquipmentFailuresRepository::default()),
         driver_info: Arc::new(MockDriverInfoRepository::default()),
+        devices: Arc::new(MockDeviceRepository::default()),
         webhook: None,
     }
 }

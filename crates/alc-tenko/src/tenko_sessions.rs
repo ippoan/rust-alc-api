@@ -262,7 +262,43 @@ async fn submit_medical(
     // 自動点呼のときだけ血圧 (最高・最低) を必須にする。通常点呼・遠隔点呼は
     // 従来どおり空でも通す (Refs ippoan/alc-app-s3#135)。測れないときは
     // escalate-remote で遠隔点呼へ切り替えてから提出する
-    if session.tenko_method == "自動点呼" && (body.systolic.is_none() || body.diastolic.is_none())
+    //
+    // ただし血圧計を繋いでいない端末 (devices.bp_enabled = false) は血圧を必須にしない
+    // (Refs ippoan/alc-app#322)。`bp_enabled` 自体はクライアントに申告させず、
+    // 端末識別子だけを受け取ってサーバが正本 (devices テーブル) を引く。
+    // device_id 未送信・device がこのテナントに属さない・DB 未反映のいずれも
+    // 安全側 (血圧必須) に倒す — フェイルクローズ
+    let bp_required = match body.device_id {
+        Some(device_id) => {
+            let device_tenant_id = state
+                .devices
+                .lookup_device_tenant(device_id)
+                .await
+                .map_err(|e| {
+                    tracing::error!("submit_medical lookup_device_tenant error: {e}");
+                    StatusCode::INTERNAL_SERVER_ERROR
+                })?;
+            if device_tenant_id != Some(tenant_id) {
+                true
+            } else {
+                state
+                    .devices
+                    .get_device_settings(device_id)
+                    .await
+                    .map_err(|e| {
+                        tracing::error!("submit_medical get_device_settings error: {e}");
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })?
+                    .map(|settings| settings.bp_enabled)
+                    .unwrap_or(true)
+            }
+        }
+        None => true,
+    };
+
+    if session.tenko_method == "自動点呼"
+        && bp_required
+        && (body.systolic.is_none() || body.diastolic.is_none())
     {
         return Err(StatusCode::BAD_REQUEST);
     }

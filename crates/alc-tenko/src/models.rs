@@ -172,6 +172,10 @@ pub struct SubmitMedicalData {
     pub pulse: Option<i32>,
     pub medical_measured_at: Option<DateTime<Utc>>,
     pub medical_manual_input: Option<bool>,
+    /// 血圧必須判定に使う端末識別子 (Refs ippoan/alc-app#322)。判定結果 (bp_enabled) 自体は
+    /// クライアントに送らせない — サーバが `devices.bp_enabled` を正本として引く
+    #[serde(default)]
+    pub device_id: Option<Uuid>,
 }
 
 #[derive(Debug, Deserialize)]

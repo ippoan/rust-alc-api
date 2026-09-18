@@ -623,7 +623,8 @@ pub fn pg_tenko_state(state: &AppState) -> alc_tenko::TenkoState {
         daily_health: Arc::new(PgDailyHealthRepository::new(pool.clone())),
         health_baselines: Arc::new(PgHealthBaselinesRepository::new(pool.clone())),
         equipment_failures: Arc::new(PgEquipmentFailuresRepository::new(pool.clone())),
-        driver_info: Arc::new(PgDriverInfoRepository::new(pool)),
+        driver_info: Arc::new(PgDriverInfoRepository::new(pool.clone())),
+        devices: Arc::new(PgDeviceRepository::new(pool)),
         webhook: state.webhook.clone(),
     }
 }
