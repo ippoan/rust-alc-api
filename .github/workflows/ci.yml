@@ -399,6 +399,12 @@ jobs:
           # RLS のテナント分離を実 DB で固定する。ci.yml の bazel-test-db と cache-warm.yml
           # を同じ内容にすること (check_bazel_test_matrix.sh が pair 一致を検査する)
           - { name: db-maintenance, target: "//:maintenance_test" }
+          # driver_info の「ト 車両整備状況」節 (recent_maintenance_records、Refs #c651-7)。
+          # tenko_sessions.carins_vehicle_id → maintenance_vehicles.car_id →
+          # maintenance_records の解決は 1 CTE の生 SQL なので mock では 1 行も通らない。
+          # ci.yml の bazel-test-db と cache-warm.yml を同じ内容にすること
+          # (check_bazel_test_matrix.sh が pair 一致を検査する)
+          - { name: db-driver-info-maintenance, target: "//:driver_info_maintenance_test" }
           - { name: db-archive, target: "//:archive_repo_test", coverage: "cov-db-archive" }
           - { name: db-hub-measurements, target: "//:hub_measurements_test" }
           - { name: db-timecard-punches, target: "//:timecard_punches_test" }
