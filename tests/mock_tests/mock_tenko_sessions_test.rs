@@ -816,6 +816,16 @@ async fn test_submit_medical_device_bp_enabled_true_returns_400() {
         400,
         "bp_enabled=true の端末は従来どおり血圧なしを弾くはず (回帰)"
     );
+    let body: serde_json::Value = res.json().await.unwrap();
+    let message = body["message"].as_str().unwrap();
+    assert!(
+        message.contains("端末設定"),
+        "根拠は「端末設定」であるはず、断定 (血圧計あり/検出) にしないこと: {message}"
+    );
+    assert!(
+        !message.contains("検出") && !message.contains("特定できなかった"),
+        "端末設定が根拠のときにボンド検出や不明の文言を出さないこと: {message}"
+    );
 }
 
 #[tokio::test]
@@ -1011,6 +1021,16 @@ async fn test_submit_medical_bp_bonded_header_1_returns_400() {
         400,
         "X-Device-Bp-Bonded: 1 (ボンドされている) は血圧必須のまま"
     );
+    let body: serde_json::Value = res.json().await.unwrap();
+    let message = body["message"].as_str().unwrap();
+    assert!(
+        message.contains("X-Device-Bp-Bonded: 1"),
+        "根拠は「ボンド検出」であるはず: {message}"
+    );
+    assert!(
+        !message.contains("端末設定") && !message.contains("特定できなかった"),
+        "ボンド検出が根拠のときに端末設定や不明の文言を出さないこと: {message}"
+    );
 }
 
 #[tokio::test]
@@ -1040,6 +1060,16 @@ async fn test_submit_medical_bp_bonded_header_missing_fails_closed() {
         res.status(),
         400,
         "X-Device-Bp-Bonded ヘッダーが無いときは不明 → 血圧必須 (フェイルクローズ)"
+    );
+    let body: serde_json::Value = res.json().await.unwrap();
+    let message = body["message"].as_str().unwrap();
+    assert!(
+        message.contains("特定できなかった"),
+        "根拠は「不明 (fail-closed)」であるはず。血圧計あり等と断定しないこと: {message}"
+    );
+    assert!(
+        !message.contains("血圧計があります") && !message.contains("端末設定"),
+        "不明が根拠のときにボンド検出や端末設定の文言 (断定) を出さないこと: {message}"
     );
 }
 
