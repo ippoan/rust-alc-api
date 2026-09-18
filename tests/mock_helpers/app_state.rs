@@ -296,11 +296,76 @@ impl alc_maintenance::categories::MaintenanceCategoriesRepository
     }
 }
 
+pub struct MockRecordsRepository;
+
+#[async_trait]
+impl alc_maintenance::records::RecordsRepository for MockRecordsRepository {
+    async fn list(
+        &self,
+        _tenant_id: Uuid,
+        filter: &alc_maintenance::models::MaintenanceRecordListFilter,
+    ) -> Result<alc_maintenance::models::MaintenanceRecordsResponse, sqlx::Error> {
+        Ok(alc_maintenance::models::MaintenanceRecordsResponse {
+            records: vec![],
+            total: 0,
+            page: filter.page.unwrap_or(1),
+            per_page: filter.per_page.unwrap_or(20),
+        })
+    }
+
+    async fn create(
+        &self,
+        _tenant_id: Uuid,
+        _created_by: Option<Uuid>,
+        _input: &alc_maintenance::models::CreateMaintenanceRecord,
+    ) -> Result<alc_maintenance::models::MaintenanceRecord, sqlx::Error> {
+        Err(sqlx::Error::RowNotFound)
+    }
+
+    async fn get(
+        &self,
+        _tenant_id: Uuid,
+        _id: Uuid,
+    ) -> Result<Option<alc_maintenance::models::MaintenanceRecord>, sqlx::Error> {
+        Ok(None)
+    }
+
+    async fn update(
+        &self,
+        _tenant_id: Uuid,
+        _id: Uuid,
+        _input: &alc_maintenance::models::UpdateMaintenanceRecord,
+    ) -> Result<Option<alc_maintenance::models::MaintenanceRecord>, sqlx::Error> {
+        Ok(None)
+    }
+
+    async fn soft_delete(&self, _tenant_id: Uuid, _id: Uuid) -> Result<bool, sqlx::Error> {
+        Ok(false)
+    }
+
+    async fn vehicle_belongs_to_tenant(
+        &self,
+        _tenant_id: Uuid,
+        _vehicle_id: Uuid,
+    ) -> Result<bool, sqlx::Error> {
+        Ok(false)
+    }
+
+    async fn category_belongs_to_tenant(
+        &self,
+        _tenant_id: Uuid,
+        _category_id: Uuid,
+    ) -> Result<bool, sqlx::Error> {
+        Ok(false)
+    }
+}
+
 /// maintenance ドメインの mock MaintenanceState (Refs #651)。carins 照合は既存の
 /// `MockCarInspectionRepository` (デフォルトで matched_by="none" 相当) をそのまま使う。
 pub fn setup_mock_maintenance_state() -> alc_maintenance::MaintenanceState {
     alc_maintenance::MaintenanceState {
         vehicles: Arc::new(MockVehiclesRepository),
+        records: Arc::new(MockRecordsRepository),
         car_inspections: Arc::new(MockCarInspectionRepository::default()),
         categories: Arc::new(MockMaintenanceCategoriesRepository),
     }

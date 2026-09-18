@@ -15,12 +15,14 @@
 //! 添付ファイルの handler は後続タスクが足す (テーブルは migrations/147 で先に用意済み)。
 
 pub mod models;
+pub mod records;
 pub mod vehicles;
 
 use std::sync::Arc;
 
 use alc_core::repository::car_inspections::CarInspectionRepository;
 
+use crate::records::RecordsRepository;
 use crate::vehicles::VehiclesRepository;
 
 /// maintenance 用の最小 State。モノリスでは `.with_state()` 経由でマウントする
@@ -29,6 +31,8 @@ use crate::vehicles::VehiclesRepository;
 #[derive(Clone)]
 pub struct MaintenanceState {
     pub vehicles: Arc<dyn VehiclesRepository>,
+    /// 整備記録 (`maintenance_records`) の CRUD + 一覧フィルタ (Refs #651)。
+    pub records: Arc<dyn RecordsRepository>,
     /// 電子車検証の照合 (`lookup_expiry`) を in-process で呼ぶための port。
     /// `alc-carins` の `PgCarInspectionRepository` を呼び出し元 (main.rs / テスト) が
     /// 注入する — `alc-maintenance` は `alc-carins` に依存しない (trait は `alc-core`)。

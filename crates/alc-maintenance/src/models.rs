@@ -104,3 +104,88 @@ pub struct CreateMaintenanceCategory {
     pub name: String,
     pub sort_order: Option<i32>,
 }
+
+/// 整備記録 1 行 (`maintenance_records`)。国交省の遠隔点呼要件 2-四-ト
+/// 「運行に使用する事業用自動車の整備状況」を満たすための、車両本体の整備記録
+/// (定期点検・修理・部品交換等、Refs #651)。`cost` は `NUMERIC(12,2)` を
+/// `::text` キャストして文字列で保持する (`alc-trouble::TroubleTicket` の
+/// `damage_amount` と同じ作法 — `f64` へ丸めない)。
+#[derive(Debug, Clone, Serialize, FromRow, TS)]
+#[ts(export)]
+pub struct MaintenanceRecord {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub vehicle_id: Uuid,
+    pub category_id: Uuid,
+    /// 整備実施日
+    pub performed_on: chrono::NaiveDate,
+    /// 走行距離 (km)
+    pub odometer_km: Option<i32>,
+    /// 整備工場
+    pub vendor: Option<String>,
+    pub description: Option<String>,
+    pub cost: Option<String>,
+    /// 次回期限
+    pub next_due_on: Option<chrono::NaiveDate>,
+    pub created_by: Option<Uuid>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub deleted_at: Option<DateTime<Utc>>,
+}
+
+/// `POST /api/maintenance/records` の body。`vehicle_id` / `category_id` は
+/// **同じテナントのものであること**を handler 側で明示確認する — DB の FK は
+/// 行の存在しか保証せずテナントは保証しないため (Refs #651)。
+#[derive(Debug, Clone, Deserialize, TS)]
+#[ts(export)]
+pub struct CreateMaintenanceRecord {
+    pub vehicle_id: Uuid,
+    pub category_id: Uuid,
+    pub performed_on: chrono::NaiveDate,
+    pub odometer_km: Option<i32>,
+    pub vendor: Option<String>,
+    pub description: Option<String>,
+    pub cost: Option<f64>,
+    pub next_due_on: Option<chrono::NaiveDate>,
+}
+
+/// `PUT /api/maintenance/records/{id}` の body。`None` のフィールドは変更しない
+/// (COALESCE 意味論。`UpdateMaintenanceVehicle` と同じ作法)。`vehicle_id` /
+/// `category_id` を変更する場合も同じテナント確認を handler 側で行う。
+#[derive(Debug, Clone, Deserialize, TS)]
+#[ts(export)]
+pub struct UpdateMaintenanceRecord {
+    pub vehicle_id: Option<Uuid>,
+    pub category_id: Option<Uuid>,
+    pub performed_on: Option<chrono::NaiveDate>,
+    pub odometer_km: Option<i32>,
+    pub vendor: Option<String>,
+    pub description: Option<String>,
+    pub cost: Option<f64>,
+    pub next_due_on: Option<chrono::NaiveDate>,
+}
+
+/// `GET /api/maintenance/records` のクエリパラメータ。
+#[derive(Debug, Deserialize, TS)]
+#[ts(export)]
+pub struct MaintenanceRecordListFilter {
+    pub vehicle_id: Option<Uuid>,
+    pub category_id: Option<Uuid>,
+    /// `performed_on` に対する範囲検索 (以上)
+    pub date_from: Option<chrono::NaiveDate>,
+    /// `performed_on` に対する範囲検索 (以下)
+    pub date_to: Option<chrono::NaiveDate>,
+    /// `description` / `vendor` の部分一致
+    pub q: Option<String>,
+    pub page: Option<i64>,
+    pub per_page: Option<i64>,
+}
+
+#[derive(Debug, Serialize, TS)]
+#[ts(export)]
+pub struct MaintenanceRecordsResponse {
+    pub records: Vec<MaintenanceRecord>,
+    pub total: i64,
+    pub page: i64,
+    pub per_page: i64,
+}

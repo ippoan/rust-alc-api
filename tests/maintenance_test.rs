@@ -584,3 +584,480 @@ async fn test_maintenance_categories_tenant_isolation() {
         }
     );
 }
+
+// ---------------------------------------------------------------------------
+// 整備記録 (maintenance_records) の CRUD + 一覧フィルタ (Refs #c651-5)
+//
+// `categories.rs` (#c651-4) が実装する generic master 経由の CRUD には依存せず、
+// `maintenance_categories` へ直接 SQL で 1 行入れる (この記録テストは categories
+// の実装詳細に結合させないため — 表は migrations/147 で用意済み)。
+// ---------------------------------------------------------------------------
+
+/// テスト用に `maintenance_categories` へ直接 1 行入れる (`categories.rs` (#c651-4)
+/// の実装詳細に依存せず検証するため)。RLS があるため `TenantConn` 経由で
+/// `app.current_tenant_id` をセットしてから insert する。
+async fn insert_maintenance_category(pool: &sqlx::PgPool, tenant_id: Uuid, name: &str) -> Uuid {
+    let mut tc = alc_core::tenant::TenantConn::acquire(pool, &tenant_id.to_string())
+        .await
+        .expect("TenantConn::acquire に失敗");
+    let row: (Uuid,) = sqlx::query_as(
+        "INSERT INTO maintenance_categories (tenant_id, name) VALUES ($1, $2) RETURNING id",
+    )
+    .bind(tenant_id)
+    .bind(name)
+    .fetch_one(&mut *tc.conn)
+    .await
+    .expect("maintenance_categories への insert に失敗");
+    row.0
+}
+
+/// `POST /api/maintenance/vehicles` 経由で車両を1台作り、id (文字列) を返す。
+async fn create_test_vehicle(
+    client: &reqwest::Client,
+    base_url: &str,
+    auth: &str,
+    registration_number: &str,
+) -> String {
+    let res = client
+        .post(format!("{base_url}/api/maintenance/vehicles"))
+        .header("Authorization", auth)
+        .json(&serde_json::json!({ "registration_number": registration_number }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 201);
+    let vehicle: Value = res.json().await.unwrap();
+    vehicle["id"].as_str().unwrap().to_string()
+}
+
+#[tokio::test]
+async fn test_maintenance_records_crud() {
+    test_group!("整備記録: CRUD");
+    test_case!(
+        "作成→取得→更新→ソフト削除→削除後は一覧にも個別取得にも出ない",
+        {
+            let state = common::setup_app_state().await;
+            let base_url = common::spawn_test_server(state.clone()).await;
+            let tenant_id =
+                common::create_test_tenant(state.pool(), "Maintenance Records CRUD Tenant").await;
+            let jwt = common::create_test_jwt(tenant_id, "admin");
+            let client = reqwest::Client::new();
+            let auth = format!("Bearer {jwt}");
+
+            let vehicle_id = create_test_vehicle(&client, &base_url, &auth, "品川300か1-11").await;
+            let category_id =
+                insert_maintenance_category(state.pool(), tenant_id, "定期点検").await;
+
+            // 作成
+            let res = client
+                .post(format!("{base_url}/api/maintenance/records"))
+                .header("Authorization", &auth)
+                .json(&serde_json::json!({
+                    "vehicle_id": vehicle_id,
+                    "category_id": category_id,
+                    "performed_on": "2026-01-10",
+                    "odometer_km": 12345,
+                    "vendor": "オートテスト整備工場",
+                    "description": "12ヶ月点検",
+                    "cost": 33000.0,
+                    "next_due_on": "2027-01-10",
+                }))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 201);
+            let created: Value = res.json().await.unwrap();
+            let id = created["id"].as_str().unwrap().to_string();
+            assert_eq!(created["vehicle_id"], vehicle_id);
+            assert_eq!(created["category_id"], category_id.to_string());
+            assert_eq!(created["odometer_km"], 12345);
+            assert_eq!(created["vendor"], "オートテスト整備工場");
+
+            // 取得
+            let res = client
+                .get(format!("{base_url}/api/maintenance/records/{id}"))
+                .header("Authorization", &auth)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 200);
+            let fetched: Value = res.json().await.unwrap();
+            assert_eq!(fetched["id"], id);
+
+            // 更新 (odometer_km と vendor のみ)
+            let res = client
+                .put(format!("{base_url}/api/maintenance/records/{id}"))
+                .header("Authorization", &auth)
+                .json(&serde_json::json!({
+                    "odometer_km": 20000,
+                    "vendor": "更新後の整備工場",
+                }))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 200);
+            let updated: Value = res.json().await.unwrap();
+            assert_eq!(updated["odometer_km"], 20000);
+            assert_eq!(updated["vendor"], "更新後の整備工場");
+            // 未指定のフィールドは変わらない
+            assert_eq!(updated["description"], "12ヶ月点検");
+
+            // ソフト削除
+            let res = client
+                .delete(format!("{base_url}/api/maintenance/records/{id}"))
+                .header("Authorization", &auth)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 204);
+
+            // 削除後は個別取得で 404
+            let res = client
+                .get(format!("{base_url}/api/maintenance/records/{id}"))
+                .header("Authorization", &auth)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 404);
+
+            // 削除後は一覧にも出ない
+            let res = client
+                .get(format!("{base_url}/api/maintenance/records"))
+                .header("Authorization", &auth)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 200);
+            let list: Value = res.json().await.unwrap();
+            let records = list["records"].as_array().unwrap();
+            assert!(!records.iter().any(|r| r["id"] == id));
+        }
+    );
+}
+
+#[tokio::test]
+async fn test_create_record_with_other_tenant_vehicle_returns_400() {
+    test_group!("整備記録: FK テナント検証");
+    test_case!(
+        "他テナントの vehicle_id を指定すると 500 ではなく 400",
+        {
+            let state = common::setup_app_state().await;
+            let base_url = common::spawn_test_server(state.clone()).await;
+            let tenant_a =
+                common::create_test_tenant(state.pool(), "Maintenance Records FK Tenant A").await;
+            let tenant_b =
+                common::create_test_tenant(state.pool(), "Maintenance Records FK Tenant B").await;
+            let jwt_a = common::create_test_jwt(tenant_a, "admin");
+            let jwt_b = common::create_test_jwt(tenant_b, "admin");
+            let client = reqwest::Client::new();
+
+            // vehicle はテナント A のもの
+            let vehicle_id =
+                create_test_vehicle(&client, &base_url, &format!("Bearer {jwt_a}"), "A専用車両")
+                    .await;
+            // category はテナント B のもの (category_id は正しいテナントのものを渡す)
+            let category_id = insert_maintenance_category(state.pool(), tenant_b, "修理").await;
+
+            let res = client
+                .post(format!("{base_url}/api/maintenance/records"))
+                .header("Authorization", format!("Bearer {jwt_b}"))
+                .json(&serde_json::json!({
+                    "vehicle_id": vehicle_id,
+                    "category_id": category_id,
+                    "performed_on": "2026-02-01",
+                }))
+                .send()
+                .await
+                .unwrap();
+            assert!(
+                res.status() == 400 || res.status() == 404,
+                "500 になってはいけない (実際: {})",
+                res.status()
+            );
+        }
+    );
+}
+
+#[tokio::test]
+async fn test_create_record_with_other_tenant_category_returns_400() {
+    test_group!("整備記録: FK テナント検証");
+    test_case!(
+        "他テナントの category_id を指定すると 500 ではなく 400",
+        {
+            let state = common::setup_app_state().await;
+            let base_url = common::spawn_test_server(state.clone()).await;
+            let tenant_a =
+                common::create_test_tenant(state.pool(), "Maintenance Records FK2 Tenant A").await;
+            let tenant_b =
+                common::create_test_tenant(state.pool(), "Maintenance Records FK2 Tenant B").await;
+            let jwt_a = common::create_test_jwt(tenant_a, "admin");
+            let jwt_b = common::create_test_jwt(tenant_b, "admin");
+            let client = reqwest::Client::new();
+
+            // vehicle も category もテナント A のものを、テナント B の JWT で作成しようとする
+            let vehicle_id =
+                create_test_vehicle(&client, &base_url, &format!("Bearer {jwt_a}"), "A専用車両2")
+                    .await;
+            let category_id = insert_maintenance_category(state.pool(), tenant_a, "部品交換").await;
+
+            let res = client
+                .post(format!("{base_url}/api/maintenance/records"))
+                .header("Authorization", format!("Bearer {jwt_b}"))
+                .json(&serde_json::json!({
+                    "vehicle_id": vehicle_id,
+                    "category_id": category_id,
+                    "performed_on": "2026-02-01",
+                }))
+                .send()
+                .await
+                .unwrap();
+            assert!(
+                res.status() == 400 || res.status() == 404,
+                "500 になってはいけない (実際: {})",
+                res.status()
+            );
+        }
+    );
+}
+
+#[tokio::test]
+async fn test_update_record_with_other_tenant_vehicle_returns_400() {
+    test_group!("整備記録: FK テナント検証");
+    test_case!(
+        "更新時も他テナントの vehicle_id を指定すると 500 ではなく 400",
+        {
+            let state = common::setup_app_state().await;
+            let base_url = common::spawn_test_server(state.clone()).await;
+            let tenant_a =
+                common::create_test_tenant(state.pool(), "Maintenance Records Update FK Tenant A")
+                    .await;
+            let tenant_b =
+                common::create_test_tenant(state.pool(), "Maintenance Records Update FK Tenant B")
+                    .await;
+            let jwt_a = common::create_test_jwt(tenant_a, "admin");
+            let jwt_b = common::create_test_jwt(tenant_b, "admin");
+            let client = reqwest::Client::new();
+            let auth_b = format!("Bearer {jwt_b}");
+
+            // テナント B 内で正しい記録を1件作る
+            let vehicle_b = create_test_vehicle(&client, &base_url, &auth_b, "B専用車両").await;
+            let category_b = insert_maintenance_category(state.pool(), tenant_b, "定期点検B").await;
+            let res = client
+                .post(format!("{base_url}/api/maintenance/records"))
+                .header("Authorization", &auth_b)
+                .json(&serde_json::json!({
+                    "vehicle_id": vehicle_b,
+                    "category_id": category_b,
+                    "performed_on": "2026-03-01",
+                }))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 201);
+            let record: Value = res.json().await.unwrap();
+            let id = record["id"].as_str().unwrap();
+
+            // テナント A の vehicle_id へ付け替えようとする
+            let vehicle_a =
+                create_test_vehicle(&client, &base_url, &format!("Bearer {jwt_a}"), "A専用車両3")
+                    .await;
+            let res = client
+                .put(format!("{base_url}/api/maintenance/records/{id}"))
+                .header("Authorization", &auth_b)
+                .json(&serde_json::json!({ "vehicle_id": vehicle_a }))
+                .send()
+                .await
+                .unwrap();
+            assert!(
+                res.status() == 400 || res.status() == 404,
+                "500 になってはいけない (実際: {})",
+                res.status()
+            );
+        }
+    );
+}
+
+#[tokio::test]
+async fn test_maintenance_records_list_filters() {
+    test_group!("整備記録: 一覧フィルタ");
+    test_case!(
+        "vehicle_id / date_from / date_to / q の各フィルタが効く",
+        {
+            let state = common::setup_app_state().await;
+            let base_url = common::spawn_test_server(state.clone()).await;
+            let tenant_id =
+                common::create_test_tenant(state.pool(), "Maintenance Records Filter Tenant").await;
+            let jwt = common::create_test_jwt(tenant_id, "admin");
+            let client = reqwest::Client::new();
+            let auth = format!("Bearer {jwt}");
+
+            let vehicle_1 = create_test_vehicle(&client, &base_url, &auth, "足立1号車").await;
+            let vehicle_2 = create_test_vehicle(&client, &base_url, &auth, "足立2号車").await;
+            let category_id =
+                insert_maintenance_category(state.pool(), tenant_id, "フィルタ用カテゴリ").await;
+
+            // vehicle_1: 2026-01-05 のオイル交換
+            let res = client
+                .post(format!("{base_url}/api/maintenance/records"))
+                .header("Authorization", &auth)
+                .json(&serde_json::json!({
+                    "vehicle_id": vehicle_1,
+                    "category_id": category_id,
+                    "performed_on": "2026-01-05",
+                    "vendor": "オイル交換専門店",
+                    "description": "エンジンオイル交換",
+                }))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 201);
+            let record_1: Value = res.json().await.unwrap();
+            let id_1 = record_1["id"].as_str().unwrap().to_string();
+
+            // vehicle_2: 2026-03-20 のタイヤ交換
+            let res = client
+                .post(format!("{base_url}/api/maintenance/records"))
+                .header("Authorization", &auth)
+                .json(&serde_json::json!({
+                    "vehicle_id": vehicle_2,
+                    "category_id": category_id,
+                    "performed_on": "2026-03-20",
+                    "vendor": "タイヤ館テスト店",
+                    "description": "冬タイヤへ交換",
+                }))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 201);
+            let record_2: Value = res.json().await.unwrap();
+            let id_2 = record_2["id"].as_str().unwrap().to_string();
+
+            // vehicle_id フィルタ: vehicle_1 のみ
+            let res = client
+                .get(format!(
+                    "{base_url}/api/maintenance/records?vehicle_id={vehicle_1}"
+                ))
+                .header("Authorization", &auth)
+                .send()
+                .await
+                .unwrap();
+            let list: Value = res.json().await.unwrap();
+            let records = list["records"].as_array().unwrap();
+            assert_eq!(list["total"], 1);
+            assert!(records.iter().any(|r| r["id"] == id_1));
+            assert!(!records.iter().any(|r| r["id"] == id_2));
+
+            // date_from / date_to フィルタ: 2026-03-01 以降は record_2 のみ
+            let res = client
+                .get(format!(
+                    "{base_url}/api/maintenance/records?date_from=2026-03-01"
+                ))
+                .header("Authorization", &auth)
+                .send()
+                .await
+                .unwrap();
+            let list: Value = res.json().await.unwrap();
+            let records = list["records"].as_array().unwrap();
+            assert!(records.iter().any(|r| r["id"] == id_2));
+            assert!(!records.iter().any(|r| r["id"] == id_1));
+
+            let res = client
+                .get(format!(
+                    "{base_url}/api/maintenance/records?date_to=2026-01-31"
+                ))
+                .header("Authorization", &auth)
+                .send()
+                .await
+                .unwrap();
+            let list: Value = res.json().await.unwrap();
+            let records = list["records"].as_array().unwrap();
+            assert!(records.iter().any(|r| r["id"] == id_1));
+            assert!(!records.iter().any(|r| r["id"] == id_2));
+
+            // q フィルタ: description の部分一致
+            let res = client
+                .get(format!("{base_url}/api/maintenance/records?q=オイル"))
+                .header("Authorization", &auth)
+                .send()
+                .await
+                .unwrap();
+            let list: Value = res.json().await.unwrap();
+            let records = list["records"].as_array().unwrap();
+            assert!(records.iter().any(|r| r["id"] == id_1));
+            assert!(!records.iter().any(|r| r["id"] == id_2));
+
+            // q フィルタ: vendor の部分一致
+            let res = client
+                .get(format!("{base_url}/api/maintenance/records?q=タイヤ館"))
+                .header("Authorization", &auth)
+                .send()
+                .await
+                .unwrap();
+            let list: Value = res.json().await.unwrap();
+            let records = list["records"].as_array().unwrap();
+            assert!(records.iter().any(|r| r["id"] == id_2));
+            assert!(!records.iter().any(|r| r["id"] == id_1));
+        }
+    );
+}
+
+#[tokio::test]
+async fn test_maintenance_records_tenant_isolation() {
+    test_group!("整備記録: RLS");
+    test_case!(
+        "別テナントの整備記録は一覧にも個別取得にも出ない",
+        {
+            let state = common::setup_app_state().await;
+            let base_url = common::spawn_test_server(state.clone()).await;
+            let tenant_a =
+                common::create_test_tenant(state.pool(), "Maintenance Records RLS Tenant A").await;
+            let tenant_b =
+                common::create_test_tenant(state.pool(), "Maintenance Records RLS Tenant B").await;
+            let jwt_a = common::create_test_jwt(tenant_a, "admin");
+            let jwt_b = common::create_test_jwt(tenant_b, "admin");
+            let client = reqwest::Client::new();
+            let auth_a = format!("Bearer {jwt_a}");
+            let auth_b = format!("Bearer {jwt_b}");
+
+            let vehicle_a = create_test_vehicle(&client, &base_url, &auth_a, "テナントA車両").await;
+            let category_a =
+                insert_maintenance_category(state.pool(), tenant_a, "テナントA用カテゴリ").await;
+
+            let res = client
+                .post(format!("{base_url}/api/maintenance/records"))
+                .header("Authorization", &auth_a)
+                .json(&serde_json::json!({
+                    "vehicle_id": vehicle_a,
+                    "category_id": category_a,
+                    "performed_on": "2026-04-01",
+                }))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 201);
+            let record_a: Value = res.json().await.unwrap();
+            let id_a = record_a["id"].as_str().unwrap();
+
+            // tenant B の一覧には出ない
+            let res = client
+                .get(format!("{base_url}/api/maintenance/records"))
+                .header("Authorization", &auth_b)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 200);
+            let list: Value = res.json().await.unwrap();
+            let records = list["records"].as_array().unwrap();
+            assert!(!records.iter().any(|r| r["id"] == id_a));
+
+            // tenant B から個別取得すると 404 (RLS で行が見えない)
+            let res = client
+                .get(format!("{base_url}/api/maintenance/records/{id_a}"))
+                .header("Authorization", &auth_b)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 404);
+        }
+    );
+}
