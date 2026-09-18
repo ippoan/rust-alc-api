@@ -574,10 +574,11 @@ async fn test_timecard_freezes_resolved_employee_in_payload() {
     *tc.find_card_data.lock().unwrap() = Some(rust_alc_api::db::models::TimecardCard {
         id: Uuid::new_v4(),
         tenant_id,
-        employee_id,
+        employee_id: Some(employee_id),
         card_id: "01401d0b1d37b660".to_string(),
         label: None,
         source: None,
+        pending_employee_code: None,
         created_at: chrono::Utc::now(),
     });
     let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
@@ -603,10 +604,11 @@ async fn test_timecard_normalizes_card_id_before_lookup() {
     *tc.find_card_data.lock().unwrap() = Some(rust_alc_api::db::models::TimecardCard {
         id: Uuid::new_v4(),
         tenant_id,
-        employee_id,
+        employee_id: Some(employee_id),
         card_id: "01401d0b1d37b660".to_string(),
         label: None,
         source: None,
+        pending_employee_code: None,
         created_at: chrono::Utc::now(),
     });
     let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
