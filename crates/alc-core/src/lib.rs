@@ -8,6 +8,7 @@ pub mod auth_jwt;
 pub mod auth_lineworks;
 pub mod auth_middleware;
 
+pub mod api_error;
 pub mod constant_time;
 pub mod device_pair_client;
 pub mod fcm;

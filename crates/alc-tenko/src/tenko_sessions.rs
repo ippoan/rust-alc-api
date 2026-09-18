@@ -10,6 +10,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::TenkoState;
+use alc_core::api_error::{bad_request, internal_error, not_found, ApiError};
 use alc_core::auth_middleware::{AuthUser, TenantId};
 use alc_core::models::SubmitCarryingItemChecks;
 
@@ -240,67 +241,91 @@ async fn submit_medical(
     State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
     Path(id): Path<Uuid>,
+    headers: axum::http::HeaderMap,
     Json(body): Json<SubmitMedicalData>,
-) -> Result<Json<TenkoSession>, StatusCode> {
+) -> Result<Json<TenkoSession>, ApiError> {
     let tenant_id = tenant.0 .0;
     let repo = &*state.tenko_sessions;
 
     let session = repo
         .get(tenant_id, id)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .ok_or(StatusCode::NOT_FOUND)?;
+        .map_err(|e| internal_error("submit_medical get_session", e))?
+        .ok_or_else(|| not_found("session_not_found"))?;
 
     // 業務前のみ + 適切な状態
     if session.tenko_type != "pre_operation" {
-        return Err(StatusCode::BAD_REQUEST);
+        return Err(bad_request(
+            "invalid_tenko_type",
+            &format!(
+                "medical data is only accepted for pre_operation sessions (got {})",
+                session.tenko_type
+            ),
+        ));
     }
     if session.status != "medical_pending" {
-        return Err(StatusCode::BAD_REQUEST);
+        return Err(bad_request(
+            "invalid_session_status",
+            &format!(
+                "session status is {} (expected medical_pending)",
+                session.status
+            ),
+        ));
     }
 
     // 自動点呼のときだけ血圧 (最高・最低) を必須にする。通常点呼・遠隔点呼は
     // 従来どおり空でも通す (Refs ippoan/alc-app-s3#135)。測れないときは
     // escalate-remote で遠隔点呼へ切り替えてから提出する
     //
-    // ただし血圧計を繋いでいない端末 (devices.bp_enabled = false) は血圧を必須にしない
-    // (Refs ippoan/alc-app#322)。`bp_enabled` 自体はクライアントに申告させず、
-    // 端末識別子だけを受け取ってサーバが正本 (devices テーブル) を引く。
-    // device_id 未送信・device がこのテナントに属さない・DB 未反映のいずれも
-    // 安全側 (血圧必須) に倒す — フェイルクローズ
-    let bp_required = match body.device_id {
-        Some(device_id) => {
-            let device_tenant_id = state
-                .devices
-                .lookup_device_tenant(device_id)
-                .await
-                .map_err(|e| {
-                    tracing::error!("submit_medical lookup_device_tenant error: {e}");
-                    StatusCode::INTERNAL_SERVER_ERROR
-                })?;
-            if device_tenant_id != Some(tenant_id) {
-                true
-            } else {
-                state
+    // 血圧計のボンド状態は `X-Device-Bp-Bonded` ヘッダーで判定する
+    // (Refs ippoan/alc-app#322, ippoan/rust-alc-api#668)。auth-worker が
+    // CoreS3 の署名済みボンド状態を検証した上で転送する (Refs ippoan/auth-worker#571)。
+    // クライアント (body) には血圧要否を申告させない — 検証済みヘッダーだけを信頼する。
+    //
+    // - `X-Device-Bp-Bonded: 1` → 血圧必須 (血圧計が繋がっている)
+    // - `X-Device-Bp-Bonded: 0` → 血圧必須を課さない
+    // - ヘッダー自体が無い (古いファーム / CoreS3 以外の経路) → 不明。
+    //   この場合だけ従来どおり `body.device_id` → `devices.bp_enabled` の経路で判定する
+    //   (登録済み端末では正しい)。device_id 未送信・device がこのテナントに属さない・
+    //   DB 未反映のいずれも安全側 (血圧必須) に倒す — フェイルクローズ
+    let bp_bonded_header = headers
+        .get("X-Device-Bp-Bonded")
+        .and_then(|v| v.to_str().ok());
+
+    let bp_required = match bp_bonded_header {
+        Some("1") => true,
+        Some("0") => false,
+        _ => match body.device_id {
+            Some(device_id) => {
+                let device_tenant_id = state
                     .devices
-                    .get_device_settings(device_id)
+                    .lookup_device_tenant(device_id)
                     .await
-                    .map_err(|e| {
-                        tracing::error!("submit_medical get_device_settings error: {e}");
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })?
-                    .map(|settings| settings.bp_enabled)
-                    .unwrap_or(true)
+                    .map_err(|e| internal_error("submit_medical lookup_device_tenant", e))?;
+                if device_tenant_id != Some(tenant_id) {
+                    true
+                } else {
+                    state
+                        .devices
+                        .get_device_settings(device_id)
+                        .await
+                        .map_err(|e| internal_error("submit_medical get_device_settings", e))?
+                        .map(|settings| settings.bp_enabled)
+                        .unwrap_or(true)
+                }
             }
-        }
-        None => true,
+            None => true,
+        },
     };
 
     if session.tenko_method == "自動点呼"
         && bp_required
         && (body.systolic.is_none() || body.diastolic.is_none())
     {
-        return Err(StatusCode::BAD_REQUEST);
+        return Err(bad_request(
+            "bp_required",
+            "systolic and diastolic blood pressure are required (自動点呼 + 血圧計あり)",
+        ));
     }
 
     let session = repo
@@ -315,10 +340,7 @@ async fn submit_medical(
             body.medical_manual_input,
         )
         .await
-        .map_err(|e| {
-            tracing::error!("submit_medical DB error: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+        .map_err(|e| internal_error("submit_medical update_medical", e))?;
 
     Ok(Json(session))
 }
