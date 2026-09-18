@@ -42,6 +42,7 @@ coverage:cov-dtako --instrumentation_filter=//crates/alc-dtako,//crates/alc-comp
 coverage:cov-misc --instrumentation_filter=//crates/alc-misc
 coverage:cov-notify --instrumentation_filter=//crates/alc-notify
 coverage:cov-pdf --instrumentation_filter=//crates/alc-pdf
+coverage:cov-maintenance --instrumentation_filter=//crates/alc-maintenance
 coverage:cov-tenko --instrumentation_filter=//crates/alc-tenko
 coverage:cov-trouble --instrumentation_filter=//crates/alc-trouble
 coverage:cov-db-trouble --instrumentation_filter=//crates/alc-trouble

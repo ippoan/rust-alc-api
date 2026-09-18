@@ -394,6 +394,17 @@ async fn main() -> anyhow::Result<()> {
         down_threshold: camera_down_threshold,
     };
 
+    // maintenance ドメイン (Refs #651) — AppState から分離した MaintenanceState で
+    // マウントする (alc-trouble / alc-tenko / alc-camera と同じ形)。carins 照合は
+    // 既存の car_inspections repo (alc-carins の PgCarInspectionRepository) を
+    // in-process で呼ぶ (HTTP で自分自身を叩かない)。
+    let maintenance_state = alc_maintenance::MaintenanceState {
+        vehicles: Arc::new(alc_maintenance::vehicles::PgVehiclesRepository::new(
+            pool.clone(),
+        )),
+        car_inspections: car_inspections.clone(),
+    };
+
     let state = AppState {
         pool: Some(pool.clone()),
         api_tokens,
@@ -535,6 +546,7 @@ async fn main() -> anyhow::Result<()> {
         tenko_state,
         trouble_state,
         camera_state,
+        maintenance_state,
     )
     .merge(rust_alc_api::routes::internal_shared_secret_router(
         internal_secret,

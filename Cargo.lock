@@ -187,6 +187,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "alc-maintenance"
+version = "0.1.0"
+dependencies = [
+ "alc-core",
+ "async-trait",
+ "axum",
+ "chrono",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "ts-rs",
+ "uuid",
+]
+
+[[package]]
 name = "alc-misc"
 version = "0.1.0"
 dependencies = [
@@ -3490,6 +3508,7 @@ dependencies = [
  "alc-csv-parser",
  "alc-devices",
  "alc-dtako",
+ "alc-maintenance",
  "alc-misc",
  "alc-notify",
  "alc-storage",

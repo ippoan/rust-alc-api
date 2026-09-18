@@ -23,6 +23,7 @@ pub use alc_dtako::dtako_work_times;
 pub use alc_dtako::dtako_y_time_export;
 pub use alc_dtako::dvr_notifications;
 pub use alc_dtako::vehicle_settings_dumps;
+pub use alc_maintenance::vehicles as maintenance_vehicles;
 pub use alc_misc::access_requests;
 pub use alc_misc::api_tokens;
 pub use alc_misc::bot_admin;
@@ -99,6 +100,7 @@ pub fn router(
     tenko_state: alc_tenko::TenkoState,
     trouble_state: alc_trouble::TroubleState,
     camera_state: alc_camera::CameraState,
+    maintenance_state: alc_maintenance::MaintenanceState,
 ) -> Router<AppState> {
     // 管理者ルート — 注入 identity (X-User-*) を信頼 (Refs #434)。
     // 前段 proxy / gateway が introspect 検証済みの identity を注入する前提。
@@ -238,6 +240,13 @@ pub fn router(
         .layer(axum_middleware::from_fn(require_tenant_header))
         .with_state(camera_state);
 
+    // maintenance ドメイン (Refs #651) — AppState から分離した MaintenanceState で
+    // マウントする。tenant 系ルートには monolith 本体と同じ require_tenant_header を張る。
+    let maintenance_tenant: Router<AppState> = Router::new()
+        .merge(maintenance_vehicles::tenant_router())
+        .layer(axum_middleware::from_fn(require_tenant_header))
+        .with_state(maintenance_state);
+
     Router::new()
         .merge(public_routes)
         .merge(tenko_public)
@@ -247,6 +256,7 @@ pub fn router(
         .merge(tenko_tenant)
         .merge(trouble_tenant)
         .merge(camera_tenant)
+        .merge(maintenance_tenant)
 }
 
 /// email-receiver Worker から `POST /api/dtako/tickets` を受ける internal ingest

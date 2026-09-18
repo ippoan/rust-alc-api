@@ -10,6 +10,7 @@ _WORKSPACE_CRATES = [
     "//crates/alc-csv-parser",
     "//crates/alc-devices",
     "//crates/alc-dtako",
+    "//crates/alc-maintenance",
     "//crates/alc-misc",
     "//crates/alc-notify",
     "//crates/alc-storage",
@@ -94,6 +95,21 @@ rust_test(
     name = "trouble_test",
     srcs = ["tests/trouble_test.rs"] + glob(["tests/common/**/*.rs"]),
     crate_root = "tests/trouble_test.rs",
+    compile_data = glob(["migrations/**"]),
+    deps = [":rust_alc_api_lib"] + all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ) + _WORKSPACE_CRATES,
+    proc_macro_deps = all_crate_deps(
+        proc_macro = True,
+        proc_macro_dev = True,
+    ),
+)
+
+rust_test(
+    name = "maintenance_test",
+    srcs = ["tests/maintenance_test.rs"] + glob(["tests/common/**/*.rs"]),
+    crate_root = "tests/maintenance_test.rs",
     compile_data = glob(["migrations/**"]),
     deps = [":rust_alc_api_lib"] + all_crate_deps(
         normal = True,

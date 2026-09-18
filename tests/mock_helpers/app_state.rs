@@ -174,6 +174,97 @@ impl alc_core::repository::CamerasRepository for MockCamerasRepository {
     }
 }
 
+/// VehiclesRepository のスタブ (Refs #651)。本タスク (#c651-2、車両マスタ土台) の
+/// 範囲では handler を mock test ではカバーしない (実 DB 統合テスト
+/// `tests/maintenance_test.rs` 側で検証する) ため、読み出しは空 / write はエラーを
+/// 返す (重要: MaintenanceState の型を揃えるためだけのダミー。
+/// `MockVehicleSettingsDumpsRepository` と同じ方針)。
+#[derive(Default)]
+pub struct MockVehiclesRepository;
+
+#[async_trait]
+impl alc_maintenance::vehicles::VehiclesRepository for MockVehiclesRepository {
+    async fn list(
+        &self,
+        _tenant_id: Uuid,
+        filter: &alc_maintenance::models::VehicleListFilter,
+    ) -> Result<alc_maintenance::models::VehicleListResponse, sqlx::Error> {
+        Ok(alc_maintenance::models::VehicleListResponse {
+            items: vec![],
+            total: 0,
+            page: filter.page.unwrap_or(1),
+            per_page: filter.per_page.unwrap_or(20),
+        })
+    }
+
+    async fn create(
+        &self,
+        _tenant_id: Uuid,
+        _input: &alc_maintenance::models::CreateMaintenanceVehicle,
+    ) -> Result<alc_maintenance::models::MaintenanceVehicle, sqlx::Error> {
+        Err(sqlx::Error::RowNotFound)
+    }
+
+    async fn get(
+        &self,
+        _tenant_id: Uuid,
+        _id: Uuid,
+    ) -> Result<Option<alc_maintenance::models::MaintenanceVehicle>, sqlx::Error> {
+        Ok(None)
+    }
+
+    async fn update(
+        &self,
+        _tenant_id: Uuid,
+        _id: Uuid,
+        _input: &alc_maintenance::models::UpdateMaintenanceVehicle,
+    ) -> Result<Option<alc_maintenance::models::MaintenanceVehicle>, sqlx::Error> {
+        Ok(None)
+    }
+
+    async fn soft_delete(&self, _tenant_id: Uuid, _id: Uuid) -> Result<bool, sqlx::Error> {
+        Ok(false)
+    }
+
+    async fn link_carins(
+        &self,
+        _tenant_id: Uuid,
+        _id: Uuid,
+        _car_id: &str,
+    ) -> Result<Option<alc_maintenance::models::MaintenanceVehicle>, sqlx::Error> {
+        Ok(None)
+    }
+
+    async fn unlink_carins(&self, _tenant_id: Uuid, _id: Uuid) -> Result<bool, sqlx::Error> {
+        Ok(false)
+    }
+
+    async fn fetch_car_id_by_cert_no(
+        &self,
+        _tenant_id: Uuid,
+        _cert_no: &str,
+    ) -> Result<Option<String>, sqlx::Error> {
+        Ok(None)
+    }
+
+    async fn carins_candidates(
+        &self,
+        _tenant_id: Uuid,
+        _normalized_registration_number: &str,
+    ) -> Result<Vec<alc_maintenance::models::CarinsCandidate>, sqlx::Error> {
+        Ok(vec![])
+    }
+}
+
+/// maintenance ドメインの mock MaintenanceState (Refs #651)。carins 照合は既存の
+/// `MockCarInspectionRepository` (デフォルトで matched_by="none" 相当) をそのまま使う。
+pub fn setup_mock_maintenance_state() -> alc_maintenance::MaintenanceState {
+    alc_maintenance::MaintenanceState {
+        vehicles: Arc::new(MockVehiclesRepository),
+        car_inspections: Arc::new(MockCarInspectionRepository::default()),
+    }
+}
+
 /// camera ドメインの mock CameraState (Refs #556)。差し替えたい field を上書き
 /// してから `spawn_mock_server_with_camera` に渡す。
 pub fn setup_mock_camera_state() -> alc_camera::CameraState {
@@ -277,11 +368,12 @@ pub async fn spawn_mock_server(state: AppState) -> String {
         setup_mock_tenko_state(),
         setup_mock_trouble_state(),
         setup_mock_camera_state(),
+        setup_mock_maintenance_state(),
     )
     .await
 }
 
-/// tenko_state を差し替えたい mock テスト用 (trouble/camera はデフォルト mock)。
+/// tenko_state を差し替えたい mock テスト用 (trouble/camera/maintenance はデフォルト mock)。
 pub async fn spawn_mock_server_with_tenko(
     state: AppState,
     tenko_state: alc_tenko::TenkoState,
@@ -291,11 +383,12 @@ pub async fn spawn_mock_server_with_tenko(
         tenko_state,
         setup_mock_trouble_state(),
         setup_mock_camera_state(),
+        setup_mock_maintenance_state(),
     )
     .await
 }
 
-/// trouble_state を差し替えたい mock テスト用 (tenko/camera はデフォルト mock)。
+/// trouble_state を差し替えたい mock テスト用 (tenko/camera/maintenance はデフォルト mock)。
 pub async fn spawn_mock_server_with_trouble(
     state: AppState,
     trouble_state: alc_trouble::TroubleState,
@@ -305,11 +398,12 @@ pub async fn spawn_mock_server_with_trouble(
         setup_mock_tenko_state(),
         trouble_state,
         setup_mock_camera_state(),
+        setup_mock_maintenance_state(),
     )
     .await
 }
 
-/// camera_state を差し替えたい mock テスト用 (tenko/trouble はデフォルト mock、Refs #556)。
+/// camera_state を差し替えたい mock テスト用 (tenko/trouble/maintenance はデフォルト mock、Refs #556)。
 pub async fn spawn_mock_server_with_camera(
     state: AppState,
     camera_state: alc_camera::CameraState,
@@ -319,6 +413,22 @@ pub async fn spawn_mock_server_with_camera(
         setup_mock_tenko_state(),
         setup_mock_trouble_state(),
         camera_state,
+        setup_mock_maintenance_state(),
+    )
+    .await
+}
+
+/// maintenance_state を差し替えたい mock テスト用 (tenko/trouble/camera はデフォルト mock、Refs #651)。
+pub async fn spawn_mock_server_with_maintenance(
+    state: AppState,
+    maintenance_state: alc_maintenance::MaintenanceState,
+) -> String {
+    crate::common::spawn_test_server_with_states(
+        state,
+        setup_mock_tenko_state(),
+        setup_mock_trouble_state(),
+        setup_mock_camera_state(),
+        maintenance_state,
     )
     .await
 }
