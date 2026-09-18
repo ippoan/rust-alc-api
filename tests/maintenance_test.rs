@@ -1496,12 +1496,21 @@ async fn test_carins_import_candidates_and_import() {
                 Value::String(existing_id.clone())
             );
             assert_eq!(link_row["car_no"], "品川３３０あ１２－３４");
-            // 最小方針: 所有者・住所・車台番号は返さない
-            let keys: Vec<&String> = link_row.as_object().unwrap().keys().collect();
+            // 最小方針: 所有者・住所・車台番号は返さない。
+            // JSON オブジェクトのキー順は契約ではない (serde_json は preserve_order
+            // 無しだと BTreeMap = アルファベット順) ので、集合として比べる。
+            let keys: std::collections::BTreeSet<&str> = link_row
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect();
             assert_eq!(
                 keys,
-                vec!["car_id", "cert_no", "car_no", "existing_vehicle_id"],
-                "所有者・住所・車台番号を含まない最小の 4 フィールドであること"
+                ["car_id", "cert_no", "car_no", "existing_vehicle_id"]
+                    .into_iter()
+                    .collect::<std::collections::BTreeSet<&str>>(),
+                "所有者・住所・車台番号を含まない最小の 4 フィールドちょうどであること"
             );
             let create_row = candidates
                 .iter()
