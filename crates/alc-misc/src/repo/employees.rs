@@ -11,6 +11,42 @@ use alc_core::tenant::TenantConn;
 
 pub use alc_core::repository::employees::*;
 
+/// 社員が現れたら、その社員番号で**保留になっているカードを結ぶ**
+/// (Refs ippoan/rust-alc-api#644)。
+///
+/// カード台帳の一括取り込み (`PUT /timecard/cards/bulk-by-code`) は、社員がまだ
+/// 居なくてもカードを受け入れ、社員番号を `timecard_cards.pending_employee_code`
+/// に残す。**受け入れた以上、後から必ず結び付けられなければならない**ので、
+/// 結び付けは社員が現れる側 (ここ) に置く。
+///
+/// **社員マスタ同期と同じトランザクションで走らせること** — 別トランザクションに
+/// すると「社員は入ったがカードは保留のまま」という中間状態が残り得る。
+///
+/// * 書き込み 1 か所で済ませる。読み時に毎回 join して解決する形にすると、
+///   読み手 (カード一覧・CSV・削除の応答…) の数だけ同じ join が要る
+/// * `tenant_id` を**明示的に条件へ入れる** (RLS に頼り切らない)
+/// * 既に結び付いている行は触らない (`employee_id IS NULL`)
+async fn link_pending_cards(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tenant_id: Uuid,
+    employee_id: Uuid,
+    code: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"
+        UPDATE timecard_cards
+           SET employee_id = $1, pending_employee_code = NULL
+         WHERE tenant_id = $2 AND pending_employee_code = $3 AND employee_id IS NULL
+        "#,
+    )
+    .bind(employee_id)
+    .bind(tenant_id)
+    .bind(code)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
 pub struct PgEmployeeRepository {
     pool: PgPool,
 }
@@ -308,6 +344,10 @@ impl EmployeeRepository for PgEmployeeRepository {
                     .execute(&mut *tx)
                     .await?;
                     updated += 1;
+                    // ★ この分岐も `continue` で抜ける。**社員が居る経路すべて**で
+                    // 結び付けないと、nfc_id が衝突している乗務員のカードだけが
+                    // 保留のまま取り残される
+                    link_pending_cards(&mut tx, tenant_id, id, &item.code).await?;
                     skipped.push(EmployeeUpsertSkipped {
                         code: item.code.clone(),
                         reason: "nfc_id_conflict".to_string(),
@@ -332,6 +372,7 @@ impl EmployeeRepository for PgEmployeeRepository {
                 .execute(&mut *tx)
                 .await?;
                 updated += 1;
+                link_pending_cards(&mut tx, tenant_id, id, &item.code).await?;
                 continue;
             }
 
@@ -363,10 +404,13 @@ impl EmployeeRepository for PgEmployeeRepository {
                         .bind(&item.name)
                         .bind(item.license_issue_date)
                         .bind(item.license_expiry_date)
-                        .bind(id)
+                        .bind(*id)
                         .execute(&mut *tx)
                         .await?;
                         updated += 1;
+                        // ここで初めて `code` がこの社員に付く経路。**保留カードは
+                        // code で待っている**ので、この分岐こそ結び付けが要る
+                        link_pending_cards(&mut tx, tenant_id, *id, &item.code).await?;
                         continue;
                     }
                     skipped.push(EmployeeUpsertSkipped {
@@ -402,8 +446,11 @@ impl EmployeeRepository for PgEmployeeRepository {
             .fetch_optional(&mut *tx)
             .await?;
 
-            if inserted.is_some() {
+            if let Some((id,)) = inserted {
                 created += 1;
+                // ★ **新規作成こそ本命の経路。** 「カードが先に届き、社員が後から
+                // 同期される」の「後から」がここ
+                link_pending_cards(&mut tx, tenant_id, id, &item.code).await?;
             } else {
                 skipped.push(EmployeeUpsertSkipped {
                     code: item.code.clone(),

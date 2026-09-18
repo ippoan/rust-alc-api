@@ -331,7 +331,10 @@ pub struct WebhookDelivery {
 pub struct TimecardCard {
     pub id: Uuid,
     pub tenant_id: Uuid,
-    pub employee_id: Uuid,
+    /// 持ち主。**社員がまだ居ないカードは `None`** (Refs ippoan/rust-alc-api#644) —
+    /// 社員マスタは別経路が別スケジュールで入れるので「カードが先、社員が後」が
+    /// 普通に起きる。そのとき社員番号は `pending_employee_code` に残る。
+    pub employee_id: Option<Uuid>,
     pub card_id: String,
     pub label: Option<String>,
     /// 行の**出所**。一括取り込み (`PUT /timecard/cards/bulk-by-code`) が入れた行だけに
@@ -342,6 +345,15 @@ pub struct TimecardCard {
     /// 決める根拠なので、送り手が書ける値にすると alc 側で直接登録したカードまで
     /// 消せるようになる。`label` を根拠にできないのも同じ理由 (自由文で誰でも書ける)。
     pub source: Option<String>,
+    /// 社員がまだ居ないカードの**社員番号** (Refs ippoan/rust-alc-api#644)。
+    /// 結び付いている行は `NULL`。
+    ///
+    /// **受け入れたカードを後から必ず結び付けられる**ようにするための列で、
+    /// 社員マスタ同期が同じ code の社員を入れた時点で `employee_id` が埋まり
+    /// ここは `NULL` に戻る。一覧に出すのは「持ち主が空欄の行の理由」を
+    /// 画面が説明できるようにするため (同じカードを別の社員に登録しようとすると
+    /// `UNIQUE (tenant_id, card_id)` で 409 になるが、持ち主が空欄だと原因が読めない)。
+    pub pending_employee_code: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -396,8 +408,10 @@ pub struct TimecardCardBulkUpsert {
 pub struct TimecardCardUpsertSkipped {
     pub index: usize,
     pub code: String,
-    /// `employee_not_found` / `invalid_card_id` / `card_owner_conflict` /
-    /// `duplicate_in_batch` の 4 種。
+    /// `invalid_card_id` / `card_owner_conflict` / `duplicate_in_batch` の 3 種。
+    ///
+    /// **`employee_not_found` は無くなった** (Refs ippoan/rust-alc-api#644) —
+    /// 社員がまだ居ないカードは skip せず受け入れ、`pending` に数える。
     pub reason: String,
 }
 
@@ -443,6 +457,9 @@ pub struct TimecardCardDeleteResult {
     pub reason: String,
     /// **誰のカードを外したか** (`employees.code`)。消さなかったときは `None` —
     /// 画面に「〜さんのカードを外しました」と出すためだけに返す。
+    ///
+    /// 社員がまだ居ない保留行を外したときは `pending_employee_code`
+    /// (= 台帳が言っている社員番号) が入る (Refs ippoan/rust-alc-api#644)。
     pub code: Option<String>,
 }
 
@@ -452,6 +469,14 @@ pub struct TimecardCardUpsertSummary {
     pub updated: usize,
     /// 既に**同じ社員**に同じカードが付いていて、何も書かなかった件数。
     pub unchanged: usize,
+    /// 受け入れたが、その社員番号の社員が alc にまだ**居なかった**件数
+    /// (Refs ippoan/rust-alc-api#644)。
+    ///
+    /// **`skipped` ではない — 行は作られている。** `created` / `updated` /
+    /// `unchanged` とは別軸の数え方で、そのどれかと必ず重なる (合計には足さない)。
+    /// 社員マスタ同期が同じ code の社員を入れた時点で自動的に結び付くので、
+    /// 呼び出し元の画面は**エラーではなく「後で結び付く」通知**として出すこと。
+    pub pending: usize,
     pub skipped: Vec<TimecardCardUpsertSkipped>,
 }
 

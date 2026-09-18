@@ -201,8 +201,15 @@ pub async fn resolve_employee_by_card(
     card_id: &str,
 ) -> Result<Option<Uuid>, sqlx::Error> {
     let card_id = normalize_card_id(card_id);
+    // ★ **カードが在っても持ち主が居ないこと**がある (Refs ippoan/rust-alc-api#644)。
+    // 社員マスタがまだ同期されていないカードは `employee_id` が NULL のまま台帳に
+    // 載っている。そこで打ち切らず `employees.nfc_id` のフォールバックへ落とす —
+    // 免許証で引ければそちらで打刻できるし、引けなければ**元どおり未解決**
+    // (端末はその場で「解決できないカード」として扱う)。
     if let Some(card) = repo.find_card_by_card_id(tenant_id, &card_id).await? {
-        return Ok(Some(card.employee_id));
+        if let Some(employee_id) = card.employee_id {
+            return Ok(Some(employee_id));
+        }
     }
     repo.find_employee_id_by_nfc(tenant_id, &card_id).await
 }

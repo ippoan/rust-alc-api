@@ -172,6 +172,12 @@ impl TimecardRepository for PgTimecardRepository {
     /// **1 件の不備でトランザクションごと落とさない**のが眼目:
     /// 社員の解決は SELECT、書き込みは `ON CONFLICT` なので制約違反が起きる余地が無く、
     /// savepoint を使わずに「skip して次へ」が成り立つ。
+    ///
+    /// **社員が引けない行も受け入れる** (Refs ippoan/rust-alc-api#644)。社員マスタは
+    /// 別経路が別スケジュールで入れるので「カードが先、社員が後」が普通に起きる。
+    /// 落とすと拾い直す仕組みが無い (= 永久に入らない) ため、`employee_id` を NULL に
+    /// して社員番号を `pending_employee_code` に残し、`pending` で件数を返す。
+    /// 結び付けは社員マスタ同期側 (`repo/employees.rs` の `link_pending_cards`) が行う。
     async fn bulk_upsert_cards_by_code(
         &self,
         tenant_id: Uuid,
@@ -196,13 +202,18 @@ impl TimecardRepository for PgTimecardRepository {
                     .fetch_optional(&mut *tx)
                     .await?;
 
-            let Some((employee_id,)) = employee else {
-                summary.skipped.push(TimecardCardUpsertSkipped {
-                    index: item.index,
-                    code: item.code.clone(),
-                    reason: "employee_not_found".to_string(),
-                });
-                continue;
+            // ★ 社員が引けなくても**落とさない** (Refs ippoan/rust-alc-api#644)。
+            // 社員マスタは別経路 (デジタコ relay) が別スケジュールで入れるので、
+            // 新しい乗務員のカードは「社員がまだ居ない」状態で届く。ここで skip すると
+            // 拾い直す仕組みが無いため**そのカードは永久に alc に入らない**。
+            //
+            // 受け入れる代わりに、**後で必ず結び付けられる**よう社員番号を
+            // `pending_employee_code` に残す。社員マスタ同期が同じ code の社員を
+            // 入れた瞬間に `link_pending_cards` (repo/employees.rs) が結ぶ。
+            let employee_id: Option<Uuid> = employee.map(|(id,)| id);
+            let pending_code: Option<&str> = match employee_id {
+                Some(_) => None,
+                None => Some(item.code.as_str()),
             };
 
             // `xmax = 0` で INSERT と UPDATE を見分ける。DO UPDATE の WHERE が
@@ -217,13 +228,32 @@ impl TimecardRepository for PgTimecardRepository {
             // これは fail-closed 側 (消せないだけ) なので仕様。
             // `tests/timecard_cards_bulk_test.rs` の
             // `test_unchanged_row_keeps_null_source_by_design` が固定している。
+            //
+            // ★ 比較は **`IS DISTINCT FROM`**。`<>` は片側が NULL だと NULL (= false 扱い)
+            // になり、保留行 (`employee_id IS NULL`) の付け替えが黙って起きなくなる。
+            // 非 NULL 同士では `<>` と同じなので既存の挙動は動かない。
+            //
+            // ★ **持ち主の居ない行 (保留行) は `reassign` を待たずに引き取る。**
+            // `on_conflict` は「**別の社員**に付いているカードを守る」ための指定で、
+            // 持ち主が居ない行には守るものが無い。ここを reassign 待ちにすると、
+            // 社員が relay 以外の経路 (画面からの手動登録) で現れたときに
+            // 保留行が結ばれないまま `card_owner_conflict` を返し続ける
+            // = 「受け入れたのに紐づけできない」状態が残る。
+            //
+            // ★ `SET` に **`pending_employee_code` を必ず含める**。落とすと付け替え後の
+            // 行に古い code が残り、`link_pending_cards` は `employee_id IS NULL` の行しか
+            // 見ないので**部分 index に幽霊行が残り続ける**。
             let written: Option<(bool,)> = sqlx::query_as(
                 r#"
-                INSERT INTO timecard_cards (tenant_id, employee_id, card_id, label, source)
-                VALUES ($1, $2, $3, $4, $5)
+                INSERT INTO timecard_cards (tenant_id, employee_id, card_id, label, source, pending_employee_code)
+                VALUES ($1, $2, $3, $4, $5, $7)
                 ON CONFLICT (tenant_id, card_id) DO UPDATE
-                    SET employee_id = EXCLUDED.employee_id
-                    WHERE $6::boolean AND timecard_cards.employee_id <> EXCLUDED.employee_id
+                    SET employee_id = EXCLUDED.employee_id,
+                        pending_employee_code = EXCLUDED.pending_employee_code
+                    WHERE ($6::boolean OR timecard_cards.employee_id IS NULL)
+                      AND (timecard_cards.employee_id IS DISTINCT FROM EXCLUDED.employee_id
+                           OR timecard_cards.pending_employee_code
+                               IS DISTINCT FROM EXCLUDED.pending_employee_code)
                 RETURNING (xmax = 0) AS inserted
                 "#,
             )
@@ -236,16 +266,23 @@ impl TimecardRepository for PgTimecardRepository {
             // 送り手が書けると alc 側で直接登録したカードまで消せるようになる
             .bind(CARD_SOURCE_LEDGER_SYNC)
             .bind(reassign)
+            .bind(pending_code)
             .fetch_optional(&mut *tx)
             .await?;
 
+            let mut accepted = true;
             match written {
                 Some((true,)) => summary.created += 1,
                 Some((false,)) => summary.updated += 1,
                 None => {
                     // 書かなかった = 同じ card_id の行が既にある。持ち主が同じなら
-                    // 何もしないのが正 (unchanged)、別人なら見送った行
-                    let owner: Option<(Uuid,)> = sqlx::query_as(
+                    // 何もしないのが正 (unchanged)、別人なら見送った行。
+                    //
+                    // ★ 受ける型は **`Option<(Option<Uuid>,)>`**。保留行は
+                    // `employee_id` が NULL なので、`Uuid` で受けるとデコードに失敗して
+                    // `sqlx::Error` になり、**1 件の不備でトランザクションごと 500**
+                    // (この関数の設計意図をそのまま破る)。
+                    let owner: Option<(Option<Uuid>,)> = sqlx::query_as(
                         "SELECT employee_id FROM timecard_cards WHERE tenant_id = $1 AND card_id = $2",
                     )
                     .bind(tenant_id)
@@ -256,6 +293,7 @@ impl TimecardRepository for PgTimecardRepository {
                     if owner == Some((employee_id,)) {
                         summary.unchanged += 1;
                     } else {
+                        accepted = false;
                         summary.skipped.push(TimecardCardUpsertSkipped {
                             index: item.index,
                             code: item.code.clone(),
@@ -263,6 +301,13 @@ impl TimecardRepository for PgTimecardRepository {
                         });
                     }
                 }
+            }
+
+            // 受け入れたが社員に結び付いていない行の数。created / updated / unchanged
+            // とは**別軸の数え方** (どれとも重なる) で、画面に「登録はできたが社員が
+            // まだ同期されていない」と出すためだけに返す
+            if accepted && employee_id.is_none() {
+                summary.pending += 1;
             }
         }
 
@@ -341,7 +386,7 @@ impl TimecardRepository for PgTimecardRepository {
             WITH gone AS (
                 DELETE FROM timecard_cards
                 WHERE tenant_id = $1 AND card_id = $2 AND source = $3
-                RETURNING employee_id
+                RETURNING employee_id, pending_employee_code
             ),
             present AS (
                 SELECT 1 FROM timecard_cards WHERE tenant_id = $1 AND card_id = $2
@@ -349,7 +394,11 @@ impl TimecardRepository for PgTimecardRepository {
             SELECT
                 EXISTS (SELECT 1 FROM gone)    AS deleted,
                 EXISTS (SELECT 1 FROM present) AS present,
-                (SELECT e.code FROM gone JOIN employees e ON e.id = gone.employee_id) AS code
+                -- ★ 保留行 (`employee_id IS NULL`) は employees に当たらないので
+                -- **LEFT JOIN + COALESCE**。INNER JOIN のままだと外した行の持ち主が
+                -- 常に `None` になり、画面が「誰のカードを外したか」を出せない
+                (SELECT COALESCE(e.code, gone.pending_employee_code)
+                   FROM gone LEFT JOIN employees e ON e.id = gone.employee_id) AS code
             "#,
         )
         .bind(tenant_id)

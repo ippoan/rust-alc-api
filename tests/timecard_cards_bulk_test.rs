@@ -60,14 +60,44 @@ impl Ctx {
         res.json().await.unwrap()
     }
 
-    async fn cards(&self) -> Vec<(String, Uuid)> {
-        sqlx::query_as::<_, (String, Uuid)>(
+    /// **持ち主は `Option`** — 社員がまだ居ないカードは `None`
+    /// (Refs ippoan/rust-alc-api#644)
+    async fn cards(&self) -> Vec<(String, Option<Uuid>)> {
+        sqlx::query_as::<_, (String, Option<Uuid>)>(
             "SELECT card_id, employee_id FROM timecard_cards WHERE tenant_id = $1 ORDER BY card_id",
         )
         .bind(self.tenant)
         .fetch_all(self.state.pool())
         .await
         .unwrap()
+    }
+
+    /// 1 枚の `(持ち主, 保留中の社員番号)`。**結び付いたら code は NULL に戻る**
+    async fn card_row(&self, card_id: &str) -> (Option<Uuid>, Option<String>) {
+        sqlx::query_as::<_, (Option<Uuid>, Option<String>)>(
+            "SELECT employee_id, pending_employee_code FROM timecard_cards \
+             WHERE tenant_id = $1 AND card_id = $2",
+        )
+        .bind(self.tenant)
+        .bind(card_id)
+        .fetch_one(self.state.pool())
+        .await
+        .unwrap()
+    }
+
+    /// 社員マスタ同期 (relay が叩く口) を 1 件で叩く。
+    /// **`nfc_id` は送らない** — relay は意図的に null を送る
+    async fn employees_bulk(&self, code: &str, name: &str) -> Value {
+        let res = self
+            .client
+            .put(format!("{}/api/employees/bulk-by-code", self.base_url))
+            .header("Authorization", &self.auth)
+            .json(&json!({"items": [{"code": code, "name": name, "nfc_id": null}]}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200, "employees/bulk-by-code");
+        res.json().await.unwrap()
     }
 
     async fn card_count(&self) -> i64 {
@@ -174,12 +204,18 @@ async fn test_accepts_4_7_8_byte_cards_and_skips_only_the_malformed_one() {
     );
 }
 
-/// 受け入れ 4: 未知の code は skip、他の行は入る (500 にしない)。
+/// 受け入れ 4: 社員がまだ居ない code も**受け入れて後から結び付ける**
+/// (Refs ippoan/rust-alc-api#644)。
+///
+/// 社員マスタは別経路 (デジタコ relay の `PUT /employees/bulk-by-code`) が
+/// 別スケジュールで入れるので、「カードが先・社員が後」が普通に起きる。
+/// 以前はここを `employee_not_found` で落としており、拾い直す仕組みが無いため
+/// **そのカードは永久に alc に入らなかった**。
 #[tokio::test]
-async fn test_unknown_code_is_skipped_without_failing_the_batch() {
-    test_group!("bulk-by-code: 未知の社員番号");
+async fn test_unknown_code_is_accepted_as_pending_and_linked_later() {
+    test_group!("bulk-by-code: 社員がまだ居ないカード");
 
-    test_case!("employee_not_found で skip、他の行は入る", {
+    test_case!("skip されず pending が 1、行が作られる", {
         let ctx = setup("Bulk Cards C").await;
         ctx.employee("居る 人", "E001").await;
 
@@ -190,13 +226,147 @@ async fn test_unknown_code_is_skipped_without_failing_the_batch() {
             ]}))
             .await;
 
-        assert_eq!(body["created"], 1);
-        let skipped = body["skipped"].as_array().unwrap();
-        assert_eq!(skipped.len(), 1);
-        assert_eq!(skipped[0]["reason"], "employee_not_found");
-        assert_eq!(skipped[0]["code"], "NOBODY");
-        assert_eq!(ctx.card_count().await, 1);
+        // 行は作られているので created に数える。skipped には入れない
+        assert_eq!(body["created"], 2, "{body}");
+        assert_eq!(body["pending"], 1, "{body}");
+        assert!(body["skipped"].as_array().unwrap().is_empty(), "{body}");
+        assert_eq!(ctx.card_count().await, 2);
+
+        // 社員番号は行に残る — 残さないと「どの社員のカードか」が消えて
+        // 後から結べなくなる
+        assert_eq!(
+            ctx.card_row("01401d0b1d37b660").await,
+            (None, Some("NOBODY".to_string()))
+        );
     });
+
+    test_case!(
+        "社員マスタ同期が社員を入れた時点で結び付き、保留の code は消える",
+        {
+            let ctx = setup("Bulk Cards C2").await;
+            ctx.bulk_ok(json!({"items": [{"code": "E900", "card_id": "01401d0b1d37b660"}]}))
+                .await;
+            assert_eq!(
+                ctx.card_row("01401d0b1d37b660").await.0,
+                None,
+                "まだ社員が居ない"
+            );
+
+            // relay が後から同じ code の社員を入れる (新規作成の経路)
+            let summary = ctx.employees_bulk("E900", "あとから 太郎").await;
+            assert_eq!(summary["created"], 1, "{summary}");
+
+            let (owner, pending) = ctx.card_row("01401d0b1d37b660").await;
+            let employee_id: Uuid = sqlx::query_as::<_, (Uuid,)>(
+                "SELECT id FROM employees WHERE tenant_id = $1 AND code = $2",
+            )
+            .bind(ctx.tenant)
+            .bind("E900")
+            .fetch_one(ctx.state.pool())
+            .await
+            .unwrap()
+            .0;
+            assert_eq!(owner, Some(employee_id), "社員が現れたら結び付く");
+            assert_eq!(pending, None, "結び付いたら保留の code は NULL に戻る");
+        }
+    );
+
+    test_case!(
+        "既に居る社員を同期し直しても保留カードは巻き込まれない",
+        {
+            let ctx = setup("Bulk Cards C3").await;
+            let alice = ctx.employee("既に 居る", "E001").await;
+            ctx.bulk_ok(json!({"items": [
+                {"code": "E001", "card_id": "01401d0b1d37b660"},
+                {"code": "E900", "card_id": "04a1b2c3d4e5f6"}
+            ]}))
+            .await;
+
+            // 既存社員の更新経路 (code 一致) を通す
+            ctx.employees_bulk("E001", "既に 居る").await;
+
+            assert_eq!(ctx.card_row("01401d0b1d37b660").await, (Some(alice), None));
+            assert_eq!(
+                ctx.card_row("04a1b2c3d4e5f6").await,
+                (None, Some("E900".to_string())),
+                "別の code の保留カードは触らない"
+            );
+        }
+    );
+
+    test_case!(
+        "保留行をもう一度流しても 500 にならない (unchanged)",
+        {
+            // 保留行は `employee_id` が NULL。持ち主を `Uuid` で受けると
+            // デコードに失敗して**トランザクションごと 500** になる
+            let ctx = setup("Bulk Cards C4").await;
+            let items = json!({"items": [{"code": "E900", "card_id": "01401d0b1d37b660"}]});
+
+            let first = ctx.bulk_ok(items.clone()).await;
+            assert_eq!(first["created"], 1, "{first}");
+            assert_eq!(first["pending"], 1, "{first}");
+
+            let second = ctx.bulk_ok(items).await;
+            assert_eq!(second["created"], 0, "{second}");
+            assert_eq!(second["unchanged"], 1, "{second}");
+            assert_eq!(second["pending"], 1, "保留のままなのは 2 回目も同じ");
+            assert!(second["skipped"].as_array().unwrap().is_empty(), "{second}");
+            assert_eq!(ctx.card_count().await, 1);
+        }
+    );
+
+    test_case!(
+        "保留行は on_conflict を待たずに社員へ引き取られる",
+        {
+            // 社員が relay 以外 (画面からの手動登録など) で現れたときの経路。
+            // ここが reassign 待ちだと「受け入れたのに紐づけできない」が残る
+            let ctx = setup("Bulk Cards C5").await;
+            ctx.bulk_ok(json!({"items": [{"code": "E001", "card_id": "01401d0b1d37b660"}]}))
+                .await;
+            let alice = ctx.employee("あとから 手動", "E001").await;
+
+            let again = ctx
+                .bulk_ok(json!({"items": [{"code": "E001", "card_id": "01401d0b1d37b660"}]}))
+                .await;
+            assert_eq!(again["updated"], 1, "{again}");
+            assert_eq!(again["pending"], 0, "{again}");
+            assert!(again["skipped"].as_array().unwrap().is_empty(), "{again}");
+            assert_eq!(ctx.card_row("01401d0b1d37b660").await, (Some(alice), None));
+        }
+    );
+
+    test_case!(
+        "付け替え (reassign) で結ばれた行の保留 code は残らない",
+        {
+            // 残ると `link_pending_cards` は `employee_id IS NULL` の行しか見ないので
+            // **部分 index に幽霊行が残り続ける**
+            let ctx = setup("Bulk Cards C6").await;
+            let bob = ctx.employee("付け替え ボブ", "E002").await;
+            ctx.bulk_ok(json!({"items": [{"code": "E900", "card_id": "01401d0b1d37b660"}]}))
+                .await;
+
+            let moved = ctx
+                .bulk_ok(json!({
+                    "on_conflict": "reassign",
+                    "items": [{"code": "E002", "card_id": "01401d0b1d37b660"}]
+                }))
+                .await;
+            assert_eq!(moved["updated"], 1, "{moved}");
+            assert_eq!(moved["pending"], 0, "{moved}");
+            assert_eq!(ctx.card_row("01401d0b1d37b660").await, (Some(bob), None));
+
+            let ghosts: i64 = sqlx::query_as::<_, (i64,)>(
+                "SELECT count(*) FROM timecard_cards \
+             WHERE tenant_id = $1 AND pending_employee_code IS NOT NULL",
+            )
+            .bind(ctx.tenant)
+            .fetch_one(ctx.state.pool())
+            .await
+            .unwrap()
+            .0;
+            assert_eq!(ghosts, 0, "結び付いた行が部分 index に残らない");
+        }
+    );
 }
 
 /// 受け入れ 5: 同じ body の 2 回目は 1 行も書かない。
@@ -245,7 +415,7 @@ async fn test_card_owner_conflict_and_reassign() {
         assert_eq!(kept["skipped"][0]["reason"], "card_owner_conflict");
         assert_eq!(
             ctx.cards().await,
-            vec![("01401d0b1d37b660".to_string(), alice)]
+            vec![("01401d0b1d37b660".to_string(), Some(alice))]
         );
 
         let moved = ctx
@@ -258,7 +428,7 @@ async fn test_card_owner_conflict_and_reassign() {
         assert!(moved["skipped"].as_array().unwrap().is_empty());
         assert_eq!(
             ctx.cards().await,
-            vec![("01401d0b1d37b660".to_string(), bob)]
+            vec![("01401d0b1d37b660".to_string(), Some(bob))]
         );
         assert_eq!(ctx.card_count().await, 1, "付け替えで行は増えない");
     });
@@ -284,8 +454,10 @@ async fn test_dry_run_writes_nothing_and_matches_apply() {
 
         let applied = ctx.bulk_ok(json!({"items": items})).await;
         assert_eq!(dry, applied, "判定は同じコードを通る");
-        assert_eq!(applied["created"], 1);
-        assert_eq!(ctx.card_count().await, before + 1);
+        // 社員がまだ居ない 2 件目も受け入れる (Refs ippoan/rust-alc-api#644)
+        assert_eq!(applied["created"], 2, "{applied}");
+        assert_eq!(applied["pending"], 1, "{applied}");
+        assert_eq!(ctx.card_count().await, before + 2);
     });
 }
 
@@ -332,8 +504,8 @@ async fn test_same_card_id_in_two_tenants_does_not_collide() {
             1
         );
 
-        assert_eq!(a.cards().await, vec![(card.to_string(), emp_a)]);
-        assert_eq!(b.cards().await, vec![(card.to_string(), emp_b)]);
+        assert_eq!(a.cards().await, vec![(card.to_string(), Some(emp_a))]);
+        assert_eq!(b.cards().await, vec![(card.to_string(), Some(emp_b))]);
     });
 }
 
@@ -570,6 +742,29 @@ async fn test_delete_by_card_only_removes_synced_rows() {
                 vec![("04a1b2c3d4e5f6".to_string(), None)],
                 "alc 側で直接登録したカードは巻き込まない"
             );
+        }
+    );
+}
+
+/// 保留行 (社員がまだ居ない行) を外したときも「誰のカードを外したか」を返す
+/// (Refs ippoan/rust-alc-api#644)。`employees` への JOIN は空振りするので
+/// `pending_employee_code` で埋める — 埋めないと画面が無名になる。
+#[tokio::test]
+async fn test_delete_by_card_reports_the_pending_code_of_an_unlinked_row() {
+    test_group!("delete-by-card: 保留行の社員番号");
+
+    test_case!(
+        "持ち主が居ない行を外すと台帳の社員番号が返る",
+        {
+            let ctx = setup("Card Delete Pending").await;
+            ctx.bulk_ok(json!({"items": [{"code": "E900", "card_id": "01401d0b1d37b660"}]}))
+                .await;
+
+            let gone = ctx.delete_ok(json!({"card_id": "01401d0b1d37b660"})).await;
+            assert_eq!(gone["deleted"], 1, "{gone}");
+            assert_eq!(gone["reason"], "deleted");
+            assert_eq!(gone["code"], "E900", "{gone}");
+            assert_eq!(ctx.card_count().await, 0);
         }
     );
 }

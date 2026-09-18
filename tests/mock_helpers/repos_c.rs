@@ -1513,8 +1513,9 @@ pub struct MockTimecardRepository {
     pub punch_card_ids: std::sync::Mutex<Vec<String>>,
     /// 一括取り込み (Refs ippoan/rust-alc-api#644) 用の社員台帳: code → employee_id
     pub bulk_employees: std::sync::Mutex<std::collections::HashMap<String, Uuid>>,
-    /// 同じく カード台帳: **正規化済み** card_id → employee_id
-    pub bulk_cards: std::sync::Mutex<std::collections::HashMap<String, Uuid>>,
+    /// 同じく カード台帳: **正規化済み** card_id → employee_id。
+    /// **値が `None` = 社員がまだ居ない保留行** (Refs ippoan/rust-alc-api#644)
+    pub bulk_cards: std::sync::Mutex<std::collections::HashMap<String, Option<Uuid>>>,
     /// 削除 (Refs ippoan/rust-alc-api#644) が返す `(deleted, reason, code)`。
     /// 既定は「そもそも無い」
     pub delete_by_card_result: std::sync::Mutex<(usize, String, Option<String>)>,
@@ -1565,10 +1566,11 @@ impl TimecardRepository for MockTimecardRepository {
         Ok(TimecardCard {
             id: Uuid::new_v4(),
             tenant_id,
-            employee_id,
+            employee_id: Some(employee_id),
             card_id: card_id.to_string(),
             label: label.map(|s| s.to_string()),
             source: None,
+            pending_employee_code: None,
             created_at: Utc::now(),
         })
     }
@@ -1602,14 +1604,10 @@ impl TimecardRepository for MockTimecardRepository {
         let mut summary = TimecardCardUpsertSummary::default();
 
         for item in items {
-            let Some(&employee_id) = employees.get(&item.code) else {
-                summary.skipped.push(TimecardCardUpsertSkipped {
-                    index: item.index,
-                    code: item.code.clone(),
-                    reason: "employee_not_found".to_string(),
-                });
-                continue;
-            };
+            // 社員が引けなくても**落とさない** (Refs ippoan/rust-alc-api#644)。
+            // 持ち主 `None` = 保留行として台帳に載せ、`pending` に数える
+            let employee_id: Option<Uuid> = employees.get(&item.code).copied();
+            let mut accepted = true;
 
             match staged.get(&item.card_id).copied() {
                 None => {
@@ -1617,15 +1615,27 @@ impl TimecardRepository for MockTimecardRepository {
                     summary.created += 1;
                 }
                 Some(owner) if owner == employee_id => summary.unchanged += 1,
+                // 持ち主の居ない行は `reassign` を待たずに引き取る (Pg 側と同じ)
+                Some(None) => {
+                    staged.insert(item.card_id.clone(), employee_id);
+                    summary.updated += 1;
+                }
                 Some(_) if on_conflict == TimecardCardConflictPolicy::Reassign => {
                     staged.insert(item.card_id.clone(), employee_id);
                     summary.updated += 1;
                 }
-                Some(_) => summary.skipped.push(TimecardCardUpsertSkipped {
-                    index: item.index,
-                    code: item.code.clone(),
-                    reason: "card_owner_conflict".to_string(),
-                }),
+                Some(_) => {
+                    accepted = false;
+                    summary.skipped.push(TimecardCardUpsertSkipped {
+                        index: item.index,
+                        code: item.code.clone(),
+                        reason: "card_owner_conflict".to_string(),
+                    });
+                }
+            }
+
+            if accepted && employee_id.is_none() {
+                summary.pending += 1;
             }
         }
 

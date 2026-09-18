@@ -36,10 +36,11 @@ fn make_card(tenant_id: Uuid, employee_id: Uuid, card_id: &str) -> TimecardCard 
     TimecardCard {
         id: Uuid::new_v4(),
         tenant_id,
-        employee_id,
+        employee_id: Some(employee_id),
         card_id: card_id.to_string(),
         label: Some("Test Card".to_string()),
         source: None,
+        pending_employee_code: None,
         created_at: Utc::now(),
     }
 }
@@ -49,7 +50,14 @@ fn make_card(tenant_id: Uuid, employee_id: Uuid, card_id: &str) -> TimecardCard 
 // ============================================================
 
 struct PunchCardFoundMock {
-    employee_id: Uuid,
+    /// カードに載っている持ち主。**`None` = 社員がまだ居ない保留行**
+    /// (Refs ippoan/rust-alc-api#644)
+    card_employee_id: Option<Uuid>,
+    /// 免許証 (`employees.nfc_id`) フォールバックが返す社員。
+    /// 保留行のときだけここへ落ちる
+    nfc_employee_id: Option<Uuid>,
+    /// フォールバックが呼ばれたか。**結び付き済みカードでは呼ばれない**ことを固定する
+    nfc_called: std::sync::atomic::AtomicBool,
 }
 
 #[async_trait::async_trait]
@@ -105,17 +113,20 @@ impl TimecardRepository for PunchCardFoundMock {
         Ok(Some(TimecardCard {
             id: Uuid::new_v4(),
             tenant_id,
-            employee_id: self.employee_id,
+            employee_id: self.card_employee_id,
             card_id: card_id.to_string(),
             label: None,
             source: None,
+            pending_employee_code: self.card_employee_id.is_none().then(|| "E999".to_string()),
             created_at: Utc::now(),
         }))
     }
 
     async fn find_employee_id_by_nfc(&self, _: Uuid, _: &str) -> Result<Option<Uuid>, sqlx::Error> {
-        // Should not be called when find_card_by_card_id returns Some
-        unreachable!("NFC fallback should not be called when card is found")
+        // 結び付き済みカードでは呼ばれない (呼び出しの有無は nfc_called が固定する)
+        self.nfc_called
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        Ok(self.nfc_employee_id)
     }
 
     async fn create_punch(
@@ -362,10 +373,11 @@ impl TimecardRepository for PunchCreateFailMock {
         Ok(Some(TimecardCard {
             id: Uuid::new_v4(),
             tenant_id,
-            employee_id: Uuid::new_v4(),
+            employee_id: Some(Uuid::new_v4()),
             card_id: card_id.to_string(),
             label: None,
             source: None,
+            pending_employee_code: None,
             created_at: Utc::now(),
         }))
     }
@@ -484,10 +496,11 @@ impl TimecardRepository for PunchGetNameFailMock {
         Ok(Some(TimecardCard {
             id: Uuid::new_v4(),
             tenant_id,
-            employee_id: Uuid::new_v4(),
+            employee_id: Some(Uuid::new_v4()),
             card_id: card_id.to_string(),
             label: None,
             source: None,
+            pending_employee_code: None,
             created_at: Utc::now(),
         }))
     }
@@ -614,10 +627,11 @@ impl TimecardRepository for PunchListTodayFailMock {
         Ok(Some(TimecardCard {
             id: Uuid::new_v4(),
             tenant_id,
-            employee_id: Uuid::new_v4(),
+            employee_id: Some(Uuid::new_v4()),
             card_id: card_id.to_string(),
             label: None,
             source: None,
+            pending_employee_code: None,
             created_at: Utc::now(),
         }))
     }
@@ -1304,8 +1318,12 @@ async fn test_delete_card_db_error() {
 #[tokio::test]
 async fn test_punch_success_card_found() {
     let employee_id = Uuid::new_v4();
-    let mock = Arc::new(PunchCardFoundMock { employee_id });
-    let (base_url, jwt) = spawn_with_mock(mock).await;
+    let mock = Arc::new(PunchCardFoundMock {
+        card_employee_id: Some(employee_id),
+        nfc_employee_id: None,
+        nfc_called: std::sync::atomic::AtomicBool::new(false),
+    });
+    let (base_url, jwt) = spawn_with_mock(mock.clone()).await;
     let client = reqwest::Client::new();
 
     let res = client
@@ -1323,6 +1341,61 @@ async fn test_punch_success_card_found() {
     assert_eq!(body["employee_name"], "Taro Yamada");
     assert!(body["punch"]["id"].is_string());
     assert!(body["today_punches"].is_array());
+    assert!(
+        !mock.nfc_called.load(std::sync::atomic::Ordering::SeqCst),
+        "結び付き済みカードでは免許証フォールバックへ落ちない"
+    );
+}
+
+/// 社員がまだ居ない保留カード (`employee_id` が NULL) は、**カードが見つかっても
+/// そこで打ち切らず免許証フォールバックへ落ちる** (Refs ippoan/rust-alc-api#644)。
+/// 免許証で引ければそちらで打刻でき、引けなければ元どおり未解決 (404)
+#[tokio::test]
+async fn test_punch_pending_card_falls_back_to_nfc() {
+    let employee_id = Uuid::new_v4();
+    let mock = Arc::new(PunchCardFoundMock {
+        card_employee_id: None,
+        nfc_employee_id: Some(employee_id),
+        nfc_called: std::sync::atomic::AtomicBool::new(false),
+    });
+    let (base_url, jwt) = spawn_with_mock(mock.clone()).await;
+
+    let res = reqwest::Client::new()
+        .post(format!("{base_url}/api/timecard/punch"))
+        .header("Authorization", auth(&jwt))
+        .json(&serde_json::json!({"card_id": "NFC-CARD-001"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 201);
+    assert!(
+        mock.nfc_called.load(std::sync::atomic::Ordering::SeqCst),
+        "保留カードは免許証フォールバックへ落ちる"
+    );
+
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(body["punch"]["employee_id"], employee_id.to_string());
+}
+
+/// 保留カードで免許証フォールバックも外れたら、**元どおり「解決できないカード」**。
+/// 保留行の存在が打刻の挙動を変えない (誰かに着いたりしない) ことを固定する
+#[tokio::test]
+async fn test_punch_pending_card_without_nfc_is_not_found() {
+    let mock = Arc::new(PunchCardFoundMock {
+        card_employee_id: None,
+        nfc_employee_id: None,
+        nfc_called: std::sync::atomic::AtomicBool::new(false),
+    });
+    let (base_url, jwt) = spawn_with_mock(mock).await;
+
+    let res = reqwest::Client::new()
+        .post(format!("{base_url}/api/timecard/punch"))
+        .header("Authorization", auth(&jwt))
+        .json(&serde_json::json!({"card_id": "NFC-CARD-001"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 404);
 }
 
 // ============================================================
@@ -2098,8 +2171,11 @@ async fn bulk_cards_skips_invalid_card_id_and_keeps_the_rest() {
     assert!(skipped[0].get("card_id").is_none(), "{body}");
 }
 
+/// 社員がまだ居ない code も**受け入れて `pending` に数える**
+/// (Refs ippoan/rust-alc-api#644)。社員マスタは別経路が別スケジュールで入れるので
+/// 「カードが先、社員が後」が普通に起きる。skip すると拾い直す仕組みが無い
 #[tokio::test]
-async fn bulk_cards_skips_unknown_code_and_keeps_the_rest() {
+async fn bulk_cards_accepts_unknown_code_as_pending() {
     let mock = bulk_mock(&[("E002", Uuid::new_v4())]);
     let (base_url, jwt) = spawn_with_mock(mock).await;
 
@@ -2114,11 +2190,10 @@ async fn bulk_cards_skips_unknown_code_and_keeps_the_rest() {
     .await;
     assert_eq!(res.status(), 200, "未知の code で 500 にしない");
     let body: Value = res.json().await.unwrap();
-    assert_eq!(body["created"], 1);
-    let skipped = body["skipped"].as_array().unwrap();
-    assert_eq!(skipped.len(), 1);
-    assert_eq!(skipped[0]["reason"], "employee_not_found");
-    assert_eq!(skipped[0]["index"], 0);
+    // **行は作られている**ので created に数える。skipped には入れない (嘘になる)
+    assert_eq!(body["created"], 2, "{body}");
+    assert_eq!(body["pending"], 1, "{body}");
+    assert!(body["skipped"].as_array().unwrap().is_empty(), "{body}");
 }
 
 #[tokio::test]
@@ -2229,15 +2304,23 @@ async fn bulk_cards_dry_run_writes_nothing_but_reports_the_same_summary() {
 
 #[tokio::test]
 async fn bulk_cards_skipped_entries_are_ordered_by_index() {
-    let mock = bulk_mock(&[("E001", Uuid::new_v4())]);
+    let mock = bulk_mock(&[("E001", Uuid::new_v4()), ("E002", Uuid::new_v4())]);
     let (base_url, jwt) = spawn_with_mock(mock).await;
+
+    // E001 のカードを 1 枚先に登録しておく (2 件目を card_owner_conflict にするため)
+    put_bulk(
+        &base_url,
+        &jwt,
+        serde_json::json!({"items": [{"code": "E001", "card_id": "01401d0b1d37b660"}]}),
+    )
+    .await;
 
     let body: Value = put_bulk(
         &base_url,
         &jwt,
         serde_json::json!({"items": [
-            {"code": "UNKNOWN", "card_id": "01401d0b1d37b660"},
             {"code": "E001", "card_id": "未登録"},
+            {"code": "E002", "card_id": "01401d0b1d37b660"},
             {"code": "E001", "card_id": "04a1b2c3d4e5f6"}
         ]}),
     )
@@ -2246,13 +2329,13 @@ async fn bulk_cards_skipped_entries_are_ordered_by_index() {
     .await
     .unwrap();
     let skipped = body["skipped"].as_array().unwrap();
-    // repo 側 (employee_not_found) と handler 側 (invalid_card_id) の合流でも
+    // repo 側 (card_owner_conflict) と handler 側 (invalid_card_id) の合流でも
     // items の並び順で返す — 送り手は index で行を突き合わせる
     assert_eq!(skipped.len(), 2, "{body}");
     assert_eq!(skipped[0]["index"], 0);
-    assert_eq!(skipped[0]["reason"], "employee_not_found");
+    assert_eq!(skipped[0]["reason"], "invalid_card_id");
     assert_eq!(skipped[1]["index"], 1);
-    assert_eq!(skipped[1]["reason"], "invalid_card_id");
+    assert_eq!(skipped[1]["reason"], "card_owner_conflict");
     assert_eq!(body["created"], 1);
 }
 
