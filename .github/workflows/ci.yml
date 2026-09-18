@@ -304,6 +304,7 @@ jobs:
           - { name: csv-parser, target: "//crates/alc-csv-parser:alc-csv-parser_test", coverage: "cov-csv-parser" }
           - { name: devices, target: "//crates/alc-devices:alc-devices_test", coverage: "cov-devices" }
           - { name: dtako, target: "//crates/alc-dtako:alc-dtako_test", coverage: "cov-dtako" }
+          - { name: maintenance, target: "//crates/alc-maintenance:alc-maintenance_test", coverage: "cov-maintenance" }
           - { name: misc, target: "//crates/alc-misc:alc-misc_test", coverage: "cov-misc" }
           - { name: notify, target: "//crates/alc-notify:alc-notify_test", pdfium: true, coverage: "cov-notify" }
           - { name: pdf, target: "//crates/alc-pdf:alc-pdf_test", coverage: "cov-pdf" }
@@ -392,6 +393,11 @@ jobs:
       matrix:
         include:
           - { name: db-trouble, target: "//:trouble_test", coverage: "cov-db-trouble" }
+          # 車両整備記録 (maintenance) の土台: 車両マスタ CRUD + carins 紐づけ/解除/候補提示
+          # (Refs ippoan/rust-alc-api#651)。partial unique (tenant_id, car_id) の 409 と
+          # RLS のテナント分離を実 DB で固定する。ci.yml の bazel-test-db と cache-warm.yml
+          # を同じ内容にすること (check_bazel_test_matrix.sh が pair 一致を検査する)
+          - { name: db-maintenance, target: "//:maintenance_test" }
           - { name: db-archive, target: "//:archive_repo_test", coverage: "cov-db-archive" }
           - { name: db-hub-measurements, target: "//:hub_measurements_test" }
           - { name: db-timecard-punches, target: "//:timecard_punches_test" }

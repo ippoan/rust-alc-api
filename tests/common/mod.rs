@@ -686,11 +686,33 @@ pub fn pg_camera_state(state: &AppState) -> alc_camera::CameraState {
     }
 }
 
+/// pool から maintenance ドメインの MaintenanceState を合成する (Refs #651)。
+/// carins 照合 (`lookup_expiry`) は既存の `state.car_inspections` (alc-carins の
+/// `PgCarInspectionRepository`) をそのまま使う — mock を挟まない。
+pub fn pg_maintenance_state(state: &AppState) -> alc_maintenance::MaintenanceState {
+    let pool = state
+        .pool
+        .clone()
+        .expect("spawn_test_server: state.pool is None — mock state は spawn_test_server_with_states を使うこと");
+    alc_maintenance::MaintenanceState {
+        vehicles: Arc::new(alc_maintenance::vehicles::PgVehiclesRepository::new(pool)),
+        car_inspections: state.car_inspections.clone(),
+    }
+}
+
 pub async fn spawn_test_server(state: AppState) -> String {
     let tenko_state = pg_tenko_state(&state);
     let trouble_state = pg_trouble_state(&state);
     let camera_state = pg_camera_state(&state);
-    spawn_test_server_with_states(state, tenko_state, trouble_state, camera_state).await
+    let maintenance_state = pg_maintenance_state(&state);
+    spawn_test_server_with_states(
+        state,
+        tenko_state,
+        trouble_state,
+        camera_state,
+        maintenance_state,
+    )
+    .await
 }
 
 pub async fn spawn_test_server_with_states(
@@ -698,6 +720,7 @@ pub async fn spawn_test_server_with_states(
     tenko_state: alc_tenko::TenkoState,
     trouble_state: alc_trouble::TroubleState,
     camera_state: alc_camera::CameraState,
+    maintenance_state: alc_maintenance::MaintenanceState,
 ) -> String {
     use axum::{Extension, Router};
     use rust_alc_api::auth::google::GoogleTokenVerifier;
@@ -730,6 +753,7 @@ pub async fn spawn_test_server_with_states(
                 tenko_state,
                 trouble_state,
                 camera_state,
+                maintenance_state,
             )
             // main.rs と同じ配線 (internal_shared_secret_router を /api 直下にマージ)。
             // テスト用共有 secret は TEST_INTERNAL_SHARED_SECRET で固定する。
