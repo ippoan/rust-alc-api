@@ -2424,6 +2424,198 @@ async fn test_resume_session_db_error() {
 }
 
 // =========================================================================
+// POST /api/tenko/sessions/{id}/self-resume (Refs ippoan/alc-app#351)
+// =========================================================================
+
+#[tokio::test]
+async fn test_self_resume_session_kiosk_without_auth_user() {
+    // キオスク (端末トークン) 相当: X-Tenant-ID のみで AuthUser が入らない呼び出し。
+    // 通ること / status が書き換わらないこと / resumed_by_user_id が NULL のままで
+    // あること (「どの管理者が承認したか」の列なので自己再開では埋めない)
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_status.lock().unwrap() = "medical_pending".to_string();
+    let state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
+    tenko_state.tenko_sessions = mock;
+    let tenant_id = uuid::Uuid::new_v4();
+    let base_url =
+        crate::mock_helpers::app_state::spawn_mock_server_with_tenko(state, tenko_state.clone())
+            .await;
+
+    let res = client()
+        .post(format!(
+            "{base_url}/api/tenko/sessions/{}/self-resume",
+            Uuid::new_v4()
+        ))
+        .header("X-Tenant-ID", tenant_id.to_string())
+        .json(&serde_json::json!({ "reason": "キオスク自己再開 (顔認証済)" }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["status"], "medical_pending");
+    assert!(body["resumed_at"].is_string());
+    assert_eq!(body["resume_reason"], "キオスク自己再開 (顔認証済)");
+    assert!(body["resumed_by_user_id"].is_null());
+}
+
+#[tokio::test]
+async fn test_self_resume_session_with_auth_user_records_user_id() {
+    // 管理者ブラウザから叩かれた場合は resumed_by_user_id に入れる
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_status.lock().unwrap() = "daily_inspection_pending".to_string();
+    let (base_url, auth_header, _, user_id) = setup_with_mock_and_user(mock).await;
+
+    let res = client()
+        .post(format!(
+            "{base_url}/api/tenko/sessions/{}/self-resume",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({ "reason": "管理者が代理で再開" }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["status"], "daily_inspection_pending");
+    assert_eq!(body["resumed_by_user_id"], user_id.to_string());
+}
+
+#[tokio::test]
+async fn test_self_resume_session_empty_reason() {
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    let (base_url, auth_header, _, _) = setup_with_mock_and_user(mock).await;
+
+    let res = client()
+        .post(format!(
+            "{base_url}/api/tenko/sessions/{}/self-resume",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({ "reason": "   " }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 400);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["error"], "reason_required");
+}
+
+#[tokio::test]
+async fn test_self_resume_session_terminal_status_rejected() {
+    // 終端 (completed / cancelled / interrupted) は 400。interrupted は管理者の
+    // resume_session の領分
+    for status in ["completed", "cancelled", "interrupted"] {
+        let mock = Arc::new(MockTenkoSessionRepository::default());
+        *mock.session_status.lock().unwrap() = status.to_string();
+        let (base_url, auth_header, _, _) = setup_with_mock_and_user(mock).await;
+
+        let res = client()
+            .post(format!(
+                "{base_url}/api/tenko/sessions/{}/self-resume",
+                Uuid::new_v4()
+            ))
+            .header("Authorization", &auth_header)
+            .json(&serde_json::json!({ "reason": "キオスク自己再開 (顔認証済)" }))
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(res.status(), 400, "{status}");
+        let body: serde_json::Value = res.json().await.unwrap();
+        assert_eq!(body["error"], "session_not_resumable", "{status}");
+    }
+}
+
+#[tokio::test]
+async fn test_self_resume_session_already_resumed() {
+    // 2 回目の再開は UPDATE の WHERE (resumed_at IS NULL) で 0 行 -> 400
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    mock.already_resumed.store(true, Ordering::SeqCst);
+    let (base_url, auth_header, _, _) = setup_with_mock_and_user(mock).await;
+
+    let res = client()
+        .post(format!(
+            "{base_url}/api/tenko/sessions/{}/self-resume",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({ "reason": "キオスク自己再開 (顔認証済)" }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 400);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["error"], "already_resumed");
+}
+
+#[tokio::test]
+async fn test_self_resume_session_not_found() {
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    mock.return_session.store(false, Ordering::SeqCst);
+    let (base_url, auth_header, _, _) = setup_with_mock_and_user(mock).await;
+
+    let res = client()
+        .post(format!(
+            "{base_url}/api/tenko/sessions/{}/self-resume",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({ "reason": "キオスク自己再開 (顔認証済)" }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 404);
+}
+
+#[tokio::test]
+async fn test_self_resume_session_get_db_error() {
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    mock.fail_next.store(true, Ordering::SeqCst);
+    let (base_url, auth_header, _, _) = setup_with_mock_and_user(mock).await;
+
+    let res = client()
+        .post(format!(
+            "{base_url}/api/tenko/sessions/{}/self-resume",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({ "reason": "キオスク自己再開 (顔認証済)" }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 500);
+}
+
+#[tokio::test]
+async fn test_self_resume_session_update_db_error() {
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    mock.fail_on_update.store(true, Ordering::SeqCst);
+    let (base_url, auth_header, _, _) = setup_with_mock_and_user(mock).await;
+
+    let res = client()
+        .post(format!(
+            "{base_url}/api/tenko/sessions/{}/self-resume",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&serde_json::json!({ "reason": "キオスク自己再開 (顔認証済)" }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 500);
+}
+
+// =========================================================================
 // POST /api/tenko/sessions/{id}/cancel
 // =========================================================================
 

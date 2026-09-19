@@ -545,6 +545,33 @@ impl TenkoSessionRepository for PgTenkoSessionRepository {
         .await
     }
 
+    async fn self_resume(
+        &self,
+        tenant_id: Uuid,
+        id: Uuid,
+        reason: &str,
+        resumed_by_user_id: Option<Uuid>,
+    ) -> Result<Option<TenkoSession>, sqlx::Error> {
+        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
+        sqlx::query_as::<_, TenkoSession>(
+            r#"
+            UPDATE tenko_sessions SET
+                resumed_at = NOW(),
+                resume_reason = $1,
+                resumed_by_user_id = $2,
+                updated_at = NOW()
+            WHERE id = $3 AND tenant_id = $4 AND resumed_at IS NULL
+            RETURNING *
+            "#,
+        )
+        .bind(reason)
+        .bind(resumed_by_user_id)
+        .bind(id)
+        .bind(tenant_id)
+        .fetch_optional(&mut *tc.conn)
+        .await
+    }
+
     async fn escalate_to_remote(
         &self,
         tenant_id: Uuid,
