@@ -762,6 +762,9 @@ pub struct MockTenkoSessionRepository {
     /// record_manager_judgment に渡された (judgment, reason, judged_by_employee_id) を
     /// 検証用に記録する (Refs ippoan/alc-app#315)
     pub recorded_manager_judgment: std::sync::Mutex<Option<(String, Option<String>, Uuid)>>,
+    /// true のとき self_resume が更新 0 行 (= 既に resumed_at が入っている) を模して
+    /// None を返す (Refs ippoan/alc-app#351)
+    pub already_resumed: AtomicBool,
 }
 
 impl Default for MockTenkoSessionRepository {
@@ -789,6 +792,7 @@ impl Default for MockTenkoSessionRepository {
             fail_on_update_carrying_items: AtomicBool::new(false),
             created_session_tenko_method: std::sync::Mutex::new(None),
             recorded_manager_judgment: std::sync::Mutex::new(None),
+            already_resumed: AtomicBool::new(false),
         }
     }
 }
@@ -1315,6 +1319,37 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
         session.resume_reason = Some(_reason.to_string());
         session.resumed_by_user_id = _resumed_by_user_id;
         Ok(session)
+    }
+
+    async fn self_resume(
+        &self,
+        _tenant_id: Uuid,
+        _id: Uuid,
+        _reason: &str,
+        _resumed_by_user_id: Option<Uuid>,
+    ) -> Result<Option<TenkoSession>, sqlx::Error> {
+        check_fail_update!(self);
+        // 本物は WHERE ... AND resumed_at IS NULL で弾き、更新 0 行なら None
+        if self.already_resumed.load(Ordering::SeqCst) {
+            return Ok(None);
+        }
+        let employee_id = *self.session_employee_id.lock().unwrap();
+        let status = self.session_status.lock().unwrap().clone();
+        let tenko_type = self.session_tenko_type.lock().unwrap().clone();
+        // status は書き換えない (自己再開は resumed_at / resume_reason だけを書く)
+        let mut session = make_mock_session(
+            _tenant_id,
+            _id,
+            employee_id,
+            &status,
+            &tenko_type,
+            false,
+            false,
+        );
+        session.resumed_at = Some(Utc::now());
+        session.resume_reason = Some(_reason.to_string());
+        session.resumed_by_user_id = _resumed_by_user_id;
+        Ok(Some(session))
     }
 
     async fn escalate_to_remote(

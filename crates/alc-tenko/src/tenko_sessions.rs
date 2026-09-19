@@ -35,6 +35,10 @@ where
         .route("/tenko/sessions/{id}/interrupt", post(interrupt_session))
         .route("/tenko/sessions/{id}/resume", post(resume_session))
         .route(
+            "/tenko/sessions/{id}/self-resume",
+            post(self_resume_session),
+        )
+        .route(
             "/tenko/sessions/{id}/judgment",
             post(record_manager_judgment),
         )
@@ -1263,6 +1267,82 @@ async fn resume_session(
     Ok(Json(session))
 }
 
+/// 終端 (これ以上進まない) の点呼 status か。
+///
+/// `alc-app` の `RESUMABLE_TENKO_STATUSES` (`useTenkoKiosk.ts`) を Rust に写すと
+/// 「再開できる status の登録簿」が 2 つになって必ず食い違うので、**否定形**で書く。
+fn is_terminal_tenko_status(status: &str) -> bool {
+    matches!(status, "completed" | "cancelled" | "interrupted")
+}
+
+/// キオスクの自己再開 (Refs ippoan/alc-app#351)。
+///
+/// 「続きから再開」(ippoan/alc-app#344) で再開した点呼は、これまでサーバに何も
+/// 通知されず `resumed_at` が空のままだった — 記録には 3 時間前の `started_at` しか
+/// 残らず、実際に点呼を実施した時刻がどこにも無かった。`started_at` は書き換えず、
+/// **再開した事実と時刻を足す**。
+///
+/// 既存の [`resume_session`] (管理者用) とは 3 点で違う:
+///
+/// 1. **`status` を一切書かない。** 再開先の段はキオスクがローカルで復元しており
+///    (`useTenkoKiosk.ts` の `_advanceByStatus`)、サーバが変える必要がない。
+///    再開先をリクエストから受けると、tenant token だけで任意の status へ
+///    遷移できる注入口になるため、`resume_to` 相当の入力自体を作らない
+/// 2. **`AuthUser` は `Option`** ([`record_manager_judgment`] と同じ作法)。
+///    `resumed_by_user_id` は「どの管理者が再開を承認したか」の列なので、
+///    キオスク (端末トークン = `AuthUser` 無し) からは **NULL のまま**にする —
+///    埋めると嘘になる。誰の点呼かは `employee_id` が持っている
+/// 3. **対象 status は否定形** ([`is_terminal_tenko_status`])。`interrupted` は
+///    管理者の領分なのでここでは弾く (既存 `resume_session` がそちらを担当する)
+///
+/// 「再開は 1 セッションにつき 1 回まで」(オーナー決定) は
+/// [`TenkoSessionRepository::self_resume`] の `WHERE ... AND resumed_at IS NULL` で
+/// 担保する。`resumed_at` は単数カラムで 2 回目の時刻を保持できないため、
+/// 2 回目は 400 にして新しい点呼としてやり直させる。
+async fn self_resume_session(
+    State(state): State<TenkoState>,
+    tenant: axum::Extension<TenantId>,
+    auth_user: Option<axum::Extension<AuthUser>>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<ResumeSession>,
+) -> Result<Json<TenkoSession>, ApiError> {
+    let reason = body.reason.trim();
+    if reason.is_empty() {
+        return Err(bad_request("reason_required", "再開理由は必須です"));
+    }
+
+    let tenant_id = tenant.0 .0;
+    let repo = &*state.tenko_sessions;
+
+    let session = repo
+        .get(tenant_id, id)
+        .await
+        .map_err(|e| internal_error("self_resume_session get", e))?
+        .ok_or_else(|| not_found("session_not_found"))?;
+
+    if is_terminal_tenko_status(&session.status) {
+        return Err(bad_request(
+            "session_not_resumable",
+            "この点呼は再開できません。新しく点呼をやり直してください",
+        ));
+    }
+
+    // 「1 回まで」は UPDATE の WHERE で弾く — ここで `session.resumed_at` を見て
+    // 分岐すると read-then-write になり、2 連打・2 端末で両方通る
+    let session = repo
+        .self_resume(tenant_id, id, reason, auth_user.map(|u| u.user_id))
+        .await
+        .map_err(|e| internal_error("self_resume_session", e))?
+        .ok_or_else(|| {
+            bad_request(
+                "already_resumed",
+                "この点呼は既に再開済みです。新しく点呼をやり直してください",
+            )
+        })?;
+
+    Ok(Json(session))
+}
+
 /// 運行管理者による点呼 OK/NG 判定 (Refs ippoan/alc-app#315)。
 ///
 /// status は変えない (オーナー決定 1: NG でも点呼は完了扱いのまま)。
@@ -1411,6 +1491,35 @@ mod tests {
         assert!(failed.contains(&"illness".to_string()));
         assert!(failed.contains(&"fatigue".to_string()));
         assert!(failed.contains(&"sleep_deprivation".to_string()));
+    }
+
+    #[test]
+    fn test_is_terminal_tenko_status_terminal() {
+        assert!(is_terminal_tenko_status("completed"));
+        assert!(is_terminal_tenko_status("cancelled"));
+        // interrupted は管理者の resume_session の領分なので自己再開では弾く
+        assert!(is_terminal_tenko_status("interrupted"));
+    }
+
+    #[test]
+    fn test_is_terminal_tenko_status_resumable() {
+        // alc-app の RESUMABLE_TENKO_STATUSES (useTenkoKiosk.ts) の 5 個が
+        // すべて「終端でない」= 自己再開できる側に落ちること
+        for status in [
+            "identity_verified",
+            "medical_pending",
+            "self_declaration_pending",
+            "daily_inspection_pending",
+            "carrying_items_pending",
+        ] {
+            assert!(!is_terminal_tenko_status(status), "{status}");
+        }
+    }
+
+    #[test]
+    fn test_is_terminal_tenko_status_unknown_is_not_terminal() {
+        // 未知の status は「終端でない」側に倒す (新しい途中段が増えても再開を塞がない)
+        assert!(!is_terminal_tenko_status("unexpected"));
     }
 
     #[test]

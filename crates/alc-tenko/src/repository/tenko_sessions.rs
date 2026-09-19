@@ -169,6 +169,27 @@ pub trait TenkoSessionRepository: Send + Sync {
         resumed_by_user_id: Option<Uuid>,
     ) -> Result<TenkoSession, sqlx::Error>;
 
+    /// キオスクの自己再開 (Refs ippoan/alc-app#351)。
+    ///
+    /// `status` は**書かない** — 再開先はキオスクがローカルに持っており、
+    /// リクエストから受けると tenant token だけで任意の status へ遷移できる
+    /// 注入口になるため。書くのは `resumed_at` / `resume_reason` /
+    /// `resumed_by_user_id` だけ。
+    ///
+    /// 「再開は 1 セッションにつき 1 回まで」は `WHERE ... AND resumed_at IS NULL`
+    /// で担保する (`get()` → 更新の read-then-write では 2 連打・2 端末で両方通る)。
+    /// 既に再開済み / 該当行なしのときは更新 0 行となり `Ok(None)` を返す。
+    ///
+    /// ★ この条件を共有の [`resume`](Self::resume) に足さないこと —
+    /// 管理者の中断→再開が 2 回目から壊れる。
+    async fn self_resume(
+        &self,
+        tenant_id: Uuid,
+        id: Uuid,
+        reason: &str,
+        resumed_by_user_id: Option<Uuid>,
+    ) -> Result<Option<TenkoSession>, sqlx::Error>;
+
     /// 自動点呼 → 遠隔点呼への切り替え (Refs ippoan/alc-app-s3#135)。
     /// tenko_method を '遠隔点呼' にし、切り替え時刻・理由を記録する。
     /// status は変えない (血圧待ちのまま次の医療データ提出へ進める)
