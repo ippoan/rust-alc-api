@@ -107,15 +107,13 @@ async fn identify(
     };
     let row = &rows[hit.index];
     // 学習は次の照合でまた起きるので、書き戻しの競合 (0 行) や失敗は捨ててよい
-    if let Some(learned) = hit.learned.filter(|t| t != &row.template) {
-        let written = state
-            .templates
-            .update_learned(tenant_id, row.id, &learned, row.updated_at)
-            .await;
-        // Ok(false) = 間に登録し直し等が入った競合で、書き戻しを捨てた
-        let employee_id = row.employee_id;
-        tracing::info!("vein identify: {employee_id} learned write-back {written:?}");
-    }
+    let written = state
+        .templates
+        .update_learned(tenant_id, row.id, &hit.learned, row.updated_at)
+        .await;
+    // Ok(false) = 間に登録し直し等が入った競合で、書き戻しを捨てた
+    let employee_id = row.employee_id;
+    tracing::info!("vein identify: {employee_id} learned write-back {written:?}");
     Ok(Json(
         json!({ "employee_id": row.employee_id, "name": row.name }),
     ))

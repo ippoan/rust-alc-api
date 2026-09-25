@@ -91,8 +91,8 @@ pub fn enroll_template(charas: &[Vec<u8>]) -> Result<String, i32> {
 pub struct Hit {
     /// 渡したテンプレートの並びでの位置。
     pub index: usize,
-    /// 学習後のテンプレート (base64)。取り出せなければ None。
-    pub learned: Option<String>,
+    /// 学習後のテンプレート (base64)。
+    pub learned: String,
 }
 
 /// [`identify`] の結果。
@@ -124,12 +124,15 @@ pub fn identify(templates: &[&str], chara: &[u8], t8: u8) -> Result<Identify, To
     let (r, _) = fv_search_user(&mut lib, chara, SEARCH_LEVEL, Some(t8));
     let hit = (r > 0).then(|| {
         let index = (r - 1) as usize;
+        // 当たった利用者には記録があり (get_enroll_plain が None にならない)、mode 1 の
+        // 組み立ては失敗しない (EncodeUnsupported は mode の bit1/bit2 だけ) ので取り出せる
         let learned = lib
             .get_enroll_template(index, TEMPLATE_MODE, &[])
-            .and_then(Result::ok);
+            .and_then(Result::ok)
+            .expect("当たった利用者の学習後テンプレートは取り出せる");
         Hit {
             index,
-            learned: learned.map(|t| STANDARD.encode(t)),
+            learned: STANDARD.encode(learned),
         }
     });
     Ok(Identify { hit, unreadable })
@@ -262,7 +265,7 @@ mod tests {
         let hit = got.hit.unwrap();
         assert_eq!(hit.index, 0);
         // 学習後のテンプレートも import_temp_b64 で読み戻せる
-        let learned = hit.learned.unwrap();
+        let learned = hit.learned;
         assert_ne!(learned, t, "学習で学習記録が足され、テンプレートが変わる");
         let mut lib = Library::new(2).unwrap();
         assert_eq!(lib.import_temp_b64(1, &learned), 0);
