@@ -237,6 +237,12 @@ jobs:
           # ci.yml の bazel-test-db と cache-warm.yml を同じ内容にすること
           # (check_bazel_test_matrix.sh が pair 一致を検査する)
           - { name: db-tenko-bp-required-escalate, target: "//:tenko_bp_required_escalate_test" }
+          # 指静脈テンプレート (migration 151、Refs ippoan/vein-match#20)。upsert の
+          # ON CONFLICT・updated_at を条件にした学習の書き戻し・削除済み乗務員の除外・
+          # RLS は mock では 1 行も通らない。coverage は alc-vein の Pg repo (repo.rs) の寄与分。
+          # ci.yml の bazel-test-db と cache-warm.yml を同じ内容にすること
+          # (check_bazel_test_matrix.sh が pair 一致を検査する)
+          - { name: db-vein-templates, target: "//:vein_templates_test", coverage: "cov-db-vein" }
     services:
       postgres:
         image: postgres:16

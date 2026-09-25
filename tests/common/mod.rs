@@ -713,17 +713,30 @@ pub fn pg_maintenance_state(state: &AppState) -> alc_maintenance::MaintenanceSta
     }
 }
 
+/// pool から指静脈の VeinState を合成する (Refs ippoan/vein-match#20)。
+pub fn pg_vein_state(state: &AppState) -> alc_vein::VeinState {
+    let pool = state
+        .pool
+        .clone()
+        .expect("spawn_test_server: state.pool is None — mock state は spawn_test_server_with_states を使うこと");
+    alc_vein::VeinState {
+        templates: Arc::new(alc_vein::repo::PgVeinTemplatesRepository::new(pool)),
+    }
+}
+
 pub async fn spawn_test_server(state: AppState) -> String {
     let tenko_state = pg_tenko_state(&state);
     let trouble_state = pg_trouble_state(&state);
     let camera_state = pg_camera_state(&state);
     let maintenance_state = pg_maintenance_state(&state);
+    let vein_state = pg_vein_state(&state);
     spawn_test_server_with_states(
         state,
         tenko_state,
         trouble_state,
         camera_state,
         maintenance_state,
+        vein_state,
     )
     .await
 }
@@ -734,6 +747,7 @@ pub async fn spawn_test_server_with_states(
     trouble_state: alc_trouble::TroubleState,
     camera_state: alc_camera::CameraState,
     maintenance_state: alc_maintenance::MaintenanceState,
+    vein_state: alc_vein::VeinState,
 ) -> String {
     use axum::{Extension, Router};
     use rust_alc_api::auth::google::GoogleTokenVerifier;
@@ -767,6 +781,7 @@ pub async fn spawn_test_server_with_states(
                 trouble_state,
                 camera_state,
                 maintenance_state,
+                vein_state,
             )
             // main.rs と同じ配線 (internal_shared_secret_router を /api 直下にマージ)。
             // テスト用共有 secret は TEST_INTERNAL_SHARED_SECRET で固定する。

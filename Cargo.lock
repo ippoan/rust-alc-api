@@ -327,6 +327,19 @@ dependencies = [
 name = "alc-vein"
 version = "0.1.0"
 dependencies = [
+ "alc-core",
+ "async-trait",
+ "axum",
+ "base64 0.22.1",
+ "chrono",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "tower",
+ "tracing",
+ "uuid",
+ "vein-match",
  "vein-match-search",
 ]
 
@@ -3521,6 +3534,7 @@ dependencies = [
  "alc-storage",
  "alc-tenko",
  "alc-trouble",
+ "alc-vein",
  "anyhow",
  "argon2",
  "async-trait",
@@ -5102,13 +5116,13 @@ dependencies = [
 
 [[package]]
 name = "vein-match"
-version = "0.1.0"
-source = "git+https://github.com/ippoan/vein-match?tag=v0.1.0#4308a862a8a5ab9ce185303f0466549c8af8df31"
+version = "0.1.1"
+source = "git+https://github.com/ippoan/vein-match?tag=v0.1.1#da9803b638b8e7508dc190482934afee0c7b0d27"
 
 [[package]]
 name = "vein-match-search"
-version = "0.1.0"
-source = "git+https://github.com/ippoan/vein-match?tag=v0.1.0#4308a862a8a5ab9ce185303f0466549c8af8df31"
+version = "0.1.1"
+source = "git+https://github.com/ippoan/vein-match?tag=v0.1.1#da9803b638b8e7508dc190482934afee0c7b0d27"
 dependencies = [
  "aes",
  "base64 0.22.1",

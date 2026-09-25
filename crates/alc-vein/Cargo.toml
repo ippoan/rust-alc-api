@@ -10,5 +10,22 @@ unexpected_cfgs = { level = "allow", check-cfg = ['cfg(coverage)'] }
 # ローカルは `gh auth setup-git` 済みであること、CI は
 # ippoan/ci-workflows の private-git-auth action が GitHub App の token で git の URL を書き換える
 # (Refs ippoan/vein-match#20)。tag を上げるときは Cargo.lock も一緒に更新する。
+# vein-match (core) は特徴量の 16 進デコードと読み込み検査 (`decode_hex` / `load`) に、
+# vein-match-search は 1:N 照合・テンプレートの組み立てに使う (同じ git の同じ tag)。
 [dependencies]
-vein-match-search = { git = "https://github.com/ippoan/vein-match", tag = "v0.1.0" }
+alc-core = { path = "../alc-core" }
+async-trait = "0.1"
+axum = "0.8"
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sqlx = { version = "0.8", features = ["postgres", "chrono", "uuid"] }
+tracing = "0.1"
+uuid = { version = "1", features = ["v4", "serde"] }
+vein-match = { git = "https://github.com/ippoan/vein-match", tag = "v0.1.1" }
+vein-match-search = { git = "https://github.com/ippoan/vein-match", tag = "v0.1.1" }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }
+tower = { version = "0.5", features = ["util"] }

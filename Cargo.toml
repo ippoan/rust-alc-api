@@ -48,6 +48,7 @@ alc-misc = { path = "crates/alc-misc" }
 alc-notify = { path = "crates/alc-notify" }
 alc-tenko = { path = "crates/alc-tenko" }
 alc-trouble = { path = "crates/alc-trouble" }
+alc-vein = { path = "crates/alc-vein" }
 alc-storage = { path = "crates/alc-storage" }
 alc-csv-parser = { path = "crates/alc-csv-parser" }
 alc-compare = { path = "crates/alc-compare" }

@@ -20,6 +20,15 @@ pub fn bad_request(error: &str, message: &str) -> ApiError {
     )
 }
 
+/// 理由付き 422。形は正しい JSON だが中身を処理できない (例: 指静脈の特徴量が
+/// 未対応の形式) ときに使う。`error` / `message` は `bad_request` と同じ。
+pub fn unprocessable(error: &str, message: &str) -> ApiError {
+    (
+        StatusCode::UNPROCESSABLE_ENTITY,
+        Json(serde_json::json!({ "error": error, "message": message })),
+    )
+}
+
 /// 理由付き 404 (`error` のみ)。
 pub fn not_found(error: &str) -> ApiError {
     (
