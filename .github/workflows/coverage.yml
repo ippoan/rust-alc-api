@@ -41,6 +41,12 @@ jobs:
       TEST_DATABASE_URL: postgresql://postgres:test@localhost:5432/postgres?options=-c search_path=alc_api
     steps:
       - uses: actions/checkout@v4
+      # private repo ippoan/vein-match (crates/alc-vein の git 依存) の取得用 (README 参照)
+      - uses: ippoan/ci-workflows/.github/actions/private-git-auth@main
+        with:
+          app-id: ${{ secrets.CI_APP_ID }}
+          private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
+          repositories: vein-match
 
       - uses: dtolnay/rust-toolchain@1.92.0
         with:

@@ -38,6 +38,12 @@ jobs:
           - { name: "test-shared", key: "test-shared", cmd: "cargo nextest run --lib --workspace --no-run" }
     steps:
       - uses: actions/checkout@v4
+      # private repo ippoan/vein-match (crates/alc-vein の git 依存) の取得用 (README 参照)
+      - uses: ippoan/ci-workflows/.github/actions/private-git-auth@main
+        with:
+          app-id: ${{ secrets.CI_APP_ID }}
+          private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
+          repositories: vein-match
       - uses: dtolnay/rust-toolchain@1.92.0
         with:
           components: llvm-tools-preview, clippy
@@ -69,6 +75,12 @@ jobs:
           - { name: backend, targets: "//:rust-alc-api //:migrate //:archive" }
     steps:
       - uses: actions/checkout@v4
+      # private repo ippoan/vein-match (crates/alc-vein の git 依存) の取得用 (README 参照)
+      - uses: ippoan/ci-workflows/.github/actions/private-git-auth@main
+        with:
+          app-id: ${{ secrets.CI_APP_ID }}
+          private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
+          repositories: vein-match
       - uses: ippoan/setup-bazel@main
         with:
           disk-cache: "bazel-${{ matrix.name }}"
@@ -125,8 +137,15 @@ jobs:
           - { name: storage, target: "//crates/alc-storage:alc-storage_test" }
           - { name: tenko, target: "//crates/alc-tenko:alc-tenko_test", coverage: "cov-tenko" }
           - { name: trouble, target: "//crates/alc-trouble:alc-trouble_test", coverage: "cov-trouble" }
+          - { name: vein, target: "//crates/alc-vein:alc-vein_test", coverage: "cov-vein" }
     steps:
       - uses: actions/checkout@v4
+      # private repo ippoan/vein-match (crates/alc-vein の git 依存) の取得用 (README 参照)
+      - uses: ippoan/ci-workflows/.github/actions/private-git-auth@main
+        with:
+          app-id: ${{ secrets.CI_APP_ID }}
+          private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
+          repositories: vein-match
       - uses: ippoan/setup-bazel@main
         with:
           disk-cache: "bazel-test-${{ matrix.name }}"
@@ -234,6 +253,12 @@ jobs:
       TEST_DATABASE_URL: "postgresql://postgres:test@localhost:5432/postgres?options=-c search_path=alc_api"
     steps:
       - uses: actions/checkout@v4
+      # private repo ippoan/vein-match (crates/alc-vein の git 依存) の取得用 (README 参照)
+      - uses: ippoan/ci-workflows/.github/actions/private-git-auth@main
+        with:
+          app-id: ${{ secrets.CI_APP_ID }}
+          private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
+          repositories: vein-match
       - uses: ippoan/setup-bazel@main
         with:
           disk-cache: "bazel-test-${{ matrix.name }}"

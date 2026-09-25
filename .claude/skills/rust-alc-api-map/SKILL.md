@@ -1,6 +1,6 @@
 ---
 name: rust-alc-api-map
-generated-from: rust-alc-api:d74918d9bc1ec500d005f645b4557e161f15d21b
+generated-from: rust-alc-api:c5678c57cd04a251d185ff1d49235562551f27d7
 paths: [crates/, src/, migrations/, tests/]
 description: rust-alc-api (アルコールチェッカー基盤の Rust/Axum Cargo workspace — domain crate 群 + monolith 単一バイナリ、PostgreSQL+RLS、Cloud Run) の構造ナビゲーション。どの crate に何のルートがあるか / monolith (rust-alc-api) 一本化 (gateway + per-domain は #556 で廃止) / RLS・migration・deploy/release 分離の gotcha を 1 枚にまとめる。トリガー:「rust-alc-api」「alc-api」「alc-notify」「alc-tenko」「alc-trouble」「alc-carins」「alc-dtako」「gateway」「tenko-api」「carins-api」「dtako-api」「trouble-api」「RLS テナント」「sqlx migration」「ts-rs」「Release Wave」「Bazel」等。
 ---
@@ -56,6 +56,7 @@ router 実装として存続。旧 per-domain は同じ domain crate を単独 m
 | `alc-storage` | StorageBackend trait + R2 / GCS / HttpProxy 実装。`list(prefix)` (Refs #205 の 13) はデフォルト未対応 (`StorageError::Config`) の trait メソッドで、R2Backend だけが `rust-s3` の `Bucket::list` (自動ページング、ETag のクォート除去込み) で実装。GCS/HttpProxy は現状未対応のまま |
 | `alc-csv-parser` / `alc-compare` | CSV パース / 比較ロジック。**KUDGURI / KUDGIVT はどちらも `対象乗務員CD` を優先し、無ければ `乗務員CD1` にフォールバックする** (`find_col("対象乗務員CD").or_else(\|\| find_col("乗務員CD1"))`)。`乗務員CD1` は運行の主運転者で運行内の全行が同一値なので、2 名乗務では対象者を取り違える。`dtako_upload.rs` が `rest_event_map` を `(driver_cd, work_date)` で張り KUDGURI 由来の driver_cd で引くため、**片方だけ `乗務員CD1` のままだとキーが食い違って 2 人目の休息時間が落ちる** (Refs ohishi-exp/rust-ichibanboshi#205 の 08) |
 | `alc-pdf` | PDF 生成 (assets/fonts 同梱) |
+| `alc-vein` | 指静脈 1:N 照合の窓口 (**試作**、Refs ippoan/vein-match#20)。照合本体 `vein-match-search` を **private repo `ippoan/vein-match` から Cargo の git 依存 (tag 固定)** で取り込む — 今は `library_capacity_ok(n)` (`Library::new` の人数判定) だけで **route / DB にはまだ繋がっていない** (monolith の `_WORKSPACE_CRATES` にも未登録)。取得に認証が要る: ローカルは `gh auth setup-git`、CI は cargo/bazel を打つ全 job の checkout 直後に `ippoan/ci-workflows/.github/actions/private-git-auth` (GitHub App token で `url.*.insteadOf`)、reusable の `rust-dep-check` / `catalog-extract` には `private_git_repos: vein-match` + secrets。**cargo/bazel を打つ job を足すときはこの step も足す** (README「private な git 依存」節) |
 
 ## entrypoint / router
 

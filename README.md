@@ -18,6 +18,24 @@
 - 顔写真アップロード (Cloud Storage)
 - RLS によるマルチテナントデータ分離
 
+## private な git 依存 (vein-match)
+
+`crates/alc-vein` は指静脈照合の `vein-match-search` を **private repo `ippoan/vein-match`** から
+git 依存 (tag 固定) で取り込んでいる。取得に GitHub の認証が要る:
+
+- **ローカル**: `gh auth login` のうえで `gh auth setup-git` 済みであること (cargo も Bazel も
+  git の credential helper 経由で取る)。確認は `git ls-remote https://github.com/ippoan/vein-match`
+- **CI**: cargo / bazel を打つ job は checkout 直後に `ippoan/ci-workflows/.github/actions/private-git-auth`
+  を呼ぶ (GitHub App `ippoan-ci-bot` の token で git の URL を `url.<token 付き URL>.insteadOf` で
+  書き換える。cargo も Bazel の crate_universe もこれを読む)。ci-workflows の reusable のうち
+  workspace を解決するもの (`rust-dep-check.yml` / `catalog-extract.yml`) には
+  `private_git_repos: vein-match` と secrets `CI_APP_ID` / `CI_APP_PRIVATE_KEY` を渡す。
+  **cargo / bazel を打つ job を足すときはこの step も足す**。fork / Dependabot の PR は secrets が
+  無いので取得できない
+
+tag を上げるときは `crates/alc-vein/Cargo.toml` の `tag` を変えて `cargo update -p vein-match-search`
+で `Cargo.lock` も更新する。
+
 ## pre-commit hook (fmt / clippy)
 
 `.githooks/pre-commit` が commit 前に `cargo fmt --check` と `cargo clippy --workspace --all-targets -- -D warnings` を走らせる。
