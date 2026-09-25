@@ -114,6 +114,10 @@ path = "crates/alc-dtako/src/dtako_logs.rs"
 type = "mock"
 
 [[files]]
+path = "crates/alc-dtako/src/dtako_operation_changes.rs"
+type = "combined"
+
+[[files]]
 path = "crates/alc-dtako/src/dtako_operations.rs"
 type = "mock"
 

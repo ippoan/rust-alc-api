@@ -5,7 +5,9 @@ use uuid::Uuid;
 
 use rust_alc_api::db::models::*;
 use rust_alc_api::db::repository::dtako_event_classifications::DtakoEventClassificationsRepository;
-use rust_alc_api::db::repository::dtako_operations::DtakoOperationsRepository;
+use rust_alc_api::db::repository::dtako_operations::{
+    DtakoOperationsRepository, OperationChangeRow,
+};
 use rust_alc_api::db::repository::dtako_restraint_report::{
     DailyWorkHoursRow, DtakoRestraintReportRepository, OpTimesRow, SegmentRow,
 };
@@ -16,7 +18,8 @@ use rust_alc_api::db::repository::dtako_scraper::DtakoScraperRepository;
 use rust_alc_api::db::repository::dtako_tickets::DtakoTicketsRepository;
 use rust_alc_api::db::repository::dtako_upload::{
     DtakoDriverOpRow, DtakoOpRow, DtakoUploadRepository, InsertDailyWorkHoursParams,
-    InsertOperationParams, InsertSegmentParams, UploadHistoryRecord, UploadTenantAndKey,
+    InsertOperationParams, InsertSegmentParams, ReuploadChangeInput, UploadHistoryRecord,
+    UploadTenantAndKey,
 };
 use rust_alc_api::db::repository::dtako_vehicles::DtakoVehiclesRepository;
 use rust_alc_api::db::repository::dtako_work_times::{DtakoWorkTimesRepository, WorkTimeItem};
@@ -124,6 +127,10 @@ pub struct MockDtakoOperationsRepository {
     pub calendar_dates_result: std::sync::Mutex<Vec<(NaiveDate, i64)>>,
     pub get_result: std::sync::Mutex<Vec<DtakoOperation>>,
     pub delete_rows_affected: std::sync::Mutex<u64>,
+    pub operation_changes: std::sync::Mutex<Vec<OperationChangeRow>>,
+    pub recording_since: std::sync::Mutex<Option<DateTime<Utc>>>,
+    /// `operation_changes_recording_since` だけを失敗させる (list の後段のエラー経路用)
+    pub fail_recording_since: AtomicBool,
 }
 
 impl Default for MockDtakoOperationsRepository {
@@ -133,6 +140,9 @@ impl Default for MockDtakoOperationsRepository {
             calendar_dates_result: std::sync::Mutex::new(vec![]),
             get_result: std::sync::Mutex::new(vec![]),
             delete_rows_affected: std::sync::Mutex::new(0),
+            operation_changes: std::sync::Mutex::new(vec![]),
+            recording_since: std::sync::Mutex::new(None),
+            fail_recording_since: AtomicBool::new(false),
         }
     }
 }
@@ -179,6 +189,25 @@ impl DtakoOperationsRepository for MockDtakoOperationsRepository {
     ) -> Result<u64, sqlx::Error> {
         check_fail!(self);
         Ok(*self.delete_rows_affected.lock().unwrap())
+    }
+
+    async fn list_operation_changes(
+        &self,
+        _tenant_id: Uuid,
+        _driver_cd: &str,
+    ) -> Result<Vec<OperationChangeRow>, sqlx::Error> {
+        check_fail!(self);
+        Ok(self.operation_changes.lock().unwrap().clone())
+    }
+
+    async fn operation_changes_recording_since(
+        &self,
+        _tenant_id: Uuid,
+    ) -> Result<Option<DateTime<Utc>>, sqlx::Error> {
+        if self.fail_recording_since.load(Ordering::SeqCst) {
+            return Err(sqlx::Error::RowNotFound);
+        }
+        Ok(*self.recording_since.lock().unwrap())
     }
 }
 
@@ -472,6 +501,11 @@ pub struct MockDtakoUploadRepository {
     /// 一部が更新されない mismatch ケースのテスト用)。空なら渡された unko_nos 全部が
     /// 当たったことにする (正常系)。
     pub update_has_kudgivt_missing_unko_nos: std::sync::Mutex<Vec<String>>,
+    /// `operation_exists` が返す値 (true = 上げ直し扱い)
+    pub operation_exists: AtomicBool,
+    /// `replace_operation` に渡された `(unko_no, crew_role, 変更記録の入力)` を記録する
+    /// (上げ直しの before/after の分数が R2 旧 KUDGIVT と zip から出ているかを検査するため)
+    pub replaced_operations: std::sync::Mutex<Vec<(String, i32, ReuploadChangeInput)>>,
 }
 
 impl Default for MockDtakoUploadRepository {
@@ -491,6 +525,8 @@ impl Default for MockDtakoUploadRepository {
             event_classifications: std::sync::Mutex::new(vec![]),
             last_update_has_kudgivt_unko_nos: std::sync::Mutex::new(None),
             update_has_kudgivt_missing_unko_nos: std::sync::Mutex::new(vec![]),
+            operation_exists: AtomicBool::new(false),
+            replaced_operations: std::sync::Mutex::new(vec![]),
         }
     }
 }
@@ -628,23 +664,29 @@ impl DtakoUploadRepository for MockDtakoUploadRepository {
         Ok(None)
     }
 
-    async fn delete_operation(
+    async fn operation_exists(
         &self,
         _tenant_id: Uuid,
         _unko_no: &str,
         _crew_role: i32,
-    ) -> Result<(), sqlx::Error> {
+    ) -> Result<bool, sqlx::Error> {
         check_fail!(self);
-        Ok(())
+        Ok(self.operation_exists.load(Ordering::SeqCst))
     }
 
-    async fn insert_operation(
+    async fn replace_operation(
         &self,
         _tenant_id: Uuid,
-        _params: &InsertOperationParams,
-    ) -> Result<(), sqlx::Error> {
+        params: &InsertOperationParams,
+        change: &ReuploadChangeInput,
+    ) -> Result<bool, sqlx::Error> {
         check_fail!(self);
-        Ok(())
+        self.replaced_operations.lock().unwrap().push((
+            params.unko_no.clone(),
+            params.crew_role,
+            change.clone(),
+        ));
+        Ok(false)
     }
 
     async fn update_has_kudgivt(

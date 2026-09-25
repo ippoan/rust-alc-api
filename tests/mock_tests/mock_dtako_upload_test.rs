@@ -3618,3 +3618,95 @@ dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,2026/03/01 10:00:00,
     eprintln!("=== SSE body ===\n{body}\n=== end ===");
     assert!(body.contains("done"), "body: {body}");
 }
+
+// =========================================================================
+// POST /api/upload — 上げ直し: before の分数は R2 旧 KUDGIVT、after は zip から
+// (Refs ohishi-exp/nuxt-dtako-admin#1133)
+// ★ split より前に読む順序の固定: upload は process_zip の後に split で同じ R2 key を
+// zip の値 (休憩 60) で上書きする。split の後に読んでいたら before も 60 になって落ちる
+// =========================================================================
+
+#[tokio::test]
+async fn test_dtako_upload_reupload_reads_old_kudgivt_from_r2() {
+    let tenant_id = Uuid::new_v4();
+    let mock = Arc::new(MockDtakoUploadRepository::default());
+    mock.operation_exists.store(true, Ordering::SeqCst);
+
+    // 1001 だけ前回 split 済みの KUDGIVT が R2 に在る (休憩 0 分、休息 45 分)。
+    // 1002 / 1003 は無い (前回 split 失敗相当) → before の分数は取れない
+    let storage = Arc::new(MockStorage::new("dtako-bucket"));
+    let old_kudgivt = "運行NO,読取日,乗務員CD1,乗務員名１,対象乗務員区分,開始日時,終了日時,イベントCD,イベント名,区間時間,区間距離\n\
+1001,2026/03/01,DR01,運転者A,1,2026/03/01 12:00:00,2026/03/01 12:00:00,301,休憩,0,0\n\
+1001,2026/03/01,DR01,運転者A,1,2026/03/01 17:30:00,2026/03/01 18:15:00,302,休息,45,0\n";
+    storage.insert_file(
+        &format!("{tenant_id}/unko/1001/KUDGIVT.csv"),
+        old_kudgivt.as_bytes().to_vec(),
+    );
+
+    let mut state = setup_mock_app_state();
+    state.dtako_upload = mock.clone();
+    state.dtako_storage = Some(storage);
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+
+    let part = reqwest::multipart::Part::bytes(crate::common::create_test_dtako_zip_rich())
+        .file_name("rich.zip");
+    let form = reqwest::multipart::Form::new().part("file", part);
+    let res = reqwest::Client::new()
+        .post(format!("{base_url}/api/upload"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .multipart(form)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+
+    let replaced = mock.replaced_operations.lock().unwrap().clone();
+    assert_eq!(replaced.len(), 3);
+    let (_, crew_role, c1001) = replaced.iter().find(|(u, _, _)| u == "1001").unwrap();
+    assert_eq!(*crew_role, 1);
+    let before = c1001.before_minutes.expect("R2 旧 KUDGIVT から出る");
+    assert_eq!(before.break_minutes, 0);
+    assert_eq!(before.rest_minutes, 45);
+    assert_eq!(c1001.after_minutes.break_minutes, 60);
+    assert_eq!(c1001.after_minutes.rest_minutes, 30);
+    let (_, _, c1002) = replaced.iter().find(|(u, _, _)| u == "1002").unwrap();
+    assert!(c1002.before_minutes.is_none());
+}
+
+// =========================================================================
+// POST /api/upload — 初回取り込み: R2 を読まず before の分数は None
+// =========================================================================
+
+#[tokio::test]
+async fn test_dtako_upload_first_import_skips_old_kudgivt() {
+    let tenant_id = Uuid::new_v4();
+    let mock = Arc::new(MockDtakoUploadRepository::default());
+    let storage = Arc::new(MockStorage::new("dtako-bucket"));
+    storage.insert_file(
+        &format!("{tenant_id}/unko/1001/KUDGIVT.csv"),
+        b"broken".to_vec(),
+    );
+
+    let mut state = setup_mock_app_state();
+    state.dtako_upload = mock.clone();
+    state.dtako_storage = Some(storage);
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+
+    let part = reqwest::multipart::Part::bytes(crate::common::create_test_dtako_zip())
+        .file_name("test.zip");
+    let form = reqwest::multipart::Form::new().part("file", part);
+    let res = reqwest::Client::new()
+        .post(format!("{base_url}/api/upload"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .multipart(form)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+
+    let replaced = mock.replaced_operations.lock().unwrap().clone();
+    assert_eq!(replaced.len(), 1);
+    assert!(replaced[0].2.before_minutes.is_none());
+}

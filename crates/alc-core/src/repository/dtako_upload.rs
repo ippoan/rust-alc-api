@@ -112,6 +112,26 @@ pub struct InsertOperationParams {
     pub r2_key_prefix: String,
 }
 
+/// 1 運行・1 crew_role ぶんの KUDGIVT 区間時間の合計 (分)。イベントCD の既定分類
+/// (201 運転 / 202-204 荷役 / 301 休憩 / 302 休息) で振り分ける。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct OperationMinutes {
+    pub drive_minutes: i32,
+    pub cargo_minutes: i32,
+    pub break_minutes: i32,
+    pub rest_minutes: i32,
+}
+
+/// 上げ直しの変更記録に要る、DB の外で決まる値。
+#[derive(Debug, Clone)]
+pub struct ReuploadChangeInput {
+    pub upload_id: Uuid,
+    /// split 済みの R2 旧 KUDGIVT から出した値。取れなかったら `None` (比較から外す)
+    pub before_minutes: Option<OperationMinutes>,
+    /// 今回の zip の KUDGIVT から出した値
+    pub after_minutes: OperationMinutes,
+}
+
 #[async_trait]
 pub trait DtakoUploadRepository: Send + Sync {
     // --- upload_history ---
@@ -190,18 +210,24 @@ pub trait DtakoUploadRepository: Send + Sync {
     ) -> Result<Option<Uuid>, sqlx::Error>;
 
     // --- operations ---
-    async fn delete_operation(
+    /// 同じ `(tenant_id, unko_no, crew_role)` の行が既に在るか (= 上げ直しか)。
+    /// 在るときだけ呼び手が R2 の旧 KUDGIVT を読みに行く (初回取り込みで R2 を叩かないため)。
+    async fn operation_exists(
         &self,
         tenant_id: Uuid,
         unko_no: &str,
         crew_role: i32,
-    ) -> Result<(), sqlx::Error>;
+    ) -> Result<bool, sqlx::Error>;
 
-    async fn insert_operation(
+    /// 同じ `(tenant_id, unko_no, crew_role)` の旧行を消して新行を入れる。旧行が在れば
+    /// 前後を比べ、違うときだけ `dtako_operation_changes` に reason='reupload' で残す。
+    /// 消す・入れる・記録するを 1 トランザクションで行う。記録したら `true`。
+    async fn replace_operation(
         &self,
         tenant_id: Uuid,
         params: &InsertOperationParams,
-    ) -> Result<(), sqlx::Error>;
+        change: &ReuploadChangeInput,
+    ) -> Result<bool, sqlx::Error>;
 
     /// 戻り値は実際に `has_kudgivt = TRUE` に更新された `unko_no` の集合 (`RETURNING`
     /// を `unko_no` で dedup したもの)。`dtako_operations` は `unko_no` が運転手/副運転手の

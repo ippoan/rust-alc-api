@@ -12,6 +12,7 @@ pub use alc_dtako::dtako_drivers;
 pub use alc_dtako::dtako_event_classifications;
 pub use alc_dtako::dtako_events;
 pub use alc_dtako::dtako_logs;
+pub use alc_dtako::dtako_operation_changes;
 pub use alc_dtako::dtako_operations;
 pub use alc_dtako::dtako_restraint_report;
 pub use alc_dtako::dtako_restraint_report_pdf;
@@ -161,6 +162,7 @@ pub fn router(
         .merge(dtako_csv_proxy::tenant_router())
         .merge(dtako_drivers::tenant_router())
         .merge(dtako_operations::tenant_router())
+        .merge(dtako_operation_changes::tenant_router())
         .merge(dtako_restraint_report::tenant_router())
         .merge(dtako_restraint_report_pdf::tenant_router())
         .merge(dtako_scraper::tenant_router())
