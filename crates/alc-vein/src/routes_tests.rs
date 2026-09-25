@@ -27,6 +27,8 @@ struct FakeRepo {
     employees: Mutex<Vec<(Uuid, String)>>,
     rows: Mutex<Vec<VeinTemplateRow>>,
     fail: AtomicBool,
+    /// upsert だけを DB エラーにする (人数の数えは通す)。
+    fail_upsert: AtomicBool,
     conflict: AtomicBool,
     /// update_learned の呼び出し (id, 読んだ updated_at)。
     learned_calls: Mutex<Vec<(Uuid, DateTime<Utc>)>>,
@@ -65,6 +67,9 @@ impl VeinTemplatesRepository for FakeRepo {
         template: &str,
     ) -> Result<Option<DateTime<Utc>>, sqlx::Error> {
         self.check()?;
+        if self.fail_upsert.load(Ordering::SeqCst) {
+            return Err(sqlx::Error::PoolTimedOut);
+        }
         let employees = self.employees.lock().unwrap();
         let Some((_, name)) = employees.iter().find(|(id, _)| *id == employee_id) else {
             return Ok(None);
@@ -85,6 +90,17 @@ impl VeinTemplatesRepository for FakeRepo {
     async fn list(&self, _tenant_id: Uuid) -> Result<Vec<VeinTemplateRow>, sqlx::Error> {
         self.check()?;
         Ok(self.rows.lock().unwrap().clone())
+    }
+
+    async fn registration_count(
+        &self,
+        _tenant_id: Uuid,
+        employee_id: Uuid,
+    ) -> Result<(i64, bool), sqlx::Error> {
+        self.check()?;
+        let rows = self.rows.lock().unwrap();
+        let enrolled = rows.iter().any(|r| r.employee_id == employee_id);
+        Ok((rows.len() as i64, enrolled))
     }
 
     async fn update_learned(
@@ -196,6 +212,9 @@ async fn put_unknown_employee_is_404_and_db_error_is_500() {
     let (status, v) = call(&repo, "PUT", &uri, body.clone()).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert_eq!(v["error"], "employee_not_found");
+    repo.fail_upsert.store(true, Ordering::SeqCst);
+    let (status, _) = call(&repo, "PUT", &uri, body.clone()).await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
     repo.fail.store(true, Ordering::SeqCst);
     let (status, _) = call(&repo, "PUT", &uri, body).await;
     assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
@@ -313,4 +332,56 @@ async fn delete_removes_then_404_and_db_error_is_500() {
     repo.fail.store(true, Ordering::SeqCst);
     let (status, _) = call(&repo, "DELETE", &uri, Value::Null).await;
     assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+}
+
+/// 登録済みを `n` 人ぶん (テンプレートの中身は PUT の判定に関係しないので空) 並べる。
+fn fill_rows(repo: &FakeRepo, n: usize) {
+    let mut rows = repo.rows.lock().unwrap();
+    for _ in 0..n {
+        rows.push(VeinTemplateRow {
+            id: Uuid::new_v4(),
+            employee_id: Uuid::new_v4(),
+            name: "既存".to_string(),
+            template: String::new(),
+            updated_at: Utc::now(),
+        });
+    }
+}
+
+#[tokio::test]
+async fn put_new_employee_at_500_is_rejected_but_overwrite_passes() {
+    let repo = Arc::new(FakeRepo::default());
+    let body = json!({ "charas": [hex(1)] });
+
+    // 499 人 + 新規 → 500 人目は通る
+    fill_rows(&repo, MAX_TEMPLATES - 1);
+    let id500 = repo.add_employee("500 人目");
+    let (status, _) = call(
+        &repo,
+        "PUT",
+        &format!("/vein/templates/{id500}"),
+        body.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(repo.rows.lock().unwrap().len(), MAX_TEMPLATES);
+
+    // 500 人 + 新規 → 422 (全員の照合を止めないよう、ここで断る)
+    let id501 = repo.add_employee("501 人目");
+    let (status, v) = call(
+        &repo,
+        "PUT",
+        &format!("/vein/templates/{id501}"),
+        body.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(v["error"], "too_many_templates");
+    assert!(v["message"].as_str().unwrap().contains("500"));
+    assert_eq!(repo.rows.lock().unwrap().len(), MAX_TEMPLATES);
+
+    // 500 人 + 既存の上書き → 人数が増えないので通る
+    let (status, _) = call(&repo, "PUT", &format!("/vein/templates/{id500}"), body).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(repo.rows.lock().unwrap().len(), MAX_TEMPLATES);
 }

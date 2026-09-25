@@ -54,6 +54,14 @@ pub trait VeinTemplatesRepository: Send + Sync {
     /// テナントの全テンプレート (削除済みの乗務員を除く)。並びは登録順。
     async fn list(&self, tenant_id: Uuid) -> Result<Vec<VeinTemplateRow>, sqlx::Error>;
 
+    /// 照合に載る登録の人数 (`list` と同じ条件 = 削除済みの乗務員を除く) と、
+    /// `employee_id` がその中に既に居るか (居れば PUT は上書きで人数が増えない)。
+    async fn registration_count(
+        &self,
+        tenant_id: Uuid,
+        employee_id: Uuid,
+    ) -> Result<(i64, bool), sqlx::Error>;
+
     /// 学習後のテンプレートを書き戻す。読んだときの `updated_at` のままのときだけ書き、
     /// 間に登録し直し・別の照合の書き戻しが入っていたら何もしない (`Ok(false)`)。
     async fn update_learned(
@@ -113,6 +121,24 @@ impl VeinTemplatesRepository for PgVeinTemplatesRepository {
         )
         .bind(tenant_id)
         .fetch_all(&mut *tc.conn)
+        .await
+    }
+
+    async fn registration_count(
+        &self,
+        tenant_id: Uuid,
+        employee_id: Uuid,
+    ) -> Result<(i64, bool), sqlx::Error> {
+        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
+        sqlx::query_as(
+            r#"SELECT COUNT(*), COALESCE(BOOL_OR(v.employee_id = $2), FALSE)
+            FROM vein_templates v
+            JOIN employees e ON e.id = v.employee_id AND e.tenant_id = v.tenant_id
+            WHERE v.tenant_id = $1 AND e.deleted_at IS NULL"#,
+        )
+        .bind(tenant_id)
+        .bind(employee_id)
+        .fetch_one(&mut *tc.conn)
         .await
     }
 

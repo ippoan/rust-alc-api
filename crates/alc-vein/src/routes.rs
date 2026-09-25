@@ -67,6 +67,16 @@ async fn upsert_template(
             "登録の特徴量は 1〜6 件で送ってください",
         )
     })?;
+    // 新規登録で上限を超えさせない (上書きは人数が増えないので通す)
+    let (registered, enrolled) = state
+        .templates
+        .registration_count(tenant_id, employee_id)
+        .await
+        .map_err(|e| internal_error("vein registration_count", e))?;
+    matcher::check_capacity(registered as usize + usize::from(!enrolled)).map_err(|_| {
+        let message = format!("登録が上限の {MAX_TEMPLATES} 人に達しています");
+        unprocessable("too_many_templates", &message)
+    })?;
     let updated_at = state
         .templates
         .upsert(tenant_id, employee_id, &template)

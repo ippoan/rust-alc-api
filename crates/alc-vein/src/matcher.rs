@@ -107,13 +107,20 @@ pub struct Identify {
 #[derive(Debug, PartialEq, Eq)]
 pub struct TooManyTemplates(pub usize);
 
+/// `n` 人の登録で 1:N を組めるか。照合 ([`identify`]) と登録 (PUT) の両方がこれで判定する
+/// (登録で上限を超えさせると、その瞬間にテナント全員の照合が止まるため)。
+pub fn check_capacity(n: usize) -> Result<(), TooManyTemplates> {
+    if n > MAX_TEMPLATES {
+        return Err(TooManyTemplates(n));
+    }
+    Ok(())
+}
+
 /// テナントの全テンプレートで `Library` を組み、`chara` (検査済みの 0xBDBD 構造体) を
 /// 1:N で照合する。当たれば学習 (`t8` = 今の unix 秒の下位 8 ビット) し、学習後の
 /// テンプレートを取り出す。0〜1 人でも動くよう `Library` は `max(件数, 2)` 人ぶんで組む。
 pub fn identify(templates: &[&str], chara: &[u8], t8: u8) -> Result<Identify, TooManyTemplates> {
-    if templates.len() > MAX_TEMPLATES {
-        return Err(TooManyTemplates(templates.len()));
-    }
+    check_capacity(templates.len())?;
     let mut lib = Library::new(templates.len().max(2)).expect("2..=500 人は Library::new の範囲内");
     let mut unreadable = Vec::new();
     for (i, t) in templates.iter().enumerate() {
@@ -293,6 +300,16 @@ mod tests {
         let got = identify(&["not-base64!", &a], &synth::chara(1), 5).unwrap();
         assert_eq!(got.unreadable, vec![0]);
         assert_eq!(got.hit.unwrap().index, 1);
+    }
+
+    #[test]
+    fn check_capacity_allows_up_to_500() {
+        assert_eq!(check_capacity(0), Ok(()));
+        assert_eq!(check_capacity(MAX_TEMPLATES), Ok(()));
+        assert_eq!(
+            check_capacity(MAX_TEMPLATES + 1),
+            Err(TooManyTemplates(501))
+        );
     }
 
     #[test]

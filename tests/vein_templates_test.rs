@@ -238,6 +238,12 @@ async fn test_vein_tenant_isolation_and_deleted_employees() {
             assert_eq!(list["templates"].as_array().unwrap().len(), 1);
             assert_eq!(a.identify(42).await, json!({ "employee_id": null }));
             assert_eq!(a.put_template(tanaka, 42).await.0, 404);
+            // PUT の上限判定の人数も削除済みを数えない (identify と同じ条件)
+            let repo = PgVeinTemplatesRepository::new(a.pool.clone());
+            let counted = repo.registration_count(a.tenant_id, yamada).await.unwrap();
+            assert_eq!(counted, (1, true));
+            let counted = repo.registration_count(a.tenant_id, tanaka).await.unwrap();
+            assert_eq!(counted, (1, false));
 
             // テンプレートの削除: 204 → 2 回目は 404。別テナントからは消せない
             let path = format!("/vein/templates/{yamada}");

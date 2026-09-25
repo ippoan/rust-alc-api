@@ -528,6 +528,14 @@ impl alc_vein::repo::VeinTemplatesRepository for MockVeinTemplatesRepository {
         Ok(vec![])
     }
 
+    async fn registration_count(
+        &self,
+        _tenant_id: Uuid,
+        _employee_id: Uuid,
+    ) -> Result<(i64, bool), sqlx::Error> {
+        Ok((0, false))
+    }
+
     async fn update_learned(
         &self,
         _tenant_id: Uuid,
