@@ -52,6 +52,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # private repo ippoan/vein-match (crates/alc-vein の git 依存) の取得用 (README 参照)
+      - uses: ippoan/ci-workflows/.github/actions/private-git-auth@main
+        with:
+          app-id: ${{ secrets.CI_APP_ID }}
+          private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
+          repositories: vein-match
       - uses: dtolnay/rust-toolchain@1.92.0
         with:
           components: rustfmt, clippy
@@ -83,6 +89,12 @@ jobs:
     needs: [pr-limit]
     if: "always() && !(github.ref == 'refs/heads/main' && github.event_name == 'push') && (needs.pr-limit.result == 'success' || needs.pr-limit.result == 'skipped')"
     uses: ippoan/ci-workflows/.github/workflows/rust-dep-check.yml@main
+    # cargo-deny の cargo metadata が private repo の vein-match を取るため (README 参照)
+    with:
+      private_git_repos: vein-match
+    secrets:
+      CI_APP_ID: ${{ secrets.CI_APP_ID }}
+      CI_APP_PRIVATE_KEY: ${{ secrets.CI_APP_PRIVATE_KEY }}
 
   test-lib:
     name: Tests (lib)
@@ -91,6 +103,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # private repo ippoan/vein-match (crates/alc-vein の git 依存) の取得用 (README 参照)
+      - uses: ippoan/ci-workflows/.github/actions/private-git-auth@main
+        with:
+          app-id: ${{ secrets.CI_APP_ID }}
+          private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
+          repositories: vein-match
       - uses: dtolnay/rust-toolchain@1.92.0
         with:
           components: llvm-tools-preview
@@ -170,6 +188,12 @@ jobs:
             staging-bin: "rust-alc-api"
     steps:
       - uses: actions/checkout@v4
+      # private repo ippoan/vein-match (crates/alc-vein の git 依存) の取得用 (README 参照)
+      - uses: ippoan/ci-workflows/.github/actions/private-git-auth@main
+        with:
+          app-id: ${{ secrets.CI_APP_ID }}
+          private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
+          repositories: vein-match
 
       # NOTE: external-cache / repository-cache は #506 で追加 → 実測で逆効果と
       # 確定し revert 済み。理由 (PR #506/#507 の 2 run で実測):
@@ -312,8 +336,15 @@ jobs:
           - { name: storage, target: "//crates/alc-storage:alc-storage_test" }
           - { name: tenko, target: "//crates/alc-tenko:alc-tenko_test", coverage: "cov-tenko" }
           - { name: trouble, target: "//crates/alc-trouble:alc-trouble_test", coverage: "cov-trouble" }
+          - { name: vein, target: "//crates/alc-vein:alc-vein_test", coverage: "cov-vein" }
     steps:
       - uses: actions/checkout@v4
+      # private repo ippoan/vein-match (crates/alc-vein の git 依存) の取得用 (README 参照)
+      - uses: ippoan/ci-workflows/.github/actions/private-git-auth@main
+        with:
+          app-id: ${{ secrets.CI_APP_ID }}
+          private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
+          repositories: vein-match
       - uses: ippoan/setup-bazel@main
         with:
           disk-cache: "bazel-test-${{ matrix.name }}"
@@ -463,6 +494,12 @@ jobs:
       TEST_DATABASE_URL: "postgresql://postgres:test@localhost:5432/postgres?options=-c search_path=alc_api"
     steps:
       - uses: actions/checkout@v4
+      # private repo ippoan/vein-match (crates/alc-vein の git 依存) の取得用 (README 参照)
+      - uses: ippoan/ci-workflows/.github/actions/private-git-auth@main
+        with:
+          app-id: ${{ secrets.CI_APP_ID }}
+          private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
+          repositories: vein-match
       - uses: ippoan/setup-bazel@main
         with:
           disk-cache: "bazel-test-${{ matrix.name }}"

@@ -11,3 +11,8 @@ jobs:
     uses: ippoan/ci-workflows/.github/workflows/catalog-extract.yml@main
     with:
       language: rust
+      # cargo doc --workspace が private repo の vein-match を取るため (README 参照)
+      private_git_repos: vein-match
+    secrets:
+      CI_APP_ID: ${{ secrets.CI_APP_ID }}
+      CI_APP_PRIVATE_KEY: ${{ secrets.CI_APP_PRIVATE_KEY }}

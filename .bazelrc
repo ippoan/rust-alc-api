@@ -45,5 +45,7 @@ coverage:cov-pdf --instrumentation_filter=//crates/alc-pdf
 coverage:cov-maintenance --instrumentation_filter=//crates/alc-maintenance
 coverage:cov-tenko --instrumentation_filter=//crates/alc-tenko
 coverage:cov-trouble --instrumentation_filter=//crates/alc-trouble
+# alc-vein の計測は自 crate だけ。git 依存の vein-match (@crates//...) は入れない
+coverage:cov-vein --instrumentation_filter=//crates/alc-vein
 coverage:cov-db-trouble --instrumentation_filter=//crates/alc-trouble
 coverage:cov-db-archive --instrumentation_filter=^//:

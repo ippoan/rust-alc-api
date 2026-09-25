@@ -312,3 +312,9 @@ type = "combined"
 [[files]]
 path = "crates/alc-notify/src/clients/line.rs"
 type = "unit"
+
+# --- alc-vein (vein-match の git 依存の窓口、Refs ippoan/vein-match#20) ---
+
+[[files]]
+path = "crates/alc-vein/src/lib.rs"
+type = "unit"
