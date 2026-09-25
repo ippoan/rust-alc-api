@@ -208,6 +208,9 @@ jobs:
           # (読取日 OR 運行日) を実 DB で固定する。ci.yml の bazel-test-db と
           # 同じ内容にすること (check_bazel_test_matrix.sh が pair 一致を検査する)
           - { name: db-dtako-operation-window, target: "//:dtako_operation_window_test" }
+          # Refs ohishi-exp/nuxt-dtako-admin#1133: 運行の上げ直し・手動削除の変更記録。
+          # 記録の有無は実行時 SQL の読み出し→比較で決まり mock では縛れない
+          - { name: db-dtako-operation-changes, target: "//:dtako_operation_changes_test" }
           # Refs #599: 新規ユーザーの role を実 DB で固定する。ci.yml の
           # bazel-test-db と同じ内容にすること
           # (check_bazel_test_matrix.sh が pair 一致を検査する)

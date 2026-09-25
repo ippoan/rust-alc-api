@@ -392,30 +392,52 @@ impl DtakoUploadRepository for PgDtakoUploadRepository {
 
     // --- operations ---
 
-    async fn delete_operation(
+    async fn operation_exists(
         &self,
         tenant_id: Uuid,
         unko_no: &str,
         crew_role: i32,
-    ) -> Result<(), sqlx::Error> {
+    ) -> Result<bool, sqlx::Error> {
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
+        let (exists,): (bool,) = sqlx::query_as(
+            "SELECT EXISTS (SELECT 1 FROM alc_api.dtako_operations WHERE tenant_id = $1 AND unko_no = $2 AND crew_role = $3)",
+        )
+        .bind(tenant_id)
+        .bind(unko_no)
+        .bind(crew_role)
+        .fetch_one(&mut *tc.conn)
+        .await?;
+        Ok(exists)
+    }
+
+    async fn replace_operation(
+        &self,
+        tenant_id: Uuid,
+        params: &InsertOperationParams,
+        change: &ReuploadChangeInput,
+    ) -> Result<bool, sqlx::Error> {
+        use crate::dtako_operation_changes::{compose_snapshot, snapshot_changed};
+        use crate::repo::dtako_operation_changes::{fetch_snapshots, insert_change, NewChange};
+
+        let mut tx = self.pool.begin().await?;
+        alc_core::tenant::set_current_tenant(&mut tx, &tenant_id.to_string()).await?;
+
+        let unko_no = params.unko_no.as_str();
+        let crew_role = params.crew_role;
+        let before = fetch_snapshots(&mut tx, tenant_id, unko_no, Some(crew_role))
+            .await?
+            .pop()
+            .map(|(_, v)| compose_snapshot(v, change.before_minutes.as_ref()));
+
         sqlx::query(
             "DELETE FROM alc_api.dtako_operations WHERE tenant_id = $1 AND unko_no = $2 AND crew_role = $3",
         )
         .bind(tenant_id)
         .bind(unko_no)
         .bind(crew_role)
-        .execute(&mut *tc.conn)
+        .execute(&mut *tx)
         .await?;
-        Ok(())
-    }
 
-    async fn insert_operation(
-        &self,
-        tenant_id: Uuid,
-        params: &InsertOperationParams,
-    ) -> Result<(), sqlx::Error> {
-        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
         sqlx::query(
             r#"INSERT INTO alc_api.dtako_operations (
                 tenant_id, unko_no, crew_role, reading_date, operation_date,
@@ -458,9 +480,37 @@ impl DtakoUploadRepository for PgDtakoUploadRepository {
         .bind(params.total_score)
         .bind(&params.raw_data)
         .bind(&params.r2_key_prefix)
-        .execute(&mut *tc.conn)
+        .execute(&mut *tx)
         .await?;
-        Ok(())
+
+        // 初回取り込み (旧行なし) は記録しない。旧行があれば同じ SQL で新行を読んで比べる。
+        let mut recorded = false;
+        if let Some(before) = before {
+            let after = fetch_snapshots(&mut tx, tenant_id, unko_no, Some(crew_role))
+                .await?
+                .pop()
+                .map(|(_, v)| compose_snapshot(v, Some(&change.after_minutes)))
+                .unwrap_or(serde_json::Value::Null);
+            if snapshot_changed(&before, &after) {
+                insert_change(
+                    &mut tx,
+                    &NewChange {
+                        tenant_id,
+                        unko_no,
+                        crew_role,
+                        upload_id: Some(change.upload_id),
+                        reason: "reupload",
+                        before: Some(&before),
+                        after: Some(&after),
+                    },
+                )
+                .await?;
+                recorded = true;
+            }
+        }
+
+        tx.commit().await?;
+        Ok(recorded)
     }
 
     async fn update_has_kudgivt(

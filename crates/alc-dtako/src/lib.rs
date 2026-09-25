@@ -11,6 +11,7 @@ pub mod dtako_drivers;
 pub mod dtako_event_classifications;
 pub mod dtako_events;
 pub mod dtako_logs;
+pub mod dtako_operation_changes;
 pub mod dtako_operations;
 pub mod dtako_restraint_report;
 pub mod dtako_restraint_report_pdf;

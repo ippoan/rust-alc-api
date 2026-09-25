@@ -9,10 +9,11 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::dtako_operation_changes::{load_before_minutes, minutes_for};
 use crate::DtakoState;
 use alc_core::auth_middleware::TenantId;
 use alc_core::repository::dtako_upload::{
-    InsertDailyWorkHoursParams, InsertOperationParams, InsertSegmentParams,
+    InsertDailyWorkHoursParams, InsertOperationParams, InsertSegmentParams, ReuploadChangeInput,
 };
 use alc_csv_parser;
 use alc_csv_parser::kudgivt::{parse_kudgivt, KudgivtRow};
@@ -234,16 +235,23 @@ async fn process_zip(
 
         let r2_key_prefix = format!("{}/unko/{}", tenant_id, row.unko_no);
 
-        // Delete existing operation with same (tenant_id, unko_no, crew_role) for re-upload
-        state
+        // 上げ直しなら、split で上書きされる前の R2 旧 KUDGIVT から前回の分数を読む
+        // (Refs ohishi-exp/nuxt-dtako-admin#1133)。初回取り込みでは R2 を叩かない。
+        let before_minutes = if state
             .dtako_upload
-            .delete_operation(tenant_id, &row.unko_no, row.crew_role)
-            .await?;
+            .operation_exists(tenant_id, &row.unko_no, row.crew_role)
+            .await?
+        {
+            load_before_minutes(dtako_st.as_ref(), tenant_id, &row.unko_no, row.crew_role).await
+        } else {
+            None
+        };
 
-        // Insert operation
+        // 同じ (tenant_id, unko_no, crew_role) の旧行を消して入れ直す。旧行と違えば
+        // dtako_operation_changes に残す (同じトランザクション)
         state
             .dtako_upload
-            .insert_operation(
+            .replace_operation(
                 tenant_id,
                 &InsertOperationParams {
                     tenant_id,
@@ -269,6 +277,11 @@ async fn process_zip(
                     total_score: row.total_score,
                     raw_data: row.raw_data.clone(),
                     r2_key_prefix,
+                },
+                &ReuploadChangeInput {
+                    upload_id,
+                    before_minutes,
+                    after_minutes: minutes_for(&kudgivt_rows, &row.unko_no, row.crew_role),
                 },
             )
             .await?;

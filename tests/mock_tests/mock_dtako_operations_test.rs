@@ -576,3 +576,105 @@ async fn test_delete_operation_db_error() {
 
     assert_eq!(res.status(), 500);
 }
+
+// ---------------------------------------------------------------------------
+// GET /api/dtako/operation-changes — 運行の日付で絞る (Refs ohishi-exp/nuxt-dtako-admin#1133)
+// ---------------------------------------------------------------------------
+
+fn change_row(
+    unko_no: &str,
+    before: Option<serde_json::Value>,
+) -> rust_alc_api::db::repository::dtako_operations::OperationChangeRow {
+    rust_alc_api::db::repository::dtako_operations::OperationChangeRow {
+        unko_no: unko_no.to_string(),
+        crew_role: 1,
+        recorded_at: Utc::now(),
+        reason: "reupload".to_string(),
+        before,
+        after: Some(serde_json::json!({"driver_cd": "1194", "break_minutes": 178})),
+    }
+}
+
+async fn get_operation_changes(state: rust_alc_api::AppState, query: &str) -> reqwest::Response {
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let jwt = crate::common::create_test_jwt(Uuid::new_v4(), "admin");
+    reqwest::Client::new()
+        .get(format!("{base_url}/api/dtako/operation-changes?{query}"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .send()
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn test_operation_changes_filters_by_operation_date() {
+    let mut state = setup_mock_app_state();
+    let mock = Arc::new(MockDtakoOperationsRepository::default());
+    let since = Utc::now();
+    *mock.recording_since.lock().unwrap() = Some(since);
+    *mock.operation_changes.lock().unwrap() = vec![
+        change_row("2605230341010000004219", None),
+        change_row("2606010000000000000001", None),
+        // unko_no が日付で読めない行は departure_at で見る
+        change_row(
+            "X",
+            Some(serde_json::json!({"departure_at": "2026-05-10T08:00:00Z"})),
+        ),
+        // どちらでも日付が出ない行は落とす
+        change_row("Y", None),
+    ];
+    state.dtako_operations = mock;
+
+    let res = get_operation_changes(state, "driver_cd=1194&from=2026-05-01&to=2026-05-31").await;
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["driver_cd"], "1194");
+    assert_eq!(body["from"], "2026-05-01");
+    assert_eq!(body["to"], "2026-05-31");
+    assert!(body["recording_since"].is_string());
+    let unko: Vec<&str> = body["changes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["unko_no"].as_str().unwrap())
+        .collect();
+    assert_eq!(unko, vec!["2605230341010000004219", "X"]);
+    assert_eq!(body["changes"][0]["after"]["break_minutes"], 178);
+}
+
+#[tokio::test]
+async fn test_operation_changes_empty_has_null_recording_since() {
+    let state = setup_mock_app_state();
+    let res = get_operation_changes(state, "driver_cd=1194&from=2026-05-01&to=2026-05-31").await;
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert!(body["recording_since"].is_null());
+    assert_eq!(body["changes"].as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn test_operation_changes_from_after_to_is_400() {
+    let state = setup_mock_app_state();
+    let res = get_operation_changes(state, "driver_cd=1194&from=2026-06-01&to=2026-05-01").await;
+    assert_eq!(res.status(), 400);
+}
+
+#[tokio::test]
+async fn test_operation_changes_list_db_error() {
+    let mut state = setup_mock_app_state();
+    let mock = Arc::new(MockDtakoOperationsRepository::default());
+    mock.fail_next.store(true, Ordering::SeqCst);
+    state.dtako_operations = mock;
+    let res = get_operation_changes(state, "driver_cd=1194&from=2026-05-01&to=2026-05-31").await;
+    assert_eq!(res.status(), 500);
+}
+
+#[tokio::test]
+async fn test_operation_changes_recording_since_db_error() {
+    let mut state = setup_mock_app_state();
+    let mock = Arc::new(MockDtakoOperationsRepository::default());
+    mock.fail_recording_since.store(true, Ordering::SeqCst);
+    state.dtako_operations = mock;
+    let res = get_operation_changes(state, "driver_cd=1194&from=2026-05-01&to=2026-05-31").await;
+    assert_eq!(res.status(), 500);
+}

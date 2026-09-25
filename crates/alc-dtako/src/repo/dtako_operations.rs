@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use chrono::{DateTime, NaiveDate, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -117,11 +117,69 @@ impl DtakoOperationsRepository for PgDtakoOperationsRepository {
     }
 
     async fn delete_by_unko_no(&self, tenant_id: Uuid, unko_no: &str) -> Result<u64, sqlx::Error> {
-        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
-        let result = sqlx::query("DELETE FROM alc_api.dtako_operations WHERE unko_no = $1")
-            .bind(unko_no)
-            .execute(&mut *tc.conn)
+        use crate::repo::dtako_operation_changes::{fetch_snapshots, insert_change, NewChange};
+
+        let mut tx = self.pool.begin().await?;
+        alc_core::tenant::set_current_tenant(&mut tx, &tenant_id.to_string()).await?;
+
+        // crew_role をまとめて消すので、旧行は crew_role ごとに読んで 1 行ずつ残す
+        let before = fetch_snapshots(&mut tx, tenant_id, unko_no, None).await?;
+        let result = sqlx::query(
+            "DELETE FROM alc_api.dtako_operations WHERE tenant_id = $1 AND unko_no = $2",
+        )
+        .bind(tenant_id)
+        .bind(unko_no)
+        .execute(&mut *tx)
+        .await?;
+        for (crew_role, snapshot) in &before {
+            insert_change(
+                &mut tx,
+                &NewChange {
+                    tenant_id,
+                    unko_no,
+                    crew_role: *crew_role,
+                    upload_id: None,
+                    reason: "manual_delete",
+                    before: Some(snapshot),
+                    after: None,
+                },
+            )
             .await?;
+        }
+        tx.commit().await?;
         Ok(result.rows_affected())
+    }
+
+    async fn list_operation_changes(
+        &self,
+        tenant_id: Uuid,
+        driver_cd: &str,
+    ) -> Result<Vec<OperationChangeRow>, sqlx::Error> {
+        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
+        sqlx::query_as::<_, OperationChangeRow>(
+            r#"SELECT unko_no, crew_role, recorded_at, reason, before, after
+                 FROM alc_api.dtako_operation_changes
+                WHERE tenant_id = $1
+                  AND (driver_cd = $2 OR before->>'driver_cd' = $2 OR after->>'driver_cd' = $2)
+                ORDER BY unko_no, crew_role, recorded_at"#,
+        )
+        .bind(tenant_id)
+        .bind(driver_cd)
+        .fetch_all(&mut *tc.conn)
+        .await
+    }
+
+    async fn operation_changes_recording_since(
+        &self,
+        tenant_id: Uuid,
+    ) -> Result<Option<DateTime<Utc>>, sqlx::Error> {
+        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
+        let (since,): (Option<DateTime<Utc>>,) = sqlx::query_as(
+            "SELECT MIN(recorded_at) FROM alc_api.dtako_operation_changes WHERE tenant_id = $1",
+        )
+        .bind(tenant_id)
+        .fetch_one(&mut *tc.conn)
+        .await?;
+        Ok(since)
     }
 }
