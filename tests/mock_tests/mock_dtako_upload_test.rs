@@ -3622,6 +3622,8 @@ dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,dummy,2026/03/01 10:00:00,
 // =========================================================================
 // POST /api/upload — 上げ直し: before の分数は R2 旧 KUDGIVT、after は zip から
 // (Refs ohishi-exp/nuxt-dtako-admin#1133)
+// ★ split より前に読む順序の固定: upload は process_zip の後に split で同じ R2 key を
+// zip の値 (休憩 60) で上書きする。split の後に読んでいたら before も 60 になって落ちる
 // =========================================================================
 
 #[tokio::test]

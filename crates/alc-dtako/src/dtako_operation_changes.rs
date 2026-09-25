@@ -86,25 +86,41 @@ pub async fn load_before_minutes(
     }
 }
 
+/// before の旧 KUDGIVT が取れなかった回に before へ残す印のキー。値は `"unavailable"`。
+/// 黙って「分数の変化なし」に見せないための印で、比較 (`snapshot_changed`) からは外す。
+pub const BEFORE_KUDGIVT_KEY: &str = "before_kudgivt";
+
 /// DB から読んだ `{driver_cd, departure_at, return_at}` に分数を足す。
+/// `minutes` が `None` なのは before の旧 KUDGIVT が取れなかったときだけ (after は常に zip
+/// から出る) で、そのときは分数の代わりに `before_kudgivt: "unavailable"` を残す。
 pub fn compose_snapshot(
     mut db: serde_json::Value,
     minutes: Option<&OperationMinutes>,
 ) -> serde_json::Value {
-    if let (Some(m), Some(obj)) = (minutes, db.as_object_mut()) {
-        obj.insert("drive_minutes".into(), m.drive_minutes.into());
-        obj.insert("cargo_minutes".into(), m.cargo_minutes.into());
-        obj.insert("break_minutes".into(), m.break_minutes.into());
-        obj.insert("rest_minutes".into(), m.rest_minutes.into());
+    if let Some(obj) = db.as_object_mut() {
+        match minutes {
+            Some(m) => {
+                obj.insert("drive_minutes".into(), m.drive_minutes.into());
+                obj.insert("cargo_minutes".into(), m.cargo_minutes.into());
+                obj.insert("break_minutes".into(), m.break_minutes.into());
+                obj.insert("rest_minutes".into(), m.rest_minutes.into());
+            }
+            None => {
+                obj.insert(BEFORE_KUDGIVT_KEY.into(), "unavailable".into());
+            }
+        }
     }
     db
 }
 
 /// before に在るキーのうち、after で値が違うものが 1 つでもあれば変わったとみなす。
-/// before に無いキー (旧 KUDGIVT が取れなかった分数) は比べない。
+/// before に無いキー (旧 KUDGIVT が取れなかった分数) と印 (`before_kudgivt`) は比べない。
 pub fn snapshot_changed(before: &serde_json::Value, after: &serde_json::Value) -> bool {
     match before.as_object() {
-        Some(b) => b.iter().any(|(k, v)| after.get(k) != Some(v)),
+        Some(b) => b
+            .iter()
+            .filter(|(k, _)| k.as_str() != BEFORE_KUDGIVT_KEY)
+            .any(|(k, v)| after.get(k) != Some(v)),
         None => before != after,
     }
 }
@@ -287,7 +303,10 @@ mod tests {
                 assert_eq!(with["drive_minutes"], 0);
                 assert_eq!(with["cargo_minutes"], 0);
                 assert_eq!(with["rest_minutes"], 0);
-                assert_eq!(compose_snapshot(db.clone(), None), db);
+                // 旧 KUDGIVT が取れなかった before は分数の代わりに印を残す
+                let without = compose_snapshot(db.clone(), None);
+                assert_eq!(without["before_kudgivt"], "unavailable");
+                assert!(without.get("break_minutes").is_none());
                 // object でなければ触らない
                 assert_eq!(compose_snapshot(json!(null), Some(&m)), json!(null));
             }
@@ -304,8 +323,10 @@ mod tests {
             assert!(!snapshot_changed(&before, &same));
             assert!(snapshot_changed(&before, &diff));
             // before の分数が取れなかった回は分数を比べない
-            let before_no_minutes = json!({"driver_cd": "1194"});
+            let before_no_minutes = json!({"driver_cd": "1194", "before_kudgivt": "unavailable"});
             assert!(!snapshot_changed(&before_no_minutes, &diff));
+            let other_driver = json!({"driver_cd": "1500", "break_minutes": 178});
+            assert!(snapshot_changed(&before_no_minutes, &other_driver));
             // after にキーが無ければ変わったとみなす
             assert!(snapshot_changed(&before, &json!({"driver_cd": "1194"})));
             // object でなければ全体で比べる

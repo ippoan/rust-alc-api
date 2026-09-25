@@ -13,6 +13,7 @@
 //! | (d) | 手動削除 | manual_delete・after=NULL が crew_role ごとに |
 //! | (e) | 2マンの運行を上げ直し | crew_role ごとに正しい乗務員・分数で対応 |
 //! | (f) | 読み口 | 別 tenant の行を返さない |
+//! | (g) | 旧 KUDGIVT が取れない回の付け替え | before に `before_kudgivt: "unavailable"` を残して記録 |
 
 mod common;
 
@@ -366,4 +367,33 @@ async fn test_list_does_not_return_other_tenant() {
         .await
         .unwrap()
         .is_none());
+}
+
+#[tokio::test]
+async fn test_reupload_without_old_kudgivt_marks_before() {
+    let pool = setup_pool().await;
+    let tenant_id = common::create_test_tenant(&pool, "opchg-unavailable").await;
+    let driver = create_driver(&pool, tenant_id, "1194").await;
+    let other = create_driver(&pool, tenant_id, "1500").await;
+    let repo = PgDtakoUploadRepository::new(pool.clone());
+    repo.replace_operation(tenant_id, &params(tenant_id, 1, driver), &change(None, 0))
+        .await
+        .unwrap();
+
+    // 旧 KUDGIVT が取れない回でも、乗務員が付け替わっていれば記録する。before には
+    // 分数の代わりに印を残し、黙って「分数の変化なし」に見せない
+    assert!(repo
+        .replace_operation(tenant_id, &params(tenant_id, 1, other), &change(None, 178))
+        .await
+        .unwrap());
+    let rows = changes(&pool, tenant_id).await;
+    assert_eq!(rows.len(), 1);
+    let before = rows[0].3.as_ref().unwrap();
+    let after = rows[0].4.as_ref().unwrap();
+    assert_eq!(before["before_kudgivt"], "unavailable");
+    assert!(before.get("break_minutes").is_none());
+    assert_eq!(before["driver_cd"], "1194");
+    assert_eq!(after["driver_cd"], "1500");
+    assert_eq!(after["break_minutes"], 178);
+    assert!(after.get("before_kudgivt").is_none());
 }
