@@ -16,6 +16,7 @@ _WORKSPACE_CRATES = [
     "//crates/alc-storage",
     "//crates/alc-tenko",
     "//crates/alc-trouble",
+    "//crates/alc-vein",
 ]
 
 rust_library(
@@ -130,6 +131,24 @@ rust_test(
     name = "driver_info_maintenance_test",
     srcs = ["tests/driver_info_maintenance_test.rs"] + glob(["tests/common/**/*.rs"]),
     crate_root = "tests/driver_info_maintenance_test.rs",
+    compile_data = glob(["migrations/**"]),
+    deps = [":rust_alc_api_lib"] + all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ) + _WORKSPACE_CRATES,
+    proc_macro_deps = all_crate_deps(
+        proc_macro = True,
+        proc_macro_dev = True,
+    ),
+)
+
+# 指静脈テンプレート (migration 151、Refs ippoan/vein-match#20)。upsert・学習の書き戻し
+# (updated_at を条件にした UPDATE)・RLS は実 DB でしか通らない。ci.yml の bazel-test-db と
+# cache-warm.yml を同じ内容にすること (check_bazel_test_matrix.sh が pair 一致を検査する)
+rust_test(
+    name = "vein_templates_test",
+    srcs = ["tests/vein_templates_test.rs"] + glob(["tests/common/**/*.rs"]),
+    crate_root = "tests/vein_templates_test.rs",
     compile_data = glob(["migrations/**"]),
     deps = [":rust_alc_api_lib"] + all_crate_deps(
         normal = True,

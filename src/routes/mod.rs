@@ -79,6 +79,7 @@ pub use alc_trouble::task_types as trouble_task_types;
 pub use alc_trouble::tasks as trouble_tasks;
 pub use alc_trouble::tickets as trouble_tickets;
 pub use alc_trouble::workflow as trouble_workflow;
+pub use alc_vein::routes as vein;
 
 use axum::{middleware as axum_middleware, Extension, Router};
 
@@ -104,6 +105,7 @@ pub fn router(
     trouble_state: alc_trouble::TroubleState,
     camera_state: alc_camera::CameraState,
     maintenance_state: alc_maintenance::MaintenanceState,
+    vein_state: alc_vein::VeinState,
 ) -> Router<AppState> {
     // 管理者ルート — 注入 identity (X-User-*) を信頼 (Refs #434)。
     // 前段 proxy / gateway が introspect 検証済みの identity を注入する前提。
@@ -182,6 +184,10 @@ pub fn router(
         .merge(notify_email_documents::tenant_router())
         .merge(notify_test_endpoints::tenant_router())
         .merge(notify_line_config::tenant_router())
+        // 指静脈の登録・1:N 照合 (Refs ippoan/vein-match#20)。AppState から分離した
+        // VeinState でマウントする。認可は employees の update_face と同じく TenantId だけで、
+        // キオスクに開く口 (PUT / identify / GET) は auth-worker の許可表が決める。
+        .merge(vein::tenant_router().with_state(vein_state))
         .layer(axum_middleware::from_fn(require_tenant_header));
 
     // 公開ルート (認証不要)。旧ログイン経路 (auth::public_router = Google /

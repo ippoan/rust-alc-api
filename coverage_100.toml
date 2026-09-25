@@ -313,8 +313,19 @@ type = "combined"
 path = "crates/alc-notify/src/clients/line.rs"
 type = "unit"
 
-# --- alc-vein (vein-match の git 依存の窓口、Refs ippoan/vein-match#20) ---
+# --- alc-vein (指静脈の登録・1:N 照合、Refs ippoan/vein-match#20) ---
+# lib.rs は mod 宣言と VeinState だけで実行可能行が無いので登録しない (auth_jwt.rs と同じ理由)。
+# repo.rs の Pg 実装は DB shard (db-vein-templates / cov-db-vein) でしか通らない — Bazel の
+# 集約 gate は全 shard の lcov を merge して見るので combined として登録する。
 
 [[files]]
-path = "crates/alc-vein/src/lib.rs"
+path = "crates/alc-vein/src/matcher.rs"
 type = "unit"
+
+[[files]]
+path = "crates/alc-vein/src/routes.rs"
+type = "unit"
+
+[[files]]
+path = "crates/alc-vein/src/repo.rs"
+type = "combined"

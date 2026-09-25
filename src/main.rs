@@ -418,6 +418,11 @@ async fn main() -> anyhow::Result<()> {
         storage: Some(storage.clone()),
     };
 
+    // 指静脈 (Refs ippoan/vein-match#20) — 登録テンプレートの正本は vein_templates。
+    let vein_state = alc_vein::VeinState {
+        templates: Arc::new(alc_vein::repo::PgVeinTemplatesRepository::new(pool.clone())),
+    };
+
     let state = AppState {
         pool: Some(pool.clone()),
         api_tokens,
@@ -560,6 +565,7 @@ async fn main() -> anyhow::Result<()> {
         trouble_state,
         camera_state,
         maintenance_state,
+        vein_state,
     )
     .merge(rust_alc_api::routes::internal_shared_secret_router(
         internal_secret,

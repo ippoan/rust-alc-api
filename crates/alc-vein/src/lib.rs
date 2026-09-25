@@ -1,35 +1,27 @@
-//! 指静脈 (Waveshare Finger Vein Module) の 1:N 照合をサーバーで回すための crate。
+//! 指静脈 (Waveshare Finger Vein Module) の登録と 1:N 照合をサーバーで回す crate
+//! (Refs ippoan/vein-match#20)。
 //!
 //! 照合の本体は XGComApi.dll と一致させた Rust 実装 `vein-match-search`
 //! (private repo ippoan/vein-match を git 依存で tag 固定) にあり、この crate は
-//! rust-alc-api から見た窓口になる (Refs ippoan/vein-match#20)。
-//! 今はまだ route / DB に繋いでいない — git 依存を Cargo / Bazel / CI で
-//! 取り込めることの証明だけを持つ。表と API は後続で足す。
+//! rust-alc-api から見た窓口になる。登録データ (テンプレート) の正本はサーバーの
+//! `vein_templates` (migrations/151)。学習 (テンプレートの更新) はオンライン照合
+//! (`POST /vein/identify`) のときだけで、オフライン (alc-app 同梱の wasm) では学習しない。
+//!
+//! - [`matcher`]: 特徴量の検査・テンプレートの組み立て・1:N 照合 (DB を持たない)
+//! - [`repo`]: `vein_templates` の読み書き
+//! - [`routes`]: 4 本の口
 
-use vein_match_search::Library;
+pub mod matcher;
+pub mod repo;
+pub mod routes;
 
-/// `n` 人ぶんの 1:N 照合ライブラリ (`XG_CreateVein(&h, n)`) を作れる人数かを返す。
-///
-/// 範囲は DLL と同じく `1 < n <= 500`。判定は `Library::new` に任せ、
-/// ここで範囲を書き写さない (vein-match 側の変更に追従させるため)。
-pub fn library_capacity_ok(n: usize) -> bool {
-    Library::new(n).is_some()
-}
+use std::sync::Arc;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+use crate::repo::VeinTemplatesRepository;
 
-    #[test]
-    fn accepts_within_dll_range() {
-        assert!(library_capacity_ok(2));
-        assert!(library_capacity_ok(500));
-    }
-
-    #[test]
-    fn rejects_outside_dll_range() {
-        assert!(!library_capacity_ok(0));
-        assert!(!library_capacity_ok(1));
-        assert!(!library_capacity_ok(501));
-    }
+/// vein 用の最小 State。モノリスは `routes::tenant_router().with_state(..)` で
+/// tenant 系ルートに merge する。repo は trait object で持つ (テストが mock に差し替える)。
+#[derive(Clone)]
+pub struct VeinState {
+    pub templates: Arc<dyn VeinTemplatesRepository>,
 }

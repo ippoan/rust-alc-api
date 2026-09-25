@@ -49,3 +49,5 @@ coverage:cov-trouble --instrumentation_filter=//crates/alc-trouble
 coverage:cov-vein --instrumentation_filter=//crates/alc-vein
 coverage:cov-db-trouble --instrumentation_filter=//crates/alc-trouble
 coverage:cov-db-archive --instrumentation_filter=^//:
+# 指静脈の Pg repo (crates/alc-vein/src/repo.rs) は DB shard でしか通らない (Refs ippoan/vein-match#20)
+coverage:cov-db-vein --instrumentation_filter=//crates/alc-vein
