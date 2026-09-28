@@ -20,10 +20,7 @@ async fn setup() -> (sqlx::PgPool, PgAuthRepository) {
         .connect(&common::test_database_url())
         .await
         .expect("Failed to connect to test DB");
-    sqlx::migrate!("./migrations")
-        .run(&pool)
-        .await
-        .expect("Failed to run migrations");
+    common::migrate_and_grant(&pool).await;
     let repo = PgAuthRepository::new(pool.clone());
     (pool, repo)
 }

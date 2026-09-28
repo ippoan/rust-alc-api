@@ -247,6 +247,11 @@ jobs:
           # ci.yml の bazel-test-db と cache-warm.yml を同じ内容にすること
           # (check_bazel_test_matrix.sh が pair 一致を検査する)
           - { name: db-vein-templates, target: "//:vein_templates_test", coverage: "cov-db-vein" }
+          # Refs #685: テスト DB の alc_api_app の権限を本番に揃えた上で、SELECT の無い
+          # alc_api の表 = 0 件を確かめる (新しい表の GRANT 付け忘れを落とす)。
+          # ci.yml の bazel-test-db と cache-warm.yml を同じ内容にすること
+          # (check_bazel_test_matrix.sh が pair 一致を検査する)
+          - { name: db-app-role-grants, target: "//:app_role_grants_test" }
     services:
       postgres:
         image: postgres:16

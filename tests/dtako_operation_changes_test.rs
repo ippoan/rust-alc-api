@@ -36,10 +36,7 @@ async fn setup_pool() -> sqlx::PgPool {
         .connect(&url)
         .await
         .expect("Failed to connect to test DB");
-    sqlx::migrate!("./migrations")
-        .run(&pool)
-        .await
-        .expect("Failed to run migrations");
+    common::migrate_and_grant(&pool).await;
     pool
 }
 

@@ -477,7 +477,8 @@ TEST_DATABASE_URL="..." cargo llvm-cov --html --open
 
 | ファイル | 内容 |
 |---------|------|
-| `tests/common/mod.rs` | テストハーネス (DB 接続、サーバー起動、JWT 発行ヘルパー) |
+| `tests/common/mod.rs` | テストハーネス (DB 接続、サーバー起動、JWT 発行ヘルパー)。migration は `migrate_and_grant` に 1 本化 (migration の後に `scripts/local_app_grants.sql` を流す。DB を直接開くテストも必ずこれを通す) |
+| `tests/app_role_grants_test.rs` | テスト DB の `alc_api_app` の権限が本番と揃っているか (Refs #685) — `alc_api` の表のうち `has_table_privilege('alc_api_app', 表, 'SELECT')` が false のものを列挙し 0 件を assert。新しい表の GRANT 付け忘れ (過去に本番 502) を落とす。直すのは migration 側 (bazel `db-app-role-grants` shard) |
 | `tests/common/mock_storage.rs` | インメモリ StorageBackend 実装 |
 | `tests/auth_test.rs` | JWT 認証 / X-Tenant-ID / 未認証拒否 |
 | `tests/employees_test.rs` | RLS テナント分離 / キオスクモード |
@@ -493,6 +494,7 @@ TEST_DATABASE_URL="..." cargo llvm-cov --html --open
 
 - `docker-compose.yml` — テスト用 PostgreSQL 16 (ポート 54322、tmpfs)
 - `scripts/init_local_db.sql` — `alc_api` スキーマ + `alc_api_app` ロール + Supabase 互換ロール
+- `scripts/local_app_grants.sql` — 本番 (Supabase) の `alc_api_app` の GRANT (表・sequence・function) の写し。表は migration が作るので `init_local_db.sql` には書けず、migration の後に `tests/common` の `migrate_and_grant` が流す (2026-09-28 取得、表 85 / 関数 20 / sequence 12。**本番の実態は migration の GRANT より広い** — 全表 ALL 相当で、`dtako_operation_changes`・`_sqlx_migrations` も。本番側を絞るかは別件。冪等の DO ブロックで、ローカルに無い対象は存在確認して飛ばし NOTICE に出す。関数は型だけで引く。`ON ALL TABLES` では書かず本番の一覧をそのまま写す)。新しい表の GRANT はここでなく migration に書く。BUILD.bazel の DB テストは `compile_data` にこのファイルを含める
 - `.test-config` — `test_and_deploy.sh` 共通スクリプトの設定
 
 ### マイグレーション作成時の注意

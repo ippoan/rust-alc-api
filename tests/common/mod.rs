@@ -186,6 +186,30 @@ pub fn test_database_url() -> String {
     })
 }
 
+/// migration を流し、続けて本番の `alc_api_app` の GRANT を再現する (Refs #685)。
+///
+/// 本番の初期の表の GRANT は migration の外 (Supabase 上で手動) で付いたので、
+/// migration だけではテスト DB の `alc_api_app` の権限が本番とずれる。
+/// 並列に走るテストが同じ表へ同時に GRANT すると `tuple concurrently updated` に
+/// なるので、advisory lock で直列化する (GRANT 自体は冪等)。
+pub async fn migrate_and_grant(pool: &sqlx::PgPool) {
+    sqlx::migrate!("./migrations")
+        .run(pool)
+        .await
+        .expect("Failed to run migrations");
+
+    let mut tx = pool.begin().await.expect("Failed to begin grant tx");
+    sqlx::query("SELECT pg_advisory_xact_lock(685685)")
+        .execute(&mut *tx)
+        .await
+        .expect("Failed to take grant lock");
+    sqlx::raw_sql(include_str!("../../scripts/local_app_grants.sql"))
+        .execute(&mut *tx)
+        .await
+        .expect("Failed to apply scripts/local_app_grants.sql");
+    tx.commit().await.expect("Failed to commit grants");
+}
+
 /// テスト用 AppState を構築 (DB 接続 + モックストレージ)
 pub async fn setup_app_state() -> AppState {
     // tracing 初期化 (1回だけ。カバレッジ計測で tracing マクロ引数を評価させるため)
@@ -200,10 +224,7 @@ pub async fn setup_app_state() -> AppState {
         .await
         .expect("Failed to connect to test DB");
 
-    sqlx::migrate!("./migrations")
-        .run(&pool)
-        .await
-        .expect("Failed to run migrations");
+    migrate_and_grant(&pool).await;
 
     let storage: Arc<dyn rust_alc_api::storage::StorageBackend> =
         Arc::new(MockStorage::new("test-bucket"));
@@ -345,10 +366,7 @@ pub async fn setup_app_state_no_fcm() -> AppState {
         .await
         .expect("Failed to connect to test DB");
 
-    sqlx::migrate!("./migrations")
-        .run(&pool)
-        .await
-        .expect("Failed to run migrations");
+    migrate_and_grant(&pool).await;
 
     let storage: Arc<dyn rust_alc_api::storage::StorageBackend> =
         Arc::new(MockStorage::new("test-bucket"));
@@ -372,10 +390,7 @@ pub async fn setup_app_state_failing_fcm() -> AppState {
         .await
         .expect("Failed to connect to test DB");
 
-    sqlx::migrate!("./migrations")
-        .run(&pool)
-        .await
-        .expect("Failed to run migrations");
+    migrate_and_grant(&pool).await;
 
     let storage: Arc<dyn rust_alc_api::storage::StorageBackend> =
         Arc::new(MockStorage::new("test-bucket"));
