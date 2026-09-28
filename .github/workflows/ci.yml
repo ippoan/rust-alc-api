@@ -119,6 +119,50 @@ jobs:
       CI_APP_ID: ${{ secrets.CI_APP_ID }}
       CI_APP_PRIVATE_KEY: ${{ secrets.CI_APP_PRIVATE_KEY }}
 
+  # 指静脈 (vein) の Worker (workers/vein、workers-rs + Hyperdrive、Refs #680 / #683)。
+  # monolith の workspace から exclude した独立 workspace なので、fmt / clippy / build をここで回す。
+  # 先頭の check-exposure.sh は「外から直接届かない」(workers_dev / preview_urls = false、
+  # route / routes / custom_domain 無し) の検査 — この Worker は X-Tenant-ID を信頼するので、
+  # 崩れたら #556 と同じ穴になる。
+  vein-worker:
+    name: Vein Worker (wasm)
+    needs: [pr-limit]
+    if: "always() && !(github.ref == 'refs/heads/main' && github.event_name == 'push') && (needs.pr-limit.result == 'success' || needs.pr-limit.result == 'skipped')"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: workers/vein
+    steps:
+      - uses: actions/checkout@v4
+      - name: 外から直接届かないことの検査 (wrangler.toml)
+        run: bash scripts/check-exposure.sh
+      # private repo ippoan/vein-match (vein-match / vein-match-search の git 依存) の取得用 (README 参照)
+      - uses: ippoan/ci-workflows/.github/actions/private-git-auth@main
+        with:
+          app-id: ${{ secrets.CI_APP_ID }}
+          private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
+          repositories: vein-match
+      - uses: dtolnay/rust-toolchain@1.92.0
+        with:
+          targets: wasm32-unknown-unknown
+          components: rustfmt, clippy
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: workers/vein
+          shared-key: vein-worker
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo fmt --check
+      - run: cargo clippy --target wasm32-unknown-unknown --release -- -D warnings
+      # worker-build の版は wrangler.toml の [build] command と揃える
+      - run: cargo install -q worker-build@0.8.6 --locked
+      - run: worker-build --release
+      - name: bundle サイズ (上限 10MB は gzip 後)
+        run: |
+          raw=$(stat -c%s build/index_bg.wasm)
+          gz=$(gzip -9c build/index_bg.wasm | wc -c)
+          echo "alc-vein wasm: raw=${raw} B / gzip=${gz} B" | tee -a "$GITHUB_STEP_SUMMARY"
+          [ "$gz" -lt 10000000 ] || { echo "::error::gzip 後 ${gz} B が 10MB を超えた"; exit 1; }
+
   test-lib:
     name: Tests (lib)
     needs: [pr-limit]
@@ -885,11 +929,12 @@ jobs:
     # docker-dev (Tag dev) は needs に入れない: :dev は front repo の
     # docker-compose.test.yml 用の可変タグでしかなく、本番 image は tag push の
     # build-image が作る (Refs #609)。したがって :dev の上書き競合は無害。
-    needs: [check, bazel-tests-ok, bazel-coverage-gate, build-image, deploy, drift-check-staging]
+    needs: [check, vein-worker, bazel-tests-ok, bazel-coverage-gate, build-image, deploy, drift-check-staging]
     if: >-
       always() &&
       github.event_name == 'pull_request' &&
       needs.check.result == 'success' &&
+      needs.vein-worker.result == 'success' &&
       needs.bazel-tests-ok.result == 'success' &&
       needs.bazel-coverage-gate.result == 'success' &&
       needs.build-image.result == 'success' &&

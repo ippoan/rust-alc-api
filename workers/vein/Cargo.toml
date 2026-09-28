@@ -1,0 +1,36 @@
+# 指静脈 (vein) の Worker。rust-alc-api を Cloudflare Workers へ段階移行する最初の 1 本
+# (Refs #680 / #683)。wasm 専用なので monolith の workspace から exclude し、自前の
+# Cargo.lock を持つ独立 workspace にしている (Bazel にも入れない)。
+#
+# 段階 A: SQL と X-Tenant-ID の解析は worker 内の最小実装。段階 B で crates/alc-vein の
+# trait と alc-core-wasm に置き換えて捨てる (Refs #682)。
+[package]
+name = "alc-vein-worker"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[workspace]
+
+# vein-match は private repo (ippoan/vein-match)。取得の仕方は crates/alc-vein/Cargo.toml と
+# 同じ (ローカルは `gh auth setup-git`、CI は ippoan/ci-workflows の private-git-auth)。
+# tag は crates/alc-vein と揃える。
+[dependencies]
+base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "wasmbind"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio-postgres = { version = "0.7", default-features = false, features = ["js", "with-chrono-0_4", "with-uuid-1"] }
+uuid = { version = "1", features = ["serde", "js"] }
+vein-match = { git = "https://github.com/ippoan/vein-match", tag = "v0.1.1" }
+vein-match-search = { git = "https://github.com/ippoan/vein-match", tag = "v0.1.1" }
+wasm-bindgen-futures = "0.4"
+worker = { version = "0.8", features = ["tokio-postgres"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
