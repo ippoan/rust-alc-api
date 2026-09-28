@@ -7,6 +7,7 @@ _WORKSPACE_CRATES = [
     "//crates/alc-carins",
     "//crates/alc-compare",
     "//crates/alc-core",
+    "//crates/alc-core-wasm",
     "//crates/alc-csv-parser",
     "//crates/alc-devices",
     "//crates/alc-dtako",

@@ -344,6 +344,7 @@ name = "alc-vein"
 version = "0.1.0"
 dependencies = [
  "alc-core",
+ "alc-core-wasm",
  "async-trait",
  "axum",
  "base64 0.22.1",
@@ -3541,6 +3542,7 @@ dependencies = [
  "alc-carins",
  "alc-compare",
  "alc-core",
+ "alc-core-wasm",
  "alc-csv-parser",
  "alc-devices",
  "alc-dtako",

@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 use tower::ServiceExt;
 use uuid::Uuid;
 
-use alc_core::auth_middleware::TenantId;
+use alc_core_wasm::{DbError, TenantId};
 
 use super::tenant_router;
 use crate::matcher::{synth, MAX_TEMPLATES};
@@ -35,9 +35,9 @@ struct FakeRepo {
 }
 
 impl FakeRepo {
-    fn check(&self) -> Result<(), sqlx::Error> {
+    fn check(&self) -> Result<(), DbError> {
         if self.fail.load(Ordering::SeqCst) {
-            return Err(sqlx::Error::PoolTimedOut);
+            return Err(DbError::Other("pool timed out".into()));
         }
         Ok(())
     }
@@ -65,10 +65,10 @@ impl VeinTemplatesRepository for FakeRepo {
         _tenant_id: Uuid,
         employee_id: Uuid,
         template: &str,
-    ) -> Result<Option<DateTime<Utc>>, sqlx::Error> {
+    ) -> Result<Option<DateTime<Utc>>, DbError> {
         self.check()?;
         if self.fail_upsert.load(Ordering::SeqCst) {
-            return Err(sqlx::Error::PoolTimedOut);
+            return Err(DbError::Other("pool timed out".into()));
         }
         let employees = self.employees.lock().unwrap();
         let Some((_, name)) = employees.iter().find(|(id, _)| *id == employee_id) else {
@@ -87,7 +87,7 @@ impl VeinTemplatesRepository for FakeRepo {
         Ok(Some(now))
     }
 
-    async fn list(&self, _tenant_id: Uuid) -> Result<Vec<VeinTemplateRow>, sqlx::Error> {
+    async fn list(&self, _tenant_id: Uuid) -> Result<Vec<VeinTemplateRow>, DbError> {
         self.check()?;
         Ok(self.rows.lock().unwrap().clone())
     }
@@ -96,7 +96,7 @@ impl VeinTemplatesRepository for FakeRepo {
         &self,
         _tenant_id: Uuid,
         employee_id: Uuid,
-    ) -> Result<(i64, bool), sqlx::Error> {
+    ) -> Result<(i64, bool), DbError> {
         self.check()?;
         let rows = self.rows.lock().unwrap();
         let enrolled = rows.iter().any(|r| r.employee_id == employee_id);
@@ -109,7 +109,7 @@ impl VeinTemplatesRepository for FakeRepo {
         id: Uuid,
         template: &str,
         read_updated_at: DateTime<Utc>,
-    ) -> Result<bool, sqlx::Error> {
+    ) -> Result<bool, DbError> {
         self.learned_calls
             .lock()
             .unwrap()
@@ -127,7 +127,7 @@ impl VeinTemplatesRepository for FakeRepo {
         Ok(true)
     }
 
-    async fn delete(&self, _tenant_id: Uuid, employee_id: Uuid) -> Result<bool, sqlx::Error> {
+    async fn delete(&self, _tenant_id: Uuid, employee_id: Uuid) -> Result<bool, DbError> {
         self.check()?;
         let mut rows = self.rows.lock().unwrap();
         let before = rows.len();

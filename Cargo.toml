@@ -67,6 +67,8 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 [dev-dependencies]
+# mock_helpers の MockVeinTemplatesRepository が trait の DbError を使う (Refs #682)
+alc-core-wasm = { path = "crates/alc-core-wasm" }
 argon2 = "0.5"
 async-trait = "0.1"
 base64 = "0.22"

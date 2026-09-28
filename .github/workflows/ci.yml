@@ -102,6 +102,7 @@ jobs:
           shared-key: wasm-build
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo build -p alc-core-wasm --target wasm32-unknown-unknown
+      - run: cargo build -p alc-vein --no-default-features --target wasm32-unknown-unknown
 
   # 依存グラフ監視: cargo-deny (重複バージョン warn、設定 SoT は deny.toml) +
   # cargo-machete (未使用依存 warn)。経緯と削減方針は docs/ci-speed-tracking.md の
