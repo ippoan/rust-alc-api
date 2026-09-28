@@ -109,6 +109,15 @@ for (const [name, t, other] of [
     count(`cross-tenant DELETE ${name}→other (404)`, r.status === 404, r);
   });
 }
+// tenant ヘッダーが無い・壊れている → 401 (alc-core-wasm の require_tenant_header)
+for (const [label, tenant] of [["missing", undefined], ["invalid", "not-a-uuid"]]) {
+  cross.push(async () => {
+    const res = await fetch(`${URL_}/vein/templates`, {
+      headers: tenant === undefined ? {} : { "X-Tenant-ID": tenant },
+    });
+    count(`tenant header ${label} (401)`, res.status === 401, { status: res.status });
+  });
+}
 await pool(cross, CONCURRENCY);
 
 // 3. 一覧を A / B 交互に大量に並列で

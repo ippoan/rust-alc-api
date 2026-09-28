@@ -4,7 +4,7 @@
 #
 # 1:N 照合の上限は 500 人 (matcher::MAX_TEMPLATES、Library::new の上限) なので、500 を超える
 # 件数は登録 (PUT) できない。その件数は 500 人を PUT で入れたあと残りを SQL で複写して入れ、
-# 照合が 422 (too_many_templates) で断ること・そこまでの一覧の読み出し時間を測る。
+# 照合が 422 (too_many_templates) で断ること・そこまでの一覧の読み出し時間 (db) を測る。
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

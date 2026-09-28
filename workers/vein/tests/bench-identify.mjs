@@ -1,6 +1,7 @@
-// `/vein/identify` の CPU 時間の測定 (Refs #680 / #683)。worker は照合 (`matcher::identify`) の
-// 前後を Date.now で測り、`Server-Timing: list;dur=.., identify;dur=..` で返す
-// (照合の区間は I/O を挟まない)。ここではそれを直列に R 回集めて min / 中央値 / p95 を出す。
+// `/vein/identify` の CPU 時間の測定 (Refs #680 / #683)。worker は Date.now で
+// `Server-Timing: connect;dur=.., db;dur=.., app;dur=..` を返す (db = repo の全メソッドの合計、
+// app = 残り = 特徴量の検査・1:N 照合・JSON など Worker の CPU)。ここではそれを直列に R 回集めて
+// min / 中央値 / p95 を出す。
 //
 // 前提: seed.sql で TENANT に N_EMPLOYEES 人の乗務員を作ってある。ENROLL 人ぶん PUT で登録する
 // (照合の上限は 500 人なので、それを超える件数は bench-local.sh が SQL で複写して入れる)。
@@ -42,8 +43,8 @@ await Promise.all(
   }),
 );
 
-const list = [];
-const ident = [];
+const db = [];
+const app = [];
 const wall = [];
 let hits = 0;
 let status = null;
@@ -61,8 +62,8 @@ for (let i = 0; i < R; i++) {
       return [k, Number(v)];
     }),
   );
-  if (m.list !== undefined) list.push(m.list);
-  if (m.identify !== undefined) ident.push(m.identify);
+  if (m.db !== undefined) db.push(m.db);
+  if (m.app !== undefined) app.push(m.app);
 }
 
 const q = (xs, p) => {
@@ -73,5 +74,5 @@ const q = (xs, p) => {
 const fmt = (xs) => `min=${q(xs, 0)} p50=${q(xs, 0.5)} p95=${q(xs, 0.95)}`;
 console.log(
   `bench-identify: enrolled=${ENROLL} R=${R} last_status=${status} hits=${hits}/${R} | ` +
-    `identify_ms ${fmt(ident)} | list_ms ${fmt(list)} | wall_ms ${fmt(wall)}`,
+    `app_ms ${fmt(app)} | db_ms ${fmt(db)} | wall_ms ${fmt(wall)}`,
 );

@@ -2,13 +2,15 @@
 
 指静脈 (vein) の 4 本の口 (crates/alc-vein) を workers-rs + Hyperdrive で提供する Worker。
 rust-alc-api を Cloudflare Workers へ段階移行する最初の 1 本 (Refs #680 / #683)。
+口・照合・trait・SQL (`repo::sql`) は alc-vein (`default-features = false`) をそのまま使い、
+この Worker が持つのは Hyperdrive 越しの repo 実装 (`src/repo.rs`) と workers-rs への載せ方 (`src/lib.rs`) だけ。
 
 - **到達経路は auth-worker からの Service Binding だけ。** JWT を検証せず `X-Tenant-ID` を
   信頼するので、`workers_dev` / `preview_urls` を false にし、`route` / `routes` を持たない。
   `scripts/check-exposure.sh` が CI で毎回検査する。
-- **RLS は 1 リクエスト = 1 トランザクション。** `BEGIN` の中で
+- **RLS は repo のメソッド 1 回 = 1 トランザクション。** `BEGIN` の中で
   `set_config('app.current_tenant_id', $1, true)` を打つ (Hyperdrive はトランザクション単位で
-  コネクションを使い回すので、session スコープの `set_current_tenant` は使えない)。詳細は `src/db.rs`。
+  コネクションを使い回すので、session スコープの `set_current_tenant` は使えない)。詳細は `src/repo.rs`。
 - monolith の workspace から exclude した独立 workspace (自前の Cargo.lock、Bazel に入れない)。
 
 ## ビルド
