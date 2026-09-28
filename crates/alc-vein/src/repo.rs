@@ -4,16 +4,19 @@
 //! mock に差し替えられるよう `VeinState` は trait object で持つ)。RLS に加えて
 //! `WHERE tenant_id` を明示する (staging は superuser 接続で RLS が効かないため)。
 
-use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
+#[cfg(feature = "sqlx")]
 use sqlx::PgPool;
 use uuid::Uuid;
 
+#[cfg(feature = "sqlx")]
 use alc_core::tenant::TenantConn;
+use alc_core_wasm::DbError;
 
 /// 照合に使う 1 行 (乗務員名つき。削除済みの乗務員は含めない)。
-#[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "sqlx", derive(sqlx::FromRow))]
 pub struct VeinTemplateRow {
     pub id: Uuid,
     pub employee_id: Uuid,
@@ -40,7 +43,9 @@ impl From<VeinTemplateRow> for VeinTemplateItem {
     }
 }
 
-#[async_trait]
+/// wasm32 (Workers) でも `Send + Sync` を外さない: routes の axum handler と
+/// `Router::with_state` が Send を要求するため。!Send を持つ実装は `SendWrapper` で包む。
+#[async_trait::async_trait]
 pub trait VeinTemplatesRepository: Send + Sync {
     /// 乗務員のテンプレートを登録し直す (1 人 1 件)。`Ok(None)` = そのテナントに
     /// 生きている乗務員が居ない (404 に写す)。
@@ -49,10 +54,10 @@ pub trait VeinTemplatesRepository: Send + Sync {
         tenant_id: Uuid,
         employee_id: Uuid,
         template: &str,
-    ) -> Result<Option<DateTime<Utc>>, sqlx::Error>;
+    ) -> Result<Option<DateTime<Utc>>, DbError>;
 
     /// テナントの全テンプレート (削除済みの乗務員を除く)。並びは登録順。
-    async fn list(&self, tenant_id: Uuid) -> Result<Vec<VeinTemplateRow>, sqlx::Error>;
+    async fn list(&self, tenant_id: Uuid) -> Result<Vec<VeinTemplateRow>, DbError>;
 
     /// 照合に載る登録の人数 (`list` と同じ条件 = 削除済みの乗務員を除く) と、
     /// `employee_id` がその中に既に居るか (居れば PUT は上書きで人数が増えない)。
@@ -60,7 +65,7 @@ pub trait VeinTemplatesRepository: Send + Sync {
         &self,
         tenant_id: Uuid,
         employee_id: Uuid,
-    ) -> Result<(i64, bool), sqlx::Error>;
+    ) -> Result<(i64, bool), DbError>;
 
     /// 学習後のテンプレートを書き戻す。読んだときの `updated_at` のままのときだけ書き、
     /// 間に登録し直し・別の照合の書き戻しが入っていたら何もしない (`Ok(false)`)。
@@ -70,30 +75,33 @@ pub trait VeinTemplatesRepository: Send + Sync {
         id: Uuid,
         template: &str,
         read_updated_at: DateTime<Utc>,
-    ) -> Result<bool, sqlx::Error>;
+    ) -> Result<bool, DbError>;
 
     /// 乗務員のテンプレートを消す。`Ok(false)` = 登録が無い。
-    async fn delete(&self, tenant_id: Uuid, employee_id: Uuid) -> Result<bool, sqlx::Error>;
+    async fn delete(&self, tenant_id: Uuid, employee_id: Uuid) -> Result<bool, DbError>;
 }
 
+#[cfg(feature = "sqlx")]
 pub struct PgVeinTemplatesRepository {
     pool: PgPool,
 }
 
+#[cfg(feature = "sqlx")]
 impl PgVeinTemplatesRepository {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 }
 
-#[async_trait]
+#[cfg(feature = "sqlx")]
+#[async_trait::async_trait]
 impl VeinTemplatesRepository for PgVeinTemplatesRepository {
     async fn upsert(
         &self,
         tenant_id: Uuid,
         employee_id: Uuid,
         template: &str,
-    ) -> Result<Option<DateTime<Utc>>, sqlx::Error> {
+    ) -> Result<Option<DateTime<Utc>>, DbError> {
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
         sqlx::query_scalar(
             r#"INSERT INTO vein_templates (tenant_id, employee_id, template)
@@ -108,9 +116,10 @@ impl VeinTemplatesRepository for PgVeinTemplatesRepository {
         .bind(template)
         .fetch_optional(&mut *tc.conn)
         .await
+        .map_err(DbError::from)
     }
 
-    async fn list(&self, tenant_id: Uuid) -> Result<Vec<VeinTemplateRow>, sqlx::Error> {
+    async fn list(&self, tenant_id: Uuid) -> Result<Vec<VeinTemplateRow>, DbError> {
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
         sqlx::query_as::<_, VeinTemplateRow>(
             r#"SELECT v.id, v.employee_id, e.name, v.template, v.updated_at
@@ -122,13 +131,14 @@ impl VeinTemplatesRepository for PgVeinTemplatesRepository {
         .bind(tenant_id)
         .fetch_all(&mut *tc.conn)
         .await
+        .map_err(DbError::from)
     }
 
     async fn registration_count(
         &self,
         tenant_id: Uuid,
         employee_id: Uuid,
-    ) -> Result<(i64, bool), sqlx::Error> {
+    ) -> Result<(i64, bool), DbError> {
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
         sqlx::query_as(
             r#"SELECT COUNT(*), COALESCE(BOOL_OR(v.employee_id = $2), FALSE)
@@ -140,6 +150,7 @@ impl VeinTemplatesRepository for PgVeinTemplatesRepository {
         .bind(employee_id)
         .fetch_one(&mut *tc.conn)
         .await
+        .map_err(DbError::from)
     }
 
     async fn update_learned(
@@ -148,7 +159,7 @@ impl VeinTemplatesRepository for PgVeinTemplatesRepository {
         id: Uuid,
         template: &str,
         read_updated_at: DateTime<Utc>,
-    ) -> Result<bool, sqlx::Error> {
+    ) -> Result<bool, DbError> {
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
         let result = sqlx::query(
             r#"UPDATE vein_templates SET template = $3, updated_at = NOW()
@@ -163,7 +174,7 @@ impl VeinTemplatesRepository for PgVeinTemplatesRepository {
         Ok(result.rows_affected() == 1)
     }
 
-    async fn delete(&self, tenant_id: Uuid, employee_id: Uuid) -> Result<bool, sqlx::Error> {
+    async fn delete(&self, tenant_id: Uuid, employee_id: Uuid) -> Result<bool, DbError> {
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
         let result =
             sqlx::query("DELETE FROM vein_templates WHERE tenant_id = $1 AND employee_id = $2")

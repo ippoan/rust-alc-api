@@ -18,8 +18,8 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use uuid::Uuid;
 
-use alc_core::api_error::{internal_error, not_found, unprocessable, ApiError};
-use alc_core::auth_middleware::TenantId;
+use alc_core_wasm::api_error::{internal_error, not_found, unprocessable, ApiError};
+use alc_core_wasm::TenantId;
 
 use crate::matcher::{self, CharaError, MAX_TEMPLATES};
 use crate::repo::VeinTemplateItem;
