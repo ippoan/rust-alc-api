@@ -8,6 +8,7 @@ rust_library(
     crate_features = ["test-helpers"],
     deps = all_crate_deps(normal = True) + [
         "//crates/alc-auth-jwt",
+        "//crates/alc-core-wasm",
     ],
     proc_macro_deps = all_crate_deps(proc_macro = True),
     visibility = ["//visibility:public"],

@@ -36,6 +36,7 @@ coverage:cov-auth-jwt --instrumentation_filter=//crates/alc-auth-jwt
 coverage:cov-carins --instrumentation_filter=//crates/alc-carins
 coverage:cov-compare --instrumentation_filter=//crates/alc-compare
 coverage:cov-core --instrumentation_filter=//crates/alc-core
+coverage:cov-core-wasm --instrumentation_filter=//crates/alc-core-wasm
 coverage:cov-csv-parser --instrumentation_filter=//crates/alc-csv-parser
 coverage:cov-devices --instrumentation_filter=//crates/alc-devices
 coverage:cov-dtako --instrumentation_filter=//crates/alc-dtako,//crates/alc-compare

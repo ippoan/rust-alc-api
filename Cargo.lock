@@ -107,6 +107,7 @@ name = "alc-core"
 version = "0.1.0"
 dependencies = [
  "alc-auth-jwt",
+ "alc-core-wasm",
  "anyhow",
  "async-trait",
  "axum",
@@ -130,6 +131,19 @@ dependencies = [
  "url",
  "uuid",
  "wiremock",
+]
+
+[[package]]
+name = "alc-core-wasm"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror 2.0.18",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
