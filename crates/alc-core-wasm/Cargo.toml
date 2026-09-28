@@ -26,3 +26,8 @@ uuid = { version = "1", features = ["js"] }
 [features]
 default = []
 sqlx = ["dep:sqlx"]
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }
+tower = { version = "0.5", features = ["util"] }
+uuid = { version = "1", features = ["v4"] }

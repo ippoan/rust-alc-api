@@ -66,3 +66,99 @@ pub async fn require_tenant_header(mut req: Request, next: Next) -> Result<Respo
 
     Ok(next.run(req).await)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{body::Body, middleware as axum_middleware, routing::get, Extension, Router};
+    use tower::ServiceExt;
+
+    async fn echo_tenant(Extension(tid): Extension<TenantId>) -> String {
+        tid.0.to_string()
+    }
+
+    async fn echo_auth_user(Extension(user): Extension<AuthUser>) -> String {
+        format!("{}:{}:{:?}", user.email, user.role, user.tenant_slug)
+    }
+
+    fn app() -> Router {
+        Router::new()
+            .route("/t", get(echo_tenant))
+            .route("/u", get(echo_auth_user))
+            .layer(axum_middleware::from_fn(require_tenant_header))
+    }
+
+    async fn send(headers: &[(&str, &str)], uri: &str) -> Response {
+        let mut b = Request::builder().uri(uri);
+        for (k, v) in headers {
+            b = b.header(*k, *v);
+        }
+        app()
+            .into_service()
+            .oneshot(b.body(Body::empty()).unwrap())
+            .await
+            .unwrap()
+    }
+
+    async fn body_string(resp: Response) -> String {
+        let body = axum::body::to_bytes(resp.into_body(), 1024).await.unwrap();
+        String::from_utf8_lossy(&body).into_owned()
+    }
+
+    #[tokio::test]
+    async fn tenant_header_ok() {
+        let tid = Uuid::new_v4();
+        let resp = send(&[("X-Tenant-ID", &tid.to_string())], "/t").await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(body_string(resp).await, tid.to_string());
+    }
+
+    #[tokio::test]
+    async fn tenant_header_missing() {
+        let resp = send(&[], "/t").await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn tenant_header_invalid_uuid() {
+        let resp = send(&[("X-Tenant-ID", "not-a-uuid")], "/t").await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn tenant_header_with_auth_user() {
+        let tid = Uuid::new_v4();
+        let uid = Uuid::new_v4();
+        let resp = send(
+            &[
+                ("X-Tenant-ID", &tid.to_string()),
+                ("X-User-ID", &uid.to_string()),
+                ("X-User-Email", "test@example.com"),
+                ("X-User-Role", "admin"),
+                ("X-Tenant-Slug", "acme"),
+            ],
+            "/u",
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            body_string(resp).await,
+            "test@example.com:admin:Some(\"acme\")"
+        );
+    }
+
+    #[tokio::test]
+    async fn partial_user_headers_do_not_restore_auth_user() {
+        let tid = Uuid::new_v4();
+        let resp = send(
+            &[
+                ("X-Tenant-ID", &tid.to_string()),
+                ("X-User-ID", &Uuid::new_v4().to_string()),
+            ],
+            "/u",
+        )
+        .await;
+        // AuthUser が復元されないので Extension 抽出が失敗する (500)
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+}
