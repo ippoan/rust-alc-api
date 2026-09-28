@@ -2,21 +2,18 @@ load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
 load("@crates//:defs.bzl", "all_crate_deps")
 
 rust_library(
-    name = "alc-core",
+    name = "alc-core-wasm",
     srcs = glob(["src/**/*.rs"]),
-    crate_name = "alc_core",
-    crate_features = ["test-helpers"],
-    deps = all_crate_deps(normal = True) + [
-        "//crates/alc-auth-jwt",
-        "//crates/alc-core-wasm",
-    ],
+    crate_name = "alc_core_wasm",
+    crate_features = ["sqlx"],
+    deps = all_crate_deps(normal = True),
     proc_macro_deps = all_crate_deps(proc_macro = True),
     visibility = ["//visibility:public"],
 )
 
 rust_test(
-    name = "alc-core_test",
-    crate = ":alc-core",
+    name = "alc-core-wasm_test",
+    crate = ":alc-core-wasm",
     deps = all_crate_deps(normal_dev = True),
     proc_macro_deps = all_crate_deps(proc_macro_dev = True),
 )

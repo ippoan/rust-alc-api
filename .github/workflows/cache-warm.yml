@@ -123,6 +123,7 @@ jobs:
           - { name: mock-maintenance, target: "//:mock_maintenance" }
           - { name: auth, target: "//crates/alc-auth:alc-auth_test" }
           - { name: auth-jwt, target: "//crates/alc-auth-jwt:alc-auth-jwt_test", coverage: "cov-auth-jwt" }
+          - { name: core-wasm, target: "//crates/alc-core-wasm:alc-core-wasm_test", coverage: "cov-core-wasm" }
           - { name: camera, target: "//crates/alc-camera:alc-camera_test" }
           - { name: carins, target: "//crates/alc-carins:alc-carins_test", coverage: "cov-carins" }
           - { name: compare, target: "//crates/alc-compare:alc-compare_test", coverage: "cov-compare" }

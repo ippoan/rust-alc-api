@@ -62,6 +62,14 @@ type = "combined"
 path = "crates/alc-core/src/redact_broadcast.rs"
 type = "unit"
 
+# --- alc-core-wasm ---
+# require_tenant_header は alc-core/src/auth_middleware.rs (mock 登録) から移した (Refs #681)。
+# cov-core-wasm shard の lib テストだけで 100% になる。
+
+[[files]]
+path = "crates/alc-core-wasm/src/tenant_header.rs"
+type = "unit"
+
 # --- alc-carins ---
 
 [[files]]

@@ -8,6 +8,7 @@ unexpected_cfgs = { level = "allow", check-cfg = ['cfg(coverage)'] }
 
 [dependencies]
 alc-auth-jwt = { path = "../alc-auth-jwt" }
+alc-core-wasm = { path = "../alc-core-wasm", features = ["sqlx"] }
 anyhow = "1"
 async-trait = "0.1"
 axum = "0.8"
