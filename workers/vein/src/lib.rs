@@ -1,0 +1,92 @@
+//! 指静脈 (vein) の Worker (Refs #680 / #683)。crates/alc-vein の 4 本の口
+//! (`routes::tenant_router`、axum) を workers-rs (`http` / `axum` feature) に載せ、
+//! repo だけを Hyperdrive 越しの実装 ([`repo::HdVeinTemplatesRepository`]) に差し替える。
+//! monolith と同じく `/api` 付きでも受ける。
+//!
+//! **この Worker は JWT を検証せず、auth-worker が付け直した tenant ヘッダーを信頼する**
+//! (`alc_core_wasm::require_tenant_header`)。到達経路は auth-worker からの Service Binding
+//! だけで、`workers_dev` / `preview_urls` / `routes` を持たない (wrangler.toml と
+//! scripts/check-exposure.sh が保証する。#556 と同じ穴を開けないため)。
+
+mod repo;
+
+use std::sync::Arc;
+
+use alc_core_wasm::require_tenant_header;
+use alc_vein::{routes::tenant_router, VeinState};
+use axum::body::Body;
+use axum::http::{HeaderValue, Response, StatusCode};
+use axum::{middleware, Router};
+use tokio_postgres::config::SslMode;
+use tokio_postgres::{Client, NoTls};
+use tower_service::Service;
+use worker::{console_error, event, Context, Date, Env, HttpRequest, Result, Socket};
+
+use crate::repo::HdVeinTemplatesRepository;
+
+/// Hyperdrive binding `HYPERDRIVE` へ繋ぐ。TLS は Hyperdrive が上流へ張るので、
+/// worker → Hyperdrive は平文 (`NoTls`)。`Socket` は `!Send` なので、この関数は handler
+/// (axum が Send を要求する側) の外 = fetch から呼ぶ。
+async fn connect(env: &Env) -> std::result::Result<Client, String> {
+    let hd = env
+        .hyperdrive("HYPERDRIVE")
+        .map_err(|e| format!("hyperdrive binding: {e}"))?;
+    let mut config: tokio_postgres::Config = hd
+        .connection_string()
+        .parse()
+        .map_err(|e| format!("parse connection string: {e}"))?;
+    config.ssl_mode(SslMode::Disable);
+    let socket = Socket::builder()
+        .connect(hd.host(), hd.port())
+        .map_err(|e| format!("socket: {e}"))?;
+    let (client, connection) = config
+        .connect_raw(socket, NoTls)
+        .await
+        .map_err(|e| format!("connect: {e}"))?;
+    wasm_bindgen_futures::spawn_local(async move {
+        if let Err(e) = connection.await {
+            console_error!("postgres connection: {e}");
+        }
+    });
+    Ok(client)
+}
+
+fn router(state: VeinState) -> Router {
+    let vein = tenant_router()
+        .layer(middleware::from_fn(require_tenant_header))
+        .with_state(state);
+    Router::new().merge(vein.clone()).nest("/api", vein)
+}
+
+#[event(fetch)]
+async fn fetch(req: HttpRequest, env: Env, _ctx: Context) -> Result<Response<Body>> {
+    let started = Date::now().as_millis();
+    let client = match connect(&env).await {
+        Ok(c) => c,
+        Err(e) => {
+            console_error!("vein: {e}");
+            let mut resp = Response::new(Body::from(r#"{"error":"internal_error"}"#));
+            *resp.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+            return Ok(resp);
+        }
+    };
+    let connect_ms = Date::now().as_millis() - started;
+    let repo = Arc::new(HdVeinTemplatesRepository::new(client));
+    let state = VeinState {
+        templates: repo.clone(),
+    };
+    let mut resp = match router(state).call(req).await {
+        Ok(r) => r,
+        Err(e) => match e {},
+    };
+    // 測定用 (#683): 接続・DB (repo の全メソッドの合計)・それ以外 (照合など Worker の CPU)。
+    // ローカル (wrangler dev) の Date.now は CPU 実行中も進むが、Cloudflare 上では
+    // Spectre 対策で I/O まで止まるので app は 0 に寄る (本番の CPU 時間は dashboard で見る)
+    let db_ms = repo.db_ms();
+    let app_ms = (Date::now().as_millis() - started).saturating_sub(connect_ms + db_ms);
+    let timing = format!("connect;dur={connect_ms}, db;dur={db_ms}, app;dur={app_ms}");
+    if let Ok(v) = HeaderValue::from_str(&timing) {
+        resp.headers_mut().insert("server-timing", v);
+    }
+    Ok(resp)
+}

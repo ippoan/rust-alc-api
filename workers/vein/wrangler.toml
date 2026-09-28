@@ -1,0 +1,24 @@
+# 指静脈 (vein) の Worker (Refs #680 / #683)。
+#
+# ★ この Worker は JWT を検証せず、auth-worker が付け直した X-Tenant-ID を信頼する。
+#   外から直接届いたら #556 と同じ穴になるので、到達経路は auth-worker からの
+#   Service Binding だけにする:
+#   - workers_dev = false / preview_urls = false (*.workers.dev と preview URL を開けない)
+#   - route / routes / custom_domain を書かない
+#   scripts/check-exposure.sh が CI で毎回これを検査する。
+name = "alc-vein"
+main = "build/index.js"
+compatibility_date = "2026-09-01"
+workers_dev = false
+preview_urls = false
+
+[build]
+command = "cargo install -q worker-build@0.8.6 && worker-build --release"
+
+# Hyperdrive の作成とデプロイはこのタスクの範囲外 (Refs #680)。id は作成時に入れる。
+# ローカルは `wrangler dev` + 環境変数
+# CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE で手元の postgres へ繋ぐ
+# (接続文字列は repo に書かない。DB ユーザーは RLS が効く alc_api_app)。
+[[hyperdrive]]
+binding = "HYPERDRIVE"
+id = "00000000000000000000000000000000"

@@ -43,6 +43,39 @@ impl From<VeinTemplateRow> for VeinTemplateItem {
     }
 }
 
+/// `vein_templates` の SQL。sqlx の Pg 実装 (モノリス) と Workers の Hyperdrive 実装
+/// (workers/vein、tokio-postgres) の両方がこれを使う (placeholder はどちらも `$n`)。
+/// RLS に加えて `WHERE tenant_id` を明示する。
+pub mod sql {
+    /// 乗務員のテンプレートを登録し直す。$1 tenant_id / $2 employee_id / $3 template → updated_at (乗務員が居なければ 0 行)。
+    pub const UPSERT: &str = r#"INSERT INTO vein_templates (tenant_id, employee_id, template)
+    SELECT e.tenant_id, e.id, $3 FROM employees e
+    WHERE e.tenant_id = $1 AND e.id = $2 AND e.deleted_at IS NULL
+    ON CONFLICT (tenant_id, employee_id)
+    DO UPDATE SET template = EXCLUDED.template, updated_at = NOW()
+    RETURNING updated_at"#;
+
+    /// テナントの全テンプレート (削除済みの乗務員を除く、登録順)。$1 tenant_id → id, employee_id, name, template, updated_at。
+    pub const LIST: &str = r#"SELECT v.id, v.employee_id, e.name, v.template, v.updated_at
+    FROM vein_templates v
+    JOIN employees e ON e.id = v.employee_id AND e.tenant_id = v.tenant_id
+    WHERE v.tenant_id = $1 AND e.deleted_at IS NULL
+    ORDER BY v.created_at, v.id"#;
+
+    /// 照合に載る登録の人数と、$2 employee_id が既に居るか。$1 tenant_id → (COUNT, BOOL)。
+    pub const REGISTRATION_COUNT: &str = r#"SELECT COUNT(*), COALESCE(BOOL_OR(v.employee_id = $2), FALSE)
+    FROM vein_templates v
+    JOIN employees e ON e.id = v.employee_id AND e.tenant_id = v.tenant_id
+    WHERE v.tenant_id = $1 AND e.deleted_at IS NULL"#;
+
+    /// 学習後のテンプレートの書き戻し ($4 = 読んだときの updated_at のままのときだけ)。$1 tenant_id / $2 id / $3 template。
+    pub const UPDATE_LEARNED: &str = r#"UPDATE vein_templates SET template = $3, updated_at = NOW()
+    WHERE tenant_id = $1 AND id = $2 AND updated_at = $4"#;
+
+    /// 乗務員のテンプレートを消す。$1 tenant_id / $2 employee_id。
+    pub const DELETE: &str = "DELETE FROM vein_templates WHERE tenant_id = $1 AND employee_id = $2";
+}
+
 /// wasm32 (Workers) でも `Send + Sync` を外さない: routes の axum handler と
 /// `Router::with_state` が Send を要求するため。!Send を持つ実装は `SendWrapper` で包む。
 #[async_trait::async_trait]
@@ -103,35 +136,22 @@ impl VeinTemplatesRepository for PgVeinTemplatesRepository {
         template: &str,
     ) -> Result<Option<DateTime<Utc>>, DbError> {
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
-        sqlx::query_scalar(
-            r#"INSERT INTO vein_templates (tenant_id, employee_id, template)
-            SELECT e.tenant_id, e.id, $3 FROM employees e
-            WHERE e.tenant_id = $1 AND e.id = $2 AND e.deleted_at IS NULL
-            ON CONFLICT (tenant_id, employee_id)
-            DO UPDATE SET template = EXCLUDED.template, updated_at = NOW()
-            RETURNING updated_at"#,
-        )
-        .bind(tenant_id)
-        .bind(employee_id)
-        .bind(template)
-        .fetch_optional(&mut *tc.conn)
-        .await
-        .map_err(DbError::from)
+        sqlx::query_scalar(sql::UPSERT)
+            .bind(tenant_id)
+            .bind(employee_id)
+            .bind(template)
+            .fetch_optional(&mut *tc.conn)
+            .await
+            .map_err(DbError::from)
     }
 
     async fn list(&self, tenant_id: Uuid) -> Result<Vec<VeinTemplateRow>, DbError> {
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
-        sqlx::query_as::<_, VeinTemplateRow>(
-            r#"SELECT v.id, v.employee_id, e.name, v.template, v.updated_at
-            FROM vein_templates v
-            JOIN employees e ON e.id = v.employee_id AND e.tenant_id = v.tenant_id
-            WHERE v.tenant_id = $1 AND e.deleted_at IS NULL
-            ORDER BY v.created_at, v.id"#,
-        )
-        .bind(tenant_id)
-        .fetch_all(&mut *tc.conn)
-        .await
-        .map_err(DbError::from)
+        sqlx::query_as::<_, VeinTemplateRow>(sql::LIST)
+            .bind(tenant_id)
+            .fetch_all(&mut *tc.conn)
+            .await
+            .map_err(DbError::from)
     }
 
     async fn registration_count(
@@ -140,17 +160,12 @@ impl VeinTemplatesRepository for PgVeinTemplatesRepository {
         employee_id: Uuid,
     ) -> Result<(i64, bool), DbError> {
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
-        sqlx::query_as(
-            r#"SELECT COUNT(*), COALESCE(BOOL_OR(v.employee_id = $2), FALSE)
-            FROM vein_templates v
-            JOIN employees e ON e.id = v.employee_id AND e.tenant_id = v.tenant_id
-            WHERE v.tenant_id = $1 AND e.deleted_at IS NULL"#,
-        )
-        .bind(tenant_id)
-        .bind(employee_id)
-        .fetch_one(&mut *tc.conn)
-        .await
-        .map_err(DbError::from)
+        sqlx::query_as(sql::REGISTRATION_COUNT)
+            .bind(tenant_id)
+            .bind(employee_id)
+            .fetch_one(&mut *tc.conn)
+            .await
+            .map_err(DbError::from)
     }
 
     async fn update_learned(
@@ -161,27 +176,23 @@ impl VeinTemplatesRepository for PgVeinTemplatesRepository {
         read_updated_at: DateTime<Utc>,
     ) -> Result<bool, DbError> {
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
-        let result = sqlx::query(
-            r#"UPDATE vein_templates SET template = $3, updated_at = NOW()
-            WHERE tenant_id = $1 AND id = $2 AND updated_at = $4"#,
-        )
-        .bind(tenant_id)
-        .bind(id)
-        .bind(template)
-        .bind(read_updated_at)
-        .execute(&mut *tc.conn)
-        .await?;
+        let result = sqlx::query(sql::UPDATE_LEARNED)
+            .bind(tenant_id)
+            .bind(id)
+            .bind(template)
+            .bind(read_updated_at)
+            .execute(&mut *tc.conn)
+            .await?;
         Ok(result.rows_affected() == 1)
     }
 
     async fn delete(&self, tenant_id: Uuid, employee_id: Uuid) -> Result<bool, DbError> {
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
-        let result =
-            sqlx::query("DELETE FROM vein_templates WHERE tenant_id = $1 AND employee_id = $2")
-                .bind(tenant_id)
-                .bind(employee_id)
-                .execute(&mut *tc.conn)
-                .await?;
+        let result = sqlx::query(sql::DELETE)
+            .bind(tenant_id)
+            .bind(employee_id)
+            .execute(&mut *tc.conn)
+            .await?;
         Ok(result.rows_affected() == 1)
     }
 }
