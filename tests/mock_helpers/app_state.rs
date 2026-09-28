@@ -517,14 +517,14 @@ impl alc_vein::repo::VeinTemplatesRepository for MockVeinTemplatesRepository {
         _tenant_id: Uuid,
         _employee_id: Uuid,
         _template: &str,
-    ) -> Result<Option<chrono::DateTime<chrono::Utc>>, sqlx::Error> {
+    ) -> Result<Option<chrono::DateTime<chrono::Utc>>, alc_core_wasm::DbError> {
         Ok(None)
     }
 
     async fn list(
         &self,
         _tenant_id: Uuid,
-    ) -> Result<Vec<alc_vein::repo::VeinTemplateRow>, sqlx::Error> {
+    ) -> Result<Vec<alc_vein::repo::VeinTemplateRow>, alc_core_wasm::DbError> {
         Ok(vec![])
     }
 
@@ -532,7 +532,7 @@ impl alc_vein::repo::VeinTemplatesRepository for MockVeinTemplatesRepository {
         &self,
         _tenant_id: Uuid,
         _employee_id: Uuid,
-    ) -> Result<(i64, bool), sqlx::Error> {
+    ) -> Result<(i64, bool), alc_core_wasm::DbError> {
         Ok((0, false))
     }
 
@@ -542,11 +542,15 @@ impl alc_vein::repo::VeinTemplatesRepository for MockVeinTemplatesRepository {
         _id: Uuid,
         _template: &str,
         _read_updated_at: chrono::DateTime<chrono::Utc>,
-    ) -> Result<bool, sqlx::Error> {
+    ) -> Result<bool, alc_core_wasm::DbError> {
         Ok(false)
     }
 
-    async fn delete(&self, _tenant_id: Uuid, _employee_id: Uuid) -> Result<bool, sqlx::Error> {
+    async fn delete(
+        &self,
+        _tenant_id: Uuid,
+        _employee_id: Uuid,
+    ) -> Result<bool, alc_core_wasm::DbError> {
         Ok(false)
     }
 }

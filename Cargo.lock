@@ -3542,6 +3542,7 @@ dependencies = [
  "alc-carins",
  "alc-compare",
  "alc-core",
+ "alc-core-wasm",
  "alc-csv-parser",
  "alc-devices",
  "alc-dtako",
