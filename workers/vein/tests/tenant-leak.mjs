@@ -8,10 +8,12 @@
 //   VEIN_URL=http://127.0.0.1:8787 TENANT_A=<uuid> TENANT_B=<uuid> N_A=7 N_B=13 \
 //     node tests/tenant-leak.mjs
 //
-// staging (Container の PgBouncer 経由) へは STAGING_TEST_SECRET も渡す。全リクエストに
-// X-Staging-Test-Secret を付け、加えて「ヘッダー無し・値違いは 401」も数える:
+// staging (Container の PgBouncer 経由、workers.dev は Cloudflare Access で保護) へは Access の
+// service token を渡す。全リクエストに CF-Access-Client-Id / CF-Access-Client-Secret を付け、
+// 加えて「Access のヘッダー無し・値違いは Worker に届かない (Access が 302 / 403 を返す)」も数える:
 //
-//   VEIN_URL=https://alc-vein-staging.<account>.workers.dev STAGING_TEST_SECRET=... \
+//   VEIN_URL=https://alc-vein-staging.<account>.workers.dev \
+//     CF_ACCESS_CLIENT_ID=... CF_ACCESS_CLIENT_SECRET=... \
 //     TENANT_A=0a000000-0000-4000-8000-00000000000a TENANT_B=0b000000-0000-4000-8000-00000000000b \
 //     N_A=7 N_B=13 node tests/tenant-leak.mjs
 //
@@ -35,8 +37,15 @@ const TENANTS = {
   B: { id: env("TENANT_B"), n: Number(env("N_B")), seedBase: 100000 },
 };
 const PER_TENANT = Number(env("PER_TENANT", "200"));
-const STAGING_SECRET = process.env.STAGING_TEST_SECRET;
-const gate = STAGING_SECRET ? { "X-Staging-Test-Secret": STAGING_SECRET } : {};
+const ACCESS_ID = process.env.CF_ACCESS_CLIENT_ID;
+const ACCESS_SECRET = process.env.CF_ACCESS_CLIENT_SECRET;
+if (Boolean(ACCESS_ID) !== Boolean(ACCESS_SECRET)) {
+  console.error("CF_ACCESS_CLIENT_ID と CF_ACCESS_CLIENT_SECRET は両方要る");
+  process.exit(2);
+}
+const gate = ACCESS_ID
+  ? { "CF-Access-Client-Id": ACCESS_ID, "CF-Access-Client-Secret": ACCESS_SECRET }
+  : {};
 const CONCURRENCY = Number(env("CONCURRENCY", "20"));
 
 // seed.sql の md5(tenant || '-' || g)::uuid と同じ
@@ -127,11 +136,12 @@ for (const [label, tenant] of [["missing", undefined], ["invalid", "not-a-uuid"]
     count(`tenant header ${label} (401)`, res.status === 401, { status: res.status });
   });
 }
-// staging: X-Staging-Test-Secret が無い・違うリクエストは tenant が正しくても 401 (staging_gate.rs)
-if (STAGING_SECRET) {
+// staging: Access の service token が無い・違うリクエストは、tenant が正しくても Worker に届かない
+// (Access がログインへの 302 か 403 を返す。Worker の応答 = JSON や 401/404 は失敗)
+if (ACCESS_ID) {
   for (const [label, headers] of [
     ["missing", {}],
-    ["wrong", { "X-Staging-Test-Secret": `${STAGING_SECRET}x` }],
+    ["wrong", { "CF-Access-Client-Id": ACCESS_ID, "CF-Access-Client-Secret": `${ACCESS_SECRET}x` }],
   ]) {
     for (const [method, path] of [
       ["GET", "/vein/templates"],
@@ -142,10 +152,15 @@ if (STAGING_SECRET) {
       cross.push(async () => {
         const res = await fetch(`${URL_}${path}`, {
           method,
+          redirect: "manual",
           headers: { ...headers, "X-Tenant-ID": TENANTS.A.id, "content-type": "application/json" },
           body: method === "POST" || method === "PUT" ? "{}" : undefined,
         });
-        count(`staging secret ${label} ${method} (401)`, res.status === 401, { status: res.status });
+        await res.text();
+        count(`access token ${label} ${method} (302/403 by Access)`, res.status === 302 || res.status === 403, {
+          status: res.status,
+          location: res.headers.get("location"),
+        });
       });
     }
   }

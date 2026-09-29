@@ -4,7 +4,7 @@
 rust-alc-api を Cloudflare Workers へ段階移行する最初の 1 本 (Refs #680 / #683 / #691)。
 口・照合・trait・SQL (`repo::sql`) は alc-vein (`default-features = false`) をそのまま使い、
 この Worker が持つのは repo 実装 (`src/repo.rs`)・DB への経路 (`src/db.rs`)・staging の DB を抱える
-Durable Object (`src/vein_db.rs`)・staging の栓 (`src/staging_gate.rs`) と workers-rs への載せ方
+Durable Object (`src/vein_db.rs`) と workers-rs への載せ方
 (`src/lib.rs`) だけ。
 
 ## DB への経路 (`src/db.rs` の 1 か所で出し分ける)
@@ -25,21 +25,25 @@ Durable Object (`src/vein_db.rs`)・staging の栓 (`src/staging_gate.rs`) と w
 - **本番の到達経路は auth-worker からの Service Binding だけ。** JWT を検証せず `X-Tenant-ID` を
   信頼するので、トップレベルは `workers_dev` / `preview_urls` を false にし、`route` / `routes` を持たない。
 - **staging はテストから叩くため `workers_dev = true`**
-  (`https://alc-vein-staging.<account>.workers.dev`)。代わりに secret `STAGING_TEST_SECRET` と一致する
-  `X-Staging-Test-Secret` ヘッダーの無いリクエストを最前段 (DB を起こす前) ですべて 401 にする
-  (`src/staging_gate.rs`、定数時間比較)。`secrets.required` に入れてあるので secret 無しでは deploy
-  できず、`STAGING_GATE = "required"` なので secret が消えても全部 401 (開けっ放しにならない)。
-- `scripts/check-exposure.sh` が CI で毎回これを検査し、`scripts/check-exposure-test.sh` が陰性対照
-  (wrangler.toml を崩すと exit 1) を回す。
+  (`https://alc-vein-staging.<account>.workers.dev`)。**この workers.dev は Cloudflare Access で保護する前提**
+  (アプリ名・ポリシー・service token は親タスク / 運用側が Access に設定する。repo には持たない)。
+  Access を通らないリクエストは Worker に届かず、Access がログインへの 302 か 403 を返す。
+  テストは service token を `CF-Access-Client-Id` / `CF-Access-Client-Secret` で付ける。
+- `workers_dev = true` を許すのは `env.staging` だけ。`scripts/check-exposure.sh` が CI で毎回これを検査し、
+  `scripts/check-exposure-test.sh` が陰性対照 (wrangler.toml を崩すと exit 1) を回す。
+- **`VeinDb` の `connect` ハンドラは Worker の `Stub::connect` (DO binding `VEIN_DB`) からしか呼べない。**
+  DO も Container も外部から直接届く口は無い (Container の 6432 は `getTcpPort()` 経由だけ)。
 
 ## RLS
 
 **repo のメソッド 1 回 = 1 トランザクション。** `BEGIN` の中で
 `set_config('app.current_tenant_id', $1, true)` を打つ (プーラーはトランザクション単位で
 コネクションを使い回すので、session スコープの `set_current_tenant` は使えない)。
-**`Row` は COMMIT の前に取り出して捨てる** — `Row` が prepared statement を握っていて、COMMIT 後に
-drop すると Close がトランザクションの外に出て別のサーバー接続へ回り、`prepared statement "s1"
-already exists` になる (staging で実測)。詳細は `src/repo.rs`。
+**repo の DB 操作はすべて `in_tenant_tx` を通し、`Row` / `Statement` をトランザクションの外へ出さない**
+(戻り値は印 `TxOutput` の付いた owned 型に限るので、`Row` を返すとコンパイルが通らない)。
+`Row` は prepared statement を握っていて、COMMIT 後に drop すると Close がトランザクションの外に出て
+別のサーバー接続へ回り、`prepared statement "s1" already exists` (42P05) になる (staging で実測)。
+詳細は `src/repo.rs`。
 
 ## staging の DB (Cloudflare Containers)
 
@@ -56,8 +60,7 @@ already exists` になる (staging で実測)。詳細は `src/repo.rs`。
 - 既定だと北米に置かれて往復ごとに太平洋を越えるので `constraints.regions = ["APAC"]`
 
 ```bash
-wrangler secret put STAGING_TEST_SECRET --env staging   # 初回は deploy --secrets-file <file>
-wrangler deploy --env staging                            # docker で container/ を build して push する
+wrangler deploy --env staging    # docker で container/ を build して push する
 ```
 
 ## ビルド
@@ -76,9 +79,10 @@ worker-build --release
 staging (Container の PgBouncer 経由。種は Container の起動時に入っている):
 
 ```bash
-VEIN_URL=https://alc-vein-staging.<account>.workers.dev STAGING_TEST_SECRET=... \
+VEIN_URL=https://alc-vein-staging.<account>.workers.dev \
+  CF_ACCESS_CLIENT_ID=... CF_ACCESS_CLIENT_SECRET=... \
   TENANT_A=0a000000-0000-4000-8000-00000000000a TENANT_B=0b000000-0000-4000-8000-00000000000b \
-  N_A=7 N_B=13 node tests/tenant-leak.mjs     # ヘッダー無し・値違いが 401 になることも数える
+  N_A=7 N_B=13 node tests/tenant-leak.mjs     # Access のヘッダー無し・値違いが 302/403 になることも数える
 ```
 
 ローカル (接続文字列は repo に書かず環境変数で渡す。`container/` の image をそのまま DB に使える):

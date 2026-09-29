@@ -122,7 +122,7 @@ jobs:
   # 指静脈 (vein) の Worker (workers/vein、workers-rs + tokio-postgres、Refs #680 / #683 / #691)。
   # monolith の workspace から exclude した独立 workspace なので、fmt / clippy / build をここで回す。
   # 先頭の check-exposure.sh は「外から素で届かない」(本番は workers_dev / preview_urls = false、
-  # route / routes 無し。workers_dev = true の staging は STAGING_TEST_SECRET の栓が必須) の検査 —
+  # route / routes 無し。workers_dev = true は Cloudflare Access で守る env.staging だけ) の検査 —
   # この Worker は X-Tenant-ID を信頼するので、崩れたら #556 と同じ穴になる。
   # check-exposure-test.sh はその陰性対照 (wrangler.toml を崩すと exit 1 になること)。
   vein-worker:

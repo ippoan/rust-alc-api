@@ -8,12 +8,11 @@
 //! (`alc_core_wasm::require_tenant_header`)。本番の到達経路は auth-worker からの Service Binding
 //! だけで、`workers_dev` / `preview_urls` / `routes` を持たない (wrangler.toml と
 //! scripts/check-exposure.sh が保証する。#556 と同じ穴を開けないため)。
-//! staging だけはテストから叩くため `workers_dev = true` で、代わりに [`staging_gate`] が
-//! secret `STAGING_TEST_SECRET` を知らないリクエストを最前段で 401 にする。
+//! staging だけはテストから叩くため `workers_dev = true` で、その workers.dev は Cloudflare Access で
+//! 保護する (Access を通らないリクエストは Worker に届かない。README 参照)。
 
 mod db;
 mod repo;
-mod staging_gate;
 mod vein_db;
 
 use std::sync::Arc;
@@ -45,10 +44,6 @@ fn error_response(status: StatusCode, code: &str) -> Response<Body> {
 
 #[event(fetch)]
 async fn fetch(req: HttpRequest, env: Env, _ctx: Context) -> Result<Response<Body>> {
-    // DB (staging では Container) を起こす前に弾く
-    if !staging_gate::allows(&env, req.headers()) {
-        return Ok(error_response(StatusCode::UNAUTHORIZED, "unauthorized"));
-    }
     let started = Date::now().as_millis();
     let client = match db::connect(&env).await {
         Ok(c) => c,

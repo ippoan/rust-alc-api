@@ -5,10 +5,9 @@
 #   auth-worker からの Service Binding だけにする:
 #   - workers_dev = false / preview_urls = false (*.workers.dev と preview URL を開けない)
 #   - route / routes / custom_domain を書かない
-#   staging (env.staging) だけはテストから叩くため workers_dev = true にし、代わりに
-#   secret STAGING_TEST_SECRET と一致する X-Staging-Test-Secret ヘッダーの無いリクエストを
-#   最前段で 401 にする (src/staging_gate.rs。STAGING_GATE = "required" なのに secret が
-#   無ければ全部断る)。
+#   staging (env.staging) だけはテストから叩くため workers_dev = true にし、その workers.dev の
+#   ホスト名は Cloudflare Access で保護する (アプリ・ポリシー・service token は Access 側で管理。
+#   Access を通らないリクエストは Worker に届かない)。workers_dev = true を許すのは env.staging だけ。
 #   scripts/check-exposure.sh が CI で毎回これを検査する。
 name = "alc-vein"
 main = "build/index.js"
@@ -26,7 +25,6 @@ command = "cargo install -q worker-build@0.8.6 && worker-build --release"
 # 抱える Durable Object VeinDb。Worker → VeinDb へ TCP → Container の 6432 へ中継 (src/vein_db.rs)。
 # Container は最後の接続から 10 分で止まり (常時起動にしない)、ディスクは揮発なので
 # 次の起動で空の DB から migration をやり直す。
-#   wrangler secret put STAGING_TEST_SECRET --env staging   # 値は repo に書かない
 #   wrangler deploy --env staging
 [env.staging]
 name = "alc-vein-staging"
@@ -35,12 +33,6 @@ preview_urls = false
 
 [env.staging.observability]
 enabled = true
-
-[env.staging.vars]
-STAGING_GATE = "required"
-
-[env.staging.secrets]
-required = ["STAGING_TEST_SECRET"]
 
 [[env.staging.containers]]
 class_name = "VeinDb"

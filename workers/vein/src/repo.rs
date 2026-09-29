@@ -27,6 +27,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use alc_core_wasm::DbError;
 use alc_vein::repo::{sql, VeinTemplateRow, VeinTemplatesRepository};
 use chrono::{DateTime, Utc};
+use futures_util::future::BoxFuture;
 use futures_util::lock::Mutex;
 use tokio_postgres::{Client, Transaction};
 use uuid::Uuid;
@@ -70,30 +71,48 @@ impl WorkerVeinTemplatesRepository {
         self.db_ms.load(Ordering::Relaxed)
     }
 
+    /// **repo の DB 操作はすべてここを通す。** tenant を `SET LOCAL` したトランザクションを開き、
+    /// `f` の結果を受け取ってから COMMIT する。`f` の戻り値は [`TxOutput`] (Row / Statement を
+    /// 含まない owned な型) に限るので、`Row` をトランザクションの外へ持ち出すコードはコンパイルが通らない。
+    async fn in_tenant_tx<T, F>(&self, tenant_id: Uuid, f: F) -> Result<T, DbError>
+    where
+        T: TxOutput,
+        F: for<'t> FnOnce(&'t Transaction<'t>) -> BoxFuture<'t, Result<T, tokio_postgres::Error>>
+            + Send,
+    {
+        let started = Date::now().as_millis();
+        let mut client = self.client.lock().await;
+        let tx = client.transaction().await.map_err(db_err)?;
+        tx.execute(
+            "SELECT set_config('app.current_tenant_id', $1, true), set_config('search_path', 'alc_api', true)",
+            &[&tenant_id.to_string()],
+        )
+        .await
+        .map_err(db_err)?;
+        // f の中で作った Row / Statement はここで全部 drop 済み (TxOutput に入れられない) なので、
+        // prepared statement の Close は COMMIT より前にこのトランザクションの中で送られる
+        let out = f(&tx).await.map_err(db_err)?;
+        tx.commit().await.map_err(db_err)?;
+        self.add_db_ms(started);
+        Ok(out)
+    }
+
     fn add_db_ms(&self, started: u64) {
         let spent = Date::now().as_millis().saturating_sub(started);
         self.db_ms.fetch_add(spent, Ordering::Relaxed);
     }
 }
 
-/// tenant を `SET LOCAL` したトランザクションを始める。
+/// トランザクションの外へ持ち出してよい値の印 (Row / Statement を含まない owned な型だけに付ける)。
 ///
-/// **`Row` は COMMIT の前に取り出して捨てること。** `tokio_postgres::Row` は prepared statement
-/// (`s0`, `s1`, ...) を握っていて、最後の `Row` が drop された時点で Close を送る。COMMIT の後に
-/// drop すると Close がトランザクションの外に出て、transaction mode のプーラーでは別のサーバー接続へ
-/// 回り、元の接続に `s1` が残って次の利用者が `prepared statement "s1" already exists` で落ちる
-/// (staging の PgBouncer で実測、Refs #691)。`Transaction` は drop で
-/// ROLLBACK されるので、呼び出し側が `commit` する。
-async fn tenant_tx(client: &mut Client, tenant_id: Uuid) -> Result<Transaction<'_>, DbError> {
-    let tx = client.transaction().await.map_err(db_err)?;
-    tx.execute(
-        "SELECT set_config('app.current_tenant_id', $1, true), set_config('search_path', 'alc_api', true)",
-        &[&tenant_id.to_string()],
-    )
-    .await
-    .map_err(db_err)?;
-    Ok(tx)
-}
+/// Row/Statement を commit の後まで持つと、transaction mode のプーラーで Close が別接続に回り
+/// 42P05 (`prepared statement "s1" already exists`) になる (staging の PgBouncer で実測、Refs #691)。
+/// `tokio_postgres::Row` は prepared statement を握っていて、最後の参照が drop されたときに Close を送るため。
+trait TxOutput: Send + 'static {}
+impl TxOutput for Option<DateTime<Utc>> {}
+impl TxOutput for Vec<VeinTemplateRow> {}
+impl TxOutput for (i64, bool) {}
+impl TxOutput for u64 {}
 
 #[async_trait::async_trait]
 impl VeinTemplatesRepository for WorkerVeinTemplatesRepository {
@@ -103,39 +122,35 @@ impl VeinTemplatesRepository for WorkerVeinTemplatesRepository {
         employee_id: Uuid,
         template: &str,
     ) -> Result<Option<DateTime<Utc>>, DbError> {
-        let started = Date::now().as_millis();
-        let mut client = self.client.lock().await;
-        let tx = tenant_tx(&mut client, tenant_id).await?;
-        let updated_at = tx
-            .query_opt(sql::UPSERT, &[&tenant_id, &employee_id, &template])
-            .await
-            .map_err(db_err)?
-            .map(|r| r.get(0));
-        tx.commit().await.map_err(db_err)?;
-        self.add_db_ms(started);
-        Ok(updated_at)
+        let template = template.to_owned();
+        self.in_tenant_tx(tenant_id, move |tx| {
+            Box::pin(async move {
+                let row = tx
+                    .query_opt(sql::UPSERT, &[&tenant_id, &employee_id, &template])
+                    .await?;
+                Ok(row.map(|r| r.get(0)))
+            })
+        })
+        .await
     }
 
     async fn list(&self, tenant_id: Uuid) -> Result<Vec<VeinTemplateRow>, DbError> {
-        let started = Date::now().as_millis();
-        let mut client = self.client.lock().await;
-        let tx = tenant_tx(&mut client, tenant_id).await?;
-        let rows = tx
-            .query(sql::LIST, &[&tenant_id])
-            .await
-            .map_err(db_err)?
-            .into_iter()
-            .map(|r| VeinTemplateRow {
-                id: r.get(0),
-                employee_id: r.get(1),
-                name: r.get(2),
-                template: r.get(3),
-                updated_at: r.get(4),
+        self.in_tenant_tx(tenant_id, move |tx| {
+            Box::pin(async move {
+                let rows = tx.query(sql::LIST, &[&tenant_id]).await?;
+                Ok(rows
+                    .into_iter()
+                    .map(|r| VeinTemplateRow {
+                        id: r.get(0),
+                        employee_id: r.get(1),
+                        name: r.get(2),
+                        template: r.get(3),
+                        updated_at: r.get(4),
+                    })
+                    .collect())
             })
-            .collect();
-        tx.commit().await.map_err(db_err)?;
-        self.add_db_ms(started);
-        Ok(rows)
+        })
+        .await
     }
 
     async fn registration_count(
@@ -143,18 +158,15 @@ impl VeinTemplatesRepository for WorkerVeinTemplatesRepository {
         tenant_id: Uuid,
         employee_id: Uuid,
     ) -> Result<(i64, bool), DbError> {
-        let started = Date::now().as_millis();
-        let mut client = self.client.lock().await;
-        let tx = tenant_tx(&mut client, tenant_id).await?;
-        let row = tx
-            .query_one(sql::REGISTRATION_COUNT, &[&tenant_id, &employee_id])
-            .await
-            .map_err(db_err)?;
-        let counts = (row.get(0), row.get(1));
-        drop(row);
-        tx.commit().await.map_err(db_err)?;
-        self.add_db_ms(started);
-        Ok(counts)
+        self.in_tenant_tx(tenant_id, move |tx| {
+            Box::pin(async move {
+                let row = tx
+                    .query_one(sql::REGISTRATION_COUNT, &[&tenant_id, &employee_id])
+                    .await?;
+                Ok((row.get(0), row.get(1)))
+            })
+        })
+        .await
     }
 
     async fn update_learned(
@@ -164,31 +176,27 @@ impl VeinTemplatesRepository for WorkerVeinTemplatesRepository {
         template: &str,
         read_updated_at: DateTime<Utc>,
     ) -> Result<bool, DbError> {
-        let started = Date::now().as_millis();
-        let mut client = self.client.lock().await;
-        let tx = tenant_tx(&mut client, tenant_id).await?;
-        let n = tx
-            .execute(
-                sql::UPDATE_LEARNED,
-                &[&tenant_id, &id, &template, &read_updated_at],
-            )
-            .await
-            .map_err(db_err)?;
-        tx.commit().await.map_err(db_err)?;
-        self.add_db_ms(started);
+        let template = template.to_owned();
+        let n = self
+            .in_tenant_tx(tenant_id, move |tx| {
+                Box::pin(async move {
+                    tx.execute(
+                        sql::UPDATE_LEARNED,
+                        &[&tenant_id, &id, &template, &read_updated_at],
+                    )
+                    .await
+                })
+            })
+            .await?;
         Ok(n == 1)
     }
 
     async fn delete(&self, tenant_id: Uuid, employee_id: Uuid) -> Result<bool, DbError> {
-        let started = Date::now().as_millis();
-        let mut client = self.client.lock().await;
-        let tx = tenant_tx(&mut client, tenant_id).await?;
-        let n = tx
-            .execute(sql::DELETE, &[&tenant_id, &employee_id])
-            .await
-            .map_err(db_err)?;
-        tx.commit().await.map_err(db_err)?;
-        self.add_db_ms(started);
+        let n = self
+            .in_tenant_tx(tenant_id, move |tx| {
+                Box::pin(async move { tx.execute(sql::DELETE, &[&tenant_id, &employee_id]).await })
+            })
+            .await?;
         Ok(n == 1)
     }
 }

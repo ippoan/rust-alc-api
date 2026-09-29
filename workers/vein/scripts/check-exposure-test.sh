@@ -32,10 +32,12 @@ PY
 }
 
 expect 0 "wrangler.toml そのまま" wrangler.toml
-mutate "staging の secrets.required を外す" \
-  's = s.replace("required = [\"STAGING_TEST_SECRET\"]", "required = []")'
-mutate "staging の STAGING_GATE を外す" \
-  's = s.replace("STAGING_GATE = \"required\"", "OTHER = \"x\"")'
+mutate "staging 以外の env で workers_dev = true" \
+  's += "\n[env.dev]\nname = \"alc-vein-dev\"\nworkers_dev = true\n"'
+mutate "staging 以外の env で preview_urls = true" \
+  's += "\n[env.preview]\nname = \"alc-vein-preview\"\npreview_urls = true\n"'
+mutate "staging 以外の env がトップレベルの true を継承" \
+  's = re.sub(r"^workers_dev = false$", "workers_dev = true", s, count=1, flags=re.M) + "\n[env.other]\nname = \"x\"\n"'
 mutate "トップレベルの workers_dev を true に" \
   's = re.sub(r"^workers_dev = false$", "workers_dev = true", s, count=1, flags=re.M)'
 mutate "トップレベルの preview_urls を消す" \
