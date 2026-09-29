@@ -5,7 +5,7 @@
 //! |---|---|---|
 //! | staging | Durable Object `VEIN_DB` へ TCP (`Stub::connect`) → DO が Container の 6432 へ中継 ([`crate::vein_db`]) | Container 内の PgBouncer |
 //! | 本番 | secret `DATABASE_URL` の host:port へ Worker の TCP (STARTTLS) | Supabase のプーラー (6543) |
-//! | ローカル | `DATABASE_URL` (`sslmode=disable`) で手元の PgBouncer へ平文 (tests/run-local.sh) | 手元の PgBouncer |
+//! | ローカル | `DATABASE_URL` (`sslmode=disable`) + var `ALLOW_INSECURE_DB = "1"` のときだけ手元の PgBouncer へ平文 (tests/run-local.sh) | 手元の PgBouncer |
 //!
 //! 本番の接続文字列の設定とデプロイは別タスク。どちらの binding も無ければ
 //! [`ConnectError::NotConfigured`] (fetch が 503 にする)。
@@ -25,6 +25,9 @@ const VEIN_DB_NAME: &str = "vein-db";
 pub const PGBOUNCER_PORT: u16 = 6432;
 /// 本番の接続文字列 (secret)。Supabase のプーラー (transaction mode) を指す
 const DATABASE_URL_SECRET: &str = "DATABASE_URL";
+/// 平文 (`sslmode=disable`) を許すローカル専用のフラグ。`wrangler dev --var ALLOW_INSECURE_DB:1`
+/// か `.dev.vars` にだけ置く (wrangler.toml に書かないことを scripts/check-exposure.sh が検査する)
+const ALLOW_INSECURE_DB_VAR: &str = "ALLOW_INSECURE_DB";
 
 #[derive(Debug)]
 pub enum ConnectError {
@@ -54,7 +57,10 @@ pub async fn connect(env: &Env) -> Result<Client, ConnectError> {
         return connect_container(&ns).await;
     }
     if let Ok(url) = env.secret(DATABASE_URL_SECRET) {
-        return connect_url(&url.to_string()).await;
+        let allow_insecure = env
+            .var(ALLOW_INSECURE_DB_VAR)
+            .is_ok_and(|v| v.to_string() == "1");
+        return connect_url(&url.to_string(), allow_insecure).await;
     }
     Err(ConnectError::NotConfigured)
 }
@@ -80,9 +86,11 @@ async fn connect_container(ns: &worker::ObjectNamespace) -> Result<Client, Conne
 /// 本番: 接続文字列の host:port へ STARTTLS で繋ぐ (postgres の SSLRequest の後に
 /// `PassthroughTls` が Workers の `startTls()` を呼ぶ)。
 ///
-/// 接続文字列が `sslmode=disable` のときだけ平文で繋ぐ (ローカルの `wrangler dev` から手元の
-/// PgBouncer へ繋ぐ tests/run-local.sh 用)。それ以外 (未指定を含む) は TLS 必須。
-async fn connect_url(url: &str) -> Result<Client, ConnectError> {
+/// 平文で繋ぐのは、接続文字列が `sslmode=disable` で**かつ** ローカル専用フラグ
+/// `ALLOW_INSECURE_DB = "1"` があるときだけ (ローカルの `wrangler dev` から手元の PgBouncer へ繋ぐ
+/// tests/run-local.sh 用)。フラグが無ければ `sslmode=disable` でも TLS を強制する — 本番の接続文字列に
+/// `sslmode=disable` が紛れ込んでも平文には落ちない。
+async fn connect_url(url: &str, allow_insecure: bool) -> Result<Client, ConnectError> {
     let mut config: Config = url
         .parse()
         .map_err(|e| ConnectError::Other(format!("parse {DATABASE_URL_SECRET}: {e}")))?;
@@ -95,7 +103,7 @@ async fn connect_url(url: &str) -> Result<Client, ConnectError> {
         }
     };
     let port = config.get_ports().first().copied().unwrap_or(5432);
-    if config.get_ssl_mode() == SslMode::Disable {
+    if allow_insecure && config.get_ssl_mode() == SslMode::Disable {
         let socket = Socket::builder()
             .connect(host, port)
             .map_err(other("socket"))?;

@@ -16,9 +16,11 @@ Durable Object (`src/vein_db.rs`) と workers-rs への載せ方
 |---|---|---|
 | staging (`--env staging`) | Worker → Durable Object `VeinDb` へ TCP (`Stub::connect`) → Container の 6432 へ中継 | Container 内の PgBouncer (`container/`) |
 | 本番 (トップレベル) | secret `DATABASE_URL` の host:port へ Worker の TCP (STARTTLS)。未設定なら 503 | Supabase のプーラー (6543) |
-| ローカル | `DATABASE_URL` (`sslmode=disable`) で手元の PgBouncer へ平文 | 手元の PgBouncer |
+| ローカル | `DATABASE_URL` (`sslmode=disable`) + var `ALLOW_INSECURE_DB=1` のときだけ手元の PgBouncer へ平文 | 手元の PgBouncer |
 
-本番の接続文字列の設定とデプロイは別タスク。
+本番の接続文字列の設定とデプロイは別タスク。`ALLOW_INSECURE_DB` はローカル専用 (`wrangler dev --var` /
+`.dev.vars`) で、無ければ `sslmode=disable` でも TLS を強制する。wrangler.toml の vars に書かないことを
+`scripts/check-exposure.sh` が検査する。
 
 ## 到達面
 
