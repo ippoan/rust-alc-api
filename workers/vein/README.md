@@ -25,7 +25,7 @@ Durable Object (`src/vein_db.rs`) と workers-rs への載せ方
 - **本番の到達経路は auth-worker からの Service Binding だけ。** JWT を検証せず `X-Tenant-ID` を
   信頼するので、トップレベルは `workers_dev` / `preview_urls` を false にし、`route` / `routes` を持たない。
 - **staging はテストから叩くため `workers_dev = true`**
-  (`https://alc-vein-staging.<account>.workers.dev`)。**この workers.dev は Cloudflare Access で保護する前提**
+  (URL は `wrangler deploy --env staging` の出力を見る)。**この workers.dev は Cloudflare Access で保護する前提**
   (アプリ名・ポリシー・service token は親タスク / 運用側が Access に設定する。repo には持たない)。
   Access を通らないリクエストは Worker に届かず、Access がログインへの 302 か 403 を返す。
   テストは service token を `CF-Access-Client-Id` / `CF-Access-Client-Secret` で付ける。
@@ -79,7 +79,7 @@ worker-build --release
 staging (Container の PgBouncer 経由。種は Container の起動時に入っている):
 
 ```bash
-VEIN_URL=https://alc-vein-staging.<account>.workers.dev \
+VEIN_URL="<wrangler deploy --env staging が出す URL>" \
   CF_ACCESS_CLIENT_ID=... CF_ACCESS_CLIENT_SECRET=... \
   TENANT_A=0a000000-0000-4000-8000-00000000000a TENANT_B=0b000000-0000-4000-8000-00000000000b \
   N_A=7 N_B=13 node tests/tenant-leak.mjs     # Access のヘッダー無し・値違いが 302/403 になることも数える

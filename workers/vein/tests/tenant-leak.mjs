@@ -12,7 +12,7 @@
 // service token を渡す。全リクエストに CF-Access-Client-Id / CF-Access-Client-Secret を付け、
 // 加えて「Access のヘッダー無し・値違いは Worker に届かない (Access が 302 / 403 を返す)」も数える:
 //
-//   VEIN_URL=https://alc-vein-staging.<account>.workers.dev \
+//   VEIN_URL="<wrangler deploy --env staging が出す URL>" \
 //     CF_ACCESS_CLIENT_ID=... CF_ACCESS_CLIENT_SECRET=... \
 //     TENANT_A=0a000000-0000-4000-8000-00000000000a TENANT_B=0b000000-0000-4000-8000-00000000000b \
 //     N_A=7 N_B=13 node tests/tenant-leak.mjs
