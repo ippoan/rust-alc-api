@@ -47,6 +47,10 @@ instance_type = "basic"
 constraints = { regions = ["APAC"] }
 # start.sh (initdb / migration / PgBouncer) の出力を Workers Logs に残す
 observability = { logs = { enabled = true } }
+# SSH は明示的に無効 (デバッグで一時的に有効にしても、wrangler は省略したフィールドを API から
+# 消さないので、書いておかないと鍵と ssh が残り続ける — staging で実測)
+ssh = { enabled = false }
+authorized_keys = []
 
 [[env.staging.durable_objects.bindings]]
 name = "VEIN_DB"
