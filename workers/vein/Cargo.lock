@@ -52,9 +52,11 @@ dependencies = [
  "axum",
  "chrono",
  "futures-util",
+ "tokio",
  "tokio-postgres",
  "tower-service",
  "uuid",
+ "wasm-bindgen",
  "wasm-bindgen-futures",
  "worker",
 ]

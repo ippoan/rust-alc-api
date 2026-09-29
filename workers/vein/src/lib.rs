@@ -1,14 +1,20 @@
-//! 指静脈 (vein) の Worker (Refs #680 / #683)。crates/alc-vein の 4 本の口
+//! 指静脈 (vein) の Worker (Refs #680 / #683 / #691)。crates/alc-vein の 4 本の口
 //! (`routes::tenant_router`、axum) を workers-rs (`http` / `axum` feature) に載せ、
-//! repo だけを Hyperdrive 越しの実装 ([`repo::HdVeinTemplatesRepository`]) に差し替える。
-//! monolith と同じく `/api` 付きでも受ける。
+//! repo だけを tokio-postgres の実装 ([`repo::WorkerVeinTemplatesRepository`]) に差し替える。
+//! DB への経路 (staging = Container 内の PgBouncer、本番 = Supabase のプーラー) は
+//! [`db::connect`] の 1 か所で出し分ける。monolith と同じく `/api` 付きでも受ける。
 //!
 //! **この Worker は JWT を検証せず、auth-worker が付け直した tenant ヘッダーを信頼する**
-//! (`alc_core_wasm::require_tenant_header`)。到達経路は auth-worker からの Service Binding
+//! (`alc_core_wasm::require_tenant_header`)。本番の到達経路は auth-worker からの Service Binding
 //! だけで、`workers_dev` / `preview_urls` / `routes` を持たない (wrangler.toml と
 //! scripts/check-exposure.sh が保証する。#556 と同じ穴を開けないため)。
+//! staging だけはテストから叩くため `workers_dev = true` で、代わりに [`staging_gate`] が
+//! secret `STAGING_TEST_SECRET` を知らないリクエストを最前段で 401 にする。
 
+mod db;
 mod repo;
+mod staging_gate;
+mod vein_db;
 
 use std::sync::Arc;
 
@@ -17,39 +23,12 @@ use alc_vein::{routes::tenant_router, VeinState};
 use axum::body::Body;
 use axum::http::{HeaderValue, Response, StatusCode};
 use axum::{middleware, Router};
-use tokio_postgres::config::SslMode;
-use tokio_postgres::{Client, NoTls};
 use tower_service::Service;
-use worker::{console_error, event, Context, Date, Env, HttpRequest, Result, Socket};
+use worker::{console_error, event, Context, Date, Env, HttpRequest, Result};
 
-use crate::repo::HdVeinTemplatesRepository;
+use crate::repo::WorkerVeinTemplatesRepository;
 
-/// Hyperdrive binding `HYPERDRIVE` へ繋ぐ。TLS は Hyperdrive が上流へ張るので、
-/// worker → Hyperdrive は平文 (`NoTls`)。`Socket` は `!Send` なので、この関数は handler
-/// (axum が Send を要求する側) の外 = fetch から呼ぶ。
-async fn connect(env: &Env) -> std::result::Result<Client, String> {
-    let hd = env
-        .hyperdrive("HYPERDRIVE")
-        .map_err(|e| format!("hyperdrive binding: {e}"))?;
-    let mut config: tokio_postgres::Config = hd
-        .connection_string()
-        .parse()
-        .map_err(|e| format!("parse connection string: {e}"))?;
-    config.ssl_mode(SslMode::Disable);
-    let socket = Socket::builder()
-        .connect(hd.host(), hd.port())
-        .map_err(|e| format!("socket: {e}"))?;
-    let (client, connection) = config
-        .connect_raw(socket, NoTls)
-        .await
-        .map_err(|e| format!("connect: {e}"))?;
-    wasm_bindgen_futures::spawn_local(async move {
-        if let Err(e) = connection.await {
-            console_error!("postgres connection: {e}");
-        }
-    });
-    Ok(client)
-}
+pub use crate::vein_db::VeinDb;
 
 fn router(state: VeinState) -> Router {
     let vein = tenant_router()
@@ -58,20 +37,38 @@ fn router(state: VeinState) -> Router {
     Router::new().merge(vein.clone()).nest("/api", vein)
 }
 
+fn error_response(status: StatusCode, code: &str) -> Response<Body> {
+    let mut resp = Response::new(Body::from(format!(r#"{{"error":"{code}"}}"#)));
+    *resp.status_mut() = status;
+    resp
+}
+
 #[event(fetch)]
 async fn fetch(req: HttpRequest, env: Env, _ctx: Context) -> Result<Response<Body>> {
+    // DB (staging では Container) を起こす前に弾く
+    if !staging_gate::allows(&env, req.headers()) {
+        return Ok(error_response(StatusCode::UNAUTHORIZED, "unauthorized"));
+    }
     let started = Date::now().as_millis();
-    let client = match connect(&env).await {
+    let client = match db::connect(&env).await {
         Ok(c) => c,
+        Err(db::ConnectError::NotConfigured) => {
+            console_error!("vein: {}", db::ConnectError::NotConfigured);
+            return Ok(error_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "database_not_configured",
+            ));
+        }
         Err(e) => {
             console_error!("vein: {e}");
-            let mut resp = Response::new(Body::from(r#"{"error":"internal_error"}"#));
-            *resp.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
-            return Ok(resp);
+            return Ok(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+            ));
         }
     };
     let connect_ms = Date::now().as_millis() - started;
-    let repo = Arc::new(HdVeinTemplatesRepository::new(client));
+    let repo = Arc::new(WorkerVeinTemplatesRepository::new(client));
     let state = VeinState {
         templates: repo.clone(),
     };

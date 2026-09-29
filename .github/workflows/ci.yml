@@ -119,11 +119,12 @@ jobs:
       CI_APP_ID: ${{ secrets.CI_APP_ID }}
       CI_APP_PRIVATE_KEY: ${{ secrets.CI_APP_PRIVATE_KEY }}
 
-  # 指静脈 (vein) の Worker (workers/vein、workers-rs + Hyperdrive、Refs #680 / #683)。
+  # 指静脈 (vein) の Worker (workers/vein、workers-rs + tokio-postgres、Refs #680 / #683 / #691)。
   # monolith の workspace から exclude した独立 workspace なので、fmt / clippy / build をここで回す。
-  # 先頭の check-exposure.sh は「外から直接届かない」(workers_dev / preview_urls = false、
-  # route / routes / custom_domain 無し) の検査 — この Worker は X-Tenant-ID を信頼するので、
-  # 崩れたら #556 と同じ穴になる。
+  # 先頭の check-exposure.sh は「外から素で届かない」(本番は workers_dev / preview_urls = false、
+  # route / routes 無し。workers_dev = true の staging は STAGING_TEST_SECRET の栓が必須) の検査 —
+  # この Worker は X-Tenant-ID を信頼するので、崩れたら #556 と同じ穴になる。
+  # check-exposure-test.sh はその陰性対照 (wrangler.toml を崩すと exit 1 になること)。
   vein-worker:
     name: Vein Worker (wasm)
     needs: [pr-limit]
@@ -136,6 +137,23 @@ jobs:
       - uses: actions/checkout@v4
       - name: 外から直接届かないことの検査 (wrangler.toml)
         run: bash scripts/check-exposure.sh
+      - name: check-exposure.sh の陰性対照
+        run: bash scripts/check-exposure-test.sh
+      # staging の DB (Cloudflare Containers、container/) が空の DB から migration を流して
+      # PgBouncer まで立ち上がること。migration を足したときに staging だけ壊れるのを防ぐ
+      - name: staging DB の Container image が起動する
+        run: |
+          docker build -q -f container/Dockerfile -t vein-db ../..
+          docker run -d --name vein-db -p 6432:6432 vein-db
+          for _ in $(seq 1 60); do
+            if psql "postgresql://alc_api_app@127.0.0.1:6432/postgres" -Atc 'SELECT 1' >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          docker logs vein-db 2>&1 | grep '^\[vein-db'
+          # RLS が効く alc_api_app で、種のテナントの乗務員が見える
+          n=$(psql "postgresql://alc_api_app@127.0.0.1:6432/postgres" -Atc "BEGIN; SELECT set_config('app.current_tenant_id', '0a000000-0000-4000-8000-00000000000a', true); SELECT count(*) FROM alc_api.employees; COMMIT;" | sed -n 3p)
+          echo "employees (tenant A) = ${n}"
+          [ "$n" = 7 ] || { docker logs vein-db; exit 1; }
       # private repo ippoan/vein-match (vein-match / vein-match-search の git 依存) の取得用 (README 参照)
       - uses: ippoan/ci-workflows/.github/actions/private-git-auth@main
         with:

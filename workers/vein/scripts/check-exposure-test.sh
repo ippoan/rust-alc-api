@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# check-exposure.sh の陰性対照 (Refs #691)。wrangler.toml を 1 か所ずつ崩したコピーで
+# exit 1 になること、元のままなら exit 0 になることを確かめる。CI で check-exposure.sh の直後に走る。
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+fail=0
+
+expect() {
+  local want="$1" label="$2" toml="$3"
+  if bash scripts/check-exposure.sh "$toml" >"$tmp/out" 2>&1; then got=0; else got=1; fi
+  if [ "$got" = "$want" ]; then
+    echo "ok   ${label} (exit ${got})"
+  else
+    echo "FAIL ${label}: exit ${got}, want ${want}"; sed 's/^/     /' "$tmp/out"; fail=1
+  fi
+}
+
+mutate() { # $1 = label, $2 = python の置換式 (s を書き換える)
+  python3 - wrangler.toml "$tmp/w.toml" "$2" <<'PY'
+import re
+import sys
+s = open(sys.argv[1]).read()
+before = s
+exec(sys.argv[3])
+assert s != before, "mutation did not change wrangler.toml"
+open(sys.argv[2], "w").write(s)
+PY
+  expect 1 "$1" "$tmp/w.toml"
+}
+
+expect 0 "wrangler.toml そのまま" wrangler.toml
+mutate "staging の secrets.required を外す" \
+  's = s.replace("required = [\"STAGING_TEST_SECRET\"]", "required = []")'
+mutate "staging の STAGING_GATE を外す" \
+  's = s.replace("STAGING_GATE = \"required\"", "OTHER = \"x\"")'
+mutate "トップレベルの workers_dev を true に" \
+  's = re.sub(r"^workers_dev = false$", "workers_dev = true", s, count=1, flags=re.M)'
+mutate "トップレベルの preview_urls を消す" \
+  's = re.sub(r"^preview_urls = false\n", "", s, count=1, flags=re.M)'
+mutate "本番に routes を足す" \
+  's = s.replace("[build]", "routes = [{ pattern = \"vein.example.com\", custom_domain = true }]\n\n[build]", 1)'
+mutate "staging に route を足す" \
+  's = s.replace("[env.staging.observability]", "route = \"vein.example.com/*\"\n\n[env.staging.observability]", 1)'
+
+exit "$fail"

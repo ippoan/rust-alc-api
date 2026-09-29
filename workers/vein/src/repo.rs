@@ -1,10 +1,11 @@
-//! Hyperdrive 越しの `VeinTemplatesRepository` 実装。SQL は alc-vein の `repo::sql`
-//! (モノリスの sqlx 実装と同じもの) を使う。
+//! Worker の `VeinTemplatesRepository` 実装 (tokio-postgres)。SQL は alc-vein の `repo::sql`
+//! (モノリスの sqlx 実装と同じもの) を使う。接続は [`crate::db::connect`] が張る。
 //!
 //! ## RLS (trait のメソッド 1 回 = 1 トランザクション)
 //!
-//! Hyperdrive はトランザクション単位で上流のコネクションを使い回すので、monolith の
-//! `set_current_tenant` (migrations/004・062、`set_config(.., false)` = session スコープ)
+//! DB の前には transaction mode のプーラー (staging は Container 内の PgBouncer、本番は
+//! Supabase のプーラー) が入り、トランザクション単位で上流のコネクションを使い回す。
+//! monolith の `set_current_tenant` (migrations/004・062、`set_config(.., false)` = session スコープ)
 //! をそのまま打つと、tenant が別リクエスト (別テナント) へ漏れるか、次の文が別の
 //! コネクションに載って行ゼロになる。だから必ず `BEGIN` の中で
 //! `set_config('app.current_tenant_id', $1, true)` (= `SET LOCAL`、COMMIT/ROLLBACK で消える)
@@ -14,12 +15,12 @@
 //! custom GUC の設定に権限が要らないので効いていない。第 3 引数を `true` にした
 //! `set_config` を直接打つのと、スコープ以外は同じ。
 //!
-//! search_path も同じ `SELECT` で `SET LOCAL` 相当にする (Hyperdrive は接続文字列の
+//! search_path も同じ `SELECT` で `SET LOCAL` 相当にする (プーラーが接続文字列の
 //! `options=-c search_path=..` を上流へ渡す保証が無く、DB 既定に頼らないため)。
 //!
 //! メソッドごとにトランザクションを閉じるので、`POST /vein/identify` は
 //! 「tx1 で一覧 → トランザクションの外で照合 → tx2 で学習の書き戻し」になり、照合の CPU の間
-//! Hyperdrive のコネクションを握らない。
+//! プーラーのコネクションを握らない。
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -29,32 +30,35 @@ use chrono::{DateTime, Utc};
 use futures_util::lock::Mutex;
 use tokio_postgres::{Client, Transaction};
 use uuid::Uuid;
-use worker::Date;
+use worker::{console_error, Date};
 
 /// PostgreSQL の unique_violation (alc-core-wasm の sqlx 版と同じ写し方)。
 const PG_UNIQUE_VIOLATION: &str = "23505";
 
 fn db_err(e: tokio_postgres::Error) -> DbError {
     // tokio_postgres::Error の Display は "db error" だけなので、DB の message も載せる
-    match e.as_db_error() {
+    let err = match e.as_db_error() {
         Some(db) if db.code().code() == PG_UNIQUE_VIOLATION => {
             DbError::Conflict(db.message().to_string())
         }
         Some(db) => DbError::Other(format!("{} ({})", db.message(), db.code().code())),
         None => DbError::Other(e.to_string()),
-    }
+    };
+    // routes は 500 の中身を返さないので、原因はここで Workers のログに残す
+    console_error!("vein repo: {err:?}");
+    err
 }
 
 /// 1 リクエストぶんの repo。接続 (`Client`) は handler の外 (fetch) で張って渡す。
 /// `Client` は `Send` なので `SendWrapper` は要らない。トランザクションに `&mut Client` が
 /// 要るので async の Mutex で包む (Workers は単一スレッドなので競合はしない)。
-pub struct HdVeinTemplatesRepository {
+pub struct WorkerVeinTemplatesRepository {
     client: Mutex<Client>,
     /// DB に使った時間の合計 (ms)。fetch がリクエスト全体から引いて Server-Timing に載せる
     db_ms: AtomicU64,
 }
 
-impl HdVeinTemplatesRepository {
+impl WorkerVeinTemplatesRepository {
     pub fn new(client: Client) -> Self {
         Self {
             client: Mutex::new(client),
@@ -72,7 +76,13 @@ impl HdVeinTemplatesRepository {
     }
 }
 
-/// tenant を `SET LOCAL` したトランザクションを始める。`Transaction` は drop で
+/// tenant を `SET LOCAL` したトランザクションを始める。
+///
+/// **`Row` は COMMIT の前に取り出して捨てること。** `tokio_postgres::Row` は prepared statement
+/// (`s0`, `s1`, ...) を握っていて、最後の `Row` が drop された時点で Close を送る。COMMIT の後に
+/// drop すると Close がトランザクションの外に出て、transaction mode のプーラーでは別のサーバー接続へ
+/// 回り、元の接続に `s1` が残って次の利用者が `prepared statement "s1" already exists` で落ちる
+/// (staging の PgBouncer で実測、Refs #691)。`Transaction` は drop で
 /// ROLLBACK されるので、呼び出し側が `commit` する。
 async fn tenant_tx(client: &mut Client, tenant_id: Uuid) -> Result<Transaction<'_>, DbError> {
     let tx = client.transaction().await.map_err(db_err)?;
@@ -86,7 +96,7 @@ async fn tenant_tx(client: &mut Client, tenant_id: Uuid) -> Result<Transaction<'
 }
 
 #[async_trait::async_trait]
-impl VeinTemplatesRepository for HdVeinTemplatesRepository {
+impl VeinTemplatesRepository for WorkerVeinTemplatesRepository {
     async fn upsert(
         &self,
         tenant_id: Uuid,
@@ -96,23 +106,24 @@ impl VeinTemplatesRepository for HdVeinTemplatesRepository {
         let started = Date::now().as_millis();
         let mut client = self.client.lock().await;
         let tx = tenant_tx(&mut client, tenant_id).await?;
-        let row = tx
+        let updated_at = tx
             .query_opt(sql::UPSERT, &[&tenant_id, &employee_id, &template])
             .await
-            .map_err(db_err)?;
+            .map_err(db_err)?
+            .map(|r| r.get(0));
         tx.commit().await.map_err(db_err)?;
         self.add_db_ms(started);
-        Ok(row.map(|r| r.get(0)))
+        Ok(updated_at)
     }
 
     async fn list(&self, tenant_id: Uuid) -> Result<Vec<VeinTemplateRow>, DbError> {
         let started = Date::now().as_millis();
         let mut client = self.client.lock().await;
         let tx = tenant_tx(&mut client, tenant_id).await?;
-        let rows = tx.query(sql::LIST, &[&tenant_id]).await.map_err(db_err)?;
-        tx.commit().await.map_err(db_err)?;
-        self.add_db_ms(started);
-        Ok(rows
+        let rows = tx
+            .query(sql::LIST, &[&tenant_id])
+            .await
+            .map_err(db_err)?
             .into_iter()
             .map(|r| VeinTemplateRow {
                 id: r.get(0),
@@ -121,7 +132,10 @@ impl VeinTemplatesRepository for HdVeinTemplatesRepository {
                 template: r.get(3),
                 updated_at: r.get(4),
             })
-            .collect())
+            .collect();
+        tx.commit().await.map_err(db_err)?;
+        self.add_db_ms(started);
+        Ok(rows)
     }
 
     async fn registration_count(
@@ -136,9 +150,11 @@ impl VeinTemplatesRepository for HdVeinTemplatesRepository {
             .query_one(sql::REGISTRATION_COUNT, &[&tenant_id, &employee_id])
             .await
             .map_err(db_err)?;
+        let counts = (row.get(0), row.get(1));
+        drop(row);
         tx.commit().await.map_err(db_err)?;
         self.add_db_ms(started);
-        Ok((row.get(0), row.get(1)))
+        Ok(counts)
     }
 
     async fn update_learned(

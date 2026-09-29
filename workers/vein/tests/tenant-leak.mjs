@@ -1,4 +1,4 @@
-// テナント漏れテスト (Refs #680 / #683)。`wrangler dev` の alc-vein に、2 テナント (A / B) の
+// テナント漏れテスト (Refs #680 / #683 / #691)。alc-vein (`wrangler dev` または staging) に、2 テナント (A / B) の
 // リクエストを並列に交互に大量に投げ、全レスポンスが自テナントの件数・ID と完全一致する
 // (他テナントの行が 1 つも混ざらない、かつ行ゼロでもない) ことを確かめる。
 //
@@ -7,6 +7,13 @@
 //
 //   VEIN_URL=http://127.0.0.1:8787 TENANT_A=<uuid> TENANT_B=<uuid> N_A=7 N_B=13 \
 //     node tests/tenant-leak.mjs
+//
+// staging (Container の PgBouncer 経由) へは STAGING_TEST_SECRET も渡す。全リクエストに
+// X-Staging-Test-Secret を付け、加えて「ヘッダー無し・値違いは 401」も数える:
+//
+//   VEIN_URL=https://alc-vein-staging.<account>.workers.dev STAGING_TEST_SECRET=... \
+//     TENANT_A=0a000000-0000-4000-8000-00000000000a TENANT_B=0b000000-0000-4000-8000-00000000000b \
+//     N_A=7 N_B=13 node tests/tenant-leak.mjs
 //
 // SQL は RLS に加えて `WHERE tenant_id = $1` も持つので、GUC が別テナントへ漏れると
 // 「他テナントの行」ではなく「行ゼロ」か 500 として現れる。だから件数が 0 でないことと
@@ -28,6 +35,8 @@ const TENANTS = {
   B: { id: env("TENANT_B"), n: Number(env("N_B")), seedBase: 100000 },
 };
 const PER_TENANT = Number(env("PER_TENANT", "200"));
+const STAGING_SECRET = process.env.STAGING_TEST_SECRET;
+const gate = STAGING_SECRET ? { "X-Staging-Test-Secret": STAGING_SECRET } : {};
 const CONCURRENCY = Number(env("CONCURRENCY", "20"));
 
 // seed.sql の md5(tenant || '-' || g)::uuid と同じ
@@ -43,7 +52,7 @@ for (const t of Object.values(TENANTS)) {
 async function call(method, path, tenant, body) {
   const res = await fetch(`${URL_}${path}`, {
     method,
-    headers: { "X-Tenant-ID": tenant, "content-type": "application/json" },
+    headers: { ...gate, "X-Tenant-ID": tenant, "content-type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const text = await res.text();
@@ -113,10 +122,33 @@ for (const [name, t, other] of [
 for (const [label, tenant] of [["missing", undefined], ["invalid", "not-a-uuid"]]) {
   cross.push(async () => {
     const res = await fetch(`${URL_}/vein/templates`, {
-      headers: tenant === undefined ? {} : { "X-Tenant-ID": tenant },
+      headers: tenant === undefined ? gate : { ...gate, "X-Tenant-ID": tenant },
     });
     count(`tenant header ${label} (401)`, res.status === 401, { status: res.status });
   });
+}
+// staging: X-Staging-Test-Secret が無い・違うリクエストは tenant が正しくても 401 (staging_gate.rs)
+if (STAGING_SECRET) {
+  for (const [label, headers] of [
+    ["missing", {}],
+    ["wrong", { "X-Staging-Test-Secret": `${STAGING_SECRET}x` }],
+  ]) {
+    for (const [method, path] of [
+      ["GET", "/vein/templates"],
+      ["POST", "/vein/identify"],
+      ["PUT", `/vein/templates/${TENANTS.A.employees[0]}`],
+      ["DELETE", `/vein/templates/${TENANTS.A.employees[0]}`],
+    ]) {
+      cross.push(async () => {
+        const res = await fetch(`${URL_}${path}`, {
+          method,
+          headers: { ...headers, "X-Tenant-ID": TENANTS.A.id, "content-type": "application/json" },
+          body: method === "POST" || method === "PUT" ? "{}" : undefined,
+        });
+        count(`staging secret ${label} ${method} (401)`, res.status === 401, { status: res.status });
+      });
+    }
+  }
 }
 await pool(cross, CONCURRENCY);
 
