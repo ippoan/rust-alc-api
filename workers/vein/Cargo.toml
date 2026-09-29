@@ -3,8 +3,9 @@
 # Cargo.lock を持つ独立 workspace にしている (Bazel にも入れない)。
 #
 # 口 (routes)・照合 (matcher)・trait は crates/alc-vein を `default-features = false` (sqlx 抜き) で
-# そのまま使い、この Worker は Hyperdrive 越しの repo 実装 (`HdVeinTemplatesRepository`) と
-# workers-rs への載せ方だけを持つ (Refs #682 / #686)。
+# そのまま使い、この Worker は tokio-postgres の repo 実装 (`WorkerVeinTemplatesRepository`)・
+# DB への経路 (`db.rs`、staging は Container の PgBouncer を抱える Durable Object `VeinDb`) と
+# workers-rs への載せ方だけを持つ (Refs #682 / #686 / #691)。
 [package]
 name = "alc-vein-worker"
 version = "0.1.0"
@@ -26,9 +27,12 @@ async-trait = "0.1"
 axum = { version = "0.8", default-features = false }
 chrono = { version = "0.4", default-features = false, features = ["clock", "wasmbind"] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
+# VeinDb の TCP 中継 (copy_bidirectional)
+tokio = { version = "1", default-features = false, features = ["io-util"] }
 tokio-postgres = { version = "0.7", default-features = false, features = ["js", "with-chrono-0_4", "with-uuid-1"] }
 tower-service = "0.3"
 uuid = { version = "1", features = ["js"] }
+wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 worker = { version = "0.8", features = ["http", "axum", "tokio-postgres"] }
 

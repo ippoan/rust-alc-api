@@ -1,4 +1,4 @@
-// テナント漏れテスト (Refs #680 / #683)。`wrangler dev` の alc-vein に、2 テナント (A / B) の
+// テナント漏れテスト (Refs #680 / #683 / #691)。alc-vein (`wrangler dev` または staging) に、2 テナント (A / B) の
 // リクエストを並列に交互に大量に投げ、全レスポンスが自テナントの件数・ID と完全一致する
 // (他テナントの行が 1 つも混ざらない、かつ行ゼロでもない) ことを確かめる。
 //
@@ -7,6 +7,15 @@
 //
 //   VEIN_URL=http://127.0.0.1:8787 TENANT_A=<uuid> TENANT_B=<uuid> N_A=7 N_B=13 \
 //     node tests/tenant-leak.mjs
+//
+// staging (Container の PgBouncer 経由、workers.dev は Cloudflare Access で保護) へは Access の
+// service token を渡す。全リクエストに CF-Access-Client-Id / CF-Access-Client-Secret を付け、
+// 加えて「Access のヘッダー無し・値違いは Worker に届かない (Access が 302 / 403 を返す)」も数える:
+//
+//   VEIN_URL="<wrangler deploy --env staging が出す URL>" \
+//     CF_ACCESS_CLIENT_ID=... CF_ACCESS_CLIENT_SECRET=... \
+//     TENANT_A=0a000000-0000-4000-8000-00000000000a TENANT_B=0b000000-0000-4000-8000-00000000000b \
+//     N_A=7 N_B=13 node tests/tenant-leak.mjs
 //
 // SQL は RLS に加えて `WHERE tenant_id = $1` も持つので、GUC が別テナントへ漏れると
 // 「他テナントの行」ではなく「行ゼロ」か 500 として現れる。だから件数が 0 でないことと
@@ -28,6 +37,15 @@ const TENANTS = {
   B: { id: env("TENANT_B"), n: Number(env("N_B")), seedBase: 100000 },
 };
 const PER_TENANT = Number(env("PER_TENANT", "200"));
+const ACCESS_ID = process.env.CF_ACCESS_CLIENT_ID;
+const ACCESS_SECRET = process.env.CF_ACCESS_CLIENT_SECRET;
+if (Boolean(ACCESS_ID) !== Boolean(ACCESS_SECRET)) {
+  console.error("CF_ACCESS_CLIENT_ID と CF_ACCESS_CLIENT_SECRET は両方要る");
+  process.exit(2);
+}
+const gate = ACCESS_ID
+  ? { "CF-Access-Client-Id": ACCESS_ID, "CF-Access-Client-Secret": ACCESS_SECRET }
+  : {};
 const CONCURRENCY = Number(env("CONCURRENCY", "20"));
 
 // seed.sql の md5(tenant || '-' || g)::uuid と同じ
@@ -43,7 +61,7 @@ for (const t of Object.values(TENANTS)) {
 async function call(method, path, tenant, body) {
   const res = await fetch(`${URL_}${path}`, {
     method,
-    headers: { "X-Tenant-ID": tenant, "content-type": "application/json" },
+    headers: { ...gate, "X-Tenant-ID": tenant, "content-type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const text = await res.text();
@@ -113,10 +131,39 @@ for (const [name, t, other] of [
 for (const [label, tenant] of [["missing", undefined], ["invalid", "not-a-uuid"]]) {
   cross.push(async () => {
     const res = await fetch(`${URL_}/vein/templates`, {
-      headers: tenant === undefined ? {} : { "X-Tenant-ID": tenant },
+      headers: tenant === undefined ? gate : { ...gate, "X-Tenant-ID": tenant },
     });
     count(`tenant header ${label} (401)`, res.status === 401, { status: res.status });
   });
+}
+// staging: Access の service token が無い・違うリクエストは、tenant が正しくても Worker に届かない
+// (Access がログインへの 302 か 403 を返す。Worker の応答 = JSON や 401/404 は失敗)
+if (ACCESS_ID) {
+  for (const [label, headers] of [
+    ["missing", {}],
+    ["wrong", { "CF-Access-Client-Id": ACCESS_ID, "CF-Access-Client-Secret": `${ACCESS_SECRET}x` }],
+  ]) {
+    for (const [method, path] of [
+      ["GET", "/vein/templates"],
+      ["POST", "/vein/identify"],
+      ["PUT", `/vein/templates/${TENANTS.A.employees[0]}`],
+      ["DELETE", `/vein/templates/${TENANTS.A.employees[0]}`],
+    ]) {
+      cross.push(async () => {
+        const res = await fetch(`${URL_}${path}`, {
+          method,
+          redirect: "manual",
+          headers: { ...headers, "X-Tenant-ID": TENANTS.A.id, "content-type": "application/json" },
+          body: method === "POST" || method === "PUT" ? "{}" : undefined,
+        });
+        await res.text();
+        count(`access token ${label} ${method} (302/403 by Access)`, res.status === 302 || res.status === 403, {
+          status: res.status,
+          location: res.headers.get("location"),
+        });
+      });
+    }
+  }
 }
 await pool(cross, CONCURRENCY);
 

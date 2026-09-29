@@ -1,10 +1,13 @@
-# 指静脈 (vein) の Worker (Refs #680 / #683)。
+# 指静脈 (vein) の Worker (Refs #680 / #683 / #691)。
 #
 # ★ この Worker は JWT を検証せず、auth-worker が付け直した X-Tenant-ID を信頼する。
-#   外から直接届いたら #556 と同じ穴になるので、到達経路は auth-worker からの
-#   Service Binding だけにする:
+#   外から直接届いたら #556 と同じ穴になるので、本番 (トップレベル) の到達経路は
+#   auth-worker からの Service Binding だけにする:
 #   - workers_dev = false / preview_urls = false (*.workers.dev と preview URL を開けない)
 #   - route / routes / custom_domain を書かない
+#   staging (env.staging) だけはテストから叩くため workers_dev = true にし、その workers.dev の
+#   ホスト名は Cloudflare Access で保護する (アプリ・ポリシー・service token は Access 側で管理。
+#   Access を通らないリクエストは Worker に届かない)。workers_dev = true を許すのは env.staging だけ。
 #   scripts/check-exposure.sh が CI で毎回これを検査する。
 name = "alc-vein"
 main = "build/index.js"
@@ -15,10 +18,44 @@ preview_urls = false
 [build]
 command = "cargo install -q worker-build@0.8.6 && worker-build --release"
 
-# Hyperdrive の作成とデプロイはこのタスクの範囲外 (Refs #680)。id は作成時に入れる。
-# ローカルは `wrangler dev` + 環境変数
-# CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE で手元の postgres へ繋ぐ
-# (接続文字列は repo に書かない。DB ユーザーは RLS が効く alc_api_app)。
-[[hyperdrive]]
-binding = "HYPERDRIVE"
-id = "00000000000000000000000000000000"
+# 本番の DB: secret DATABASE_URL (Supabase のプーラー 6543、transaction mode) へ Worker の TCP
+# (STARTTLS) で繋ぐ (src/db.rs)。secret の設定と本番のデプロイは別タスク。未設定なら 503。
+
+# staging: DB は Cloudflare Containers (postgres + PgBouncer transaction mode、container/) を
+# 抱える Durable Object VeinDb。Worker → VeinDb へ TCP → Container の 6432 へ中継 (src/vein_db.rs)。
+# Container は最後の接続から 10 分で止まり (常時起動にしない)、ディスクは揮発なので
+# 次の起動で空の DB から migration をやり直す。
+#   wrangler deploy --env staging
+[env.staging]
+name = "alc-vein-staging"
+workers_dev = true
+preview_urls = false
+
+[env.staging.observability]
+enabled = true
+
+[[env.staging.containers]]
+class_name = "VeinDb"
+image = "./container/Dockerfile"
+# Dockerfile が migrations/ と scripts/ を COPY するので build context は repo のルート
+# (持ち込むファイルは container/Dockerfile.dockerignore で絞る)
+image_build_context = "../.."
+max_instances = 1
+instance_type = "basic"
+# 置き場所の指定が無いと北米 (iad) に置かれ、postgres の往復ごとに太平洋を越える
+# (実測: 一覧 1 回が 2〜3 秒)。Worker が動く日本の近くに寄せる
+constraints = { regions = ["APAC"] }
+# start.sh (initdb / migration / PgBouncer) の出力を Workers Logs に残す
+observability = { logs = { enabled = true } }
+# SSH は明示的に無効 (デバッグで一時的に有効にしても、wrangler は省略したフィールドを API から
+# 消さないので、書いておかないと鍵と ssh が残り続ける — staging で実測)
+ssh = { enabled = false }
+authorized_keys = []
+
+[[env.staging.durable_objects.bindings]]
+name = "VEIN_DB"
+class_name = "VeinDb"
+
+[[env.staging.migrations]]
+tag = "v1"
+new_sqlite_classes = ["VeinDb"]
