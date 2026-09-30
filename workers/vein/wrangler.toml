@@ -23,6 +23,10 @@ command = "cargo install -q worker-build@0.8.7 && worker-build --release"
 [version_metadata]
 binding = "CF_VERSION_METADATA"
 
+# 本番の DB (Supabase のプーラー) は aws:ap-northeast-1。Worker をその近くで動かす
+[placement]
+region = "aws:ap-northeast-1"
+
 # 本番の DB: secret DATABASE_URL (Supabase のプーラー 6543、transaction mode) へ Worker の TCP
 # (STARTTLS) で繋ぐ (src/db.rs)。secret の設定と本番のデプロイは別タスク。未設定なら 503。
 

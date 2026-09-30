@@ -77,6 +77,8 @@ npx wrangler@4.144.0 deploy --env staging   # 4.78.0 以上なら可
 - **Worker の実行場所は `[env.staging.placement] region` で DB の近く (Tunnel の繋がる関西) に固定する。**
   指定しないとリクエストが入った colo (実測で SIN) で動き、DB の往復ごとに海を越えて一覧の p50 が 944ms になる
   (固定後は入口が SIN でも `cf-placement: remote-KIX` で動き、DB 部分は connect 37ms + db 120ms)
+- 本番 (トップレベルの `[placement]`) は `aws:ap-northeast-1` (東京)。DB (Supabase のプーラー) の近くで動かす。
+  staging と同じくヒントであり、実際に動いた場所は応答ヘッダー `cf-placement` で分かる
 - DB は止まらないので cold start は無い。ディスクは揮発のまま (unit の再起動で空の DB から作り直す)
 
 **終わりの条件** — 次のどれかが来たら、`[[env.staging.vpc_services]]`・`src/db.rs` の `connect_vpc`・VPC Service・
