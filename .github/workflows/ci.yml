@@ -172,7 +172,7 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --target wasm32-unknown-unknown --release -- -D warnings
       # worker-build の版は wrangler.toml の [build] command と揃える
-      - run: cargo install -q worker-build@0.8.6 --locked
+      - run: cargo install -q worker-build@0.8.7 --locked
       - run: worker-build --release
       - name: bundle サイズ (上限 10MB は gzip 後)
         run: |

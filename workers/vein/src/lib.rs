@@ -24,7 +24,9 @@ use axum::body::Body;
 use axum::http::{HeaderValue, Response, StatusCode};
 use axum::{middleware, Router};
 use tower_service::Service;
-use worker::{console_error, event, Context, Date, Env, HttpRequest, Result};
+use worker::{
+    console_error, event, Context, Date, Env, HttpRequest, Result, WorkerVersionMetadata,
+};
 
 use crate::repo::WorkerVeinTemplatesRepository;
 
@@ -80,6 +82,18 @@ async fn fetch(req: HttpRequest, env: Env, _ctx: Context) -> Result<Response<Bod
     let timing = format!("connect;dur={connect_ms}, db;dur={db_ms}, app;dur={app_ms}");
     if let Ok(v) = HeaderValue::from_str(&timing) {
         resp.headers_mut().insert("server-timing", v);
+    }
+    // どの版が応えたかを応答ヘッダーで分かるようにする (#697)。binding が取れなければ何も付けない
+    if let Ok(meta) = env.get_binding::<WorkerVersionMetadata>("CF_VERSION_METADATA") {
+        if let Ok(v) = HeaderValue::from_str(&meta.id()) {
+            resp.headers_mut().insert("x-worker-version", v);
+        }
+        let tag = meta.tag();
+        if !tag.is_empty() {
+            if let Ok(v) = HeaderValue::from_str(&tag) {
+                resp.headers_mut().insert("x-worker-tag", v);
+            }
+        }
     }
     Ok(resp)
 }
