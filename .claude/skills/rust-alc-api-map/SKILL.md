@@ -523,6 +523,7 @@ splinter / RLS 検証フルセットは CI に集約する。
 
 ## マイグレーションとデプロイ
 
+- **migration の正本は ippoan/alc-migrations に移行済み (rust-alc-api#697)**。rust-alc-api の `migrations/` と `scripts/init_local_db.sql`・`scripts/local_app_grants.sql` は crate への切り替えまで追加・変更禁止 (CI `pr-limit` の Freeze step が止める。`removed` は通す)
 - マイグレーションファイルは `migrations/` ディレクトリに連番で配置 (`001_`, `002_`, ...)
 - マイグレーションは **Cloud Run Jobs** (`rust-alc-api-migrate`) でデプロイ前に実行される
 - `src/bin/migrate.rs` — マイグレーション専用バイナリ（同じ Docker イメージに含まれる）
