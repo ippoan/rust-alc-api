@@ -32,6 +32,21 @@ jobs:
             exit 1
           fi
 
+      - name: Freeze migrations (moved to ippoan/alc-migrations)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # stdin: "<status> <filename>" の行。凍結対象を変更 (removed 以外) した path を出す
+          frozen_hits() {
+            awk '$1 != "removed" && ($2 ~ /^migrations\// || $2 == "scripts/init_local_db.sql" || $2 == "scripts/local_app_grants.sql") { print $2 }'
+          }
+          HITS=$(gh api --paginate "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" --jq '.[] | "\(.status) \(.filename)"' | frozen_hits)
+          if [ -n "$HITS" ]; then
+            echo "::error::migration は ippoan/alc-migrations に移しました。新しい migration はそちらに PR を出してください (rust-alc-api#697)。rust-alc-api 側の migrations/ とテスト DB 用 SQL は、切り替えまで追加・変更禁止です"
+            echo "$HITS" | awk '{ print "  " $0 }'
+            exit 1
+          fi
+
   # cache warm (rust-cache / bazel disk tar) + 直後の世代掃除。job 定義は
   # cache-warm.yml に切り出してある — cache が 7 日 TTL で全消失した時に
   # cache-size-report.yml から同じ定義を workflow_dispatch で空回しするため
