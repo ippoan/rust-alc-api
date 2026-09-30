@@ -1,14 +1,18 @@
-//! postgres への接続 (Refs #691)。**DB に繋ぐのはこの 1 か所だけ**で、env で経路を出し分ける。
-//! どちらの経路も間に transaction mode のプーラーが入る (repo の RLS はそれを前提にしている):
+//! postgres への接続 (Refs #691 / #695)。**DB に繋ぐのはこの 1 か所だけ**で、env の binding で経路を出し分ける
+//! (上から順に見て、最初にあったものを使う)。どの経路も間に transaction mode のプーラーが入る
+//! (repo の RLS はそれを前提にしている):
 //!
 //! | env | 経路 | プーラー |
 //! |---|---|---|
-//! | staging | Durable Object `VEIN_DB` へ TCP (`Stub::connect`) → DO が Container の 6432 へ中継 ([`crate::vein_db`]) | Container 内の PgBouncer |
+//! | staging (一時、#695) | Workers VPC の binding `VEIN_DB_VPC` (VPC Service 型、宛先の host:port は Service 側で固定) へ TCP → 既存の Tunnel → 手元の docker の 6432 | 手元の Container image 内の PgBouncer |
+//! | staging (fallback) | Durable Object `VEIN_DB` へ TCP (`Stub::connect`) → DO が Container の 6432 へ中継 ([`crate::vein_db`]) | Container 内の PgBouncer |
 //! | 本番 | secret `DATABASE_URL` の host:port へ Worker の TCP (STARTTLS) | Supabase のプーラー (6543) |
 //! | ローカル | `DATABASE_URL` (`sslmode=disable`) + var `ALLOW_INSECURE_DB = "1"` のときだけ手元の PgBouncer へ平文 (tests/run-local.sh) | 手元の PgBouncer |
 //!
-//! 本番の接続文字列の設定とデプロイは別タスク。どちらの binding も無ければ
+//! 本番の接続文字列の設定とデプロイは別タスク。binding も secret も無ければ
 //! [`ConnectError::NotConfigured`] (fetch が 503 にする)。
+//! binding は secret より先に見るので、平文に落ちる binding (`VEIN_DB_VPC` / `VEIN_DB`) を本番
+//! (トップレベル) に置かないことを scripts/check-exposure.sh が検査する。
 //!
 //! `Socket` は `!Send` 相当 (JS の値) なので、この関数は handler (axum が Send を要求する側)
 //! の外 = fetch から呼ぶ。
@@ -18,6 +22,10 @@ use tokio_postgres::{Client, Config, NoTls};
 use worker::postgres_tls::PassthroughTls;
 use worker::{console_error, Env, SecureTransport, Socket};
 
+use crate::tcp::TcpPort;
+
+/// staging の Workers VPC binding (VPC Service 型、#695)。宛先 (手元の PgBouncer) は Service 側で固定
+pub const VEIN_DB_VPC_BINDING: &str = "VEIN_DB_VPC";
 /// staging の DO binding。1 個の DO (= 1 個の Container) に全リクエストを集める
 pub const VEIN_DB_BINDING: &str = "VEIN_DB";
 const VEIN_DB_NAME: &str = "vein-db";
@@ -31,7 +39,7 @@ const ALLOW_INSECURE_DB_VAR: &str = "ALLOW_INSECURE_DB";
 
 #[derive(Debug)]
 pub enum ConnectError {
-    /// どちらの経路の binding も無い
+    /// どの経路の binding も secret も無い
     NotConfigured,
     Other(String),
 }
@@ -41,7 +49,7 @@ impl std::fmt::Display for ConnectError {
         match self {
             Self::NotConfigured => write!(
                 f,
-                "no {VEIN_DB_BINDING} binding and no {DATABASE_URL_SECRET} secret"
+                "no {VEIN_DB_VPC_BINDING} / {VEIN_DB_BINDING} binding and no {DATABASE_URL_SECRET} secret"
             ),
             Self::Other(e) => f.write_str(e),
         }
@@ -53,6 +61,9 @@ fn other(what: &str) -> impl Fn(worker::Error) -> ConnectError + '_ {
 }
 
 pub async fn connect(env: &Env) -> Result<Client, ConnectError> {
+    if let Ok(vpc) = env.get_binding::<TcpPort>(VEIN_DB_VPC_BINDING) {
+        return connect_vpc(&vpc).await;
+    }
     if let Ok(ns) = env.durable_object(VEIN_DB_BINDING) {
         return connect_container(&ns).await;
     }
@@ -75,12 +86,28 @@ async fn connect_container(ns: &worker::ObjectNamespace) -> Result<Client, Conne
     let socket = stub
         .connect(&format!("{VEIN_DB_NAME}:{PGBOUNCER_PORT}"))
         .map_err(other("vein-db connect"))?;
+    handshake(pgbouncer_config(), socket, NoTls).await
+}
+
+/// staging (#695): Workers VPC の binding へ TCP を開き、そのまま postgres のソケットとして使う。
+/// VPC Service 型は宛先の host:port を Service 側で固定するので、`connect()` に渡すアドレスは
+/// 名目の値 (宛先は binding 側で固定され、この文字列は使われない。IP はコードに書かない)。Tunnel の区間は Cloudflare が暗号化し、ホスト内の
+/// PgBouncer までは平文・trust 認証 (Container 経路と同じ)。
+async fn connect_vpc(vpc: &TcpPort) -> Result<Client, ConnectError> {
+    let raw = vpc
+        .connect(&format!("{VEIN_DB_NAME}:{PGBOUNCER_PORT}"))
+        .map_err(|e| ConnectError::Other(format!("vein-db vpc connect: {e:?}")))?;
+    handshake(pgbouncer_config(), Socket::from(raw), NoTls).await
+}
+
+/// `container/` の PgBouncer (trust 認証) へ、RLS が効く `alc_api_app` で繋ぐ設定
+fn pgbouncer_config() -> Config {
     let mut config = Config::new();
     config
         .user("alc_api_app")
         .dbname("postgres")
         .ssl_mode(SslMode::Disable);
-    handshake(config, socket, NoTls).await
+    config
 }
 
 /// 本番: 接続文字列の host:port へ STARTTLS で繋ぐ (postgres の SSLRequest の後に

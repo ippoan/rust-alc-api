@@ -13,6 +13,7 @@
 
 mod db;
 mod repo;
+mod tcp;
 mod vein_db;
 
 use std::sync::Arc;

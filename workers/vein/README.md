@@ -14,10 +14,13 @@ Durable Object (`src/vein_db.rs`) と workers-rs への載せ方
 
 | env | 経路 | プーラー |
 |---|---|---|
-| staging (`--env staging`) | Worker → Durable Object `VeinDb` へ TCP (`Stub::connect`) → Container の 6432 へ中継 | Container 内の PgBouncer (`container/`) |
+| staging (`--env staging`、**一時**、#695) | Worker → Workers VPC の binding `VEIN_DB_VPC` (VPC Service 型、TCP) → 既存の Cloudflare Tunnel → 運用者の Linux 機の docker (`127.0.0.1:6432` にだけ bind) | 手元で動かす `container/` の image 内の PgBouncer |
+| staging (fallback、#691) | Worker → Durable Object `VeinDb` へ TCP (`Stub::connect`) → Container の 6432 へ中継。`VEIN_DB_VPC` を外して deploy するとこちらに戻る | Container 内の PgBouncer (`container/`) |
 | 本番 (トップレベル) | secret `DATABASE_URL` の host:port へ Worker の TCP (STARTTLS)。未設定なら 503 | Supabase のプーラー (6543) |
 | ローカル | `DATABASE_URL` (`sslmode=disable`) + var `ALLOW_INSECURE_DB=1` のときだけ手元の PgBouncer へ平文 | 手元の PgBouncer |
 
+`src/db.rs` は binding (`VEIN_DB_VPC` → `VEIN_DB`) を secret `DATABASE_URL` より先に見る。どちらの binding も
+平文 (trust 認証) なので本番 (トップレベル) に置かないことを `scripts/check-exposure.sh` が検査する。
 本番の接続文字列の設定とデプロイは別タスク。`ALLOW_INSECURE_DB` はローカル専用 (`wrangler dev --var` /
 `.dev.vars`) で、無ければ `sslmode=disable` でも TLS を強制する。wrangler.toml の vars に書かないことを
 `scripts/check-exposure.sh` が検査する。
@@ -35,6 +38,9 @@ Durable Object (`src/vein_db.rs`) と workers-rs への載せ方
   `scripts/check-exposure-test.sh` が陰性対照 (wrangler.toml を崩すと exit 1) を回す。
 - **`VeinDb` の `connect` ハンドラは Worker の `Stub::connect` (DO binding `VEIN_DB`) からしか呼べない。**
   DO も Container も外部から直接届く口は無い (Container の 6432 は `getTcpPort()` 経由だけ)。
+- **staging の手元 DB (#695) に届く口は VPC binding `VEIN_DB_VPC` だけ。** ホストの 6432 は `127.0.0.1` にだけ
+  bind し、Tunnel の ingress / public hostname / CIDR route には出さない。VPC Service 型は宛先を 1 host:port に
+  固定するので、Worker からホストの他のポートへは届かない (VPC Networks 型は Tunnel の先の網全体に届くので使わない)。
 
 ## RLS
 
@@ -47,7 +53,40 @@ Durable Object (`src/vein_db.rs`) と workers-rs への載せ方
 別のサーバー接続へ回り、`prepared statement "s1" already exists` (42P05) になる (staging で実測)。
 詳細は `src/repo.rs`。
 
-## staging の DB (Cloudflare Containers)
+## staging の DB (手元の docker + Workers VPC、一時、#695)
+
+Container 経路は止まった後の cold start (約 3.5 秒)・置き場所が `APAC` までしか絞れない (往復 60〜140ms)・
+起動のたびの migration が重いので、**一時的に** staging の DB を運用者の Linux 機の docker に置く。
+Hyperdrive は使わない (#680)。
+
+- DB は `container/` の image をそのまま使う (build context は repo のルート)。systemd --user の unit が
+  `docker rm -f` → `docker run --rm -p 127.0.0.1:6432:6432` で毎回作り直す (start.sh は既存の PGDATA があると
+  落ちるので restart policy・volume は使わない)。**ポートは必ず `127.0.0.1` に bind する** (PgBouncer は
+  trust 認証で、届けば全テナントを読める)
+- Worker からの到達口は **VPC Service (TCP 型、宛先 = そのホストの `127.0.0.1:6432` だけ)** の binding だけ。
+  既存の Tunnel の ingress・public hostname・CIDR route には出さない (VPC Service は ingress 不要)。
+  宛先は Service 側で固定なので、`connect()` に渡すアドレスは名目だけ
+- wrangler.toml に書くのは VPC Service の ID だけ。Tunnel の ID・ホスト名・account ID・IP は repo に書かない
+  (Service は `wrangler vpc service create <名前> --type tcp --tunnel-id … --ipv4 127.0.0.1 --tcp-port 6432` で作る)
+- **wrangler は 4.78.0 以上**を使う (TCP 型の VPC Service は 4.78.0 から。手元の 4.58 には `--type tcp` が無い)。
+  CI は wrangler を使わない (worker-build だけ) ので CI 側の版は関係ない
+
+```bash
+npx wrangler@4.144.0 deploy --env staging   # 4.78.0 以上なら可
+```
+- **Worker の実行場所は `[env.staging.placement] region` で DB の近く (Tunnel の繋がる関西) に固定する。**
+  指定しないとリクエストが入った colo (実測で SIN) で動き、DB の往復ごとに海を越えて一覧の p50 が 944ms になる
+  (固定後は入口が SIN でも `cf-placement: remote-KIX` で動き、DB 部分は connect 37ms + db 120ms)
+- DB は止まらないので cold start は無い。ディスクは揮発のまま (unit の再起動で空の DB から作り直す)
+
+**終わりの条件** — 次のどれかが来たら、`[[env.staging.vpc_services]]`・`src/db.rs` の `connect_vpc`・VPC Service・
+systemd の unit・コンテナ・image を消し、staging を Container 経路 (または本番と同じ経路) に戻す:
+
+- 本番の DB 接続が決まり、staging をそれに揃えるとき
+- Workers VPC が有料化されるとき
+- この Linux 機を止めるとき
+
+## staging の DB (Cloudflare Containers、fallback)
 
 `container/`: postgres 16 + PgBouncer (`pool_mode = transaction`、サーバー側 4 本、
 `max_prepared_statements = 0`)。**ディスクは揮発**なので、起動のたびに空の DB から
@@ -78,7 +117,7 @@ worker-build --release
 自テナントの件数・ID と完全一致することを数える。worker は **RLS が効く `alc_api_app` で**繋ぐこと
 (superuser だと RLS を素通りして全部通ってしまう)。
 
-staging (Container の PgBouncer 経由。種は Container の起動時に入っている):
+staging (VPC 経路でも Container 経路でも、種は DB の起動時に `container/start.sh` が入れている):
 
 ```bash
 VEIN_URL="<wrangler deploy --env staging が出す URL>" \

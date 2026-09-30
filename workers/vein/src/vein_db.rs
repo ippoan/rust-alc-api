@@ -25,24 +25,13 @@ use worker::{
 };
 
 use crate::db::PGBOUNCER_PORT;
+use crate::tcp::TcpPort;
 
 const SLEEP_AFTER_MS: u64 = 10 * 60 * 1000;
 const STARTUP_TIMEOUT_MS: u64 = 90 * 1000;
 /// 1 回の試行 (接続 → StartupMessage → 最初の応答) の上限
 const ATTEMPT_TIMEOUT_MS: u64 = 5 * 1000;
 const RETRY_INTERVAL_MS: u64 = 250;
-
-// workers-rs の `Fetcher` は `connect` を持たないので、JS の `Fetcher.connect()` を直接呼ぶ
-#[wasm_bindgen]
-extern "C" {
-    type TcpPort;
-
-    #[wasm_bindgen(method, catch)]
-    fn connect(
-        this: &TcpPort,
-        address: &str,
-    ) -> std::result::Result<worker::worker_sys::Socket, JsValue>;
-}
 
 #[durable_object]
 pub struct VeinDb {
