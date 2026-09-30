@@ -8,6 +8,10 @@
 #   - workers_dev / preview_urls が true になってよいのは env.staging だけ
 #   - どの vars にも ALLOW_INSECURE_DB (DB への平文接続を許すローカル専用フラグ) が無い
 #     (staging の workers.dev は Cloudflare Access で保護する前提。README 参照)
+#   - トップレベル (本番) に平文 (NoTls + trust) で繋ぐ DB の binding が無い: vpc_services /
+#     vpc_networks (Workers VPC、#695) と durable_objects の VEIN_DB (Container、#691)。
+#     src/db.rs は binding を secret DATABASE_URL より先に見るので、本番に紛れると TLS を強制する
+#     経路を飛ばして平文に落ちる。これらは env.staging にだけ置く
 # 違えば exit 1。CI で毎回走らせる。陰性対照は scripts/check-exposure-test.sh。
 #
 #   bash scripts/check-exposure.sh [wrangler.toml]
@@ -51,6 +55,14 @@ for name, e in envs.items():
 for scope, table in [("トップレベル", cfg)] + [(f"env.{n}", e) for n, e in envs.items()]:
     if "ALLOW_INSECURE_DB" in table.get("vars", {}):
         err(f"{scope} の vars に ALLOW_INSECURE_DB がある (DB 接続が平文に落ちうる。ローカル専用)")
+
+# 平文の DB 経路の binding は staging 専用 (db.rs が secret より先に見るので、本番にあると TLS を飛ばす)
+for key in ("vpc_services", "vpc_networks"):
+    if cfg.get(key):
+        err(f"トップレベルに {key} がある (本番の DB 接続が平文の VPC 経路に落ちる。env.staging にだけ置く)")
+for b in cfg.get("durable_objects", {}).get("bindings", []):
+    if b.get("name") == "VEIN_DB":
+        err("トップレベルの durable_objects に VEIN_DB がある (本番の DB 接続が平文の Container 経路に落ちる。env.staging にだけ置く)")
 
 if errors:
     sys.exit(1)
