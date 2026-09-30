@@ -16,7 +16,12 @@ workers_dev = false
 preview_urls = false
 
 [build]
-command = "cargo install -q worker-build@0.8.6 && worker-build --release"
+command = "cargo install -q worker-build@0.8.7 && worker-build --release"
+
+# 応答ヘッダー x-worker-version / x-worker-tag の元 (src/lib.rs)。binding は env に継承されないので
+# トップレベルと env.staging の両方に要る。tag / message は deploy の --tag / --message (vein-deploy.yml)
+[version_metadata]
+binding = "CF_VERSION_METADATA"
 
 # 本番の DB: secret DATABASE_URL (Supabase のプーラー 6543、transaction mode) へ Worker の TCP
 # (STARTTLS) で繋ぐ (src/db.rs)。secret の設定と本番のデプロイは別タスク。未設定なら 503。
@@ -33,6 +38,9 @@ command = "cargo install -q worker-build@0.8.6 && worker-build --release"
 name = "alc-vein-staging"
 workers_dev = true
 preview_urls = false
+
+[env.staging.version_metadata]
+binding = "CF_VERSION_METADATA"
 
 [env.staging.observability]
 enabled = true

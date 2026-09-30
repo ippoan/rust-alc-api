@@ -107,7 +107,7 @@ wrangler deploy --env staging    # docker で container/ を build して push �
 ## ビルド
 
 ```bash
-cargo install worker-build@0.8.6 --locked
+cargo install worker-build@0.8.7 --locked
 worker-build --release
 ```
 
