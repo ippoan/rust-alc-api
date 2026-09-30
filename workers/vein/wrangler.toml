@@ -37,6 +37,13 @@ preview_urls = false
 [env.staging.observability]
 enabled = true
 
+# Worker の実行場所を手元の DB の近くに寄せる (#695)。VPC の Tunnel は関西の colo に繋がっているので、
+# 置き場所を指定しないと、リクエストが入った colo (実測では SIN) で動き、DB の往復ごとに海を越える
+# (一覧の p50 が 944ms。KIX で動いたときは 194ms)。region は強制ではなくヒントで、
+# 実際に動いた場所は応答ヘッダー cf-placement で分かる
+[env.staging.placement]
+region = "aws:ap-northeast-3"
+
 # 手元の DB への口 (#695、一時)。本番 (トップレベル) には置かない (scripts/check-exposure.sh が検査)
 [[env.staging.vpc_services]]
 binding = "VEIN_DB_VPC"
