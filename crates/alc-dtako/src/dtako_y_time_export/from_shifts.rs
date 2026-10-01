@@ -6,7 +6,7 @@
 
 use std::collections::HashSet;
 
-use chrono::NaiveDateTime;
+use chrono::{NaiveDateTime, Timelike};
 
 use super::builder::{build_y_time_rows, fits_no_row_shape, SegmentInput};
 use super::models::{
@@ -124,6 +124,10 @@ fn validate(req: &YTimeRowsRequest) -> Result<(), String> {
 
     let mut seen: HashSet<(NaiveDateTime, NaiveDateTime)> = HashSet::new();
     for (i, shift) in req.shifts.iter().enumerate() {
+        // 秒つきを分に切り捨てて受けない (下の「勤務の中に収まる」の検査が 1 分ずれるため)
+        if shift.start.second() != 0 || shift.end.second() != 0 {
+            return Err(format!("shifts[{i}]: start / end の秒は 0"));
+        }
         if shift.end <= shift.start {
             return Err(format!("shifts[{i}]: end は start より後"));
         }
@@ -142,6 +146,11 @@ fn validate(req: &YTimeRowsRequest) -> Result<(), String> {
         }
         let mut prev_end = shift.start;
         for (k, n) in non_working.iter().enumerate() {
+            if n.start.second() != 0 || n.end.second() != 0 {
+                return Err(format!(
+                    "shifts[{i}].non_working[{k}]: start / end の秒は 0"
+                ));
+            }
             if n.end <= n.start {
                 return Err(format!("shifts[{i}].non_working[{k}]: end は start より後"));
             }
@@ -425,6 +434,8 @@ mod tests {
             })
             .collect();
 
+        let sec = chrono::Duration::seconds(30);
+
         // (名前, 入力, エラーに含まれる語)
         let cases: Vec<(&str, YTimeRowsRequest, &str)> = vec![
             (
@@ -446,6 +457,47 @@ mod tests {
                 "期間は 400 日以内",
             ),
             ("勤務が 2001 本", req(many_shifts), "shifts は 2000 本以内"),
+            (
+                "始業に秒が付いている",
+                req(vec![shift(dt(6, 8, 0) + sec, dt(6, 17, 0), &[])]),
+                "shifts[0]: start / end の秒は 0",
+            ),
+            (
+                "終業に秒が付いている",
+                req(vec![ok(), shift(dt(7, 8, 0), dt(7, 17, 0) + sec, &[])]),
+                "shifts[1]: start / end の秒は 0",
+            ),
+            (
+                "non_working が null の勤務の秒",
+                req(vec![YTimeShiftInput {
+                    start: dt(6, 8, 0) + sec,
+                    end: dt(6, 17, 0),
+                    non_working: None,
+                    note: None,
+                }]),
+                "shifts[0]: start / end の秒は 0",
+            ),
+            (
+                "区間の始まりに秒が付いている",
+                req(vec![shift(
+                    dt(6, 8, 0),
+                    dt(6, 17, 0),
+                    &[(dt(6, 12, 0) + sec, dt(6, 13, 0))],
+                )]),
+                "shifts[0].non_working[0]: start / end の秒は 0",
+            ),
+            (
+                "区間の終わりに秒が付いている",
+                req(vec![shift(
+                    dt(6, 8, 0),
+                    dt(6, 17, 0),
+                    &[
+                        (dt(6, 10, 0), dt(6, 11, 0)),
+                        (dt(6, 12, 0), dt(6, 13, 0) + sec),
+                    ],
+                )]),
+                "shifts[0].non_working[1]: start / end の秒は 0",
+            ),
             (
                 "end == start",
                 req(vec![shift(dt(6, 8, 0), dt(6, 8, 0), &[])]),

@@ -931,7 +931,9 @@ body `{from, to, shifts:[{start, end, non_working:[{start, end, kind?}] | null, 
   `no_non_working` (`non_working` が null / 欄なし) → `three_days` (始業日と終業日が 2 日以上離れる) →
   `overlap` (同じ入力の別の勤務と `[start, end)` が重なる。両方外す。終業 = 次の始業 は重なりでない) →
   `night_bands` (`builder::fits_no_row_shape`)。行の日付が `from`〜`to` の外の勤務は、既存の経路と同じく行にならないだけ (名指ししない)
-- **検証の破れは 400** (切り詰めない): `from > to` / 期間 400 日超 (`MAX_PERIOD_DAYS`、両端を含む) / 勤務 2,000 本超 (`MAX_SHIFTS`) /
+- **検証の破れは 400** (切り詰めない): 勤務と `non_working` の `start` / `end` は**秒 0 だけ** (秒つきを分に切り捨てて受けない —
+  勤怠の側は分に切り捨てた値を保存していて秒は届かない。受けると「勤務の中に収まる」の検査が 1 分ずれる) /
+  `from > to` / 期間 400 日超 (`MAX_PERIOD_DAYS`、両端を含む) / 勤務 2,000 本超 (`MAX_SHIFTS`) /
   `end <= start` / 始業と終業が完全に同じ勤務が 2 回 / `non_working` 100 個超 (`MAX_NON_WORKING_PER_SHIFT`)・`end <= start`・
   勤務の外・昇順でない・重なる。body が読めない (JSON でない・時刻の形が違う) のも 400 (`JsonRejection` を 400 に写す)。
   上限いっぱいの body は約 16MB で、全体の上限 20MB (`src/main.rs`) に収まる

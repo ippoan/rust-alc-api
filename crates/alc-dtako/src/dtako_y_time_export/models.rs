@@ -92,7 +92,7 @@ pub struct YTimeRowsRequest {
     pub shifts: Vec<YTimeShiftInput>,
 }
 
-/// 勤務 1 本。`start` / `end` は JST の壁時計。
+/// 勤務 1 本。`start` / `end` は JST の壁時計で、秒は 0 だけ (秒つきは 400。分に切り捨てて受けない)。
 #[derive(Debug, Clone, Deserialize)]
 pub struct YTimeShiftInput {
     #[serde(with = "wall_clock")]
@@ -106,7 +106,7 @@ pub struct YTimeShiftInput {
     pub note: Option<String>,
 }
 
-/// 実働でない区間 `[start, end)`。種別 (`kind`) は在っても読まない (どの種別も実働でない)。
+/// 実働でない区間 `[start, end)`。秒は 0 だけ。種別 (`kind`) は在っても読まない (どの種別も実働でない)。
 #[derive(Debug, Clone, Deserialize)]
 pub struct YTimeNonWorking {
     #[serde(with = "wall_clock")]
