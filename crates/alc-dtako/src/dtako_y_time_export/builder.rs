@@ -11,14 +11,99 @@ pub struct SegmentInput {
     pub end: NaiveDateTime,
     /// 後方互換用 (sum)。実態は rest_intervals の duration 合計と一致。
     pub rest_minutes: i32,
-    /// 各休憩 (event_cd=301) の (start, end)。bucket 確定後に時間帯別に振り分けるために必要。
+    /// 実働でない区間 (運行の経路では休憩イベント、勤怠の経路では休息と休憩) の (start, end)。
+    /// bucket 確定後に時間帯別に振り分けるために必要。
     pub rest_intervals: Vec<(NaiveDateTime, NaiveDateTime)>,
     pub note: Option<String>,
 }
 
-/// (A) cutoff: 所定労働時間 (h)。これ以上の勤務時間 (= end - start - rest) は深夜跨ぎ時に
-/// 終業日側 row に F=1 で記録、未満なら始業日 row に 24h+ 表記で記録。
+/// (A) cutoff: 所定労働時間 (h)。深夜跨ぎの入力は、勤務時間 (= end - start - rest) がこれ以上なら
+/// 終業日側 row (F=1)、未満なら始業日 row (24h+ 表記) をまず選ぶ。選んだ形が深夜の時間帯に
+/// 載らないときは、もう一方の形に替える ([`RowShape::fits`])。
 const WORK_CUTOFF_HOURS: f64 = 7.0;
+
+/// 深夜跨ぎの入力を置く行の形。形ごとに、夜として数えられる時間帯が違う。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RowShape {
+    /// 終業日の行 (F=1)。夜 = 前日 22-24 時 / 当日 0-5 時 / 当日 22-24 時。
+    /// 前日の始業〜22:00 は 1 つの昼の帯なので、前日 5:00 より前から始まる入力は載らない。
+    EndDate,
+    /// 始業日の行 (F=0、終業は 24h+ 表記)。夜 = 当日 0-5 時 / 当日 22-24 時 / 翌日 0-5 時。
+    /// 翌日 5:00 以降は 1 つの昼の帯なので、翌日 22:00 より後に終わる入力は載らない。
+    StartDate,
+}
+
+impl RowShape {
+    fn other(self) -> Self {
+        match self {
+            RowShape::EndDate => RowShape::StartDate,
+            RowShape::StartDate => RowShape::EndDate,
+        }
+    }
+
+    /// この形の行の深夜の時間帯に `start`〜`end` が載るか。時刻だけで決める
+    /// (その時間帯が全部休憩かどうかは見ない)。
+    fn fits(self, start: NaiveDateTime, end: NaiveDateTime) -> bool {
+        match self {
+            RowShape::EndDate => {
+                let prev = end.date().pred_opt().expect("valid prev date");
+                start >= prev.and_hms_opt(5, 0, 0).expect("valid time")
+            }
+            RowShape::StartDate => {
+                let next = start.date().succ_opt().expect("valid next date");
+                end <= next.and_hms_opt(22, 0, 0).expect("valid time")
+            }
+        }
+    }
+}
+
+/// 深夜跨ぎの入力が、どちらの形の行でも深夜の時間帯に載らないか
+/// (始業が 5:00 より前 かつ 終業が翌日 22:00 より後)。同日の入力は常に false。
+///
+/// 24 時間以内の入力では起きない (始業が 5:00 より前なら終業は翌日 5:00 より前)。
+pub(crate) fn fits_no_row_shape(start: NaiveDateTime, end: NaiveDateTime) -> bool {
+    start.date() != end.date()
+        && !RowShape::EndDate.fits(start, end)
+        && !RowShape::StartDate.fits(start, end)
+}
+
+/// 1 つの入力を置く行: (行の日付, F, 終業の行の日付 0:00 からの分)。
+type Placement = (NaiveDate, bool, i32);
+
+/// 行の日付・F・終業の表記を決める。戻り値の 2 つ目は「どちらの形でも深夜の時間帯に載らない」
+/// (そのときは勤務時間で選んだ形のまま)。
+fn place(seg: &SegmentInput) -> (Placement, bool) {
+    if seg.start.date() == seg.end.date() {
+        return ((seg.start.date(), false, minutes_of_day(seg.end)), false);
+    }
+
+    let work_minutes = (seg.end - seg.start).num_minutes() as i32 - seg.rest_minutes;
+    let work_hours = work_minutes as f64 / 60.0;
+    let by_cutoff = if work_hours >= WORK_CUTOFF_HOURS {
+        RowShape::EndDate
+    } else {
+        RowShape::StartDate
+    };
+    let no_shape_fits = fits_no_row_shape(seg.start, seg.end);
+    let shape = if no_shape_fits || by_cutoff.fits(seg.start, seg.end) {
+        by_cutoff
+    } else {
+        by_cutoff.other()
+    };
+
+    let placement = match shape {
+        // 終業日 row F=1
+        RowShape::EndDate => (seg.end.date(), true, minutes_of_day(seg.end)),
+        // 始業日 row 24h+ 表記
+        RowShape::StartDate => {
+            let bucket = seg.start.date();
+            let bucket_midnight = bucket.and_hms_opt(0, 0, 0).expect("valid midnight");
+            let end_min = (seg.end - bucket_midnight).num_minutes() as i32;
+            (bucket, false, end_min)
+        }
+    };
+    (placement, no_shape_fits)
+}
 
 /// `segments` を bucketing して `YTimeRow` の列を返す。
 ///
@@ -29,6 +114,9 @@ const WORK_CUTOFF_HOURS: f64 = 7.0;
 /// - 深夜跨ぎ + 勤務時間 < 7h → bucket = start.date()、F=0、H 列 24h+ 表記
 /// - 深夜跨ぎ + 勤務時間 ≥ 7h → bucket = end.date()、F=1、H 列 = end の minutes_of_day
 ///   (テンプレ数式が「F=1 のとき G を 0 として扱う」ので、当日 0:00 から H までを当日労働として計算)
+/// - 深夜跨ぎで、上で選んだ形が深夜の時間帯に載らないとき (終業日 row で始業が 5:00 より前 /
+///   始業日 row で終業が翌日 22:00 より後) は、もう一方の形に替える。どちらの形でも載らない入力は
+///   勤務時間で選んだ形のまま行にして warning を 1 行足す (24 時間以内の入力では起きない)
 /// - 期間外 (`bucket_date < from || > to`) は drop
 /// - 同 bucket_date に複数 segment: 結合 (G=最早, H=最遅, rest=各 segment 内の休憩合計 +
 ///   segment 間の時間, F=any)
@@ -46,26 +134,17 @@ pub fn build_y_time_rows(
     let mut bucket_order: Vec<NaiveDate> = Vec::new();
 
     for seg in segments {
-        let work_minutes = (seg.end - seg.start).num_minutes() as i32 - seg.rest_minutes;
-        let work_hours = work_minutes as f64 / 60.0;
-
-        let (bucket, previous_day_start, end_min_from_bucket) =
-            if seg.start.date() == seg.end.date() {
-                (seg.start.date(), false, minutes_of_day(seg.end))
-            } else if work_hours >= WORK_CUTOFF_HOURS {
-                // 深夜跨ぎ + 長時間勤務 → 終業日 row F=1
-                (seg.end.date(), true, minutes_of_day(seg.end))
-            } else {
-                // 深夜跨ぎ + 短時間 → 始業日 row 24h+ 表記
-                let bucket = seg.start.date();
-                let bucket_midnight = bucket.and_hms_opt(0, 0, 0).expect("valid midnight");
-                let end_min = (seg.end - bucket_midnight).num_minutes() as i32;
-                (bucket, false, end_min)
-            };
+        let ((bucket, previous_day_start, end_min_from_bucket), no_shape_fits) = place(&seg);
 
         // 期間外
         if bucket < from || bucket > to {
             continue;
+        }
+
+        if no_shape_fits {
+            warnings.push(format!(
+                "{bucket}: 始業が 5:00 より前で終業が翌日 22:00 より後のため、深夜の時間帯に載らない (行の形は替えていない)"
+            ));
         }
 
         // 休憩 7 セル split を計算 (bucket date に対する 前日/当日/翌日 で時間帯振り分け)
@@ -119,7 +198,8 @@ fn gap_rest(prev_end: Option<NaiveDateTime>, start: NaiveDateTime, bucket: Naive
     }
 }
 
-/// 休憩 (event_cd=301) intervals を、bucket date を基準にして 7 セル (前日/当日/翌日 × 時間帯) に振り分け。
+/// 実働でない区間 (運行の経路では休憩イベント、勤怠の経路では休息と休憩) を、bucket date を基準にして
+/// 7 セル (前日/当日/翌日 × 時間帯) に振り分け。
 fn split_rest_intervals(
     intervals: &[(NaiveDateTime, NaiveDateTime)],
     bucket: NaiveDate,
@@ -707,5 +787,222 @@ mod tests {
         let (rows, warns) = build_y_time_rows(vec![], d(2024, 4, 1), d(2024, 4, 30));
         assert!(rows.is_empty());
         assert!(warns.is_empty());
+    }
+
+    // ---- 行の置き方: 選んだ形が深夜の時間帯に載らないとき、もう一方の形に替える ----
+
+    /// `[start, end]` のうち休憩を除いた分を、`date` の `[from_min, to_min)` の帯について数える。
+    fn work_in_band(seg: &SegmentInput, date: NaiveDate, from_min: i32, to_min: i32) -> i32 {
+        let rest: i32 = seg
+            .rest_intervals
+            .iter()
+            .map(|(s, e)| overlap_minutes(*s, *e, date, from_min, to_min))
+            .sum();
+        overlap_minutes(seg.start, seg.end, date, from_min, to_min) - rest
+    }
+
+    /// 勤務の中の 22-5 時の実労働 (暦日ごとの 0-5 時と 22-24 時の和)。
+    fn night_work_of_segment(seg: &SegmentInput) -> i32 {
+        let mut total = 0;
+        let mut day = seg.start.date();
+        while day <= seg.end.date() {
+            total += work_in_band(seg, day, 0, 5 * 60) + work_in_band(seg, day, 22 * 60, 24 * 60);
+            day = day.succ_opt().unwrap();
+        }
+        total
+    }
+
+    /// その形の行が夜として数える時間帯の中の実労働。
+    /// 終業日の行 (F=1): 前日 22-24 / 当日 0-5 / 当日 22-24。
+    /// 始業日の行 (F=0): 当日 0-5 / 当日 22-24 / 翌日 0-5。
+    fn night_work_counted_by_row(seg: &SegmentInput, row: &YTimeRow) -> i32 {
+        let today = row.date;
+        let same_day =
+            work_in_band(seg, today, 0, 5 * 60) + work_in_band(seg, today, 22 * 60, 24 * 60);
+        if row.previous_day_start {
+            same_day + work_in_band(seg, today.pred_opt().unwrap(), 22 * 60, 24 * 60)
+        } else {
+            same_day + work_in_band(seg, today.succ_opt().unwrap(), 0, 5 * 60)
+        }
+    }
+
+    fn rest_cells_total(r: &YTimeRow) -> i32 {
+        r.rest_prev_5_22
+            + r.rest_prev_22_0
+            + r.rest_today_0_5
+            + r.rest_today_5_22
+            + r.rest_today_22_0
+            + r.rest_next_0_5
+            + r.rest_next_5_22
+    }
+
+    #[test]
+    fn long_work_starting_before_5_moves_to_start_date_row() {
+        // (a) 4/15 03:00 → 4/16 01:00、休憩 03:30-04:00。実働 21.5h (7h 以上) だが始業が 5:00 より前
+        let s = SegmentInput {
+            start: dt((2024, 4, 15), (3, 0)),
+            end: dt((2024, 4, 16), (1, 0)),
+            rest_minutes: 30,
+            rest_intervals: vec![(dt((2024, 4, 15), (3, 30)), dt((2024, 4, 15), (4, 0)))],
+            note: None,
+        };
+        let (rows, warns) = build_y_time_rows(vec![s.clone()], d(2024, 4, 1), d(2024, 4, 30));
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].date, d(2024, 4, 15));
+        assert!(!rows[0].previous_day_start);
+        assert_eq!(rows[0].start_minutes_of_day, 3 * 60);
+        // 25:00
+        assert_eq!(rows[0].end_minutes_from_bucket_date, 1500);
+        // 03:30-04:00 の休憩は「当日 0-5 時」に入る (欄の外へ消えない)
+        assert_eq!(rows[0].rest_today_0_5, 30);
+        assert_eq!(rest_cells_total(&rows[0]), 30);
+        assert_eq!(night_work_of_segment(&s), 270);
+        assert_eq!(night_work_counted_by_row(&s, &rows[0]), 270);
+        assert!(warns.is_empty());
+    }
+
+    #[test]
+    fn short_work_ending_after_next_22_moves_to_end_date_row() {
+        // (b) 4/15 20:00 → 4/16 23:00、休憩 4/15 21:00-4/16 17:30 と 4/16 22:10-22:40。
+        // 実働 6h (7h 未満) だが終業が翌日 22:00 より後
+        let s = SegmentInput {
+            start: dt((2024, 4, 15), (20, 0)),
+            end: dt((2024, 4, 16), (23, 0)),
+            rest_minutes: 1260,
+            rest_intervals: vec![
+                (dt((2024, 4, 15), (21, 0)), dt((2024, 4, 16), (17, 30))),
+                (dt((2024, 4, 16), (22, 10)), dt((2024, 4, 16), (22, 40))),
+            ],
+            note: None,
+        };
+        let (rows, warns) = build_y_time_rows(vec![s.clone()], d(2024, 4, 1), d(2024, 4, 30));
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].date, d(2024, 4, 16));
+        assert!(rows[0].previous_day_start);
+        assert_eq!(rows[0].start_minutes_of_day, 20 * 60);
+        assert_eq!(rows[0].end_minutes_from_bucket_date, 23 * 60);
+        // 22:10-22:40 の休憩は「当日 22-24 時」に入る (欄の外へ消えない)
+        assert_eq!(rows[0].rest_today_22_0, 30);
+        assert_eq!(rows[0].rest_prev_5_22, 60);
+        assert_eq!(rows[0].rest_prev_22_0, 120);
+        assert_eq!(rows[0].rest_today_0_5, 300);
+        assert_eq!(rows[0].rest_today_5_22, 750);
+        assert_eq!(rest_cells_total(&rows[0]), 1260);
+        assert_eq!(night_work_of_segment(&s), 30);
+        assert_eq!(night_work_counted_by_row(&s, &rows[0]), 30);
+        assert!(warns.is_empty());
+    }
+
+    #[test]
+    fn long_work_starting_at_or_after_5_stays_on_end_date_row() {
+        // (c) 22:00 → 翌 09:00 は今までどおり。境界: 始業ちょうど 5:00 は終業日の行のまま
+        for start_hm in [(22, 0), (5, 0)] {
+            let s = seg_simple(
+                dt((2024, 4, 15), start_hm),
+                dt((2024, 4, 16), (9, 0)),
+                0,
+                None,
+            );
+            let (rows, warns) = build_y_time_rows(vec![s], d(2024, 4, 1), d(2024, 4, 30));
+            assert_eq!(rows[0].date, d(2024, 4, 16));
+            assert!(rows[0].previous_day_start);
+            assert_eq!(rows[0].end_minutes_from_bucket_date, 9 * 60);
+            assert!(warns.is_empty());
+        }
+    }
+
+    #[test]
+    fn short_work_ending_by_next_22_stays_on_start_date_row() {
+        // (d) 23:00 → 翌 02:00 は今までどおり
+        let s = seg_simple(
+            dt((2024, 4, 15), (23, 0)),
+            dt((2024, 4, 16), (2, 0)),
+            0,
+            None,
+        );
+        let (rows, warns) = build_y_time_rows(vec![s], d(2024, 4, 1), d(2024, 4, 30));
+        assert_eq!(rows[0].date, d(2024, 4, 15));
+        assert!(!rows[0].previous_day_start);
+        assert_eq!(rows[0].end_minutes_from_bucket_date, 26 * 60);
+        assert!(warns.is_empty());
+
+        // 境界: 終業ちょうど翌日 22:00 は始業日の行のまま (20:00 → 翌 22:00、休憩 20h で実働 6h)
+        let s = SegmentInput {
+            start: dt((2024, 4, 15), (20, 0)),
+            end: dt((2024, 4, 16), (22, 0)),
+            rest_minutes: 1200,
+            rest_intervals: vec![(dt((2024, 4, 15), (21, 0)), dt((2024, 4, 16), (17, 0)))],
+            note: None,
+        };
+        let (rows, warns) = build_y_time_rows(vec![s], d(2024, 4, 1), d(2024, 4, 30));
+        assert_eq!(rows[0].date, d(2024, 4, 15));
+        assert!(!rows[0].previous_day_start);
+        assert_eq!(rows[0].end_minutes_from_bucket_date, 46 * 60);
+        assert!(warns.is_empty());
+    }
+
+    #[test]
+    fn input_fitting_no_shape_keeps_cutoff_shape_and_warns() {
+        // (e) 03:00 → 翌 23:00。どちらの形でも載らない → 勤務時間で選んだ形のまま + 警告 1 行
+        let long = seg_simple(
+            dt((2024, 4, 15), (3, 0)),
+            dt((2024, 4, 16), (23, 0)),
+            0,
+            None,
+        );
+        let (rows, warns) = build_y_time_rows(vec![long], d(2024, 4, 1), d(2024, 4, 30));
+        assert_eq!(rows[0].date, d(2024, 4, 16));
+        assert!(rows[0].previous_day_start);
+        assert_eq!(
+            warns,
+            vec!["2024-04-16: 始業が 5:00 より前で終業が翌日 22:00 より後のため、深夜の時間帯に載らない (行の形は替えていない)".to_string()]
+        );
+
+        // 実働 7h 未満なら始業日の行のまま
+        let short = seg_simple(
+            dt((2024, 4, 15), (3, 0)),
+            dt((2024, 4, 16), (23, 0)),
+            2400,
+            None,
+        );
+        let (rows, warns) = build_y_time_rows(vec![short], d(2024, 4, 1), d(2024, 4, 30));
+        assert_eq!(rows[0].date, d(2024, 4, 15));
+        assert!(!rows[0].previous_day_start);
+        assert_eq!(rows[0].end_minutes_from_bucket_date, 47 * 60);
+        assert_eq!(warns.len(), 1);
+
+        // 行の日付が期間の外なら、行も警告も出ない
+        let out = seg_simple(
+            dt((2024, 4, 15), (3, 0)),
+            dt((2024, 4, 16), (23, 0)),
+            0,
+            None,
+        );
+        let (rows, warns) = build_y_time_rows(vec![out], d(2024, 5, 1), d(2024, 5, 31));
+        assert!(rows.is_empty());
+        assert!(warns.is_empty());
+    }
+
+    #[test]
+    fn pieces_within_24h_always_fit_one_shape() {
+        // (f) 24 時間以内の片 (運行から作る経路) では「どちらの形でも載らない」が起きない
+        let day0 = dt((2024, 4, 15), (0, 0));
+        for start_min in 0..1440 {
+            let start = day0 + chrono::Duration::minutes(start_min);
+            for len_min in [1, 300, 419, 420, 1020, 1021, 1439, 1440] {
+                let end = start + chrono::Duration::minutes(len_min);
+                assert!(!fits_no_row_shape(start, end), "{start} → {end}");
+            }
+        }
+        // 24 時間を 1 分でも超えれば起きうる (04:59 → 翌 22:01 は 41h02m)
+        assert!(fits_no_row_shape(
+            dt((2024, 4, 15), (4, 59)),
+            dt((2024, 4, 16), (22, 1))
+        ));
+        // 同日は対象外
+        assert!(!fits_no_row_shape(
+            dt((2024, 4, 15), (3, 0)),
+            dt((2024, 4, 15), (23, 30))
+        ));
     }
 }

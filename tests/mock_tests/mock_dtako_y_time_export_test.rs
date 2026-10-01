@@ -1,4 +1,4 @@
-//! mock テスト for `GET /api/dtako/y-time-export`。
+//! mock テスト for `GET /api/dtako/y-time-export` と `POST /api/dtako/y-time-rows`。
 //!
 //! - DB 不要 (`MockDtakoYTimeExportRepository` を差し込み)
 //! - R2 不要 (`MockStorage` に CSV を upload してから handler を叩く)
@@ -238,4 +238,98 @@ async fn happy_path_with_kudgivt_yields_one_row() {
     assert_eq!(r["rest_today_22_0"].as_i64().unwrap(), 0);
     assert_eq!(r["rest_next_0_5"].as_i64().unwrap(), 0);
     assert_eq!(r["rest_next_5_22"].as_i64().unwrap(), 0);
+}
+
+// ---- POST /api/dtako/y-time-rows (勤怠の勤務の列から行を返す。DB も R2 も読まない) ----
+
+fn y_time_rows_body() -> serde_json::Value {
+    serde_json::json!({
+        "from": "2024-04-01",
+        "to": "2024-04-30",
+        "shifts": [
+            { "start": "2024-04-03 22:10:00", "end": "2024-04-04 09:05:00",
+              "non_working": [
+                  { "start": "2024-04-04 02:00:00", "end": "2024-04-04 03:00:00", "kind": "break_event" }
+              ],
+              "note": null },
+            { "start": "2024-04-06 08:00:00", "end": "2024-04-06 17:00:00", "non_working": null }
+        ]
+    })
+}
+
+#[tokio::test]
+async fn y_time_rows_returns_rows_and_excluded() {
+    let state = setup_mock_app_state();
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let res = reqwest::Client::new()
+        .post(format!("{base_url}/api/dtako/y-time-rows"))
+        .header("Authorization", test_auth_header())
+        .json(&y_time_rows_body())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+
+    let body: serde_json::Value = res.json().await.unwrap();
+    let rows = body["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 1, "expected 1 row, got {rows:?}");
+    // 22:10 → 翌 09:05 (実働 9h55m) は終業日の行
+    assert_eq!(rows[0]["date"], "2024-04-04");
+    assert_eq!(rows[0]["previous_day_start"], true);
+    assert_eq!(rows[0]["start_minutes_of_day"], 22 * 60 + 10);
+    assert_eq!(rows[0]["end_minutes_from_bucket_date"], 9 * 60 + 5);
+    assert_eq!(rows[0]["rest_today_0_5"], 60);
+    assert_eq!(body["warnings"], serde_json::json!([]));
+    assert_eq!(
+        body["excluded"],
+        serde_json::json!([
+            { "start": "2024-04-06 08:00:00", "end": "2024-04-06 17:00:00", "reason": "no_non_working" }
+        ])
+    );
+}
+
+#[tokio::test]
+async fn y_time_rows_returns_400_on_invalid_input() {
+    let state = setup_mock_app_state();
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let client = reqwest::Client::new();
+
+    // 検証の破れ (終業が始業より前)
+    let mut body = y_time_rows_body();
+    body["shifts"][0]["end"] = "2024-04-03 21:00:00".into();
+    let res = client
+        .post(format!("{base_url}/api/dtako/y-time-rows"))
+        .header("Authorization", test_auth_header())
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 400);
+    assert!(res.text().await.unwrap().contains("shifts[0]"));
+
+    // 時刻の形が違う body も 400
+    let mut body = y_time_rows_body();
+    body["shifts"][0]["start"] = "2024-04-03T22:10:00".into();
+    let res = client
+        .post(format!("{base_url}/api/dtako/y-time-rows"))
+        .header("Authorization", test_auth_header())
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 400);
+}
+
+#[tokio::test]
+async fn y_time_rows_returns_401_without_tenant() {
+    // 認可は既存の router のもの (X-Tenant-ID が無ければ 401)
+    let state = setup_mock_app_state();
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let res = reqwest::Client::new()
+        .post(format!("{base_url}/api/dtako/y-time-rows"))
+        .json(&y_time_rows_body())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 401);
 }
