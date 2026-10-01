@@ -4,6 +4,7 @@ use uuid::Uuid;
 
 use alc_core::models::{
     CreateMeasurement, Measurement, MeasurementFilter, StartMeasurement, UpdateMeasurement,
+    UpdatedMeasurement,
 };
 
 use alc_core::tenant::TenantConn;
@@ -80,12 +81,14 @@ impl MeasurementsRepository for PgMeasurementsRepository {
         .fetch_one(&mut *tx)
         .await?;
 
+        // POST は点呼方法を受けない (従来どおり通常点呼)。点呼セッションの id も返さない
         let tenko = NormalTenkoInput {
             tenko_type: input.tenko_type.as_deref(),
+            tenko_method: None,
             carins_cert_no: input.carins_cert_no.as_deref(),
             carins_vehicle_id: input.carins_vehicle_id.as_deref(),
         };
-        record_as_tenko_if_marked(&mut tx, &m, input.record_as_tenko, &tenko).await;
+        let _ = record_as_tenko_if_marked(&mut tx, &m, input.record_as_tenko, &tenko).await;
         tx.commit().await?;
         Ok(m)
     }
@@ -95,7 +98,7 @@ impl MeasurementsRepository for PgMeasurementsRepository {
         tenant_id: Uuid,
         id: Uuid,
         input: &UpdateMeasurement,
-    ) -> Result<Option<Measurement>, sqlx::Error> {
+    ) -> Result<Option<UpdatedMeasurement>, sqlx::Error> {
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
         let mut tx = tc.conn.begin().await?;
         let m = sqlx::query_as::<_, Measurement>(
@@ -139,16 +142,23 @@ impl MeasurementsRepository for PgMeasurementsRepository {
         .fetch_optional(&mut *tx)
         .await?;
 
-        if let Some(m) = &m {
-            let tenko = NormalTenkoInput {
-                tenko_type: input.tenko_type.as_deref(),
-                carins_cert_no: input.carins_cert_no.as_deref(),
-                carins_vehicle_id: input.carins_vehicle_id.as_deref(),
-            };
-            record_as_tenko_if_marked(&mut tx, m, input.record_as_tenko, &tenko).await;
-        }
+        let Some(measurement) = m else {
+            tx.commit().await?;
+            return Ok(None);
+        };
+        let tenko = NormalTenkoInput {
+            tenko_type: input.tenko_type.as_deref(),
+            tenko_method: input.tenko_method.as_deref(),
+            carins_cert_no: input.carins_cert_no.as_deref(),
+            carins_vehicle_id: input.carins_vehicle_id.as_deref(),
+        };
+        let tenko_session_id =
+            record_as_tenko_if_marked(&mut tx, &measurement, input.record_as_tenko, &tenko).await;
         tx.commit().await?;
-        Ok(m)
+        Ok(Some(UpdatedMeasurement {
+            measurement,
+            tenko_session_id,
+        }))
     }
 
     async fn get(&self, tenant_id: Uuid, id: Uuid) -> Result<Option<Measurement>, sqlx::Error> {
@@ -258,14 +268,18 @@ impl MeasurementsRepository for PgMeasurementsRepository {
 /// (SAVEPOINT = sqlx の入れ子 transaction) で行い、失敗したら内側だけ戻して
 /// warn を残す — 外側の測定の保存はそのまま commit される
 /// (Refs ippoan/alc-app#238, ippoan/alc-app-s3#135)。
+///
+/// 戻り値は点呼セッションの id (Refs ippoan/alc-app#387): 今回作ったもの、または
+/// 同じ測定に既にあるもの (再送)。印が無い・結果が点呼にならない・記録に失敗した
+/// ときは `None`。
 async fn record_as_tenko_if_marked(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     m: &Measurement,
     record_as_tenko: bool,
     tenko: &NormalTenkoInput<'_>,
-) {
+) -> Option<Uuid> {
     if !record_as_tenko || m.status != "completed" {
-        return;
+        return None;
     }
 
     let mut inner = match tx.begin().await {
@@ -275,19 +289,21 @@ async fn record_as_tenko_if_marked(
                 "通常点呼の記録を開始できませんでした (measurement {}): {e}",
                 m.id
             );
-            return;
+            return None;
         }
     };
 
-    match alc_tenko::normal_tenko::record(&mut inner, m, tenko).await {
-        Ok(_) => {
-            if let Err(e) = inner.commit().await {
+    match record_or_existing_session_id(&mut inner, m, tenko).await {
+        Ok(session_id) => match inner.commit().await {
+            Ok(()) => session_id,
+            Err(e) => {
                 tracing::warn!(
                     "通常点呼の記録を確定できませんでした (measurement {}): {e}",
                     m.id
                 );
+                None
             }
-        }
+        },
         Err(e) => {
             tracing::warn!(
                 "通常点呼の記録の作成に失敗しました (measurement {}): {e}",
@@ -299,6 +315,20 @@ async fn record_as_tenko_if_marked(
                     m.id
                 );
             }
+            None
         }
+    }
+}
+
+/// 点呼セッションを作ってその id を返す。作られなかったとき (記録済みの再送、または
+/// 結果が点呼にならない測定) は、同じ測定に既にある session の id を引き直す。
+async fn record_or_existing_session_id(
+    conn: &mut sqlx::PgConnection,
+    m: &Measurement,
+    tenko: &NormalTenkoInput<'_>,
+) -> Result<Option<Uuid>, sqlx::Error> {
+    match alc_tenko::normal_tenko::record(conn, m, tenko).await? {
+        Some(session) => Ok(Some(session.id)),
+        None => alc_tenko::normal_tenko::existing_session_id(conn, m.id).await,
     }
 }

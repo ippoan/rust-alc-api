@@ -772,6 +772,185 @@ async fn test_update_measurement_valid_tenko_type() {
 }
 
 // =========================================================================
+// PUT /api/measurements/{id} — tenko_method (点呼方法) と tenko_session_id
+// (Refs ippoan/alc-app#387)
+// =========================================================================
+
+#[tokio::test]
+async fn test_update_measurement_invalid_tenko_method() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+
+    let mock = Arc::new(MockMeasurementsRepository::default());
+    // repository まで届いたら 500 になる = 400 は repository より前で返っている
+    mock.fail_next.store(true, Ordering::SeqCst);
+
+    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
+    state.measurements = mock.clone();
+    let tenant_id = Uuid::new_v4();
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+    let client = reqwest::Client::new();
+
+    // 自動点呼・遠隔点呼は点呼の段を踏む別の流れなので、この口からは作らせない
+    for method in ["自動点呼", "遠隔点呼", "", "IT", "it点呼", " IT点呼"] {
+        let id = Uuid::new_v4();
+        let body = serde_json::json!({
+            "status": "completed",
+            "record_as_tenko": true,
+            "tenko_method": method,
+        });
+
+        let res = client
+            .put(format!("{base_url}/api/measurements/{id}"))
+            .header("Authorization", format!("Bearer {jwt}"))
+            .json(&body)
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(res.status(), 400, "tenko_method={method:?} は 400");
+    }
+    assert!(
+        mock.update_tenko_methods.lock().unwrap().is_empty(),
+        "400 は repository を呼ばない"
+    );
+}
+
+#[tokio::test]
+async fn test_update_measurement_tenko_method_reaches_repository() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+
+    let mock = Arc::new(MockMeasurementsRepository::default());
+    mock.return_some.store(true, Ordering::SeqCst);
+
+    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
+    state.measurements = mock.clone();
+    let tenant_id = Uuid::new_v4();
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+    let client = reqwest::Client::new();
+
+    // 未指定 (既存の client) / 通常点呼 / IT点呼
+    for method in [None, Some("通常点呼"), Some("IT点呼")] {
+        let id = Uuid::new_v4();
+        let mut body = serde_json::json!({
+            "status": "completed",
+            "record_as_tenko": true,
+        });
+        if let Some(method) = method {
+            body["tenko_method"] = Value::from(method);
+        }
+
+        let res = client
+            .put(format!("{base_url}/api/measurements/{id}"))
+            .header("Authorization", format!("Bearer {jwt}"))
+            .json(&body)
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(res.status(), 200, "tenko_method={method:?} は通る");
+    }
+    assert_eq!(
+        *mock.update_tenko_methods.lock().unwrap(),
+        vec![
+            None,
+            Some("通常点呼".to_string()),
+            Some("IT点呼".to_string())
+        ],
+        "repository には送られた値がそのまま渡る (未指定は None)"
+    );
+}
+
+#[tokio::test]
+async fn test_update_measurement_response_adds_only_tenko_session_id() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+
+    let mock = Arc::new(MockMeasurementsRepository::default());
+    mock.return_some.store(true, Ordering::SeqCst);
+
+    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
+    state.measurements = mock.clone();
+    let tenant_id = Uuid::new_v4();
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+    let client = reqwest::Client::new();
+
+    let put = |body: Value| {
+        let client = client.clone();
+        let url = format!("{base_url}/api/measurements/{}", Uuid::new_v4());
+        let auth = format!("Bearer {jwt}");
+        async move {
+            let res = client
+                .put(url)
+                .header("Authorization", auth)
+                .json(&body)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 200);
+            res.json::<Value>().await.unwrap()
+        }
+    };
+
+    // 点呼セッションが無い保存: 欄は在り、値は null
+    let json = put(serde_json::json!({ "status": "completed" })).await;
+    let mut keys: Vec<&str> = json
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        vec![
+            "alcohol_value",
+            "created_at",
+            "device_use_count",
+            "diastolic",
+            "employee_id",
+            "face_photo_url",
+            "face_verified",
+            "id",
+            "measured_at",
+            "medical_manual_input",
+            "medical_measured_at",
+            "pulse",
+            "result_type",
+            "status",
+            "systolic",
+            "temperature",
+            "tenant_id",
+            "tenko_session_id",
+            "updated_at",
+            "video_url",
+        ],
+        "測定の欄はそのまま (入れ子にならない)。増えるのは tenko_session_id だけ"
+    );
+    assert_eq!(json["status"], "completed");
+    assert_eq!(json["result_type"], "pass");
+    assert_eq!(json["alcohol_value"], 0.0);
+    assert_eq!(json["tenant_id"], tenant_id.to_string());
+    assert!(json["tenko_session_id"].is_null());
+
+    // 点呼セッションができた保存: その id が載る
+    let session_id = Uuid::new_v4();
+    *mock.tenko_session_id.lock().unwrap() = Some(session_id);
+    let json = put(serde_json::json!({
+        "status": "completed",
+        "record_as_tenko": true,
+        "tenko_method": "IT点呼",
+    }))
+    .await;
+    assert_eq!(json["tenko_session_id"], session_id.to_string());
+    assert_eq!(json["status"], "completed");
+}
+
+// =========================================================================
 // PUT /api/measurements/{id} — invalid JSON (400)
 // =========================================================================
 

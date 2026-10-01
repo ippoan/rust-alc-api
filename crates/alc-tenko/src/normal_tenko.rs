@@ -9,6 +9,7 @@
 
 use chrono::NaiveDate;
 use sqlx::{Connection, PgConnection};
+use uuid::Uuid;
 
 use alc_core::models::Measurement;
 use alc_core::repo::car_inspections::lookup_expiry;
@@ -21,8 +22,10 @@ use crate::tenko_sessions::{record_payload, status_for_result};
 /// `post_operation` が渡ってくる (2026-09 のオーナー判断で migration 140 の方針を改めた)。
 const TENKO_TYPE_NORMAL: &str = "normal";
 
-/// 点呼セッション・点呼記録の点呼方法。運行管理者の一覧・CSV にこの文字列が出る。
+/// 点呼セッション・点呼記録の点呼方法の既定値。運行管理者の一覧・CSV にこの文字列が出る。
 /// 種別 (業務前 / 業務後) とは軸が違うので、始業 / 終業を選んでもこのまま。
+/// 測定の保存 (PUT) が `IT点呼` を指定してきたときだけ、そちらで記録する
+/// (Refs ippoan/alc-app#387)。
 const TENKO_METHOD_NORMAL: &str = "通常点呼";
 
 /// 測定の保存に付いてくる、通常点呼の記録だけに使う値 (値の検査は handler で済ませてある)。
@@ -30,6 +33,8 @@ const TENKO_METHOD_NORMAL: &str = "通常点呼";
 pub struct NormalTenkoInput<'a> {
     /// `None` → `normal`
     pub tenko_type: Option<&'a str>,
+    /// `None` → `通常点呼`。session と record の両方に同じ値を書く
+    pub tenko_method: Option<&'a str>,
     /// 運行者端末が電子車検証から読んだ管理番号 (Refs ippoan/alc-app-s3#110)
     pub carins_cert_no: Option<&'a str>,
     /// 同じく車両 ID
@@ -52,6 +57,8 @@ pub async fn record(
     let Some((status, cancel_reason)) = status_for_result(m.result.as_deref()) else {
         return Ok(None);
     };
+
+    let tenko_method = input.tenko_method.unwrap_or(TENKO_METHOD_NORMAL);
 
     let (carins_expires_on, carins_matched_by) =
         carins_expiry(conn, input.carins_cert_no, input.carins_vehicle_id).await;
@@ -99,7 +106,7 @@ pub async fn record(
     .bind(m.medical_manual_input)
     .bind(cancel_reason)
     .bind(m.measured_at)
-    .bind(TENKO_METHOD_NORMAL)
+    .bind(tenko_method)
     .bind(input.carins_cert_no)
     .bind(input.carins_vehicle_id)
     .bind(carins_expires_on)
@@ -132,11 +139,34 @@ pub async fn record(
         &None,
         &record_data,
         &record_hash,
-        TENKO_METHOD_NORMAL,
+        tenko_method,
     )
     .await?;
 
     Ok(Some(session))
+}
+
+/// 同じ測定に既にある、通常の流れ (通常点呼 / IT点呼) の点呼セッションの id を引く。
+///
+/// [`record`] が `Ok(None)` (記録済み) を返したときに、測定の保存の応答へ載せる id を
+/// 引き直すために使う。述語は冪等用の部分 unique と同じで、自動点呼・遠隔点呼が
+/// `update_alcohol` で同じ測定を指している session は拾わない。
+/// 接続は呼び元の transaction (RLS で自分のテナント・自分の軸の行しか見えない)。
+pub async fn existing_session_id(
+    conn: &mut PgConnection,
+    measurement_id: Uuid,
+) -> Result<Option<Uuid>, sqlx::Error> {
+    sqlx::query_scalar(
+        r#"
+        SELECT id FROM tenko_sessions
+        WHERE measurement_id = $1
+          AND (tenko_type = 'normal' OR tenko_method IN ('通常点呼', 'IT点呼'))
+        LIMIT 1
+        "#,
+    )
+    .bind(measurement_id)
+    .fetch_optional(conn)
+    .await
 }
 
 /// 電子車検証の番号で carins を照合し、(期限, matched_by) を返す。

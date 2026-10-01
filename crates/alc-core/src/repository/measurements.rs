@@ -3,6 +3,7 @@ use uuid::Uuid;
 
 use crate::models::{
     CreateMeasurement, Measurement, MeasurementFilter, StartMeasurement, UpdateMeasurement,
+    UpdatedMeasurement,
 };
 
 /// Paginated list result (internal, before wrapping in MeasurementsResponse)
@@ -30,7 +31,7 @@ pub trait MeasurementsRepository: Send + Sync {
         tenant_id: Uuid,
         id: Uuid,
         input: &UpdateMeasurement,
-    ) -> Result<Option<Measurement>, sqlx::Error>;
+    ) -> Result<Option<UpdatedMeasurement>, sqlx::Error>;
 
     async fn get(&self, tenant_id: Uuid, id: Uuid) -> Result<Option<Measurement>, sqlx::Error>;
 

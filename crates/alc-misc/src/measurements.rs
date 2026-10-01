@@ -11,13 +11,17 @@ use uuid::Uuid;
 use alc_core::auth_middleware::TenantId;
 use alc_core::models::{
     CreateMeasurement, Measurement, MeasurementFilter, MeasurementsResponse, StartMeasurement,
-    UpdateMeasurement,
+    UpdateMeasurement, UpdatedMeasurement,
 };
 use alc_core::repository::car_inspections::normalize_carins_numbers;
 use alc_core::AppState;
 
 /// 通常点呼の記録に付けられる種別 (`tenko_sessions_tenko_type_check` と同じ 3 つ)
 const VALID_TENKO_TYPES: [&str; 3] = ["normal", "pre_operation", "post_operation"];
+
+/// 測定の保存 (PUT) で指定できる点呼方法。`自動点呼` / `遠隔点呼` は点呼の段を踏む
+/// 別の流れなので、この口からは作らせない (Refs ippoan/alc-app#387)
+const VALID_TENKO_METHODS: [&str; 2] = ["通常点呼", "IT点呼"];
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -65,7 +69,7 @@ async fn update_measurement(
     tenant: axum::Extension<TenantId>,
     Path(id): Path<Uuid>,
     Json(mut body): Json<UpdateMeasurement>,
-) -> Result<Json<Measurement>, StatusCode> {
+) -> Result<Json<UpdatedMeasurement>, StatusCode> {
     let tenant_id = tenant.0 .0;
 
     if let Some(ref rt) = body.result_type {
@@ -84,6 +88,12 @@ async fn update_measurement(
 
     if let Some(ref tt) = body.tenko_type {
         if !VALID_TENKO_TYPES.contains(&tt.as_str()) {
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    }
+
+    if let Some(ref method) = body.tenko_method {
+        if !VALID_TENKO_METHODS.contains(&method.as_str()) {
             return Err(StatusCode::BAD_REQUEST);
         }
     }
