@@ -264,64 +264,15 @@ async fn submit_alcohol(
     Ok(Json(session))
 }
 
-/// `submit_medical` が血圧を必須と判定した根拠 (Refs ippoan/rust-alc-api#668 の 2)。
-/// 判定条件 (true/false になる経路) は変えず、400 の `message` をこの根拠ごとに
-/// 言い分けるためだけに導入する — 真偽値 1 個だと「血圧計あり」のような断定した
-/// 文言しか作れず、フェイルクローズ (=不明) のときまで同じ文言になっていた (#670)。
-enum BpRequiredReason {
-    /// ボンド済みの血圧計を実際に検出した (`X-Device-Bp-Bonded: 1`)
-    Bonded,
-    /// 登録済み端末の設定で必須 (`devices.bp_enabled == true`)
-    DeviceSetting,
-    /// 端末を特定・確認できず、安全側 (fail-closed) に倒した
-    Unknown(UnknownBpReason),
-}
-
-/// [`BpRequiredReason::Unknown`] の内訳。次に「不明」側で外したときに原因が
-/// 一発で分かるように分けておく。
-enum UnknownBpReason {
-    /// `X-Device-Bp-Bonded` ヘッダーが無く、body の `device_id` も未送信
-    NoDeviceId,
-    /// `device_id` はこのテナントの端末ではない
-    TenantMismatch,
-    /// `device_id` のテナントは一致するが、`devices` に設定行が見つからない
-    SettingsNotFound,
-}
-
-impl BpRequiredReason {
-    fn message(&self) -> String {
-        let detail = match self {
-            BpRequiredReason::Bonded => {
-                "この端末には血圧計があります (X-Device-Bp-Bonded: 1)。測定してください".to_string()
-            }
-            BpRequiredReason::DeviceSetting => {
-                "端末設定で血圧測定が必須になっています (devices.bp_enabled)".to_string()
-            }
-            BpRequiredReason::Unknown(reason) => format!(
-                "端末を特定できなかったため、安全側で血圧を必須にしています ({})",
-                reason.label()
-            ),
-        };
-        format!("systolic and diastolic blood pressure are required (自動点呼 + {detail})")
-    }
-}
-
-impl UnknownBpReason {
-    fn label(&self) -> &'static str {
-        match self {
-            UnknownBpReason::NoDeviceId => "X-Device-Bp-Bonded ヘッダーが無く device_id も未送信",
-            UnknownBpReason::TenantMismatch => "device_id のテナントが一致しません",
-            UnknownBpReason::SettingsNotFound => "端末の設定 (devices) が見つかりません",
-        }
-    }
-}
+/// 自動点呼の業務前で血圧が無い提出を弾くときの 400 の文言。端末の状態 (血圧計の
+/// ボンド・`bp_enabled`) では言い分けない — 自動点呼は常に血圧必須 (Refs ippoan/alc-app#401)
+const BP_REQUIRED_MESSAGE: &str = "systolic and diastolic blood pressure are required (自動点呼では血圧の測定が必須です。血圧計のある端末で測定するか、遠隔点呼に切り替えてください)";
 
 /// 医療データ送信 (業務前のみ)
 async fn submit_medical(
     State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
     Path(id): Path<Uuid>,
-    headers: axum::http::HeaderMap,
     Json(body): Json<SubmitMedicalData>,
 ) -> Result<Json<TenkoSession>, ApiError> {
     let tenant_id = tenant.0 .0;
@@ -355,64 +306,14 @@ async fn submit_medical(
 
     // 自動点呼のときだけ血圧 (最高・最低) を必須にする。通常点呼・遠隔点呼は
     // 従来どおり空でも通す (Refs ippoan/alc-app-s3#135)。測れないときは
-    // escalate-remote で遠隔点呼へ切り替えてから提出する
+    // escalate-remote で遠隔点呼へ切り替えてから提出する。
     //
-    // 血圧計のボンド状態は `X-Device-Bp-Bonded` ヘッダーで判定する
-    // (Refs ippoan/alc-app#322, ippoan/rust-alc-api#668)。auth-worker が
-    // CoreS3 の署名済みボンド状態を検証した上で転送する (Refs ippoan/auth-worker#571)。
-    // クライアント (body) には血圧要否を申告させない — 検証済みヘッダーだけを信頼する。
-    //
-    // - `X-Device-Bp-Bonded: 1` → 血圧必須 (血圧計が繋がっている)
-    // - `X-Device-Bp-Bonded: 0` → 血圧必須を課さない
-    // - ヘッダー自体が無い (古いファーム / CoreS3 以外の経路) → 不明。
-    //   この場合だけ従来どおり `body.device_id` → `devices.bp_enabled` の経路で判定する
-    //   (登録済み端末では正しい)。device_id 未送信・device がこのテナントに属さない・
-    //   DB 未反映のいずれも安全側 (血圧必須) に倒す — フェイルクローズ
-    //
-    // 判定 (true/false になる条件) はここでは変えない。#670 で 400 に理由を載せたが
-    // 「血圧計あり」で一律断定していたため (この判定が true になる経路はここに複数あり、
-    // フェイルクローズも含まれる)、根拠ごとに `message` を言い分ける
-    // (Refs ippoan/rust-alc-api#668 の 2)。
-    let bp_bonded_header = headers
-        .get("X-Device-Bp-Bonded")
-        .and_then(|v| v.to_str().ok());
-
-    let bp_required: Option<BpRequiredReason> = match bp_bonded_header {
-        Some("1") => Some(BpRequiredReason::Bonded),
-        Some("0") => None,
-        _ => match body.device_id {
-            Some(device_id) => {
-                let device_tenant_id = state
-                    .devices
-                    .lookup_device_tenant(device_id)
-                    .await
-                    .map_err(|e| internal_error("submit_medical lookup_device_tenant", e))?;
-                if device_tenant_id != Some(tenant_id) {
-                    Some(BpRequiredReason::Unknown(UnknownBpReason::TenantMismatch))
-                } else {
-                    match state
-                        .devices
-                        .get_device_settings(device_id)
-                        .await
-                        .map_err(|e| internal_error("submit_medical get_device_settings", e))?
-                    {
-                        Some(settings) if settings.bp_enabled => {
-                            Some(BpRequiredReason::DeviceSetting)
-                        }
-                        Some(_) => None,
-                        None => Some(BpRequiredReason::Unknown(UnknownBpReason::SettingsNotFound)),
-                    }
-                }
-            }
-            None => Some(BpRequiredReason::Unknown(UnknownBpReason::NoDeviceId)),
-        },
-    };
-
+    // 端末の状態 (`X-Device-Bp-Bonded` / `devices.bp_enabled`) による免除は無い。
+    // オーナーの決定で、自動点呼は常に血圧必須 (Refs ippoan/alc-app#401)。
+    // 血圧を測れない端末は画面側で自動点呼のタブを選べない
     if session.tenko_method == "自動点呼" && (body.systolic.is_none() || body.diastolic.is_none())
     {
-        if let Some(reason) = bp_required {
-            return Err(bad_request("bp_required", &reason.message()));
-        }
+        return Err(bad_request("bp_required", BP_REQUIRED_MESSAGE));
     }
 
     let session = repo
