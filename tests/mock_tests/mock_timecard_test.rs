@@ -2538,3 +2538,302 @@ async fn delete_by_card_rejects_every_method_but_post() {
         assert_eq!(res.status(), 405, "{method} は 405 で閉じる");
     }
 }
+
+// ============================================================
+// POST /api/timecard/cards/lookup — カードから社員を返す読み取り専用の口
+// (Refs ippoan/alc-app#387)
+//
+// 運行管理者席の IT点呼 の受け画面が「この席の運行管理者」をカードのタッチで
+// 登録するための口。**打刻にしない**のがこの口の存在理由なので、どの分岐でも
+// `create_punch` が呼ばれないことを固定する。
+//
+// ★ mock は repository を丸ごと差し替えるので SQL を通らない。退職を弾くのは
+//   `employees.get` の `deleted_at IS NULL` で、ここでは「照合で決まった社員 id を
+//   そのまま `employees.get` に渡し、None なら 404」という handler の分岐を固定する。
+// ============================================================
+
+/// カードの照合 (timecard) と社員の取得 (employees) の両方を mock に差し替えて立てる。
+async fn spawn_lookup(
+    timecard: Arc<crate::mock_helpers::MockTimecardRepository>,
+    employees: Arc<crate::mock_helpers::MockEmployeeRepository>,
+) -> (String, String) {
+    let tenant_id = Uuid::new_v4();
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+
+    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
+    state.timecard = timecard;
+    state.employees = employees;
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+
+    (base_url, jwt)
+}
+
+/// `employees.get` が社員を返す (= 在籍) mock。
+fn employees_found() -> Arc<crate::mock_helpers::MockEmployeeRepository> {
+    let mock = Arc::new(crate::mock_helpers::MockEmployeeRepository::default());
+    mock.return_some.store(true, Ordering::SeqCst);
+    mock
+}
+
+async fn post_card_lookup(base_url: &str, jwt: &str, body: Value) -> reqwest::Response {
+    reqwest::Client::new()
+        .post(format!("{base_url}/api/timecard/cards/lookup"))
+        .header("Authorization", auth(jwt))
+        .json(&body)
+        .send()
+        .await
+        .unwrap()
+}
+
+/// 読み取り専用の口なので、打刻の repo は 1 度も呼ばれない。
+fn assert_no_punch(timecard: &crate::mock_helpers::MockTimecardRepository) {
+    assert!(
+        timecard.punches.lock().unwrap().is_empty(),
+        "カードの照会で打刻してはいけない"
+    );
+    assert!(timecard.punch_card_ids.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn card_lookup_returns_the_employee_of_a_registered_card() {
+    let employee_id = Uuid::new_v4();
+    let timecard = Arc::new(crate::mock_helpers::MockTimecardRepository::default());
+    *timecard.find_card_data.lock().unwrap() =
+        Some(make_card(Uuid::new_v4(), employee_id, "0123456789abcdef"));
+    let employees = employees_found();
+    let (base_url, jwt) = spawn_lookup(timecard.clone(), employees.clone()).await;
+
+    // 読み取った生値 (大文字・`:` 区切り) のまま送ってよい
+    let res = post_card_lookup(
+        &base_url,
+        &jwt,
+        serde_json::json!({"card_id": "  01:23:45:67:89:AB:CD:EF  "}),
+    )
+    .await;
+    assert_eq!(res.status(), 200);
+
+    // 応答は `POST /employees/lookup` と同じ `Employee`
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(body["name"], "Test Employee");
+    assert_eq!(body["code"], "EMP-001");
+    assert!(body["id"].is_string());
+    assert!(body["role"].is_array());
+
+    // 照合は打刻と同じ正規化形で引く
+    assert_eq!(
+        timecard.card_lookups.lock().unwrap().as_slice(),
+        ["0123456789abcdef"]
+    );
+    // カードの持ち主をそのまま引く
+    assert_eq!(*employees.get_calls.lock().unwrap(), vec![employee_id]);
+    assert_no_punch(&timecard);
+}
+
+/// 免許証はブラウザが `交付日 8 桁 + 有効期限 8 桁` の 16 桁を `card_id` として送る。
+/// `timecard_cards` には無いので `employees.nfc_id` のフォールバックで当たる。
+/// 数字 16 桁は正規化で変わらない
+#[tokio::test]
+async fn card_lookup_falls_back_to_the_license_nfc_id() {
+    let employee_id = Uuid::new_v4();
+    let timecard = Arc::new(crate::mock_helpers::MockTimecardRepository::default());
+    *timecard.nfc_employee_id.lock().unwrap() = Some(employee_id);
+    let employees = employees_found();
+    let (base_url, jwt) = spawn_lookup(timecard.clone(), employees.clone()).await;
+
+    let res = post_card_lookup(
+        &base_url,
+        &jwt,
+        serde_json::json!({"card_id": "2023040120280331"}),
+    )
+    .await;
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(body["name"], "Test Employee");
+
+    assert_eq!(
+        timecard.card_lookups.lock().unwrap().as_slice(),
+        ["2023040120280331"],
+        "免許証の 16 桁は正規化で変わらない"
+    );
+    assert_eq!(*employees.get_calls.lock().unwrap(), vec![employee_id]);
+    assert_no_punch(&timecard);
+}
+
+#[tokio::test]
+async fn card_lookup_unknown_card_is_404() {
+    // 既定の mock: カードも免許証も当たらない
+    let timecard = Arc::new(crate::mock_helpers::MockTimecardRepository::default());
+    let employees = employees_found();
+    let (base_url, jwt) = spawn_lookup(timecard.clone(), employees.clone()).await;
+
+    let res = post_card_lookup(
+        &base_url,
+        &jwt,
+        serde_json::json!({"card_id": "01401d0b1d37b660"}),
+    )
+    .await;
+    assert_eq!(res.status(), 404);
+    assert!(
+        employees.get_calls.lock().unwrap().is_empty(),
+        "社員が決まらなければ employees を引かない"
+    );
+    assert_no_punch(&timecard);
+}
+
+/// 持ち主の居ない保留カード (`employee_id` が NULL) で、免許証としても当たらない → 404。
+/// 保留行が在ることで誰かに着いたりしない
+#[tokio::test]
+async fn card_lookup_pending_card_is_404() {
+    let timecard = Arc::new(crate::mock_helpers::MockTimecardRepository::default());
+    let mut pending = make_card(Uuid::new_v4(), Uuid::new_v4(), "01401d0b1d37b660");
+    pending.employee_id = None;
+    pending.pending_employee_code = Some("E999".to_string());
+    *timecard.find_card_data.lock().unwrap() = Some(pending);
+    let employees = employees_found();
+    let (base_url, jwt) = spawn_lookup(timecard.clone(), employees.clone()).await;
+
+    let res = post_card_lookup(
+        &base_url,
+        &jwt,
+        serde_json::json!({"card_id": "01401d0b1d37b660"}),
+    )
+    .await;
+    assert_eq!(res.status(), 404);
+    assert!(employees.get_calls.lock().unwrap().is_empty());
+    assert_no_punch(&timecard);
+}
+
+/// カードは社員に結び付いているが、その社員が退職している (`employees.get` は
+/// `deleted_at IS NULL` で引くので None) → 404。照合 (`resolve_employee_by_card`) は
+/// `deleted_at` を見ないので、ここで弾かないと退職者が席に登録される
+#[tokio::test]
+async fn card_lookup_retired_employee_is_404() {
+    let employee_id = Uuid::new_v4();
+    let timecard = Arc::new(crate::mock_helpers::MockTimecardRepository::default());
+    *timecard.find_card_data.lock().unwrap() =
+        Some(make_card(Uuid::new_v4(), employee_id, "01401d0b1d37b660"));
+    // 既定の mock: employees.get は None (= 在籍の行が無い)
+    let employees = Arc::new(crate::mock_helpers::MockEmployeeRepository::default());
+    let (base_url, jwt) = spawn_lookup(timecard.clone(), employees.clone()).await;
+
+    let res = post_card_lookup(
+        &base_url,
+        &jwt,
+        serde_json::json!({"card_id": "01401d0b1d37b660"}),
+    )
+    .await;
+    assert_eq!(res.status(), 404);
+    assert_eq!(*employees.get_calls.lock().unwrap(), vec![employee_id]);
+    assert_no_punch(&timecard);
+}
+
+#[tokio::test]
+async fn card_lookup_empty_or_missing_card_id_is_400_and_never_reaches_the_repository() {
+    let timecard = Arc::new(crate::mock_helpers::MockTimecardRepository::default());
+    *timecard.nfc_employee_id.lock().unwrap() = Some(Uuid::new_v4());
+    let employees = employees_found();
+    let (base_url, jwt) = spawn_lookup(timecard.clone(), employees.clone()).await;
+
+    for body in [
+        serde_json::json!({"card_id": ""}),
+        serde_json::json!({"card_id": "   "}),
+        // 区切りだけも正規化後は空
+        serde_json::json!({"card_id": "::"}),
+        // 欠落
+        serde_json::json!({}),
+    ] {
+        let res = post_card_lookup(&base_url, &jwt, body.clone()).await;
+        assert_eq!(res.status(), 400, "{body} は 400");
+    }
+    assert!(
+        timecard.card_lookups.lock().unwrap().is_empty(),
+        "空の値で DB を引きに行かない"
+    );
+    assert!(employees.get_calls.lock().unwrap().is_empty());
+    assert_no_punch(&timecard);
+}
+
+#[tokio::test]
+async fn card_lookup_resolve_db_error_is_500() {
+    let timecard = Arc::new(crate::mock_helpers::MockTimecardRepository::default());
+    timecard.fail_next.store(true, Ordering::SeqCst);
+    let employees = employees_found();
+    let (base_url, jwt) = spawn_lookup(timecard.clone(), employees.clone()).await;
+
+    let res = post_card_lookup(
+        &base_url,
+        &jwt,
+        serde_json::json!({"card_id": "01401d0b1d37b660"}),
+    )
+    .await;
+    assert_eq!(res.status(), 500);
+    // ★ card_id は応答に出さない
+    assert!(!res.text().await.unwrap().contains("01401d0b1d37b660"));
+    assert!(employees.get_calls.lock().unwrap().is_empty());
+    assert_no_punch(&timecard);
+}
+
+#[tokio::test]
+async fn card_lookup_employee_db_error_is_500() {
+    let employee_id = Uuid::new_v4();
+    let timecard = Arc::new(crate::mock_helpers::MockTimecardRepository::default());
+    *timecard.find_card_data.lock().unwrap() =
+        Some(make_card(Uuid::new_v4(), employee_id, "01401d0b1d37b660"));
+    let employees = employees_found();
+    employees.fail_next.store(true, Ordering::SeqCst);
+    let (base_url, jwt) = spawn_lookup(timecard.clone(), employees).await;
+
+    let res = post_card_lookup(
+        &base_url,
+        &jwt,
+        serde_json::json!({"card_id": "01401d0b1d37b660"}),
+    )
+    .await;
+    assert_eq!(res.status(), 500);
+    assert!(!res.text().await.unwrap().contains("01401d0b1d37b660"));
+    assert_no_punch(&timecard);
+}
+
+/// `lookup` は `/timecard/cards/{id}` (GET / DELETE) に食われない。POST 以外は
+/// 405 で閉じる — `{id}` の handler に落ちるなら GET は 400 (UUID でない)、
+/// DELETE も 400 になるはずで、405 が返ることがそうでない証拠
+#[tokio::test]
+async fn card_lookup_rejects_every_method_but_post_and_is_not_swallowed_by_id_route() {
+    let timecard = Arc::new(crate::mock_helpers::MockTimecardRepository::default());
+    let (base_url, jwt) = spawn_lookup(timecard.clone(), employees_found()).await;
+    let url = format!("{base_url}/api/timecard/cards/lookup");
+    let client = reqwest::Client::new();
+
+    for method in [
+        reqwest::Method::GET,
+        reqwest::Method::PUT,
+        reqwest::Method::PATCH,
+        reqwest::Method::DELETE,
+    ] {
+        let res = client
+            .request(method.clone(), &url)
+            .header("Authorization", auth(&jwt))
+            .json(&serde_json::json!({"card_id": "01401d0b1d37b660"}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 405, "{method} は 405 で閉じる");
+    }
+    assert!(timecard.card_lookups.lock().unwrap().is_empty());
+    assert_no_punch(&timecard);
+}
+
+#[tokio::test]
+async fn card_lookup_without_auth_is_401() {
+    let timecard = Arc::new(crate::mock_helpers::MockTimecardRepository::default());
+    let (base_url, _jwt) = spawn_lookup(timecard.clone(), employees_found()).await;
+
+    let res = reqwest::Client::new()
+        .post(format!("{base_url}/api/timecard/cards/lookup"))
+        .json(&serde_json::json!({"card_id": "01401d0b1d37b660"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 401);
+    assert!(timecard.card_lookups.lock().unwrap().is_empty());
+}
