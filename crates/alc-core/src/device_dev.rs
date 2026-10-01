@@ -24,12 +24,12 @@ pub fn is_device_dev() -> bool {
     DEVICE_DEV.try_with(DeviceDevSlot::get).unwrap_or(false)
 }
 
-/// いまの要求が **dev にした運行管理者用の鍵** のものか。スコープの外では常に false。
+/// いまの要求が **運行管理者用の鍵** のものか (dev かどうかは問わない)。スコープの外では常に false。
 ///
-/// dev でない (本番の) 運行管理者の鍵、dev のキオスクの鍵、管理者ログインはどれも false。
-pub fn is_dev_tenko_manager() -> bool {
+/// キオスクの鍵、管理者ログインは false。dev の鍵かどうかは [`is_device_dev`] で別に見る。
+pub fn is_tenko_manager_key() -> bool {
     DEVICE_DEV
-        .try_with(|slot| slot.get() && slot.is_tenko_manager())
+        .try_with(DeviceDevSlot::is_tenko_manager)
         .unwrap_or(false)
 }
 
@@ -61,20 +61,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn outside_scope_is_not_dev_tenko_manager() {
-        assert!(!is_dev_tenko_manager());
+    async fn outside_scope_is_not_tenko_manager_key() {
+        assert!(!is_tenko_manager_key());
     }
 
     #[tokio::test]
-    async fn dev_tenko_manager_needs_both_marks() {
+    async fn tenko_manager_key_ignores_the_dev_mark() {
         for (dev, manager) in [(false, false), (true, false), (false, true), (true, true)] {
             let slot = DeviceDevSlot::default();
             slot.set(dev);
             slot.set_tenko_manager(manager);
-            let seen = scope(slot, async { is_dev_tenko_manager() }).await;
-            assert_eq!(seen, dev && manager, "dev={dev} manager={manager}");
+            let seen = scope(slot, async { (is_device_dev(), is_tenko_manager_key()) }).await;
+            assert_eq!(seen, (dev, manager), "dev={dev} manager={manager}");
         }
-        assert!(!is_dev_tenko_manager());
+        assert!(!is_tenko_manager_key());
     }
 
     #[tokio::test]

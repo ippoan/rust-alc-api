@@ -1275,13 +1275,14 @@ async fn self_resume_session(
 /// 判断したか」の法定記録で、テナント管理者アカウントの識別子はその答えにならない。
 /// **2 段構えにする**:
 ///   1. 管理者ログイン (`AuthUser` が入っている = ブラウザ経由の利用者。`role` の値では
-///      絞らない) か、**dev にした運行管理者用の鍵**
-///      (`alc_core::device_dev::is_dev_tenko_manager()`) であること。どちらでもなければ 401。
-///      キオスクの鍵と本番の運行管理者の鍵は弾く。dev の運行管理者の鍵だけ通す
-///      (Refs ippoan/alc-app#387 — dev端末の IT点呼を受けて判定するのがこの鍵)。
-///      auth-worker の許可表は運行管理者の鍵すべてにこの POST を通すので、dev に絞るのは
-///      backend。鍵の経路では `AuthUser` が無いが、もともと `AuthUser` の値は記録に使って
-///      いない (判定者は 2. の employee id)
+///      絞らない) か、**運行管理者用の鍵** (`alc_core::device_dev::is_tenko_manager_key()`。
+///      dev かどうかは問わない) であること。どちらでもなければ 401。キオスクの鍵は弾く。
+///      鍵の経路では `AuthUser` が無いが、もともと `AuthUser` の値は記録に使っていない
+///      (判定者は 2. の employee id)。
+///      **dev でない運行管理者の鍵が判定できるのは IT点呼 の記録だけ** (Refs ippoan/alc-app#387
+///      — 席の鍵で IT点呼 を受けて判定する)。記録を読んだ後に `tenko_method` の列で見て、
+///      IT点呼 でなければ 403 (body の `method` では決めない)。管理者ログインと dev の
+///      運行管理者の鍵は、点呼方法で絞らない
 ///   2. body の `judged_by_employee_id` が同テナントの `employees` に存在し
 ///      (`deleted_at IS NULL`)、`role` (TEXT[]) に `manager` または `admin` を
 ///      含むことをサーバ側で検証する。`manager_judgment_by` にはこの employee id
@@ -1297,10 +1298,9 @@ async fn record_manager_judgment(
     Path(id): Path<Uuid>,
     Json(body): Json<RecordManagerJudgment>,
 ) -> Result<Json<TenkoSession>, StatusCode> {
-    // 管理者ログイン (X-User-* が揃い AuthUser が入る) か、dev の運行管理者の鍵だけ通す。
-    // キオスクの鍵と本番の運行管理者の鍵は弾く (dev に絞るのは backend。auth-worker の
-    // 許可表は運行管理者の鍵すべてにこの POST を通す)
-    if auth_user.is_none() && !alc_core::device_dev::is_dev_tenko_manager() {
+    // 管理者ログイン (X-User-* が揃い AuthUser が入る) か、運行管理者の鍵だけ通す。
+    // キオスクの鍵は弾く。dev でない運行管理者の鍵は、下で IT点呼 の記録に絞る
+    if auth_user.is_none() && !alc_core::device_dev::is_tenko_manager_key() {
         return Err(StatusCode::UNAUTHORIZED);
     }
 
@@ -1328,6 +1328,15 @@ async fn record_manager_judgment(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
+
+    // dev でない運行管理者の鍵 (AuthUser なし) が判定できるのは IT点呼 の記録だけ。
+    // 記録の列で決める (body の method では決めない)
+    if auth_user.is_none()
+        && !alc_core::device_dev::is_device_dev()
+        && current.tenko_method != TENKO_METHOD_IT
+    {
+        return Err(StatusCode::FORBIDDEN);
+    }
 
     // 確認の方法 (通話 / 対面) の検査。画面の作りに頼らずここで決める
     let method = body.method.as_deref();
