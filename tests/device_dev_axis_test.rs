@@ -437,6 +437,89 @@ async fn test_reads_are_split_by_the_header() {
     });
 }
 
+/// 端末の鍵の経路 (auth-worker の /device-data-proxy 相当) で判定の口を叩く。
+///
+/// `Ctx::request` は Authorization を付ける (= 管理者ログインの `AuthUser` ができる) ので
+/// 使わない。X-Tenant-ID と、dev にした運行管理者用の鍵が付ける 2 欄だけを生で送る。
+async fn judge_as_dev_tenko_manager(
+    ctx: &Ctx,
+    session_id: &str,
+    judge_id: &str,
+) -> reqwest::Response {
+    ctx.client
+        .post(format!(
+            "{}/api/tenko/sessions/{session_id}/judgment",
+            ctx.base_url
+        ))
+        .header("X-Tenant-ID", ctx.tenant.to_string())
+        .header("X-Device-Dev", "1")
+        .header("X-Device-Role", "device-tenko-manager")
+        .json(&json!({ "judgment": "ok", "judged_by_employee_id": judge_id }))
+        .send()
+        .await
+        .unwrap()
+}
+
+/// 行の判定と is_dev (RLS を素通りする pool で)
+async fn judgment_of(ctx: &Ctx, session_id: &str) -> (Option<String>, Option<Uuid>, bool) {
+    sqlx::query_as(
+        "SELECT manager_judgment, manager_judgment_by, is_dev
+         FROM alc_api.tenko_sessions WHERE id = $1",
+    )
+    .bind(Uuid::parse_str(session_id).unwrap())
+    .fetch_one(&ctx.admin)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn test_dev_tenko_manager_key_judges_only_dev_sessions() {
+    test_group!("dev の運行管理者の鍵による点呼の判定");
+    let ctx = setup("Dev Axis Judgment", 5, true).await;
+    let emp = ctx.employee("DA4").await;
+    // 判定者 (運行管理者)。employees は軸を持たないので、どちらの軸からも引ける
+    let judge = ctx
+        .create(
+            "/api/employees",
+            None,
+            json!({ "name": "運行管理者", "code": "DA4M", "role": ["manager"] }),
+        )
+        .await;
+    let judge_uuid = Uuid::parse_str(&judge).unwrap();
+
+    let dev_session = ctx.start_session(&emp, Some("1")).await;
+    let prod_session = ctx.start_session(&emp, None).await;
+
+    test_case!(
+        "dev の軸のセッション → 200、判定が入り is_dev のまま",
+        {
+            let res = judge_as_dev_tenko_manager(&ctx, &dev_session, &judge).await;
+            let status = res.status();
+            let text = res.text().await.unwrap();
+            assert_eq!(status, 200, "{text}");
+            let body: Value = serde_json::from_str(&text).unwrap();
+            assert_eq!(body["manager_judgment"], "ok");
+            assert_eq!(
+                judgment_of(&ctx, &dev_session).await,
+                (Some("ok".to_string()), Some(judge_uuid), true)
+            );
+        }
+    );
+
+    test_case!(
+        "本番の軸のセッション → 404、行は書き換わらない",
+        {
+            let res = judge_as_dev_tenko_manager(&ctx, &prod_session, &judge).await;
+            assert_eq!(res.status(), 404);
+            assert_eq!(
+                judgment_of(&ctx, &prod_session).await,
+                (None, None, false),
+                "本番の行に判定が入っていない"
+            );
+        }
+    );
+}
+
 /// 接続に残っている `app.device_dev` を、サーバと同じ pool から直接読む
 async fn device_dev_on_connection(ctx: &Ctx) -> String {
     sqlx::query_scalar("SELECT coalesce(current_setting('app.device_dev', true), '')")

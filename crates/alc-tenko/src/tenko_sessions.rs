@@ -1372,8 +1372,14 @@ async fn self_resume_session(
 /// 限らず正当な利用者を弾く可能性がある、(b) `manager_judgment` は「どの運行管理者が
 /// 判断したか」の法定記録で、テナント管理者アカウントの識別子はその答えにならない。
 /// **2 段構えにする**:
-///   1. `AuthUser` が入っていること (= ブラウザ経由の利用者。乗務員キオスク端末の
-///      トークンを弾く) を必須にし、`role` の値では絞らない
+///   1. 管理者ログイン (`AuthUser` が入っている = ブラウザ経由の利用者。`role` の値では
+///      絞らない) か、**dev にした運行管理者用の鍵**
+///      (`alc_core::device_dev::is_dev_tenko_manager()`) であること。どちらでもなければ 401。
+///      キオスクの鍵と本番の運行管理者の鍵は弾く。dev の運行管理者の鍵だけ通す
+///      (Refs ippoan/alc-app#387 — dev端末の IT点呼を受けて判定するのがこの鍵)。
+///      auth-worker の許可表は運行管理者の鍵すべてにこの POST を通すので、dev に絞るのは
+///      backend。鍵の経路では `AuthUser` が無いが、もともと `AuthUser` の値は記録に使って
+///      いない (判定者は 2. の employee id)
 ///   2. body の `judged_by_employee_id` が同テナントの `employees` に存在し
 ///      (`deleted_at IS NULL`)、`role` (TEXT[]) に `manager` または `admin` を
 ///      含むことをサーバ側で検証する。`manager_judgment_by` にはこの employee id
@@ -1385,9 +1391,12 @@ async fn record_manager_judgment(
     Path(id): Path<Uuid>,
     Json(body): Json<RecordManagerJudgment>,
 ) -> Result<Json<TenkoSession>, StatusCode> {
-    // ブラウザ経由の利用者であること (端末トークンには X-User-* が無く AuthUser が
-    // 入らない、crates/alc-core/src/auth_middleware.rs 参照)
-    let _ = auth_user.ok_or(StatusCode::UNAUTHORIZED)?;
+    // 管理者ログイン (X-User-* が揃い AuthUser が入る) か、dev の運行管理者の鍵だけ通す。
+    // キオスクの鍵と本番の運行管理者の鍵は弾く (dev に絞るのは backend。auth-worker の
+    // 許可表は運行管理者の鍵すべてにこの POST を通す)
+    if auth_user.is_none() && !alc_core::device_dev::is_dev_tenko_manager() {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
 
     if body.judgment != "ok" && body.judgment != "ng" {
         return Err(StatusCode::BAD_REQUEST);

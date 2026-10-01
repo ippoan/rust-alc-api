@@ -10,7 +10,10 @@
 
 use std::future::Future;
 
-pub use alc_core_wasm::device_dev::{device_dev_from_headers, DeviceDevSlot, DEVICE_DEV_HEADER};
+pub use alc_core_wasm::device_dev::{
+    device_dev_from_headers, device_tenko_manager_from_headers, DeviceDevSlot, DEVICE_DEV_HEADER,
+    DEVICE_ROLE_HEADER, DEVICE_ROLE_TENKO_MANAGER,
+};
 
 tokio::task_local! {
     static DEVICE_DEV: DeviceDevSlot;
@@ -19,6 +22,15 @@ tokio::task_local! {
 /// いまの要求が dev端末のものか。スコープの外では常に false。
 pub fn is_device_dev() -> bool {
     DEVICE_DEV.try_with(DeviceDevSlot::get).unwrap_or(false)
+}
+
+/// いまの要求が **dev にした運行管理者用の鍵** のものか。スコープの外では常に false。
+///
+/// dev でない (本番の) 運行管理者の鍵、dev のキオスクの鍵、管理者ログインはどれも false。
+pub fn is_dev_tenko_manager() -> bool {
+    DEVICE_DEV
+        .try_with(|slot| slot.get() && slot.is_tenko_manager())
+        .unwrap_or(false)
 }
 
 /// `fut` を、入れ物 `slot` を印とする要求のスコープで走らせる。
@@ -46,6 +58,23 @@ mod tests {
         .await;
         assert_eq!(seen, (false, true));
         assert!(!is_device_dev());
+    }
+
+    #[tokio::test]
+    async fn outside_scope_is_not_dev_tenko_manager() {
+        assert!(!is_dev_tenko_manager());
+    }
+
+    #[tokio::test]
+    async fn dev_tenko_manager_needs_both_marks() {
+        for (dev, manager) in [(false, false), (true, false), (false, true), (true, true)] {
+            let slot = DeviceDevSlot::default();
+            slot.set(dev);
+            slot.set_tenko_manager(manager);
+            let seen = scope(slot, async { is_dev_tenko_manager() }).await;
+            assert_eq!(seen, dev && manager, "dev={dev} manager={manager}");
+        }
+        assert!(!is_dev_tenko_manager());
     }
 
     #[tokio::test]
