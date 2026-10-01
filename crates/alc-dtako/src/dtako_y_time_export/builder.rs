@@ -30,7 +30,8 @@ const WORK_CUTOFF_HOURS: f64 = 7.0;
 /// - 深夜跨ぎ + 勤務時間 ≥ 7h → bucket = end.date()、F=1、H 列 = end の minutes_of_day
 ///   (テンプレ数式が「F=1 のとき G を 0 として扱う」ので、当日 0:00 から H までを当日労働として計算)
 /// - 期間外 (`bucket_date < from || > to`) は drop
-/// - 同 bucket_date に複数 segment: 結合 (G=最早, H=最遅, rest=各 segment 合計, F=any)
+/// - 同 bucket_date に複数 segment: 結合 (G=最早, H=最遅, rest=各 segment 内の休憩合計 +
+///   segment 間の時間, F=any)
 pub fn build_y_time_rows(
     mut segments: Vec<SegmentInput>,
     from: NaiveDate,
@@ -75,6 +76,12 @@ pub fn build_y_time_rows(
             BucketAccum::new(bucket)
         });
 
+        // 同じ行の直前のかたまりとの間 (最後に入ったかたまりの終わり 〜 今の始まり) は
+        // 休憩の欄に算入する。重なり (間が 0 分以下) は何も足さない。
+        let gap_split = gap_rest(entry.last_end, seg.start, bucket);
+        entry.last_end = Some(entry.last_end.map_or(seg.end, |e| e.max(seg.end)));
+        entry.rest.add(&gap_split);
+
         let already_had_seg = entry.has_segment;
         entry.merge(SegInBucket {
             start_min: minutes_of_day(seg.start),
@@ -86,7 +93,8 @@ pub fn build_y_time_rows(
 
         if already_had_seg {
             warnings.push(format!(
-                "{bucket}: 複数 segment 結合 (1 行に集約: 最早始業 / 最遅終業 / 休憩合計)"
+                "{bucket}: 複数 segment 結合 (1 行に集約: 最早始業 / 最遅終業 / 間の {} 分を休憩に算入)",
+                gap_split.total()
             ));
         }
     }
@@ -97,6 +105,18 @@ pub fn build_y_time_rows(
         .collect();
     rows.sort_by_key(|r| r.date);
     (rows, warnings)
+}
+
+/// 同じ行の直前のかたまりの終わり `prev_end` 〜 次の始まり `start` の間を 7 セルに振る。
+/// `prev_end` が無い / 間が 0 分以下なら空。
+///
+/// 同じ行 (bucket) に入るかたまりの終わりは必ず bucket の 0:00 以降、次の始まりは bucket の
+/// 24:00 より前なので、間は当日の 3 セル (0-5 / 5-22 / 22-24) に全部収まる (欄の外には出ない)。
+fn gap_rest(prev_end: Option<NaiveDateTime>, start: NaiveDateTime, bucket: NaiveDate) -> RestSplit {
+    match prev_end.filter(|e| start > *e) {
+        Some(e) => split_rest_intervals(&[(e, start)], bucket),
+        None => RestSplit::default(),
+    }
 }
 
 /// 休憩 (event_cd=301) intervals を、bucket date を基準にして 7 セル (前日/当日/翌日 × 時間帯) に振り分け。
@@ -163,6 +183,16 @@ impl RestSplit {
         self.next_0_5 += other.next_0_5;
         self.next_5_22 += other.next_5_22;
     }
+
+    fn total(&self) -> i32 {
+        self.prev_5_22
+            + self.prev_22_0
+            + self.today_0_5
+            + self.today_5_22
+            + self.today_22_0
+            + self.next_0_5
+            + self.next_5_22
+    }
 }
 
 struct SegInBucket {
@@ -183,6 +213,8 @@ struct BucketAccum {
     rest: RestSplit,
     previous_day_start: bool,
     notes: Vec<String>,
+    /// この行に入ったかたまりの終わり (絶対時刻) の最大。次のかたまりとの間を出すのに使う
+    last_end: Option<NaiveDateTime>,
 }
 
 impl BucketAccum {
@@ -195,6 +227,7 @@ impl BucketAccum {
             rest: RestSplit::default(),
             previous_day_start: false,
             notes: Vec::new(),
+            last_end: None,
         }
     }
 
@@ -389,6 +422,204 @@ mod tests {
         assert_eq!(rows[0].end_minutes_from_bucket_date, 17 * 60);
         assert_eq!(warns.len(), 1);
         assert!(warns[0].contains("複数 segment 結合"));
+        // 間の 09:00-11:00 は当日 5-22 の休憩に入る
+        assert_eq!(rows[0].rest_today_5_22, 120);
+        assert_eq!(rows[0].rest_prev_5_22, 0);
+        assert_eq!(rows[0].rest_prev_22_0, 0);
+        assert_eq!(rows[0].rest_today_0_5, 0);
+        assert_eq!(rows[0].rest_today_22_0, 0);
+        assert_eq!(rows[0].rest_next_0_5, 0);
+        assert_eq!(rows[0].rest_next_5_22, 0);
+        assert_eq!(
+            warns[0],
+            "2024-04-03: 複数 segment 結合 (1 行に集約: 最早始業 / 最遅終業 / 間の 120 分を休憩に算入)"
+        );
+    }
+
+    #[test]
+    fn same_bucket_three_segments_add_both_gaps() {
+        let s1 = seg_simple(dt((2024, 4, 3), (6, 0)), dt((2024, 4, 3), (8, 0)), 0, None);
+        let s2 = seg_simple(dt((2024, 4, 3), (9, 0)), dt((2024, 4, 3), (12, 0)), 0, None);
+        let s3 = seg_simple(
+            dt((2024, 4, 3), (14, 0)),
+            dt((2024, 4, 3), (18, 0)),
+            0,
+            None,
+        );
+        let (rows, warns) = build_y_time_rows(vec![s3, s1, s2], d(2024, 4, 1), d(2024, 4, 30));
+        assert_eq!(rows.len(), 1);
+        // 08:00-09:00 (60) + 12:00-14:00 (120)
+        assert_eq!(rows[0].rest_today_5_22, 180);
+        assert_eq!(warns.len(), 2);
+        assert!(warns[0].contains("間の 60 分を休憩に算入"));
+        assert!(warns[1].contains("間の 120 分を休憩に算入"));
+    }
+
+    #[test]
+    fn gap_across_midnight_is_split_by_time_band_in_f1_row() {
+        // 4/2 21:00 → 4/3 04:00 (7h、F=1 で 4/3 row) の後 4/3 08:00-12:00。
+        // 間 04:00-08:00 は 当日 0-5 が 60、当日 5-22 が 180
+        let s1 = seg_simple(dt((2024, 4, 2), (21, 0)), dt((2024, 4, 3), (4, 0)), 0, None);
+        let s2 = seg_simple(dt((2024, 4, 3), (8, 0)), dt((2024, 4, 3), (12, 0)), 0, None);
+        let (rows, warns) = build_y_time_rows(vec![s1, s2], d(2024, 4, 1), d(2024, 4, 30));
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].previous_day_start);
+        assert_eq!(rows[0].rest_today_0_5, 60);
+        assert_eq!(rows[0].rest_today_5_22, 180);
+        assert_eq!(rows[0].rest_prev_22_0, 0);
+        assert_eq!(warns.len(), 1);
+        assert!(warns[0].contains("間の 240 分を休憩に算入"));
+    }
+
+    #[test]
+    fn gap_rest_none_or_non_positive_is_empty() {
+        let b = d(2024, 4, 3);
+        let t = dt((2024, 4, 3), (10, 0));
+        assert_eq!(gap_rest(None, t, b), RestSplit::default());
+        assert_eq!(gap_rest(Some(t), t, b), RestSplit::default());
+        let later = dt((2024, 4, 3), (11, 0));
+        assert_eq!(gap_rest(Some(later), t, b), RestSplit::default());
+    }
+
+    /// かたまりの種類の組み合わせごとに「間の長さ = 行の休憩に足された分」を固定する。
+    /// (i) 始業も終業も当日 / (ii) 深夜またぎ 7h 以上 (終業日の行、F=1) /
+    /// (iii) 深夜またぎ 7h 未満 (始業日の行)
+    fn assert_gap_fully_counted(segs: Vec<SegmentInput>, expected_gap: i32) {
+        let (rows, _) = build_y_time_rows(segs, d(2024, 4, 1), d(2024, 4, 30));
+        assert_eq!(rows.len(), 1);
+        let r = &rows[0];
+        assert_eq!(r.rest_prev_5_22, 0);
+        assert_eq!(r.rest_prev_22_0, 0);
+        assert_eq!(r.rest_next_0_5, 0);
+        assert_eq!(r.rest_next_5_22, 0);
+        assert_eq!(
+            r.rest_today_0_5 + r.rest_today_5_22 + r.rest_today_22_0,
+            expected_gap
+        );
+    }
+
+    #[test]
+    fn gap_equals_added_rest_for_ii_then_i() {
+        assert_gap_fully_counted(
+            vec![
+                seg_simple(dt((2024, 4, 2), (21, 0)), dt((2024, 4, 3), (4, 0)), 0, None),
+                seg_simple(dt((2024, 4, 3), (8, 0)), dt((2024, 4, 3), (12, 0)), 0, None),
+            ],
+            240,
+        );
+    }
+
+    #[test]
+    fn gap_equals_added_rest_for_i_then_i() {
+        assert_gap_fully_counted(
+            vec![
+                seg_simple(dt((2024, 4, 3), (8, 0)), dt((2024, 4, 3), (12, 0)), 0, None),
+                seg_simple(
+                    dt((2024, 4, 3), (14, 0)),
+                    dt((2024, 4, 3), (18, 0)),
+                    0,
+                    None,
+                ),
+            ],
+            120,
+        );
+    }
+
+    #[test]
+    fn gap_equals_added_rest_for_i_then_iii() {
+        // (iii) 4/3 22:00 → 4/4 02:00 (4h < 7h) は始業日 4/3 の行。間 12:00-22:00 = 600
+        assert_gap_fully_counted(
+            vec![
+                seg_simple(dt((2024, 4, 3), (8, 0)), dt((2024, 4, 3), (12, 0)), 0, None),
+                seg_simple(dt((2024, 4, 3), (22, 0)), dt((2024, 4, 4), (2, 0)), 0, None),
+            ],
+            600,
+        );
+    }
+
+    #[test]
+    fn gap_equals_added_rest_for_ii_then_iii() {
+        // 間 04:00-22:00 = 1080 (当日 0-5 が 60、5-22 が 1020)
+        assert_gap_fully_counted(
+            vec![
+                seg_simple(dt((2024, 4, 2), (21, 0)), dt((2024, 4, 3), (4, 0)), 0, None),
+                seg_simple(dt((2024, 4, 3), (22, 0)), dt((2024, 4, 4), (3, 0)), 0, None),
+            ],
+            1080,
+        );
+    }
+
+    #[test]
+    fn overlapping_segments_add_no_rest() {
+        let s1 = seg_simple(dt((2024, 4, 3), (8, 0)), dt((2024, 4, 3), (15, 0)), 0, None);
+        let s2 = seg_simple(
+            dt((2024, 4, 3), (10, 0)),
+            dt((2024, 4, 3), (12, 0)),
+            0,
+            None,
+        );
+        let (rows, warns) = build_y_time_rows(vec![s1, s2], d(2024, 4, 1), d(2024, 4, 30));
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].rest_today_5_22, 0);
+        assert_eq!(warns.len(), 1);
+        assert!(warns[0].contains("間の 0 分を休憩に算入"));
+    }
+
+    #[test]
+    fn overlap_does_not_double_count_gap_after_longer_segment() {
+        // s1 8-15、s2 10-12 (s1 に内包)、s3 16-18。間は 15-16 の 60 分だけ
+        let s1 = seg_simple(dt((2024, 4, 3), (8, 0)), dt((2024, 4, 3), (15, 0)), 0, None);
+        let s2 = seg_simple(
+            dt((2024, 4, 3), (10, 0)),
+            dt((2024, 4, 3), (12, 0)),
+            0,
+            None,
+        );
+        let s3 = seg_simple(
+            dt((2024, 4, 3), (16, 0)),
+            dt((2024, 4, 3), (18, 0)),
+            0,
+            None,
+        );
+        let (rows, _) = build_y_time_rows(vec![s1, s2, s3], d(2024, 4, 1), d(2024, 4, 30));
+        assert_eq!(rows[0].rest_today_5_22, 60);
+    }
+
+    #[test]
+    fn contiguous_split_pieces_add_no_rest() {
+        // 24 時間で強制的に切った片どうしは連続 (間 0 分)
+        let s1 = seg_simple(dt((2024, 4, 3), (0, 0)), dt((2024, 4, 3), (12, 0)), 0, None);
+        let s2 = seg_simple(
+            dt((2024, 4, 3), (12, 0)),
+            dt((2024, 4, 3), (20, 0)),
+            0,
+            None,
+        );
+        let (rows, warns) = build_y_time_rows(vec![s1, s2], d(2024, 4, 1), d(2024, 4, 30));
+        assert_eq!(rows[0].rest_today_5_22, 0);
+        assert_eq!(rows[0].rest_today_0_5, 0);
+        assert!(warns[0].contains("間の 0 分を休憩に算入"));
+    }
+
+    #[test]
+    fn rest_inside_segments_and_gap_are_summed() {
+        let s1 = SegmentInput {
+            start: dt((2024, 4, 3), (8, 0)),
+            end: dt((2024, 4, 3), (12, 0)),
+            rest_minutes: 30,
+            rest_intervals: vec![(dt((2024, 4, 3), (10, 0)), dt((2024, 4, 3), (10, 30)))],
+            note: None,
+        };
+        let s2 = SegmentInput {
+            start: dt((2024, 4, 3), (13, 0)),
+            end: dt((2024, 4, 3), (17, 0)),
+            rest_minutes: 15,
+            rest_intervals: vec![(dt((2024, 4, 3), (15, 0)), dt((2024, 4, 3), (15, 15)))],
+            note: None,
+        };
+        let (rows, _) = build_y_time_rows(vec![s1, s2], d(2024, 4, 1), d(2024, 4, 30));
+        // 30 + 15 + 間 60
+        assert_eq!(rows[0].rest_today_5_22, 105);
     }
 
     #[test]
