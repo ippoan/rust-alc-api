@@ -1858,8 +1858,10 @@ impl MeasurementsRepository for MockMeasurementsRepository {
 // MockHubMeasurementsRepository (Refs #564)
 // =============================================================================
 
-/// insert された item を tenant ごとに記録し、(device_id, seq) 重複は本物の
-/// `ON CONFLICT (tenant_id, device_id, seq) DO NOTHING` と同じく duplicates に数える。
+/// insert された item を tenant ごとに記録し、(device_id, seq) 重複は duplicates に数える。
+/// 本物は `ON CONFLICT (tenant_id, device_id, seq, is_dev) DO NOTHING` で、dev端末の軸
+/// (`is_dev`) が違えば別の行になる。mock は軸を持たない (= 1 つの軸の中の再送だけを写す)。
+/// 軸をまたぐ振る舞いは実 DB の `tests/device_dev_axis_test.rs` が固定する。
 /// `list` 用に行そのものも積む (Refs #592)。
 pub struct MockHubMeasurementsRepository {
     pub fail_next: AtomicBool,

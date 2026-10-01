@@ -313,7 +313,8 @@ async fn test_internal_route_hub_ingest_follows_the_header() {
     test_case!(
         "X-Device-Dev: 1 → is_dev = true、ヘッダなし・\"true\" → false",
         {
-            // 3 列 unique (tenant, device_id, seq) がまだ残っているので、軸ごとに連番を分ける
+            // 軸ごとに連番を分けてある (3 列 unique が残っていた頃の書き方のまま)。同じ連番が
+            // 両方の軸に入ることは test_hub_same_device_and_seq_goes_into_both_axes が固定する
             assert_eq!(ctx.ingest_hub(Some("1"), "hub-dev", 1).await["inserted"], 1);
             assert_eq!(ctx.ingest_hub(None, "hub-dev", 2).await["inserted"], 1);
             assert_eq!(
@@ -349,6 +350,64 @@ async fn test_internal_route_hub_ingest_follows_the_header() {
             "行は増えない"
         );
     });
+}
+
+#[tokio::test]
+async fn test_hub_same_device_and_seq_goes_into_both_axes() {
+    test_group!("hub の測定: 同じ端末・同じ連番を両方の軸に取り込む (alc-migrations 156)");
+    let ctx = setup("Dev Axis Hub Same Seq", 5, true).await;
+
+    // (seq, is_dev) の並び (is_dev は false が先)
+    let rows = || {
+        let admin = ctx.admin.clone();
+        let tenant = ctx.tenant;
+        async move {
+            sqlx::query_as::<_, (i64, bool)>(
+                "SELECT seq, is_dev FROM alc_api.hub_measurements
+                 WHERE tenant_id = $1 AND device_id = 'hub-both' ORDER BY seq, is_dev",
+            )
+            .bind(tenant)
+            .fetch_all(&admin)
+            .await
+            .unwrap()
+        }
+    };
+
+    test_case!("開発用の軸と本番の軸の両方に入る", {
+        // 3 列 unique (126) は 156 で落ちた。重複の判定は 4 列 (is_dev を含む) だけ
+        let dev = ctx.ingest_hub(Some("1"), "hub-both", 1).await;
+        assert_eq!(
+            (dev["inserted"].clone(), dev["duplicates"].clone()),
+            (json!(1), json!(0)),
+            "開発用の軸"
+        );
+        let prod = ctx.ingest_hub(None, "hub-both", 1).await;
+        assert_eq!(
+            (prod["inserted"].clone(), prod["duplicates"].clone()),
+            (json!(1), json!(0)),
+            "本番の軸 (同じ端末・同じ連番)"
+        );
+        assert_eq!(rows().await, vec![(1, false), (1, true)]);
+    });
+
+    test_case!(
+        "同じ軸の再送はどちらも重複として弾かれる",
+        {
+            for (label, dev) in [("開発用の軸", Some("1")), ("本番の軸", None)] {
+                let again = ctx.ingest_hub(dev, "hub-both", 1).await;
+                assert_eq!(
+                    (again["inserted"].clone(), again["duplicates"].clone()),
+                    (json!(0), json!(1)),
+                    "{label}"
+                );
+            }
+            assert_eq!(
+                rows().await,
+                vec![(1, false), (1, true)],
+                "行は軸ごとに 1 行ずつのまま"
+            );
+        }
+    );
 }
 
 #[tokio::test]
