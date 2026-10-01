@@ -146,12 +146,14 @@ YAML
                   name: ALC_STAGING_API_KEY
 YAML
   else
+    # 本番の service は実行用ロール (表の非所有者) の接続文字列を使う。migrate job と
+    # archive job は所有者の alc-app-database-url のまま (deploy.yml)。戻すときはこの名前を戻す。
     cat <<YAML
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   key: latest
-                  name: alc-app-database-url
+                  name: alc-app-database-url-rt
 YAML
   fi
   cat <<YAML
