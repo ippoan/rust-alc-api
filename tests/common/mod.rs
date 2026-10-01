@@ -339,6 +339,47 @@ fn build_app_state(
     }
 }
 
+/// RLS が効く形のテスト用 AppState (Refs ippoan/alc-app#387)。
+///
+/// `setup_app_state` は superuser (`postgres`) で繋ぐので RLS を素通りし、行の出し分けを
+/// 検証できない。ここは接続ごとに `SET ROLE alc_api_app` して本番と同じロールで走らせる
+/// (`alc_api_app` は NOLOGIN なので直接は繋げない)。
+///
+/// * migration と GRANT は流さない — 先に `setup_app_state()` を呼んでおくこと
+///   (その AppState の pool は RLS を素通りするので、行の準備と検証に使える)
+/// * `reset_on_release` が true なら、本番 (`src/main.rs`) と同じ `after_release` を掛ける
+pub async fn setup_app_state_as_app_role(max_connections: u32, reset_on_release: bool) -> AppState {
+    let mut options = PgPoolOptions::new()
+        .max_connections(max_connections)
+        .after_connect(|conn, _meta| {
+            Box::pin(async move {
+                sqlx::query("SET ROLE alc_api_app")
+                    .execute(&mut *conn)
+                    .await?;
+                Ok(())
+            })
+        });
+    if reset_on_release {
+        options = options.after_release(|conn, _meta| {
+            Box::pin(async move {
+                alc_core::tenant::reset_tenant_context(conn).await?;
+                Ok(true)
+            })
+        });
+    }
+    let pool = options
+        .connect(&test_database_url())
+        .await
+        .expect("Failed to connect to test DB as alc_api_app");
+
+    let storage: Arc<dyn rust_alc_api::storage::StorageBackend> =
+        Arc::new(MockStorage::new("test-bucket"));
+    let dtako_storage: Arc<dyn rust_alc_api::storage::StorageBackend> =
+        Arc::new(MockStorage::new("dtako-bucket"));
+
+    build_app_state(pool, storage, Some(dtako_storage), None)
+}
+
 /// テスト用 FailingFcmSender (常にエラーを返す)
 pub struct FailingFcmSender;
 

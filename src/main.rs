@@ -115,11 +115,11 @@ async fn main() -> anyhow::Result<()> {
         // 別リクエスト (特に `self.pool` 直クエリ) へ tenant コンテキストが
         // リークするのを防ぐため、返却時に必ず RESET して未設定 (= RLS で
         // 行ゼロの fail-closed) に戻す。Refs #386。
+        // dev端末の印 (`app.device_dev`) も同じ session-scope なので一緒に消す
+        // (Refs ippoan/alc-app#387)。
         .after_release(|conn, _meta| {
             Box::pin(async move {
-                sqlx::query("RESET app.current_tenant_id")
-                    .execute(conn)
-                    .await?;
+                alc_core::tenant::reset_tenant_context(conn).await?;
                 Ok(true)
             })
         })

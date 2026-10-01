@@ -22,6 +22,28 @@ use crate::models::{
 };
 use crate::repository::TenkoSessionRepository;
 
+/// webhook を裏で発火する。点呼の 5 か所 (アルコール検知 / 運行報告 / 安全判定の中断 /
+/// 日常点検 NG / 手動の中断) はすべてここを通る。
+///
+/// **dev端末の要求では発火しない** (Refs ippoan/alc-app#387) — 配信の行も作らず、
+/// 外部へも送らない。判定を spawn の前に取るのは、spawn の先では要求のスコープ
+/// (task-local) が消えていて dev かどうかが分からず、配信の行が本番の行になるため。
+fn spawn_webhook(
+    webhook: Option<Arc<dyn alc_core::webhook::WebhookService>>,
+    tenant_id: Uuid,
+    event_type: &'static str,
+    payload: serde_json::Value,
+) {
+    if alc_core::device_dev::is_device_dev() {
+        return;
+    }
+    if let Some(wh) = webhook {
+        tokio::spawn(async move {
+            wh.fire_event(tenant_id, event_type, payload).await;
+        });
+    }
+}
+
 /// JWT 必須ルート (管理者)
 /// テナント対応ルート (JWT or X-Tenant-ID)
 pub fn tenant_router<S>() -> Router<S>
@@ -230,11 +252,12 @@ async fn submit_alcohol(
             }
         });
 
-        if let Some(wh) = state.webhook.clone() {
-            tokio::spawn(async move {
-                wh.fire_event(tenant_id, "alcohol_detected", payload).await;
-            });
-        }
+        spawn_webhook(
+            state.webhook.clone(),
+            tenant_id,
+            "alcohol_detected",
+            payload,
+        );
     }
 
     Ok(Json(session))
@@ -572,11 +595,12 @@ async fn submit_report(
             }
         });
 
-        if let Some(wh) = state.webhook.clone() {
-            tokio::spawn(async move {
-                wh.fire_event(tenant_id, "report_submitted", payload).await;
-            });
-        }
+        spawn_webhook(
+            state.webhook.clone(),
+            tenant_id,
+            "report_submitted",
+            payload,
+        );
     }
 
     Ok(Json(session))
@@ -961,11 +985,7 @@ async fn perform_safety_judgment(
             }
         });
 
-        if let Some(wh) = webhook {
-            tokio::spawn(async move {
-                wh.fire_event(tenant_id, "tenko_interrupted", payload).await;
-            });
-        }
+        spawn_webhook(webhook, tenant_id, "tenko_interrupted", payload);
     }
 
     Ok(session)
@@ -1080,11 +1100,7 @@ async fn submit_daily_inspection(
             }
         });
 
-        if let Some(wh) = state.webhook.clone() {
-            tokio::spawn(async move {
-                wh.fire_event(tenant_id, "inspection_ng", payload).await;
-            });
-        }
+        spawn_webhook(state.webhook.clone(), tenant_id, "inspection_ng", payload);
     }
 
     Ok(Json(session))
@@ -1207,11 +1223,12 @@ async fn interrupt_session(
         }
     });
 
-    if let Some(wh) = state.webhook.clone() {
-        tokio::spawn(async move {
-            wh.fire_event(tenant_id, "tenko_interrupted", payload).await;
-        });
-    }
+    spawn_webhook(
+        state.webhook.clone(),
+        tenant_id,
+        "tenko_interrupted",
+        payload,
+    );
 
     Ok(Json(session))
 }

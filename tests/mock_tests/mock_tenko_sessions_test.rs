@@ -4269,6 +4269,51 @@ async fn test_webhook_tenko_interrupted_via_interrupt() {
     assert_eq!(body["status"], "interrupted");
 }
 
+/// dev端末の要求 (`X-Device-Dev: 1`) では webhook を発火しない (Refs ippoan/alc-app#387)。
+/// 判定は spawn の前。ヘッダなしの要求は従来どおり発火する。
+#[tokio::test]
+async fn test_webhook_not_fired_for_device_dev_request() {
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_status.lock().unwrap() = "identity_verified".to_string();
+    let webhook = Arc::new(crate::mock_helpers::webhook::MockWebhookService::default());
+    let state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
+    tenko_state.tenko_sessions = mock;
+    tenko_state.webhook = Some(webhook.clone());
+    let base_url =
+        crate::mock_helpers::app_state::spawn_mock_server_with_tenko(state, tenko_state).await;
+    let jwt = crate::common::create_test_jwt(uuid::Uuid::new_v4(), "admin");
+    let auth_header = format!("Bearer {jwt}");
+
+    let interrupt = |dev: Option<&'static str>| {
+        let rb = client()
+            .post(format!(
+                "{base_url}/api/tenko/sessions/{}/interrupt",
+                Uuid::new_v4()
+            ))
+            .header("Authorization", &auth_header)
+            .json(&serde_json::json!({ "reason": "Manager decision" }));
+        match dev {
+            Some(v) => rb.header("X-Device-Dev", v),
+            None => rb,
+        }
+        .send()
+    };
+
+    // dev の要求を先に出す。誤って発火していれば、下の待ちのあいだに数に出る
+    assert_eq!(interrupt(Some("1")).await.unwrap().status(), 200);
+    assert_eq!(interrupt(None).await.unwrap().status(), 200);
+
+    for _ in 0..100 {
+        if webhook.fired.load(Ordering::SeqCst) > 0 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    assert_eq!(webhook.fired.load(Ordering::SeqCst), 1);
+}
+
 // =========================================================================
 // DB error on specific methods (lines 527-529, 717-719, 932-934)
 // =========================================================================

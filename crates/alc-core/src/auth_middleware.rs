@@ -1,10 +1,23 @@
 pub use crate::middleware::{AuthUser, TenantId};
-pub use alc_core_wasm::require_tenant_header;
 
 use axum::{extract::Request, http::StatusCode, middleware::Next, response::Response, Extension};
 use uuid::Uuid;
 
 use crate::auth_google::GoogleTokenVerifier;
+use crate::device_dev::{self, device_dev_from_headers, DeviceDevSlot};
+
+/// 注入された identity ヘッダーを信頼するミドルウェア。検証の実体は
+/// `alc_core_wasm::require_tenant_header` (monolith と worker で 1 か所)。
+///
+/// monolith ではその外側に dev端末の印のスコープを張る (Refs ippoan/alc-app#387):
+/// 入れ物を request extensions に入れ、実体が**認証を通した後に** `X-Device-Dev` を
+/// 書き、以降の `set_current_tenant` がそれを DB の接続へ通す。認証に落ちた要求は
+/// 入れ物が dev でないまま終わる。
+pub async fn require_tenant_header(mut req: Request, next: Next) -> Result<Response, StatusCode> {
+    let slot = DeviceDevSlot::default();
+    req.extensions_mut().insert(slot.clone());
+    device_dev::scope(slot, alc_core_wasm::require_tenant_header(req, next)).await
+}
 
 /// internal-auth の OIDC 検証設定。`require_internal_jwt` 配下に Extension で注入する。
 /// `verifier` は `client_id=alc-api-internal` で構築した `GoogleTokenVerifier`。
@@ -53,6 +66,9 @@ pub async fn require_internal_jwt(
 /// 認証ヘッダーが揃えば追加で `X-Tenant-ID` から `TenantId` extension を挿入する
 /// (`require_tenant_header` と同じ規約)。X-Tenant-ID 欠落時は 401。
 ///
+/// secret と tenant を通した後に、caller (cf-alc-recorder 等) が付けた `X-Device-Dev`
+/// を読んで dev端末の印のスコープを張る (Refs ippoan/alc-app#387)。
+///
 /// 使用箇所: email-receiver Worker → `POST /api/dtako/tickets` 等の internal ingest
 /// 経路。本 middleware を `from_fn_with_state` ではなく `Extension(InternalSharedSecret)`
 /// 経由で読むことで、binding ごとに secret を差し替え可能 (テスト時 mock しやすい)。
@@ -85,7 +101,10 @@ pub async fn require_internal_shared_secret(
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
     req.extensions_mut().insert(TenantId(tenant_id));
-    Ok(next.run(req).await)
+
+    let slot = DeviceDevSlot::default();
+    slot.set(device_dev_from_headers(req.headers()));
+    Ok(device_dev::scope(slot, next.run(req)).await)
 }
 
 /// timing-safe な byte 列等値比較。長さが異なれば短い方を 0 と比較し続けて
@@ -410,6 +429,104 @@ mod tests {
                 &[
                     ("X-Internal-Shared-Secret", "secret-value"),
                     ("X-Tenant-ID", "not-a-uuid"),
+                ],
+            ),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    // -----------------------------------------------------------------
+    // dev端末の印 (X-Device-Dev) — 認証を通した要求のスコープにだけ立つ
+    // -----------------------------------------------------------------
+
+    async fn echo_dev() -> &'static str {
+        if device_dev::is_device_dev() {
+            "dev"
+        } else {
+            "prod"
+        }
+    }
+
+    async fn body_of(resp: Response) -> String {
+        let body = axum::body::to_bytes(resp.into_body(), 1024).await.unwrap();
+        String::from_utf8_lossy(&body).into_owned()
+    }
+
+    fn app_dev() -> Router {
+        let tenant = Router::new()
+            .route("/t", get(echo_dev))
+            .layer(axum_middleware::from_fn(require_tenant_header));
+        let internal = Router::new()
+            .route("/i", get(echo_dev))
+            .layer(axum_middleware::from_fn(require_internal_shared_secret))
+            .layer(Extension(InternalSharedSecret("secret-value".to_string())));
+        Router::new()
+            .route("/public", get(echo_dev))
+            .merge(tenant)
+            .merge(internal)
+    }
+
+    #[tokio::test]
+    async fn device_dev_tenant_header_route() {
+        let tid = Uuid::new_v4().to_string();
+        for (value, expected) in [
+            (Some("1"), "dev"),
+            (Some("true"), "prod"),
+            (Some("0"), "prod"),
+            (Some(""), "prod"),
+            (None, "prod"),
+        ] {
+            let mut headers = vec![("X-Tenant-ID", tid.as_str())];
+            if let Some(v) = value {
+                headers.push(("X-Device-Dev", v));
+            }
+            let resp = send(app_dev(), req_with_headers("/t", &headers)).await;
+            assert_eq!(resp.status(), StatusCode::OK);
+            assert_eq!(body_of(resp).await, expected, "{value:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn device_dev_internal_secret_route() {
+        let tid = Uuid::new_v4().to_string();
+        for (value, expected) in [(Some("1"), "dev"), (Some("true"), "prod"), (None, "prod")] {
+            let mut headers = vec![
+                ("X-Internal-Shared-Secret", "secret-value"),
+                ("X-Tenant-ID", tid.as_str()),
+            ];
+            if let Some(v) = value {
+                headers.push(("X-Device-Dev", v));
+            }
+            let resp = send(app_dev(), req_with_headers("/i", &headers)).await;
+            assert_eq!(resp.status(), StatusCode::OK);
+            assert_eq!(body_of(resp).await, expected, "{value:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn device_dev_ignored_on_public_route() {
+        let resp = send(
+            app_dev(),
+            req_with_headers("/public", &[("X-Device-Dev", "1")]),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(body_of(resp).await, "prod");
+    }
+
+    #[tokio::test]
+    async fn device_dev_does_not_bypass_auth() {
+        let resp = send(app_dev(), req_with_headers("/t", &[("X-Device-Dev", "1")])).await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        let resp = send(
+            app_dev(),
+            req_with_headers(
+                "/i",
+                &[
+                    ("X-Internal-Shared-Secret", "wrong"),
+                    ("X-Tenant-ID", &Uuid::new_v4().to_string()),
+                    ("X-Device-Dev", "1"),
                 ],
             ),
         )

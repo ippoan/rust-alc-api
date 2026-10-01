@@ -10,6 +10,7 @@ pub mod auth_middleware;
 
 pub mod api_error;
 pub mod constant_time;
+pub mod device_dev;
 pub mod device_pair_client;
 pub mod fcm;
 pub mod master_data;

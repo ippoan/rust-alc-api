@@ -1,6 +1,7 @@
 use axum::{extract::Request, http::StatusCode, middleware::Next, response::Response};
 use uuid::Uuid;
 
+use crate::device_dev::{device_dev_from_headers, DeviceDevSlot};
 use crate::types::{AuthUser, TenantId};
 
 /// 注入された identity ヘッダーを信頼するミドルウェア (Refs #434)
@@ -19,6 +20,8 @@ use crate::types::{AuthUser, TenantId};
 /// - `X-Tenant-ID` 欠落 → 401
 /// - `X-User-ID` / `X-User-Email` / `X-User-Role` が揃えば AuthUser も復元する
 ///   (admin 経路の role 判定はハンドラ側が AuthUser から行う)
+/// - 呼び元が request extensions に `DeviceDevSlot` を入れていれば、認証を通した後に
+///   `X-Device-Dev` の印を書く (Refs ippoan/alc-app#387)。入れ物が無ければ何もしない
 pub async fn require_tenant_header(mut req: Request, next: Next) -> Result<Response, StatusCode> {
     let tenant_id = req
         .headers()
@@ -28,6 +31,10 @@ pub async fn require_tenant_header(mut req: Request, next: Next) -> Result<Respo
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
     req.extensions_mut().insert(TenantId(tenant_id));
+
+    if let Some(slot) = req.extensions().get::<DeviceDevSlot>() {
+        slot.set(device_dev_from_headers(req.headers()));
+    }
 
     // Gateway が注入した認証ヘッダーから AuthUser を復元
     let user_id = req
@@ -103,6 +110,49 @@ mod tests {
     async fn body_string(resp: Response) -> String {
         let body = axum::body::to_bytes(resp.into_body(), 1024).await.unwrap();
         String::from_utf8_lossy(&body).into_owned()
+    }
+
+    /// 入れ物を request extensions に入れてから middleware を通し、書かれた値を返す。
+    async fn slot_after(headers: &[(&str, &str)]) -> (StatusCode, bool) {
+        let slot = DeviceDevSlot::default();
+        let mut b = Request::builder().uri("/t");
+        for (k, v) in headers {
+            b = b.header(*k, *v);
+        }
+        let mut req = b.body(Body::empty()).unwrap();
+        req.extensions_mut().insert(slot.clone());
+        let resp = app().into_service().oneshot(req).await.unwrap();
+        (resp.status(), slot.get())
+    }
+
+    #[tokio::test]
+    async fn device_dev_written_to_slot_after_auth() {
+        let tid = Uuid::new_v4().to_string();
+        let got = slot_after(&[("X-Tenant-ID", &tid), ("X-Device-Dev", "1")]).await;
+        assert_eq!(got, (StatusCode::OK, true));
+        for v in ["true", "0", ""] {
+            let got = slot_after(&[("X-Tenant-ID", &tid), ("X-Device-Dev", v)]).await;
+            assert_eq!(got, (StatusCode::OK, false), "{v:?}");
+        }
+        let got = slot_after(&[("X-Tenant-ID", &tid)]).await;
+        assert_eq!(got, (StatusCode::OK, false));
+    }
+
+    #[tokio::test]
+    async fn device_dev_not_written_when_auth_fails() {
+        let got = slot_after(&[("X-Device-Dev", "1")]).await;
+        assert_eq!(got, (StatusCode::UNAUTHORIZED, false));
+    }
+
+    #[tokio::test]
+    async fn device_dev_header_without_slot_is_ignored() {
+        let tid = Uuid::new_v4();
+        let resp = send(
+            &[("X-Tenant-ID", &tid.to_string()), ("X-Device-Dev", "1")],
+            "/t",
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
     }
 
     #[tokio::test]
