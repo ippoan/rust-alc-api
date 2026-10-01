@@ -221,6 +221,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "alc-migrations"
+version = "0.152.0"
+source = "git+https://github.com/ippoan/alc-migrations?rev=6f9f3593f930f5a9cca8387b42cdf70d63a02ca4#6f9f3593f930f5a9cca8387b42cdf70d63a02ca4"
+dependencies = [
+ "sqlx",
+]
+
+[[package]]
 name = "alc-misc"
 version = "0.1.0"
 dependencies = [
@@ -3547,6 +3555,7 @@ dependencies = [
  "alc-devices",
  "alc-dtako",
  "alc-maintenance",
+ "alc-migrations",
  "alc-misc",
  "alc-notify",
  "alc-storage",

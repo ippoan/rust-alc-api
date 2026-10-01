@@ -13,7 +13,7 @@ Axum + PostgreSQL RLS の ALC (アルコールチェック) API。Cloud Run に�
 - 適用済み migration は絶対に変更しない (checksum で起動不能) — 修正は新規ファイル追加
 - migration: `SECURITY DEFINER` に `SET search_path = alc_api` 必須 / `WITH CHECK (true)` は避ける / 既存データへの INSERT/UPDATE ハードコード禁止 (`WHERE EXISTS`)
 - migration PR はローカルで流さず CI + staging に任せる
-- migration の正本は ippoan/alc-migrations。rust-alc-api の `migrations/` とテスト DB 用 SQL (`scripts/init_local_db.sql`・`scripts/local_app_grants.sql`) は切り替えまで追加・変更禁止 (CI の `pr-limit` で止まる)
+- migration の正本は ippoan/alc-migrations。migrate とテストは alc-migrations (git 依存、rev 固定) を読む。`migrations/` と `scripts/*.sql` は 152 番で止めた写しで正本ではなく、追加・変更禁止 (CI の `pr-limit` で止まる)。新しい migration を取り込むには `Cargo.toml` の rev を上げる
 - main 直接 merge/push・`git checkout main`・メイン worktree のソース編集は禁止 — コード変更は必ず origin/main ベースの worktree で (hooks 強制)。削除前に必ず repo root へ cd
 - 確認なしの `deploy.sh` 実行禁止 (AskUserQuestion 2 択で確認)。本番デプロイは `/tag-release patch` のみ
 - Cloud Run handler 内 `tokio::spawn` fire-and-forget 禁止 (CPU throttle で完走しない)

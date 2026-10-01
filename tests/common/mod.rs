@@ -193,7 +193,7 @@ pub fn test_database_url() -> String {
 /// 並列に走るテストが同じ表へ同時に GRANT すると `tuple concurrently updated` に
 /// なるので、advisory lock で直列化する (GRANT 自体は冪等)。
 pub async fn migrate_and_grant(pool: &sqlx::PgPool) {
-    sqlx::migrate!("./migrations")
+    alc_migrations::MIGRATOR
         .run(pool)
         .await
         .expect("Failed to run migrations");
@@ -203,10 +203,10 @@ pub async fn migrate_and_grant(pool: &sqlx::PgPool) {
         .execute(&mut *tx)
         .await
         .expect("Failed to take grant lock");
-    sqlx::raw_sql(include_str!("../../scripts/local_app_grants.sql"))
+    sqlx::raw_sql(alc_migrations::LOCAL_APP_GRANTS)
         .execute(&mut *tx)
         .await
-        .expect("Failed to apply scripts/local_app_grants.sql");
+        .expect("Failed to apply alc_migrations::LOCAL_APP_GRANTS");
     tx.commit().await.expect("Failed to commit grants");
 }
 
