@@ -12,6 +12,10 @@
 //!
 //! xlsx 生成は frontend Worker 側 (nuxt-dtako-admin) で行う。
 //!
+//! `POST /api/dtako/y-time-rows` は、勤怠の勤務の列 (始業・終業 + 実働でない区間) を body で
+//! 受けて同じ行を返す計算だけの口 (DB も R2 も読まない)。行の入れ方は 5. と同じ
+//! `build_y_time_rows` で、入力の検証と行を作らない勤務の名指しは `from_shifts` が持つ。
+//!
 //! ## 設計補足: 同期 GET だけにした経緯 (2026-05-10)
 //!
 //! 一時期 `POST /jobs` + WebSocket 完了通知 (notify-realtime-bus) で async job 化を
@@ -34,15 +38,16 @@
 
 pub mod builder;
 pub mod csv_aggregator;
+pub mod from_shifts;
 pub mod models;
 
 use crate::DtakoState;
 use alc_core::auth_middleware::TenantId;
 use alc_core::storage::StorageBackend;
 use axum::{
-    extract::{Query, State},
+    extract::{rejection::JsonRejection, Query, State},
     http::StatusCode,
-    routing::get,
+    routing::{get, post},
     Json, Router,
 };
 use chrono::{DateTime, Utc};
@@ -52,7 +57,10 @@ use uuid::Uuid;
 
 use builder::{build_y_time_rows, SegmentInput};
 use csv_aggregator::{build_segment_inputs, fetch_and_parse_kudgivt};
-use models::{YTimeDriver, YTimeExportQuery, YTimeExportResponse, YTimePeriod};
+use models::{
+    YTimeDriver, YTimeExportQuery, YTimeExportResponse, YTimePeriod, YTimeRowsRequest,
+    YTimeRowsResponse,
+};
 
 /// R2 から KUDGIVT.csv を並列 fetch する際の同時実行数。
 ///
@@ -65,7 +73,20 @@ where
     DtakoState: axum::extract::FromRef<S>,
     S: Clone + Send + Sync + 'static,
 {
-    Router::new().route("/dtako/y-time-export", get(get_y_time_export))
+    Router::new()
+        .route("/dtako/y-time-export", get(get_y_time_export))
+        .route("/dtako/y-time-rows", post(post_y_time_rows))
+}
+
+/// 勤怠の勤務の列から Y時間 の行を返す。計算だけで、保存値は読まない・書かない。
+/// body が読めない (JSON でない・欄の欠け・時刻の形の違い) のも、検証の破れも 400。
+async fn post_y_time_rows(
+    body: Result<Json<YTimeRowsRequest>, JsonRejection>,
+) -> Result<Json<YTimeRowsResponse>, (StatusCode, String)> {
+    let Json(req) = body.map_err(|e| (StatusCode::BAD_REQUEST, e.body_text()))?;
+    from_shifts::rows_from_shifts(req)
+        .map(Json)
+        .map_err(|m| (StatusCode::BAD_REQUEST, m))
 }
 
 /// 同期 GET。compute 完了まで HTTP を保持する (5-15s 想定、Cloudflare proxy 100s 内)。

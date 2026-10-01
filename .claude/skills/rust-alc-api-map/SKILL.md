@@ -1,6 +1,6 @@
 ---
 name: rust-alc-api-map
-generated-from: rust-alc-api:ac205c03f3d1d3b0fac3227fe7ffac0955a027b8
+generated-from: rust-alc-api:007ad513da0d569b6e8eda8e2e5b1126be0bc586
 paths: [crates/, src/, migrations/, tests/]
 description: rust-alc-api (アルコールチェッカー基盤の Rust/Axum Cargo workspace — domain crate 群 + monolith 単一バイナリ、PostgreSQL+RLS、Cloud Run) の構造ナビゲーション。どの crate に何のルートがあるか / monolith (rust-alc-api) 一本化 (gateway + per-domain は #556 で廃止) / RLS・migration・deploy/release 分離の gotcha を 1 枚にまとめる。トリガー:「rust-alc-api」「alc-api」「alc-notify」「alc-tenko」「alc-trouble」「alc-carins」「alc-dtako」「gateway」「tenko-api」「carins-api」「dtako-api」「trouble-api」「RLS テナント」「sqlx migration」「ts-rs」「Release Wave」「Bazel」等。
 ---
@@ -905,6 +905,40 @@ fetch のみに戻す)。
 **かたまりの間の時間は、`gap_rest` が「その行に入ったかたまりの終わりの最大 〜 次の始まり」を
 `split_rest_intervals` に通して休憩の 7 欄に足す** (足さないと Excel で労働に数えられ、1 行が 24 時間を超える日が出る)。
 間が 0 分以下 (重なり) なら何も足さない。間は必ず当日の 3 欄に収まる (欄の外には出ない)。応答の形 (`YTimeRow`) は不変。
+
+### Y時間 export: 日をまたぐ入力を置く行の形 (Refs ohishi-exp/nuxt-dtako-admin#1133)
+
+`build_y_time_rows` は日をまたぐ入力 (segment) を、まず実働 (= end − start − rest) が 7 時間以上なら
+**終業日の行 (F=1)**、未満なら **始業日の行 (F=0、終業は 24h+ 表記)** に置く。形ごとに夜として数えられる
+時間帯が違う (終業日の行 = 前日 22-24 / 当日 0-5 / 当日 22-24、始業日の行 = 当日 0-5 / 当日 22-24 / 翌日 0-5) ので、
+**選んだ形が深夜の時間帯に載らないとき — 終業日の行で始業が (前日の) 5:00 より前 / 始業日の行で終業が翌日 22:00 より後 —
+は、もう一方の形に替える** (`builder.rs` の `RowShape::fits` と `place`。判定は時刻だけで、その時間帯が休憩かどうかは見ない)。
+同日の入力は今までどおり。**運行から作る経路 (`GET /dtako/y-time-export`) にも効く** (関数が 1 つ)。
+どちらの形でも載らない入力 (`fits_no_row_shape`) は、24 時間以内の片 (`split_at_24h` の出力) では起きない —
+万一 `build_y_time_rows` に来たら勤務時間で選んだ形のまま行にして warning を 1 行足す。
+**始業 5:00・終業 翌日 22:00 の条件は `RowShape::fits` の 1 か所** (ほかに書かない)。`split_rest_intervals` は無改造。
+
+### Y時間 の行を勤怠の勤務の列から返す口 `POST /api/dtako/y-time-rows` (Refs ohishi-exp/nuxt-dtako-admin#1133)
+
+`dtako_y_time_export/from_shifts.rs` (pure) + `mod.rs` の `post_y_time_rows`。既存の GET と同じ `tenant_router`
+(認可は `require_tenant_header`、`X-Tenant-ID` が無ければ 401)。**DB も R2 も読まない・書かない** (計算だけ)。
+body `{from, to, shifts:[{start, end, non_working:[{start, end, kind?}] | null, note?}]}` — 時刻は
+`YYYY-MM-DD HH:MM:SS` (JST の壁時計。`models.rs` の `wall_clock`)、`kind` は読まない (勤怠の `shift-days` の応答をそのまま渡せる)。
+勤務を `SegmentInput` に写して **`build_y_time_rows` に渡すだけ** (`rest_intervals` = `non_working`、`rest_minutes` = その長さの和。
+行の入れ方の規則をここに写さない)。応答 `{rows, warnings, excluded:[{start, end, reason}]}` — `rows` / `warnings` は
+`build_y_time_rows` の戻り値のまま (既存の警告の文言は画面が解析するので変えない)。
+- **行を作らない勤務は `excluded` に理由つきで名指し** (黙って丸めない)。理由は 4 つで、複数当たるときはこの順:
+  `no_non_working` (`non_working` が null / 欄なし) → `three_days` (始業日と終業日が 2 日以上離れる) →
+  `overlap` (同じ入力の別の勤務と `[start, end)` が重なる。両方外す。終業 = 次の始業 は重なりでない) →
+  `night_bands` (`builder::fits_no_row_shape`)。行の日付が `from`〜`to` の外の勤務は、既存の経路と同じく行にならないだけ (名指ししない)
+- **検証の破れは 400** (切り詰めない): 勤務と `non_working` の `start` / `end` は**秒 0 だけ** (秒つきを分に切り捨てて受けない —
+  勤怠の側は分に切り捨てた値を保存していて秒は届かない。受けると「勤務の中に収まる」の検査が 1 分ずれる) /
+  `from > to` / 期間 400 日超 (`MAX_PERIOD_DAYS`、両端を含む) / 勤務 2,000 本超 (`MAX_SHIFTS`) /
+  `end <= start` / 始業と終業が完全に同じ勤務が 2 回 / `non_working` 100 個超 (`MAX_NON_WORKING_PER_SHIFT`)・`end <= start`・
+  勤務の外・昇順でない・重なる。body が読めない (JSON でない・時刻の形が違う) のも 400 (`JsonRejection` を 400 に写す)。
+  上限いっぱいの body は約 16MB で、全体の上限 20MB (`src/main.rs`) に収まる
+- テスト: 行の置き方と検証・除外は crate 内の unit (`builder.rs` / `from_shifts.rs`)、route は
+  `tests/mock_tests/mock_dtako_y_time_export_test.rs` (正常 / 400 / 認可なし 401)
 
 **LIST も同じ (2026-07-31、Refs ohishi-exp/rust-ichibanboshi#205-27)**。`dtako_events.rs` の
 `list_prefixes` は `R2_LIST_CONCURRENCY = 16` で複数 prefix の LIST を並列に投げる。
