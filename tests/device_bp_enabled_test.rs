@@ -183,12 +183,14 @@ async fn put_medical(
         .unwrap()
 }
 
-/// submit_medical の血圧必須判定は devices.bp_enabled (migration 143) を正本にする
-/// (Refs ippoan/alc-app#322)。`bp_enabled` の真偽値自体はクライアントに申告させず、
-/// device_id だけを受け取ってサーバが DB を引く — この境界を固定する。
+/// 自動点呼の血圧必須は端末の `devices.bp_enabled` に関係なく常に掛かる
+/// (Refs ippoan/alc-app#401。#322 で入れた bp_enabled=false の免除はオーナーの決定で外した)。
+/// device_id を送っても免除されない — この境界を固定する。
 #[tokio::test]
 async fn auto_tenko_bp_required_follows_device_bp_enabled() {
-    test_group!("自動点呼の血圧必須は devices.bp_enabled が正本 (Refs ippoan/alc-app#322)");
+    test_group!(
+        "自動点呼の血圧必須は devices.bp_enabled に関係なく常に掛かる (Refs ippoan/alc-app#401)"
+    );
 
     let state = common::setup_app_state().await;
     let base_url = common::spawn_test_server(state.clone()).await;
@@ -217,7 +219,7 @@ async fn auto_tenko_bp_required_follows_device_bp_enabled() {
     }
 
     test_case!(
-        "bp_enabled=false (既定) の端末は血圧なしで通る — #322 の症状固定",
+        "bp_enabled=false (既定) の端末でも血圧なしは 400 (以前は免除。#401 で外した)",
         {
             let session = start_pre_operation_session(&client, &base_url, &auth, employee_id).await;
             as_auto_tenko(state.pool(), &session).await;
@@ -234,14 +236,14 @@ async fn auto_tenko_bp_required_follows_device_bp_enabled() {
             .await;
             assert_eq!(
                 res.status(),
-                200,
-                "血圧計を使わない端末 (bp_enabled=false) は血圧なしで通るはず"
+                400,
+                "血圧計を使わない端末 (bp_enabled=false) でも自動点呼は血圧必須のはず"
             );
         }
     );
 
     test_case!(
-        "bp_enabled=true の端末は従来どおり血圧なしを 400 で弾く (回帰) / 血圧ありは 200",
+        "bp_enabled=true の端末も血圧なしを 400 で弾く / 血圧ありは 200",
         {
             let res = client
                 .put(format!("{base_url}/api/devices/{device_id}/call-settings"))

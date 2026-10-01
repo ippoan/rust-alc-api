@@ -340,7 +340,6 @@ async fn main() -> anyhow::Result<()> {
         health_baselines,
         equipment_failures,
         driver_info,
-        devices: devices.clone(),
         webhook: webhook_service.clone(),
     };
 
