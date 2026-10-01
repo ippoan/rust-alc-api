@@ -110,6 +110,10 @@ router 実装として存続。旧 per-domain は同じ domain crate を単独 m
   RLS テナント分離が壊れる)。ただし **worker (`workers/*`) は `in_tenant_tx` でトランザクション単位
   (`set_config(..., true)`) の RLS にする場合に限り、プーラーの 6543 を使う** (`workers/vein` 行参照)。
   `DATABASE_URL` に `?options=-c search_path=alc_api` 必須。
+  **接続先の secret (Refs ippoan/alc-app#387)**: 本番の service (`cloudrun/render.sh` の本番枝) は
+  実行用ロール (表の非所有者 = FORCE の無い表でも RLS が掛かる) の `alc-app-database-url-rt`。
+  migrate job (`deploy.yml`) と archive job は所有者の `alc-app-database-url` のまま。
+  戻すときは render.sh の secret 名を戻す。
 - **staging は postgres superuser 接続 → RLS 完全 bypass** (`staging/cloudrun-staging.yaml` の
   `postgresql://postgres:...`)。superuser は `FORCE ROW LEVEL SECURITY` でも RLS を無視するため、
   **RLS 頼みで WHERE tenant_id を省いたクエリは staging で全テナント横断に漏れる**。tenant scope は
