@@ -953,12 +953,12 @@ impl TroubleSchedulesRepository for MockTroubleSchedulesRepository {
         Ok(None)
     }
 
-    async fn mark_sent(&self, _id: Uuid) -> Result<bool, sqlx::Error> {
+    async fn mark_sent(&self, _tenant_id: Uuid, _id: Uuid) -> Result<bool, sqlx::Error> {
         check_fail!(self);
         Ok(true)
     }
 
-    async fn mark_failed(&self, _id: Uuid) -> Result<bool, sqlx::Error> {
+    async fn mark_failed(&self, _tenant_id: Uuid, _id: Uuid) -> Result<bool, sqlx::Error> {
         check_fail!(self);
         Ok(true)
     }

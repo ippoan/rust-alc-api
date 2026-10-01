@@ -20,8 +20,9 @@ impl NotifyLineConfigRepository for PgNotifyLineConfigRepository {
     async fn get(&self, tenant_id: Uuid) -> Result<Option<NotifyLineConfig>, sqlx::Error> {
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
         sqlx::query_as::<_, NotifyLineConfig>(
-            "SELECT id, tenant_id, name, channel_id, bot_basic_id, public_key_jwk, enabled, created_at, updated_at FROM notify_line_configs LIMIT 1",
+            "SELECT id, tenant_id, name, channel_id, bot_basic_id, public_key_jwk, enabled, created_at, updated_at FROM notify_line_configs WHERE tenant_id = $1 LIMIT 1",
         )
+        .bind(tenant_id)
         .fetch_optional(&mut *tc.conn)
         .await
     }
@@ -29,8 +30,9 @@ impl NotifyLineConfigRepository for PgNotifyLineConfigRepository {
     async fn get_full(&self, tenant_id: Uuid) -> Result<Option<NotifyLineConfigFull>, sqlx::Error> {
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
         sqlx::query_as::<_, NotifyLineConfigFull>(
-            "SELECT id, tenant_id, channel_id, channel_secret_encrypted, channel_access_token_encrypted, key_id, private_key_encrypted FROM notify_line_configs LIMIT 1",
+            "SELECT id, tenant_id, channel_id, channel_secret_encrypted, channel_access_token_encrypted, key_id, private_key_encrypted FROM notify_line_configs WHERE tenant_id = $1 LIMIT 1",
         )
+        .bind(tenant_id)
         .fetch_optional(&mut *tc.conn)
         .await
     }
@@ -77,7 +79,8 @@ impl NotifyLineConfigRepository for PgNotifyLineConfigRepository {
 
     async fn delete(&self, tenant_id: Uuid) -> Result<(), sqlx::Error> {
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
-        sqlx::query("DELETE FROM notify_line_configs")
+        sqlx::query("DELETE FROM notify_line_configs WHERE tenant_id = $1")
+            .bind(tenant_id)
             .execute(&mut *tc.conn)
             .await?;
         Ok(())

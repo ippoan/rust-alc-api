@@ -216,12 +216,18 @@ async fn create_number(
 
 async fn delete_number(
     State(state): State<TenkoState>,
+    Extension(TenantId(tenant_id)): Extension<TenantId>,
     Path(id): Path<i32>,
 ) -> Result<StatusCode, StatusCode> {
-    state.tenko_call.delete_number(id).await.map_err(|e| {
-        tracing::error!("tenko_call delete_number error: {e}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    // 認証済みテナントの番号だけを消す (他テナントの id は 0 行で 204 のまま)。
+    state
+        .tenko_call
+        .delete_number(&tenant_id.to_string(), id)
+        .await
+        .map_err(|e| {
+            tracing::error!("tenko_call delete_number error: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
     Ok(StatusCode::NO_CONTENT)
 }

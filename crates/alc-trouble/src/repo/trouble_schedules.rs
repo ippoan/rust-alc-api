@@ -118,23 +118,26 @@ impl TroubleSchedulesRepository for PgTroubleSchedulesRepository {
             .await
     }
 
-    async fn mark_sent(&self, id: Uuid) -> Result<bool, sqlx::Error> {
-        // fire は RLS 外から呼ばれるため pool 直接使用
+    async fn mark_sent(&self, tenant_id: Uuid, id: Uuid) -> Result<bool, sqlx::Error> {
+        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
         let result = sqlx::query(
-            "UPDATE trouble_schedules SET status = 'sent', sent_at = NOW() WHERE id = $1 AND status = 'pending'",
+            "UPDATE trouble_schedules SET status = 'sent', sent_at = NOW() WHERE id = $1 AND tenant_id = $2 AND status = 'pending'",
         )
         .bind(id)
-        .execute(&self.pool)
+        .bind(tenant_id)
+        .execute(&mut *tc.conn)
         .await?;
         Ok(result.rows_affected() > 0)
     }
 
-    async fn mark_failed(&self, id: Uuid) -> Result<bool, sqlx::Error> {
+    async fn mark_failed(&self, tenant_id: Uuid, id: Uuid) -> Result<bool, sqlx::Error> {
+        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
         let result = sqlx::query(
-            "UPDATE trouble_schedules SET status = 'failed' WHERE id = $1 AND status = 'pending'",
+            "UPDATE trouble_schedules SET status = 'failed' WHERE id = $1 AND tenant_id = $2 AND status = 'pending'",
         )
         .bind(id)
-        .execute(&self.pool)
+        .bind(tenant_id)
+        .execute(&mut *tc.conn)
         .await?;
         Ok(result.rows_affected() > 0)
     }

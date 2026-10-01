@@ -209,6 +209,7 @@ pub trait DeviceRepository: Send + Sync {
     /// claim: QR永久 - phone_number/device_name 更新
     async fn claim_update_permanent_qr(
         &self,
+        tenant_id: Uuid,
         req_id: Uuid,
         phone_number: Option<&str>,
         device_name: &str,
@@ -417,13 +418,7 @@ pub trait DeviceRepository: Send + Sync {
         reset_binding: bool,
     ) -> Result<Option<chrono::DateTime<chrono::Utc>>, sqlx::Error>;
 
-    /// FCM トークン取得 (RLS 回避、pool 直接)
-    async fn get_fcm_token_bypass_rls(
-        &self,
-        device_id: Uuid,
-    ) -> Result<Option<Option<String>>, sqlx::Error>;
-
-    /// FCM テスト用: デバイスの FCM トークン取得 (tenant-scoped)
+    /// デバイスの FCM トークン取得 (tenant-scoped)
     async fn get_device_fcm_token(
         &self,
         tenant_id: Uuid,

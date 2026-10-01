@@ -159,7 +159,7 @@ impl AuthRepository for MockAuthRepository {
         Ok(self.return_invitation.lock().unwrap().clone())
     }
 
-    async fn delete_invitation(&self, _id: Uuid) -> Result<(), sqlx::Error> {
+    async fn delete_invitation(&self, _tenant_id: Uuid, _id: Uuid) -> Result<(), sqlx::Error> {
         check_fail!(self);
         Ok(())
     }
@@ -347,7 +347,11 @@ impl AuthRepository for MockAuthRepository {
         Ok(())
     }
 
-    async fn clear_refresh_token(&self, _user_id: Uuid) -> Result<(), sqlx::Error> {
+    async fn clear_refresh_token(
+        &self,
+        _tenant_id: Uuid,
+        _user_id: Uuid,
+    ) -> Result<(), sqlx::Error> {
         check_fail!(self);
         Ok(())
     }
@@ -1013,8 +1017,6 @@ pub struct MockDeviceRepository {
     pub return_schedule_disabled: AtomicBool,
     /// list_fcm_devices で日曜のみ schedule を返す (time-based test に使う)
     pub return_schedule_with_days: AtomicBool,
-    /// get_fcm_token_bypass_rls で None (token なし) を返す
-    pub return_no_fcm_token: AtomicBool,
     /// get_device_fcm_token で Some(None) (token null) を返す
     pub return_null_fcm_token: AtomicBool,
     /// list_all_callable_devices でデバイスを返す
@@ -1064,7 +1066,6 @@ impl Default for MockDeviceRepository {
             return_call_disabled: AtomicBool::new(false),
             return_schedule_disabled: AtomicBool::new(false),
             return_schedule_with_days: AtomicBool::new(false),
-            return_no_fcm_token: AtomicBool::new(false),
             return_null_fcm_token: AtomicBool::new(false),
             return_callable_devices: AtomicBool::new(false),
             return_dev_tenants: AtomicBool::new(false),
@@ -1194,6 +1195,7 @@ impl DeviceRepository for MockDeviceRepository {
 
     async fn claim_update_permanent_qr(
         &self,
+        _tenant_id: Uuid,
         _req_id: Uuid,
         _phone_number: Option<&str>,
         _device_name: &str,
@@ -1662,22 +1664,6 @@ impl DeviceRepository for MockDeviceRepository {
         check_fail!(self);
         if self.return_data.load(Ordering::SeqCst) {
             Ok(Some(Utc::now() + chrono::Duration::seconds(window_secs)))
-        } else {
-            Ok(None)
-        }
-    }
-
-    async fn get_fcm_token_bypass_rls(
-        &self,
-        _device_id: Uuid,
-    ) -> Result<Option<Option<String>>, sqlx::Error> {
-        check_fail!(self);
-        if self.return_data.load(Ordering::SeqCst) {
-            if self.return_no_fcm_token.load(Ordering::SeqCst) {
-                Ok(Some(None))
-            } else {
-                Ok(Some(Some("mock-fcm-token-bypass".to_string())))
-            }
         } else {
             Ok(None)
         }

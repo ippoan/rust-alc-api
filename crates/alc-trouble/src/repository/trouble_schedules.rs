@@ -37,8 +37,8 @@ pub trait TroubleSchedulesRepository: Send + Sync {
     /// RLS バイパス — Cloud Tasks fire 用 (SECURITY DEFINER 関数経由)
     async fn get_for_fire(&self, id: Uuid) -> Result<Option<TroubleSchedule>, sqlx::Error>;
 
-    /// fire 後の status + sent_at 更新 (RLS バイパス)
-    async fn mark_sent(&self, id: Uuid) -> Result<bool, sqlx::Error>;
+    /// fire 後の status + sent_at 更新 (tenant は `get_for_fire` で引いた行のもの)
+    async fn mark_sent(&self, tenant_id: Uuid, id: Uuid) -> Result<bool, sqlx::Error>;
 
-    async fn mark_failed(&self, id: Uuid) -> Result<bool, sqlx::Error>;
+    async fn mark_failed(&self, tenant_id: Uuid, id: Uuid) -> Result<bool, sqlx::Error>;
 }

@@ -181,21 +181,24 @@ impl DeviceRepository for PgDeviceRepository {
 
     async fn claim_update_permanent_qr(
         &self,
+        tenant_id: Uuid,
         req_id: Uuid,
         phone_number: Option<&str>,
         device_name: &str,
     ) -> Result<(), sqlx::Error> {
+        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
         sqlx::query(
             r#"
             UPDATE device_registration_requests
             SET phone_number = $1, device_name = $2
-            WHERE id = $3
+            WHERE id = $3 AND tenant_id = $4
             "#,
         )
         .bind(phone_number)
         .bind(device_name)
         .bind(req_id)
-        .execute(&self.pool)
+        .bind(tenant_id)
+        .execute(&mut *tc.conn)
         .await?;
         Ok(())
     }
@@ -320,12 +323,13 @@ impl DeviceRepository for PgDeviceRepository {
         tenant_id: Uuid,
         exclude_device_id: Uuid,
     ) -> Result<Vec<String>, sqlx::Error> {
+        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
         let rows = sqlx::query_as::<_, (String,)>(
             "SELECT fcm_token FROM alc_api.devices WHERE tenant_id = $1 AND id != $2 AND status = 'active' AND fcm_token IS NOT NULL",
         )
         .bind(tenant_id)
         .bind(exclude_device_id)
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *tc.conn)
         .await?;
         Ok(rows.into_iter().map(|r| r.0).collect())
     }
@@ -773,19 +777,6 @@ impl DeviceRepository for PgDeviceRepository {
         .bind(reset_binding)
         .bind(id)
         .fetch_optional(&mut *tc.conn)
-        .await?;
-        Ok(row.map(|r| r.0))
-    }
-
-    async fn get_fcm_token_bypass_rls(
-        &self,
-        device_id: Uuid,
-    ) -> Result<Option<Option<String>>, sqlx::Error> {
-        let row = sqlx::query_as::<_, (Option<String>,)>(
-            "SELECT fcm_token FROM alc_api.devices WHERE id = $1",
-        )
-        .bind(device_id)
-        .fetch_optional(&self.pool)
         .await?;
         Ok(row.map(|r| r.0))
     }

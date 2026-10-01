@@ -1,6 +1,6 @@
 ---
 name: rust-alc-api-map
-generated-from: rust-alc-api:007ad513da0d569b6e8eda8e2e5b1126be0bc586
+generated-from: rust-alc-api:c88d4d41b6cc880e7eebf65f33b480e8afd2bd51
 paths: [crates/, src/, migrations/, tests/]
 description: rust-alc-api (アルコールチェッカー基盤の Rust/Axum Cargo workspace — domain crate 群 + monolith 単一バイナリ、PostgreSQL+RLS、Cloud Run) の構造ナビゲーション。どの crate に何のルートがあるか / monolith (rust-alc-api) 一本化 (gateway + per-domain は #556 で廃止) / RLS・migration・deploy/release 分離の gotcha を 1 枚にまとめる。トリガー:「rust-alc-api」「alc-api」「alc-notify」「alc-tenko」「alc-trouble」「alc-carins」「alc-dtako」「gateway」「tenko-api」「carins-api」「dtako-api」「trouble-api」「RLS テナント」「sqlx migration」「ts-rs」「Release Wave」「Bazel」等。
 ---
@@ -116,6 +116,44 @@ router 実装として存続。旧 per-domain は同じ domain crate を単独 m
   `crates/alc-core/src/tenant.rs::TenantConn` が `set_current_tenant` で `app.current_tenant_id` を
   立てて RLS に委ねるが、本番 (alc_api_app) でしか効かない。staging も対象にするクエリは
   **WHERE tenant_id を明示**すること (Refs #434、sso_admin で実害)。
+- **呼び出し元に tenant が在る query は `TenantConn` 経由 + `WHERE tenant_id` を明示 (Refs ippoan/alc-app#387)**:
+  本番の backend は表の所有者で繋いでいるあいだ、`FORCE ROW LEVEL SECURITY` の無い表に RLS が
+  1 行も掛からない (分離は query の `WHERE tenant_id` 頼み)。実行用ロール (所有者でない) へ切り替えると
+  ポリシーが掛かり始め、tenant context を立てずに `self.pool` / `state.pool()` で叩く query は
+  42704 / 22P02 で落ちる。**どちらの接続でも同じ結果になるよう、tenant を渡せる query は
+  `TenantConn::acquire` で接続を取り、id / email で引く UPDATE・DELETE・SELECT にも
+  `AND tenant_id = $n` を書く** (RLS 任せにしない)。この形に直した口:
+  - `alc-core/src/repo/auth.rs`: `create_user_google` / `create_user_lineworks` / `create_user_line` /
+    `register_line_recipient` / `delete_invitation(tenant_id, id)` / `clear_refresh_token(tenant_id, user_id)`
+    (後ろ 2 つは署名に tenant_id を足した。呼び出し元は `alc-auth` の `internal.rs` = `inv.tenant_id` /
+    `lib.rs` の logout = `auth_user.tenant_id`)
+  - `alc-devices/src/repo/devices.rs`: `claim_update_permanent_qr(tenant_id, req_id, …)` (handler は
+    `req.tenant_id` が無ければ 400「無効なトークンです」) / `list_tenant_fcm_tokens_except`。
+    **`get_fcm_token_bypass_rls` は消した** — 設定変更の通知 (`update_call_settings`) は tenant 付きの
+    `get_device_fcm_token(tenant_id, id)` でトークンを引く
+  - `alc-tenko`: `TenkoOverdueRepository::get_employee_name(tenant_id, employee_id)` /
+    `mark_overdue_notified(tenant_id, schedule_id)` (`check_overdue_schedules` が `config.tenant_id` を渡す) /
+    `TenkoCallRepository::delete_number(tenant_id, id)` (handler が `Extension<TenantId>` を取る。
+    `tenko_call_numbers.tenant_id` は TEXT なので `&str`)
+  - `alc-trouble`: `TroubleSchedulesRepository::mark_sent(tenant_id, id)` / `mark_failed(tenant_id, id)`
+    (fire は `get_for_fire` で引いた `schedule.tenant_id` を渡す)
+  - `alc-misc/src/access_requests.rs`: 一覧・承認・却下は helper `tenant_conn` (`auth_user.tenant_id`) の接続で叩く。
+    `create_request` (申請先テナントへ INSERT) と slug 検索は認証前・テナント横断の側なのでそのまま
+  - `alc-misc/src/repo/tenant_users.rs`: 一覧 2 本・`invite_user`・id / email 指定の DELETE・UPDATE すべて
+  - `alc-notify/src/repo/notify_line_config.rs`: `get` / `get_full` / `delete` (以前の `delete` は WHERE 無しで、
+    所有者接続では全テナントの LINE 設定を消していた)
+  - **そのまま残した pool 直の query** (認証前・テナント横断が本来の動き。SECURITY DEFINER 関数へ出すのは
+    別タスク): `find_user_by_google_sub` / `find_user_by_lineworks_id` / `save_refresh_token` /
+    `find_invitation_by_email` / `get_registration_status` / `list_fcm_devices` / `get_device_tenant_active` /
+    `list_all_callable_devices` / `list_dev_device_tenant_ids` / `find_overdue_configs` / `create_request`。
+    `tenko_call` の `ON CONFLICT (phone_number)` と `tenant_users` の `ON CONFLICT (email)` はテナントをまたぐ
+    UNIQUE に当たるままで、切り替え後は他テナントと衝突するとエラーになる (未対応)
+  - **公開 route `POST /devices/test-fcm-all-exclude` は `check_internal_secret` (`X-Internal-Secret` =
+    `FCM_INTERNAL_SECRET`) を通す** — 全テナントの端末へ FCM を送る口で、以前は認可が無かった。
+    呼び出し元は alc-app の signaling (`cf-alc-signaling` の `room-registry.ts`) で、隣の
+    `/devices/fcm-notify-call` と同じ形でヘッダを付ける。secret 未設定は 503 (fail-closed)、不一致は 401
+  - テストは `tests/tenant_scoped_queries_test.rs` (実 DB。superuser 接続なので RLS は素通り =
+    落ちれば query 側の条件が抜けている)
 - **dev端末 (開発用の鍵) の記録の分離 — `X-Device-Dev` → `app.device_dev` (Refs ippoan/alc-app#387)**:
   dev端末で行った点呼・測定・打刻の行は、その鍵の要求からしか見えない。**INSERT / SELECT の SQL は
   書き換えていない** — backend は検証済みの要求の印を DB の接続の設定に通すだけで、行の出し分けは
@@ -535,6 +573,7 @@ TEST_DATABASE_URL="..." cargo llvm-cov --html --open
 | `tests/employees_test.rs` | RLS テナント分離 / キオスクモード |
 | `tests/hub_measurements_test.rs` | hub 測定の ingest 冪等性 (4 列 unique index、本番の軸のみ) + 一覧の絞り込み / ページング / テナント分離 |
 | `tests/normal_tenko_record_test.rs` | 通常点呼の点呼記録化 — 印つきで session + record が 1 件ずつ / 始業・終業の種別 (pre / post) と点呼方法 '通常点呼' / 不正な種別は POST・PUT とも 400 で測定を作らない・更新しない / pre の PUT 再送・同一乗務員同時刻の normal と post でも 1 組 / 切り替えの窓 (旧版の normal + DEFAULT 行を直接 INSERT) の後に pre で再送しても 1 組 / スケジュール無し (遠隔点呼) の session は '通常点呼' ではないため、同じ測定を submit_alcohol に付けても unique に当たらない (Refs #655) / 完了 PUT 再送・同一乗務員同時刻の 2 件目でも 1 組のまま / `over` は `cancelled` + 中止理由 / `error`・印なしは 作らない / **記録の作成が失敗しても測定は残る** (内側だけ rollback) / 執行者 NULL の記録があっても一覧・CSV が 取れる / 電子車検証: 管理番号一致・車両 ID 一致・未登録・番号なしを session・record_data・CSV 末尾 4 列に残す、同じ車両 ID の古い行と新しい行は新しい期限、壊れた期限 (月 13 = NULL / 2 月 31 日 = 照合失敗) でも記録は作る、不正な桁は 400 (テスト DB は superuser 接続なので RLS は検証しない)。**失敗注入はテナント条件付きの `BEFORE INSERT` トリガー** — 表の RENAME だと同じ binary の他テストを 巻き添えにする / **点呼方法と応答の id (Refs ippoan/alc-app#387)**: `tenko_method` 未指定・明示の `通常点呼` は従来どおりで PUT の応答 `tenko_session_id` が作られた session の id / `IT点呼` は session・record の両方に書かれ種別 (未指定・pre・post) と状態 (`over` → `cancelled`) の決まり方は同じ / 同じ測定の再送は 1 行のまま id も同じ (点呼方法を変えて再送しても書き換わらない)、同じ乗務員・同じ時刻の別の測定は null / 印なし・`error`・未完了は null、`自動点呼`・`遠隔点呼` は 400 で測定も更新しない / POST は `tenko_method` を無視し応答に欄も無い / IT点呼 の session に運行管理者の判定 (`POST /tenko/sessions/{id}/judgment`) が 200 で入り GET に `tenko_method` と判定が出る |
+| `tests/tenant_scoped_queries_test.rs` | tenant を渡して叩く query が別テナントの id では 0 行 / 影響なしになること (Refs ippoan/alc-app#387) — 招待の消費・logout の refresh token 消去・LINE 通知先の自動登録 (auth) / ユーザーと招待の一覧・削除・role 変更 (tenant_users) / LINE 設定の取得・削除 (notify_line_config) / QR 永久のクレームと FCM トークン (devices) / 超過検知の従業員名・通知済みの印と点呼用電話番号の削除 (tenko) / 通知予約の `mark_sent`・`mark_failed` (trouble) / 参加申請の一覧・承認・却下 (HTTP 経由、別テナントの管理者は 404)。bazel `db-tenant-scoped-queries` shard |
 | `tests/dvr_notifications_test.rs` | DVR 通知の ingest 冪等性 (自然キー) + `pending` 再掲 / **テナント分離 (別 tenant の id は 404)** / 32MB 超は 413 + `failed` |
 | `tests/tenko_bp_required_escalate_test.rs` | 自動点呼タブの血圧必須化 + 遠隔点呼への切り替え (migration 144、Refs ippoan/alc-app-s3#135) — 自動点呼 (`tenko_method` 既定) は血圧 (最高・最低) なしで 400 / ありで 200 / 通常点呼は血圧なしでも 200 (退行がないこと、`tenko_method` を直接書き換えて分岐だけ確かめる — 実運用の通常点呼作成経路は即 completed になり medical_pending を経由できないため) / `escalate-remote` (`PUT .../escalate-remote`) で `tenko_method` が '遠隔点呼' に変わり、切り替え時刻・理由が応答と DB の両方に残る / 切り替え後は血圧なしで 200 / 切り替えても cancel までの記録は作られず、完了後の `tenko_records` は 1 件だけで `tenko_method` が '自動点呼' に化けていない (144 の `create_tenko_record` 修正の固定) / 理由が空文字は 400 / 200 文字超も 400 (切り詰めない) / 通常点呼のセッションは切り替えられない 400 (別経路の振る舞いを変えない) / 既に遠隔点呼へ切り替え済みのセッションは再度切り替えられない 400 (二重にならない) / **start_session のスケジュール無し経路は `tenko_method='遠隔点呼'` で作られ (Refs #655)、血圧を含まない体温だけの submit_medical が 400 にならず成功する** (症状の固定) / 回帰: スケジュールありの開始は従来どおり `tenko_method='自動点呼'` で、血圧の無い体温提出は従来どおり 400 |
 | `tests/device_bp_enabled_test.rs` | `devices.bp_enabled` (migration 143) の既定値・GET/PUT 往復に加え (Refs ippoan/alc-app-s3#135)、`submit_medical` の血圧必須判定が `bp_enabled` を正本にすることを固定 (Refs ippoan/alc-app#322) — `bp_enabled=false` の端末は自動点呼でも血圧なしで 200 (症状の固定) / `bp_enabled=true` の端末は従来どおり血圧なしを 400 で弾く (回帰) / 自動点呼でなければ device_id の有無に関わらず血圧なしで 200 |
