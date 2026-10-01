@@ -1,6 +1,6 @@
 ---
 name: rust-alc-api-map
-generated-from: rust-alc-api:52dcf718f2ccc239ec90ebfc8073ebea554072b5
+generated-from: rust-alc-api:ac205c03f3d1d3b0fac3227fe7ffac0955a027b8
 paths: [crates/, src/, migrations/, tests/]
 description: rust-alc-api (アルコールチェッカー基盤の Rust/Axum Cargo workspace — domain crate 群 + monolith 単一バイナリ、PostgreSQL+RLS、Cloud Run) の構造ナビゲーション。どの crate に何のルートがあるか / monolith (rust-alc-api) 一本化 (gateway + per-domain は #556 で廃止) / RLS・migration・deploy/release 分離の gotcha を 1 枚にまとめる。トリガー:「rust-alc-api」「alc-api」「alc-notify」「alc-tenko」「alc-trouble」「alc-carins」「alc-dtako」「gateway」「tenko-api」「carins-api」「dtako-api」「trouble-api」「RLS テナント」「sqlx migration」「ts-rs」「Release Wave」「Bazel」等。
 ---
@@ -897,6 +897,14 @@ fetch のみに戻す)。
 - `pool.close()` / DB error injection は対象外 (R2 fetch は DB connection 不要)
 - 想定: 13ヶ月レンジで 41-107s → **5-15s** (~85% 削減)
 - これだけで Cloudflare proxy 100s timeout 内に収まるので、async 化不要
+
+### Y時間 export: 同じ日の行に複数のかたまりが入るとき
+
+`dtako_y_time_export/builder.rs` の `build_y_time_rows` は、同じ日の行 (bucket) に 2 つ以上の segment
+(休息で切ったかたまり) が入ると 始業=最早・終業=最遅・休憩=各 segment 内の休憩の合計 にまとめる。
+**かたまりの間の時間は、`gap_rest` が「その行に入ったかたまりの終わりの最大 〜 次の始まり」を
+`split_rest_intervals` に通して休憩の 7 欄に足す** (足さないと Excel で労働に数えられ、1 行が 24 時間を超える日が出る)。
+間が 0 分以下 (重なり) なら何も足さない。7 欄に入らなかった分は警告に出す。応答の形 (`YTimeRow`) は不変。
 
 **LIST も同じ (2026-07-31、Refs ohishi-exp/rust-ichibanboshi#205-27)**。`dtako_events.rs` の
 `list_prefixes` は `R2_LIST_CONCURRENCY = 16` で複数 prefix の LIST を並列に投げる。
