@@ -479,7 +479,7 @@ TEST_DATABASE_URL="..." cargo llvm-cov --html --open
 
 | ファイル | 内容 |
 |---------|------|
-| `tests/common/mod.rs` | テストハーネス (DB 接続、サーバー起動、JWT 発行ヘルパー)。migration は `migrate_and_grant` に 1 本化 (migration の後に `scripts/local_app_grants.sql` を流す。DB を直接開くテストも必ずこれを通す) |
+| `tests/common/mod.rs` | テストハーネス (DB 接続、サーバー起動、JWT 発行ヘルパー)。migration は `migrate_and_grant` に 1 本化 (`alc_migrations::MIGRATOR` の後に `alc_migrations::LOCAL_APP_GRANTS` を流す。DB を直接開くテストも必ずこれを通す) |
 | `tests/app_role_grants_test.rs` | テスト DB の `alc_api_app` の権限が本番と揃っているか (Refs #685) — `alc_api` の表のうち `has_table_privilege('alc_api_app', 表, 'SELECT')` が false のものを列挙し 0 件を assert。新しい表の GRANT 付け忘れ (過去に本番 502) を落とす。直すのは migration 側 (bazel `db-app-role-grants` shard) |
 | `tests/common/mock_storage.rs` | インメモリ StorageBackend 実装 |
 | `tests/auth_test.rs` | JWT 認証 / X-Tenant-ID / 未認証拒否 |
@@ -523,7 +523,7 @@ splinter / RLS 検証フルセットは CI に集約する。
 
 ## マイグレーションとデプロイ
 
-- **migration の正本は ippoan/alc-migrations に移行済み (rust-alc-api#697)**。rust-alc-api の `migrations/` と `scripts/init_local_db.sql`・`scripts/local_app_grants.sql` は crate への切り替えまで追加・変更禁止 (CI `pr-limit` の Freeze step が止める。`removed` は通す)
+- **migration の正本は ippoan/alc-migrations に移行済み (rust-alc-api#697)**。`src/bin/migrate.rs` (本番) と `tests/common` (テスト) は `alc_migrations::MIGRATOR` / `LOCAL_APP_GRANTS` を読む (git 依存、`Cargo.toml` の rev 固定。新しい migration は rev を上げて取り込む)。rust-alc-api の `migrations/` と `scripts/init_local_db.sql`・`scripts/local_app_grants.sql` は 152 番で止めた写しで正本ではなく、追加・変更禁止 (CI `pr-limit` の Freeze step が止める。`removed` は通す)
 - マイグレーションファイルは `migrations/` ディレクトリに連番で配置 (`001_`, `002_`, ...)
 - マイグレーションは **Cloud Run Jobs** (`rust-alc-api-migrate`) でデプロイ前に実行される
 - `src/bin/migrate.rs` — マイグレーション専用バイナリ（同じ Docker イメージに含まれる）

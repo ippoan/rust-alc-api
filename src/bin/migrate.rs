@@ -9,7 +9,7 @@ async fn main() -> anyhow::Result<()> {
         .connect(&database_url)
         .await?;
 
-    sqlx::migrate!("./migrations").run(&pool).await?;
+    alc_migrations::MIGRATOR.run(&pool).await?;
 
     println!("Migrations completed successfully");
     Ok(())

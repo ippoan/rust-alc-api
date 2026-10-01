@@ -1593,11 +1593,13 @@ mod tests {
             })))
             .mount(&boards_server)
             .await;
+        // since (now-30日) より新しい投稿。固定の日付だと時間が経つと窓から外れて落ちる。
+        let recent_created = (Utc::now() - chrono::Duration::days(1)).to_rfc3339();
         Mock::given(method("GET"))
             .and(path("/boards/4000000000000000001/posts"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "posts": [
-                    {"postId": 1234567890123456789u64, "createdTime": "2026-09-01T00:00:00+09:00"},
+                    {"postId": 1234567890123456789u64, "createdTime": recent_created},
                     // since より古い投稿は呼び出し元 (list_recent_board_posts) で弾かれる。
                     {"postId": 9999999999999999999u64, "createdTime": "2020-01-01T00:00:00+09:00"},
                 ]
