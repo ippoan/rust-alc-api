@@ -1426,7 +1426,8 @@ pub struct HubMeasurementCreate {
     /// temperature / blood_pressure / alcohol / fc1200_raw
     /// (allowlist は alc-devices hub_measurements::HUB_MEASUREMENT_KINDS)。
     pub kind: String,
-    /// device 内シーケンス。UNIQUE (tenant_id, device_id, seq) で再送を冪等に吸収する。
+    /// device 内シーケンス。unique index (tenant_id, device_id, seq, is_dev) で再送を冪等に吸収する
+    /// (is_dev = dev端末の軸。列の既定値で入るので、この型には持たせない)。
     pub seq: i64,
     /// 端末計時 (unix ms)。時計未同期端末では null。
     pub recorded_at_ms: Option<i64>,
@@ -1444,7 +1445,7 @@ pub struct HubMeasurementCreate {
 pub struct HubMeasurementsIngestResponse {
     /// 新規に insert された件数。
     pub inserted: i64,
-    /// UNIQUE (tenant_id, device_id, seq) 衝突でスキップされた件数 (再送重複)。
+    /// unique index (tenant_id, device_id, seq, is_dev) 衝突でスキップされた件数 (同じ軸の再送重複)。
     pub duplicates: i64,
 }
 

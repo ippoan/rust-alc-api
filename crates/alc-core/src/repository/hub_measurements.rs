@@ -12,8 +12,9 @@ use crate::models::{
 /// router の `GET /api/hub/measurements`。
 #[async_trait]
 pub trait HubMeasurementsRepository: Send + Sync {
-    /// バッチ insert。`UNIQUE (tenant_id, device_id, seq)` の衝突 (再送重複) は
-    /// ON CONFLICT DO NOTHING でスキップし、duplicates として数える。
+    /// バッチ insert。unique index `(tenant_id, device_id, seq, is_dev)` の衝突 (再送重複) は
+    /// ON CONFLICT DO NOTHING でスキップし、duplicates として数える。同じ端末・同じ連番でも
+    /// dev端末の軸 (`is_dev`) が違えば別の行として入る (alc-migrations 155 / 156)。
     ///
     /// **payload は呼び出し側が凍結済みのものを渡す** — `kind="timecard"` の
     /// `employee_id` は ingest handler が insert の前に解決して入れる

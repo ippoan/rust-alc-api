@@ -35,8 +35,8 @@ impl HubMeasurementsRepository for PgHubMeasurementsRepository {
                 .recorded_at_ms
                 .and_then(DateTime::from_timestamp_millis);
             // 重複の判定は dev端末の軸 (is_dev) ごと (alc-migrations 155 の 4 列 unique を
-            // 推論させる)。is_dev は列の既定値で入る。3 列 unique (126) がまだ残っているので、
-            // 同じ端末・同じ連番が両方の軸で届くと一意違反のエラーになる (黙って捨てない)
+            // 推論させる)。is_dev は列の既定値で入る。126 の 3 列 unique は alc-migrations 156 で
+            // 落ちたので、同じ端末・同じ連番は軸ごとに 1 行ずつ入る (同じ軸の再送だけが弾かれる)
             let res = sqlx::query(
                 r#"
                 INSERT INTO hub_measurements (

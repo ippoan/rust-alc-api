@@ -2,7 +2,8 @@
 //!
 //! - POST … cf-alc-recorder →(auth-worker /alc-internal-proxy)→ 本 API。
 //!   `internal_shared_secret_router` 配下 (X-Internal-Shared-Secret + X-Tenant-ID) の
-//!   実 DB での冪等性 (UNIQUE (tenant_id, device_id, seq)) とテナント分離を固定する。
+//!   実 DB での冪等性 (unique index (tenant_id, device_id, seq, is_dev)) とテナント分離を固定する。
+//!   ここは全部ヘッダなし (本番の軸)。軸をまたぐ取り込みは `device_dev_axis_test.rs`。
 //! - GET … テナント認証付き router (X-Tenant-ID)。絞り込み・created_at DESC の
 //!   ページング・**テナント分離**を実 DB で固定する。
 
