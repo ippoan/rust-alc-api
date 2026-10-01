@@ -261,7 +261,10 @@ async fn fire_schedule(
     }
 
     // 送信済みマーク
-    let _ = state.trouble_schedules.mark_sent(id).await;
+    let _ = state
+        .trouble_schedules
+        .mark_sent(schedule.tenant_id, id)
+        .await;
 
     Ok(StatusCode::OK)
 }

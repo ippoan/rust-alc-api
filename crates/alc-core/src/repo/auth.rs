@@ -4,6 +4,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::models::{Tenant, TenantAllowedEmail, User};
+use crate::tenant::TenantConn;
 
 pub use crate::repository::auth::*;
 
@@ -64,10 +65,12 @@ impl AuthRepository for PgAuthRepository {
         .await
     }
 
-    async fn delete_invitation(&self, id: Uuid) -> Result<(), sqlx::Error> {
-        sqlx::query("DELETE FROM tenant_allowed_emails WHERE id = $1")
+    async fn delete_invitation(&self, tenant_id: Uuid, id: Uuid) -> Result<(), sqlx::Error> {
+        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
+        sqlx::query("DELETE FROM tenant_allowed_emails WHERE id = $1 AND tenant_id = $2")
             .bind(id)
-            .execute(&self.pool)
+            .bind(tenant_id)
+            .execute(&mut *tc.conn)
             .await?;
         Ok(())
     }
@@ -145,6 +148,7 @@ impl AuthRepository for PgAuthRepository {
         name: &str,
         role: &str,
     ) -> Result<User, sqlx::Error> {
+        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
         sqlx::query_as::<_, User>(
             r#"
             INSERT INTO users (tenant_id, google_sub, email, name, role)
@@ -157,7 +161,7 @@ impl AuthRepository for PgAuthRepository {
         .bind(email)
         .bind(name)
         .bind(role)
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *tc.conn)
         .await
     }
 
@@ -177,6 +181,7 @@ impl AuthRepository for PgAuthRepository {
         email: &str,
         name: &str,
     ) -> Result<User, sqlx::Error> {
+        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
         sqlx::query_as::<_, User>(
             r#"INSERT INTO users (tenant_id, lineworks_id, email, name, role)
                VALUES ($1, $2, $3, $4, 'viewer') RETURNING *"#,
@@ -185,7 +190,7 @@ impl AuthRepository for PgAuthRepository {
         .bind(lineworks_id)
         .bind(email)
         .bind(name)
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *tc.conn)
         .await
     }
 
@@ -264,6 +269,7 @@ impl AuthRepository for PgAuthRepository {
         name: &str,
         line_user_id: &str,
     ) -> Result<(), sqlx::Error> {
+        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
         sqlx::query(
             "INSERT INTO alc_api.notify_recipients (tenant_id, name, provider, line_user_id) \
              VALUES ($1, $2, 'line', $3) \
@@ -272,7 +278,7 @@ impl AuthRepository for PgAuthRepository {
         .bind(tenant_id)
         .bind(name)
         .bind(line_user_id)
-        .execute(&self.pool)
+        .execute(&mut *tc.conn)
         .await?;
         Ok(())
     }
@@ -283,6 +289,7 @@ impl AuthRepository for PgAuthRepository {
         line_user_id: &str,
         name: &str,
     ) -> Result<User, sqlx::Error> {
+        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
         sqlx::query_as::<_, User>(
             r#"INSERT INTO users (tenant_id, line_user_id, email, name, role)
                VALUES ($1, $2, $2, $3, 'viewer') RETURNING *"#,
@@ -290,7 +297,7 @@ impl AuthRepository for PgAuthRepository {
         .bind(tenant_id)
         .bind(line_user_id)
         .bind(name)
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *tc.conn)
         .await
     }
 
@@ -311,12 +318,14 @@ impl AuthRepository for PgAuthRepository {
         Ok(())
     }
 
-    async fn clear_refresh_token(&self, user_id: Uuid) -> Result<(), sqlx::Error> {
+    async fn clear_refresh_token(&self, tenant_id: Uuid, user_id: Uuid) -> Result<(), sqlx::Error> {
+        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
         sqlx::query(
-            "UPDATE users SET refresh_token_hash = NULL, refresh_token_expires_at = NULL WHERE id = $1",
+            "UPDATE users SET refresh_token_hash = NULL, refresh_token_expires_at = NULL WHERE id = $1 AND tenant_id = $2",
         )
         .bind(user_id)
-        .execute(&self.pool)
+        .bind(tenant_id)
+        .execute(&mut *tc.conn)
         .await?;
         Ok(())
     }

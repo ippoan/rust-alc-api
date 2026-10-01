@@ -86,7 +86,7 @@ async fn logout(
 ) -> Result<StatusCode, StatusCode> {
     state
         .auth
-        .clear_refresh_token(auth_user.user_id)
+        .clear_refresh_token(auth_user.tenant_id, auth_user.user_id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 

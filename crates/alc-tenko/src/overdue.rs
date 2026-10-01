@@ -24,9 +24,17 @@ pub trait TenkoOverdueRepository: Send + Sync {
         overdue_minutes: i64,
     ) -> Result<Vec<TenkoSchedule>, sqlx::Error>;
 
-    async fn get_employee_name(&self, employee_id: Uuid) -> Result<Option<String>, sqlx::Error>;
+    async fn get_employee_name(
+        &self,
+        tenant_id: Uuid,
+        employee_id: Uuid,
+    ) -> Result<Option<String>, sqlx::Error>;
 
-    async fn mark_overdue_notified(&self, schedule_id: Uuid) -> Result<(), sqlx::Error>;
+    async fn mark_overdue_notified(
+        &self,
+        tenant_id: Uuid,
+        schedule_id: Uuid,
+    ) -> Result<(), sqlx::Error>;
 }
 
 /// 未完了予定の検出 + overdue通知 (バックグラウンドループから呼ばれる)
@@ -48,7 +56,9 @@ pub async fn check_overdue_schedules(
             .await?;
 
         for schedule in &overdue_schedules {
-            let employee_name = overdue.get_employee_name(schedule.employee_id).await?;
+            let employee_name = overdue
+                .get_employee_name(config.tenant_id, schedule.employee_id)
+                .await?;
 
             let minutes = (Utc::now() - schedule.scheduled_at).num_minutes();
 
@@ -67,7 +77,9 @@ pub async fn check_overdue_schedules(
                 }
             });
 
-            overdue.mark_overdue_notified(schedule.id).await?;
+            overdue
+                .mark_overdue_notified(config.tenant_id, schedule.id)
+                .await?;
 
             let _ = deliver_webhook(repo, http, config, "tenko_overdue", &payload).await;
         }
@@ -161,12 +173,17 @@ mod tests {
 
         async fn get_employee_name(
             &self,
+            _tenant_id: Uuid,
             _employee_id: Uuid,
         ) -> Result<Option<String>, sqlx::Error> {
             Ok(self.employee_name.clone())
         }
 
-        async fn mark_overdue_notified(&self, schedule_id: Uuid) -> Result<(), sqlx::Error> {
+        async fn mark_overdue_notified(
+            &self,
+            _tenant_id: Uuid,
+            schedule_id: Uuid,
+        ) -> Result<(), sqlx::Error> {
             self.notified.lock().unwrap().push(schedule_id);
             Ok(())
         }

@@ -1,6 +1,8 @@
 use async_trait::async_trait;
 use sqlx::PgPool;
 
+use alc_core::tenant::TenantConn;
+
 pub use crate::repository::tenko_call::*;
 
 pub struct PgTenkoCallRepository {
@@ -167,10 +169,12 @@ impl TenkoCallRepository for PgTenkoCallRepository {
         Ok(row.0)
     }
 
-    async fn delete_number(&self, id: i32) -> Result<(), sqlx::Error> {
-        sqlx::query("DELETE FROM tenko_call_numbers WHERE id = $1")
+    async fn delete_number(&self, tenant_id: &str, id: i32) -> Result<(), sqlx::Error> {
+        let mut tc = TenantConn::acquire(&self.pool, tenant_id).await?;
+        sqlx::query("DELETE FROM tenko_call_numbers WHERE id = $1 AND tenant_id = $2")
             .bind(id)
-            .execute(&self.pool)
+            .bind(tenant_id)
+            .execute(&mut *tc.conn)
             .await?;
 
         Ok(())

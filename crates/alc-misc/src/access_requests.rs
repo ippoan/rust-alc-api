@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use alc_core::auth_middleware::AuthUser;
+use alc_core::tenant::TenantConn;
 use alc_core::AppState;
 
 #[derive(Debug, Clone, sqlx::FromRow, Serialize)]
@@ -77,6 +78,16 @@ pub fn protected_router() -> Router<AppState> {
         .route("/access-requests", get(list_requests))
         .route("/access-requests/{id}/approve", post(approve_request))
         .route("/access-requests/{id}/decline", post(decline_request))
+}
+
+/// 認証済みテナントの context を立てた接続を取る (access_requests の RLS 用)。
+async fn tenant_conn(state: &AppState, auth_user: &AuthUser) -> Result<TenantConn, StatusCode> {
+    TenantConn::acquire(state.pool(), &auth_user.tenant_id.to_string())
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to acquire tenant connection: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })
 }
 
 async fn get_tenant_by_slug(
@@ -157,20 +168,22 @@ async fn list_requests(
         return Err(StatusCode::FORBIDDEN);
     }
 
+    let mut tc = tenant_conn(&state, &auth_user).await?;
+
     let rows = if let Some(status) = &params.status {
         sqlx::query_as::<_, AccessRequestRow>(
             "SELECT * FROM alc_api.access_requests WHERE tenant_id = $1 AND status = $2 ORDER BY created_at DESC",
         )
         .bind(auth_user.tenant_id)
         .bind(status)
-        .fetch_all(state.pool())
+        .fetch_all(&mut *tc.conn)
         .await
     } else {
         sqlx::query_as::<_, AccessRequestRow>(
             "SELECT * FROM alc_api.access_requests WHERE tenant_id = $1 ORDER BY created_at DESC",
         )
         .bind(auth_user.tenant_id)
-        .fetch_all(state.pool())
+        .fetch_all(&mut *tc.conn)
         .await
     }
     .map_err(|e| {
@@ -208,6 +221,8 @@ async fn approve_request(
         .and_then(|b| b.role)
         .unwrap_or_else(|| "viewer".to_string());
 
+    let mut tc = tenant_conn(&state, &auth_user).await?;
+
     // ステータスを approved に更新
     let result = sqlx::query(
         "UPDATE alc_api.access_requests SET status = 'approved', role = $1, updated_at = now() WHERE id = $2 AND tenant_id = $3 AND status = 'pending'",
@@ -215,7 +230,7 @@ async fn approve_request(
     .bind(&role)
     .bind(id)
     .bind(auth_user.tenant_id)
-    .execute(state.pool())
+    .execute(&mut *tc.conn)
     .await
     .map_err(|e| {
         tracing::error!("Failed to approve access request: {e}");
@@ -238,12 +253,14 @@ async fn decline_request(
         return Err(StatusCode::FORBIDDEN);
     }
 
+    let mut tc = tenant_conn(&state, &auth_user).await?;
+
     let result = sqlx::query(
         "UPDATE alc_api.access_requests SET status = 'declined', updated_at = now() WHERE id = $1 AND tenant_id = $2 AND status = 'pending'",
     )
     .bind(id)
     .bind(auth_user.tenant_id)
-    .execute(state.pool())
+    .execute(&mut *tc.conn)
     .await
     .map_err(|e| {
         tracing::error!("Failed to decline access request: {e}");

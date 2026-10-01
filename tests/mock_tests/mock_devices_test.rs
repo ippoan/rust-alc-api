@@ -878,6 +878,7 @@ async fn test_fcm_dismiss_test_success() {
 async fn test_fcm_all_exclude_no_fcm() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+    std::env::set_var("FCM_INTERNAL_SECRET", "test-fcm-secret");
 
     let mock = Arc::new(MockDeviceRepository::default());
     let mut state = setup_mock_app_state();
@@ -887,6 +888,55 @@ async fn test_fcm_all_exclude_no_fcm() {
     let client = reqwest::Client::new();
     let res = client
         .post(format!("{base_url}/api/devices/test-fcm-all-exclude"))
+        .header("X-Internal-Secret", "test-fcm-secret")
+        .json(&serde_json::json!({ "exclude_device_ids": [] }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 503);
+}
+
+/// 公開 route だが、全テナントの端末へ FCM を送るので内部 secret が要る
+/// (Refs ippoan/alc-app#387)。secret 無し・違う secret は 401、env 未設定は 503。
+#[tokio::test]
+async fn test_fcm_all_exclude_requires_internal_secret() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+    std::env::set_var("FCM_INTERNAL_SECRET", "my-secret-123");
+
+    let mock = Arc::new(MockDeviceRepository::default());
+    mock.return_callable_devices.store(true, Ordering::SeqCst);
+    let mut state = setup_mock_app_state();
+    state.devices = mock;
+    state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+
+    let client = reqwest::Client::new();
+
+    // No header -> 401
+    let res = client
+        .post(format!("{base_url}/api/devices/test-fcm-all-exclude"))
+        .json(&serde_json::json!({ "exclude_device_ids": [] }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 401);
+
+    // Wrong secret -> 401
+    let res = client
+        .post(format!("{base_url}/api/devices/test-fcm-all-exclude"))
+        .header("X-Internal-Secret", "wrong-secret")
+        .json(&serde_json::json!({ "exclude_device_ids": [] }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 401);
+
+    // env 未設定 -> fail-closed で 503
+    std::env::remove_var("FCM_INTERNAL_SECRET");
+    let res = client
+        .post(format!("{base_url}/api/devices/test-fcm-all-exclude"))
+        .header("X-Internal-Secret", "my-secret-123")
         .json(&serde_json::json!({ "exclude_device_ids": [] }))
         .send()
         .await
@@ -2333,7 +2383,7 @@ async fn test_update_call_settings_always_on_no_token() {
 
     let mock = Arc::new(MockDeviceRepository::default());
     mock.return_data.store(true, Ordering::SeqCst);
-    mock.return_no_fcm_token.store(true, Ordering::SeqCst);
+    mock.return_null_fcm_token.store(true, Ordering::SeqCst);
     let mut state = setup_mock_app_state();
     state.devices = mock;
     state.fcm = Some(Arc::new(crate::common::MockFcmSender::new()));
@@ -2881,6 +2931,7 @@ async fn test_fcm_dismiss_test_db_error() {
 async fn test_fcm_all_exclude_with_devices() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+    std::env::set_var("FCM_INTERNAL_SECRET", "test-fcm-secret");
 
     let mock = Arc::new(MockDeviceRepository::default());
     mock.return_callable_devices.store(true, Ordering::SeqCst);
@@ -2892,6 +2943,7 @@ async fn test_fcm_all_exclude_with_devices() {
     let client = reqwest::Client::new();
     let res = client
         .post(format!("{base_url}/api/devices/test-fcm-all-exclude"))
+        .header("X-Internal-Secret", "test-fcm-secret")
         .json(&serde_json::json!({ "exclude_device_ids": [] }))
         .send()
         .await
@@ -2909,6 +2961,7 @@ async fn test_fcm_all_exclude_with_devices() {
 async fn test_fcm_all_exclude_with_exclude_matching() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+    std::env::set_var("FCM_INTERNAL_SECRET", "test-fcm-secret");
 
     let mock = Arc::new(MockDeviceRepository::default());
     mock.return_callable_devices.store(true, Ordering::SeqCst);
@@ -2920,6 +2973,7 @@ async fn test_fcm_all_exclude_with_exclude_matching() {
     let client = reqwest::Client::new();
     let res = client
         .post(format!("{base_url}/api/devices/test-fcm-all-exclude"))
+        .header("X-Internal-Secret", "test-fcm-secret")
         .json(&serde_json::json!({ "exclude_device_ids": [Uuid::nil().to_string()] }))
         .send()
         .await
@@ -2937,6 +2991,7 @@ async fn test_fcm_all_exclude_with_exclude_matching() {
 async fn test_fcm_all_exclude_fcm_error() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+    std::env::set_var("FCM_INTERNAL_SECRET", "test-fcm-secret");
 
     let mock = Arc::new(MockDeviceRepository::default());
     mock.return_callable_devices.store(true, Ordering::SeqCst);
@@ -2948,6 +3003,7 @@ async fn test_fcm_all_exclude_fcm_error() {
     let client = reqwest::Client::new();
     let res = client
         .post(format!("{base_url}/api/devices/test-fcm-all-exclude"))
+        .header("X-Internal-Secret", "test-fcm-secret")
         .json(&serde_json::json!({ "exclude_device_ids": [] }))
         .send()
         .await
@@ -2966,6 +3022,7 @@ async fn test_fcm_all_exclude_fcm_error() {
 async fn test_fcm_all_exclude_db_error() {
     let _guard = crate::common::ENV_LOCK.lock().unwrap();
     std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+    std::env::set_var("FCM_INTERNAL_SECRET", "test-fcm-secret");
 
     let mock = Arc::new(MockDeviceRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
@@ -2977,6 +3034,7 @@ async fn test_fcm_all_exclude_db_error() {
     let client = reqwest::Client::new();
     let res = client
         .post(format!("{base_url}/api/devices/test-fcm-all-exclude"))
+        .header("X-Internal-Secret", "test-fcm-secret")
         .json(&serde_json::json!({ "exclude_device_ids": [] }))
         .send()
         .await

@@ -437,9 +437,17 @@ async fn claim_registration(
         }
         "qr_permanent" => {
             // QR永久: pending のまま、管理者承認待ち
+            let tenant_id = req
+                .tenant_id
+                .ok_or_else(|| claim_err("無効なトークンです"))?;
             state
                 .devices
-                .claim_update_permanent_qr(req.id, body.phone_number.as_deref(), &device_name)
+                .claim_update_permanent_qr(
+                    tenant_id,
+                    req.id,
+                    body.phone_number.as_deref(),
+                    &device_name,
+                )
                 .await
                 .map_err(|e| claim_db("claim update permanent qr", e))?;
 
@@ -954,10 +962,9 @@ async fn update_call_settings(
     // always_on / bp_enabled が変更された場合、FCM で端末に通知して設定を再取得させる
     let settings_changed = body.always_on.is_some() || body.bp_enabled.is_some();
     if let (true, Some(fcm)) = (settings_changed, state.fcm.as_ref()) {
-        // RLS を回避して fcm_token を取得
         let token_row = state
             .devices
-            .get_fcm_token_bypass_rls(id)
+            .get_device_fcm_token(tenant.0, id)
             .await
             .ok()
             .flatten();
@@ -1322,8 +1329,11 @@ struct TestFcmAllExcludeBody {
 
 async fn test_fcm_all_exclude(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(body): Json<TestFcmAllExcludeBody>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
+    check_internal_secret(&headers)?;
+
     let fcm = state.fcm.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
 
     let rows = state

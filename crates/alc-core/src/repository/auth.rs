@@ -37,7 +37,7 @@ pub trait AuthRepository: Send + Sync {
         email: &str,
     ) -> Result<Option<TenantAllowedEmail>, sqlx::Error>;
 
-    async fn delete_invitation(&self, id: Uuid) -> Result<(), sqlx::Error>;
+    async fn delete_invitation(&self, tenant_id: Uuid, id: Uuid) -> Result<(), sqlx::Error>;
 
     // --- Tenant ---
 
@@ -88,7 +88,7 @@ pub trait AuthRepository: Send + Sync {
         expires_at: DateTime<Utc>,
     ) -> Result<(), sqlx::Error>;
 
-    async fn clear_refresh_token(&self, user_id: Uuid) -> Result<(), sqlx::Error>;
+    async fn clear_refresh_token(&self, tenant_id: Uuid, user_id: Uuid) -> Result<(), sqlx::Error>;
 
     // --- LINE Login ---
 

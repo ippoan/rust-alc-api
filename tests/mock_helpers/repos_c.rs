@@ -384,7 +384,7 @@ impl TenkoCallRepository for MockTenkoCallRepository {
         Ok(99)
     }
 
-    async fn delete_number(&self, _id: i32) -> Result<(), sqlx::Error> {
+    async fn delete_number(&self, _tenant_id: &str, _id: i32) -> Result<(), sqlx::Error> {
         check_fail!(self);
         Ok(())
     }

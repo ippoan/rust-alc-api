@@ -51,18 +51,32 @@ impl TenkoOverdueRepository for PgTenkoOverdueRepository {
         .await
     }
 
-    async fn get_employee_name(&self, employee_id: Uuid) -> Result<Option<String>, sqlx::Error> {
-        sqlx::query_scalar("SELECT name FROM employees WHERE id = $1")
+    async fn get_employee_name(
+        &self,
+        tenant_id: Uuid,
+        employee_id: Uuid,
+    ) -> Result<Option<String>, sqlx::Error> {
+        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
+        sqlx::query_scalar("SELECT name FROM employees WHERE id = $1 AND tenant_id = $2")
             .bind(employee_id)
-            .fetch_optional(&self.pool)
+            .bind(tenant_id)
+            .fetch_optional(&mut *tc.conn)
             .await
     }
 
-    async fn mark_overdue_notified(&self, schedule_id: Uuid) -> Result<(), sqlx::Error> {
-        sqlx::query("UPDATE tenko_schedules SET overdue_notified_at = NOW() WHERE id = $1")
-            .bind(schedule_id)
-            .execute(&self.pool)
-            .await?;
+    async fn mark_overdue_notified(
+        &self,
+        tenant_id: Uuid,
+        schedule_id: Uuid,
+    ) -> Result<(), sqlx::Error> {
+        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
+        sqlx::query(
+            "UPDATE tenko_schedules SET overdue_notified_at = NOW() WHERE id = $1 AND tenant_id = $2",
+        )
+        .bind(schedule_id)
+        .bind(tenant_id)
+        .execute(&mut *tc.conn)
+        .await?;
         Ok(())
     }
 }

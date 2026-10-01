@@ -71,7 +71,7 @@ pub trait TenkoCallRepository: Send + Sync {
     ) -> Result<i32, sqlx::Error>;
 
     /// 電話番号マスタ削除
-    async fn delete_number(&self, id: i32) -> Result<(), sqlx::Error>;
+    async fn delete_number(&self, tenant_id: &str, id: i32) -> Result<(), sqlx::Error>;
 
     /// 登録ドライバー一覧
     async fn list_drivers(&self) -> Result<Vec<TenkoCallDriverRow>, sqlx::Error>;

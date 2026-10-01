@@ -298,7 +298,7 @@ async fn upsert_google_user(
                 .map_err(|e| internal_error("create_user_google", e))?;
             // 招待レコードを消費 (使い済み)
             if let Some(inv) = &invitation {
-                let _ = state.auth.delete_invitation(inv.id).await;
+                let _ = state.auth.delete_invitation(inv.tenant_id, inv.id).await;
             }
             user
         }
