@@ -67,6 +67,9 @@ impl DeviceRepository for PgDeviceRepository {
         &self,
         code: &str,
     ) -> Result<Option<RegistrationStatusRow>, sqlx::Error> {
+        // 公開のポーリング (tenant 無し)。`devices` は tenant の RLS が掛かるので JOIN しない。
+        // settings_token は、device_id が在るときだけ `get_device_re_pair_state()`
+        // (SECURITY DEFINER) で取る (Refs ippoan/alc-app#387)。
         let row = sqlx::query_as::<
             _,
             (
@@ -75,28 +78,35 @@ impl DeviceRepository for PgDeviceRepository {
                 Option<Uuid>,
                 Option<String>,
                 Option<String>,
-                Option<Uuid>,
             ),
         >(
             r#"
             SELECT r.status, r.device_id, r.tenant_id, r.expires_at::text,
-                   NULLIF(r.device_name, '') AS device_name,
-                   d.settings_token
+                   NULLIF(r.device_name, '') AS device_name
             FROM device_registration_requests r
-            LEFT JOIN devices d ON d.id = r.device_id
             WHERE r.registration_code = $1
             "#,
         )
         .bind(code)
         .fetch_optional(&self.pool)
         .await?;
-        Ok(row.map(|r| RegistrationStatusRow {
+        let Some(r) = row else {
+            return Ok(None);
+        };
+        let settings_token = match r.1 {
+            Some(device_id) => self
+                .get_device_re_pair_state(device_id)
+                .await?
+                .and_then(|d| d.settings_token),
+            None => None,
+        };
+        Ok(Some(RegistrationStatusRow {
             status: r.0,
             device_id: r.1,
             tenant_id: r.2,
             expires_at: r.3,
             device_name: r.4,
-            settings_token: r.5,
+            settings_token,
         }))
     }
 
@@ -299,23 +309,24 @@ impl DeviceRepository for PgDeviceRepository {
     }
 
     async fn list_fcm_devices(&self) -> Result<Vec<FcmDeviceRow>, sqlx::Error> {
-        sqlx::query_as::<_, FcmDeviceRow>(
-            "SELECT id, fcm_token, call_enabled, call_schedule FROM devices WHERE fcm_token IS NOT NULL AND status = 'active'",
-        )
-        .fetch_all(&self.pool)
-        .await
+        // 全テナント横断。SECURITY DEFINER 関数経由 (migration 158)。
+        sqlx::query_as::<_, FcmDeviceRow>("SELECT * FROM alc_api.list_fcm_devices()")
+            .fetch_all(&self.pool)
+            .await
     }
 
     async fn get_device_tenant_active(
         &self,
         device_id: Uuid,
     ) -> Result<Option<DeviceTenantRow>, sqlx::Error> {
-        sqlx::query_as::<_, DeviceTenantRow>(
-            "SELECT tenant_id FROM alc_api.devices WHERE id = $1 AND status = 'active'",
-        )
-        .bind(device_id)
-        .fetch_optional(&self.pool)
-        .await
+        // tenant 確定前の逆引き。`get_device_re_pair_state()` (SECURITY DEFINER) の
+        // tenant_id と status を使い、active だけを返す (Refs ippoan/alc-app#387)。
+        let state = self.get_device_re_pair_state(device_id).await?;
+        Ok(state
+            .filter(|d| d.status == "active")
+            .map(|d| DeviceTenantRow {
+                tenant_id: d.tenant_id,
+            }))
     }
 
     async fn list_tenant_fcm_tokens_except(
@@ -335,11 +346,10 @@ impl DeviceRepository for PgDeviceRepository {
     }
 
     async fn list_all_callable_devices(&self) -> Result<Vec<FcmTestDeviceRow>, sqlx::Error> {
-        sqlx::query_as::<_, FcmTestDeviceRow>(
-            "SELECT id, device_name, fcm_token FROM alc_api.devices WHERE status = 'active' AND fcm_token IS NOT NULL AND call_enabled = true",
-        )
-        .fetch_all(&self.pool)
-        .await
+        // 全テナント横断。SECURITY DEFINER 関数経由 (migration 158)。
+        sqlx::query_as::<_, FcmTestDeviceRow>("SELECT * FROM alc_api.list_all_callable_devices()")
+            .fetch_all(&self.pool)
+            .await
     }
 
     async fn update_watchdog_state(
@@ -385,8 +395,9 @@ impl DeviceRepository for PgDeviceRepository {
     }
 
     async fn list_dev_device_tenant_ids(&self) -> Result<Vec<String>, sqlx::Error> {
+        // 全テナント横断。SECURITY DEFINER 関数経由 (migration 158)。関数は uuid を返すので text に直す。
         sqlx::query_scalar::<_, String>(
-            "SELECT DISTINCT tenant_id::text FROM alc_api.devices WHERE status = 'active' AND is_dev_device = true AND fcm_token IS NOT NULL",
+            "SELECT t::text FROM alc_api.list_dev_device_tenant_ids() t",
         )
         .fetch_all(&self.pool)
         .await

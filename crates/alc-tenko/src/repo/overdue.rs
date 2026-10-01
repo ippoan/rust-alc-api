@@ -23,8 +23,9 @@ impl PgTenkoOverdueRepository {
 #[async_trait]
 impl TenkoOverdueRepository for PgTenkoOverdueRepository {
     async fn find_overdue_configs(&self) -> Result<Vec<WebhookConfig>, sqlx::Error> {
+        // 全テナント横断 (定期のバッチ)。SECURITY DEFINER 関数経由 (migration 158)。
         sqlx::query_as::<_, WebhookConfig>(
-            "SELECT * FROM webhook_configs WHERE event_type = 'tenko_overdue' AND enabled = TRUE",
+            "SELECT * FROM alc_api.list_tenko_overdue_webhook_configs()",
         )
         .fetch_all(&self.pool)
         .await

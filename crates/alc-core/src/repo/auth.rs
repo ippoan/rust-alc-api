@@ -21,7 +21,8 @@ impl PgAuthRepository {
 #[async_trait]
 impl AuthRepository for PgAuthRepository {
     async fn find_user_by_google_sub(&self, google_sub: &str) -> Result<Option<User>, sqlx::Error> {
-        sqlx::query_as::<_, User>("SELECT * FROM users WHERE google_sub = $1")
+        // Google ログイン中 (テナント未確定) の逆引き。SECURITY DEFINER 関数経由 (migration 158)。
+        sqlx::query_as::<_, User>("SELECT * FROM alc_api.find_user_by_google_sub($1)")
             .bind(google_sub)
             .fetch_optional(&self.pool)
             .await
@@ -31,7 +32,8 @@ impl AuthRepository for PgAuthRepository {
         &self,
         lineworks_id: &str,
     ) -> Result<Option<User>, sqlx::Error> {
-        sqlx::query_as::<_, User>("SELECT * FROM users WHERE lineworks_id = $1")
+        // LINE WORKS ログイン中 (テナント未確定) の逆引き。SECURITY DEFINER 関数経由 (migration 158)。
+        sqlx::query_as::<_, User>("SELECT * FROM alc_api.find_user_by_lineworks_id($1)")
             .bind(lineworks_id)
             .fetch_optional(&self.pool)
             .await
@@ -57,8 +59,9 @@ impl AuthRepository for PgAuthRepository {
         &self,
         email: &str,
     ) -> Result<Option<TenantAllowedEmail>, sqlx::Error> {
+        // 初回ログイン中 (テナント未確定) の招待の逆引き。SECURITY DEFINER 関数経由 (migration 158)。
         sqlx::query_as::<_, TenantAllowedEmail>(
-            "SELECT * FROM tenant_allowed_emails WHERE email = $1",
+            "SELECT * FROM alc_api.find_invitation_by_email($1)",
         )
         .bind(email)
         .fetch_optional(&self.pool)
@@ -307,14 +310,14 @@ impl AuthRepository for PgAuthRepository {
         refresh_hash: &str,
         expires_at: DateTime<Utc>,
     ) -> Result<(), sqlx::Error> {
-        sqlx::query(
-            "UPDATE users SET refresh_token_hash = $1, refresh_token_expires_at = $2 WHERE id = $3",
-        )
-        .bind(refresh_hash)
-        .bind(expires_at)
-        .bind(user_id)
-        .execute(&self.pool)
-        .await?;
+        // 呼び出し元 (ログインの最後) は user の id しか持たない。SECURITY DEFINER 関数経由
+        // (migration 158)。引数は (user_id, token_hash, expires_at) の順。
+        sqlx::query("SELECT alc_api.save_user_refresh_token($1, $2, $3)")
+            .bind(user_id)
+            .bind(refresh_hash)
+            .bind(expires_at)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 
