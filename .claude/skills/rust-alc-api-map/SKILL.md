@@ -904,7 +904,7 @@ fetch のみに戻す)。
 (休息で切ったかたまり) が入ると 始業=最早・終業=最遅・休憩=各 segment 内の休憩の合計 にまとめる。
 **かたまりの間の時間は、`gap_rest` が「その行に入ったかたまりの終わりの最大 〜 次の始まり」を
 `split_rest_intervals` に通して休憩の 7 欄に足す** (足さないと Excel で労働に数えられ、1 行が 24 時間を超える日が出る)。
-間が 0 分以下 (重なり) なら何も足さない。7 欄に入らなかった分は警告に出す。応答の形 (`YTimeRow`) は不変。
+間が 0 分以下 (重なり) なら何も足さない。間は必ず当日の 3 欄に収まる (欄の外には出ない)。応答の形 (`YTimeRow`) は不変。
 
 **LIST も同じ (2026-07-31、Refs ohishi-exp/rust-ichibanboshi#205-27)**。`dtako_events.rs` の
 `list_prefixes` は `R2_LIST_CONCURRENCY = 16` で複数 prefix の LIST を並列に投げる。
