@@ -78,8 +78,7 @@ pub fn build_y_time_rows(
 
         // 同じ行の直前のかたまりとの間 (最後に入ったかたまりの終わり 〜 今の始まり) は
         // 休憩の欄に算入する。重なり (間が 0 分以下) は何も足さない。
-        let (gap_split, gap_total) = gap_rest(entry.last_end, seg.start, bucket);
-        let gap_counted = gap_split.total();
+        let gap_split = gap_rest(entry.last_end, seg.start, bucket);
         entry.last_end = Some(entry.last_end.map_or(seg.end, |e| e.max(seg.end)));
         entry.rest.add(&gap_split);
 
@@ -94,12 +93,9 @@ pub fn build_y_time_rows(
 
         if already_had_seg {
             warnings.push(format!(
-                "{bucket}: 複数 segment 結合 (1 行に集約: 最早始業 / 最遅終業 / 間の {gap_counted} 分を休憩に算入)"
+                "{bucket}: 複数 segment 結合 (1 行に集約: 最早始業 / 最遅終業 / 間の {} 分を休憩に算入)",
+                gap_split.total()
             ));
-            let uncounted = gap_total - gap_counted;
-            if uncounted > 0 {
-                warnings.push(uncounted_gap_warning(bucket, uncounted));
-            }
         }
     }
 
@@ -112,23 +108,15 @@ pub fn build_y_time_rows(
 }
 
 /// 同じ行の直前のかたまりの終わり `prev_end` 〜 次の始まり `start` の間を 7 セルに振る。
-/// 戻り値: (7 セルに入った分, 間の長さ)。`prev_end` が無い / 間が 0 分以下なら (空, 0)。
-fn gap_rest(
-    prev_end: Option<NaiveDateTime>,
-    start: NaiveDateTime,
-    bucket: NaiveDate,
-) -> (RestSplit, i32) {
+/// `prev_end` が無い / 間が 0 分以下なら空。
+///
+/// 同じ行 (bucket) に入るかたまりの終わりは必ず bucket の 0:00 以降、次の始まりは bucket の
+/// 24:00 より前なので、間は当日の 3 セル (0-5 / 5-22 / 22-24) に全部収まる (欄の外には出ない)。
+fn gap_rest(prev_end: Option<NaiveDateTime>, start: NaiveDateTime, bucket: NaiveDate) -> RestSplit {
     match prev_end.filter(|e| start > *e) {
-        Some(e) => (
-            split_rest_intervals(&[(e, start)], bucket),
-            (start - e).num_minutes() as i32,
-        ),
-        None => (RestSplit::default(), 0),
+        Some(e) => split_rest_intervals(&[(e, start)], bucket),
+        None => RestSplit::default(),
     }
-}
-
-fn uncounted_gap_warning(bucket: NaiveDate, minutes: i32) -> String {
-    format!("{bucket}: 間の {minutes} 分は休憩の欄に入らない時間帯 (前日 0-5 時 / 翌日 22 時以降) のため労働に数えられる")
 }
 
 /// 休憩 (event_cd=301) intervals を、bucket date を基準にして 7 セル (前日/当日/翌日 × 時間帯) に振り分け。
@@ -484,45 +472,81 @@ mod tests {
     }
 
     #[test]
-    fn gap_rest_splits_prev_today_cells() {
-        // 前日 22:00 〜 当日 06:00: 前日 22-24 = 120 / 当日 0-5 = 300 / 当日 5-22 = 60
-        let (split, total) = gap_rest(
-            Some(dt((2024, 4, 2), (22, 0))),
-            dt((2024, 4, 3), (6, 0)),
-            d(2024, 4, 3),
-        );
-        assert_eq!(total, 480);
-        assert_eq!(split.prev_22_0, 120);
-        assert_eq!(split.today_0_5, 300);
-        assert_eq!(split.today_5_22, 60);
-        assert_eq!(split.total(), 480);
-    }
-
-    #[test]
-    fn gap_rest_outside_cells_leaves_uncounted_minutes() {
-        // 前日 03:00 〜 前日 07:00: 前日 0-5 の 120 分は欄が無い (5-22 の 120 分だけ入る)
-        let (split, total) = gap_rest(
-            Some(dt((2024, 4, 2), (3, 0))),
-            dt((2024, 4, 2), (7, 0)),
-            d(2024, 4, 3),
-        );
-        assert_eq!(total, 240);
-        assert_eq!(split.prev_5_22, 120);
-        assert_eq!(total - split.total(), 120);
-        assert_eq!(
-            uncounted_gap_warning(d(2024, 4, 3), total - split.total()),
-            "2024-04-03: 間の 120 分は休憩の欄に入らない時間帯 (前日 0-5 時 / 翌日 22 時以降) のため労働に数えられる"
-        );
-    }
-
-    #[test]
     fn gap_rest_none_or_non_positive_is_empty() {
         let b = d(2024, 4, 3);
         let t = dt((2024, 4, 3), (10, 0));
-        assert_eq!(gap_rest(None, t, b), (RestSplit::default(), 0));
-        assert_eq!(gap_rest(Some(t), t, b), (RestSplit::default(), 0));
+        assert_eq!(gap_rest(None, t, b), RestSplit::default());
+        assert_eq!(gap_rest(Some(t), t, b), RestSplit::default());
         let later = dt((2024, 4, 3), (11, 0));
-        assert_eq!(gap_rest(Some(later), t, b), (RestSplit::default(), 0));
+        assert_eq!(gap_rest(Some(later), t, b), RestSplit::default());
+    }
+
+    /// かたまりの種類の組み合わせごとに「間の長さ = 行の休憩に足された分」を固定する。
+    /// (i) 始業も終業も当日 / (ii) 深夜またぎ 7h 以上 (終業日の行、F=1) /
+    /// (iii) 深夜またぎ 7h 未満 (始業日の行)
+    fn assert_gap_fully_counted(segs: Vec<SegmentInput>, expected_gap: i32) {
+        let (rows, _) = build_y_time_rows(segs, d(2024, 4, 1), d(2024, 4, 30));
+        assert_eq!(rows.len(), 1);
+        let r = &rows[0];
+        assert_eq!(r.rest_prev_5_22, 0);
+        assert_eq!(r.rest_prev_22_0, 0);
+        assert_eq!(r.rest_next_0_5, 0);
+        assert_eq!(r.rest_next_5_22, 0);
+        assert_eq!(
+            r.rest_today_0_5 + r.rest_today_5_22 + r.rest_today_22_0,
+            expected_gap
+        );
+    }
+
+    #[test]
+    fn gap_equals_added_rest_for_ii_then_i() {
+        assert_gap_fully_counted(
+            vec![
+                seg_simple(dt((2024, 4, 2), (21, 0)), dt((2024, 4, 3), (4, 0)), 0, None),
+                seg_simple(dt((2024, 4, 3), (8, 0)), dt((2024, 4, 3), (12, 0)), 0, None),
+            ],
+            240,
+        );
+    }
+
+    #[test]
+    fn gap_equals_added_rest_for_i_then_i() {
+        assert_gap_fully_counted(
+            vec![
+                seg_simple(dt((2024, 4, 3), (8, 0)), dt((2024, 4, 3), (12, 0)), 0, None),
+                seg_simple(
+                    dt((2024, 4, 3), (14, 0)),
+                    dt((2024, 4, 3), (18, 0)),
+                    0,
+                    None,
+                ),
+            ],
+            120,
+        );
+    }
+
+    #[test]
+    fn gap_equals_added_rest_for_i_then_iii() {
+        // (iii) 4/3 22:00 → 4/4 02:00 (4h < 7h) は始業日 4/3 の行。間 12:00-22:00 = 600
+        assert_gap_fully_counted(
+            vec![
+                seg_simple(dt((2024, 4, 3), (8, 0)), dt((2024, 4, 3), (12, 0)), 0, None),
+                seg_simple(dt((2024, 4, 3), (22, 0)), dt((2024, 4, 4), (2, 0)), 0, None),
+            ],
+            600,
+        );
+    }
+
+    #[test]
+    fn gap_equals_added_rest_for_ii_then_iii() {
+        // 間 04:00-22:00 = 1080 (当日 0-5 が 60、5-22 が 1020)
+        assert_gap_fully_counted(
+            vec![
+                seg_simple(dt((2024, 4, 2), (21, 0)), dt((2024, 4, 3), (4, 0)), 0, None),
+                seg_simple(dt((2024, 4, 3), (22, 0)), dt((2024, 4, 4), (3, 0)), 0, None),
+            ],
+            1080,
+        );
     }
 
     #[test]
