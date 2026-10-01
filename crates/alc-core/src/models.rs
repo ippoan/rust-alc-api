@@ -237,6 +237,11 @@ pub struct UpdateMeasurement {
     /// 詳細は [`CreateMeasurement::tenko_type`]。
     #[serde(default)]
     pub tenko_type: Option<String>,
+    /// 点呼セッション・点呼記録に書く点呼方法 (`通常点呼` / `IT点呼`)。無ければ `通常点呼`。
+    /// 種別 (`tenko_type`) とは軸が違う。POST ([`CreateMeasurement`]) には無い
+    /// (Refs ippoan/alc-app#387)
+    #[serde(default)]
+    pub tenko_method: Option<String>,
     /// 詳細は [`CreateMeasurement::carins_cert_no`]。
     #[serde(default)]
     pub carins_cert_no: Option<String>,
@@ -258,6 +263,20 @@ pub struct UpdateMeasurement {
     pub medical_measured_at: Option<DateTime<Utc>>,
     pub face_verified: Option<bool>,
     pub medical_manual_input: Option<bool>,
+}
+
+/// `PUT /measurements/{id}` の応答。[`Measurement`] の欄がそのまま並び、
+/// `tenko_session_id` が 1 つ増えるだけ (Refs ippoan/alc-app#387)。
+///
+/// [`Measurement`] 本体に欄を足さないのは、DB 行型 (`SELECT *` の `FromRow`) で
+/// 他の口の応答にもそのまま出るため。
+#[derive(Debug, Serialize)]
+pub struct UpdatedMeasurement {
+    #[serde(flatten)]
+    pub measurement: Measurement,
+    /// この保存で作られた (または同じ測定に既にある) 通常の流れの点呼セッションの id。
+    /// `record_as_tenko` が無い・結果が点呼にならない・記録に失敗したときは `None`
+    pub tenko_session_id: Option<Uuid>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -1739,6 +1739,10 @@ pub struct MockMeasurementsRepository {
     pub return_some: AtomicBool,
     pub face_photo_url: std::sync::Mutex<Option<String>>,
     pub video_url: std::sync::Mutex<Option<String>>,
+    /// `update` が応答に載せる点呼セッションの id
+    pub tenko_session_id: std::sync::Mutex<Option<Uuid>>,
+    /// `update` に届いた `tenko_method` (呼ばれるたびに積む)
+    pub update_tenko_methods: std::sync::Mutex<Vec<Option<String>>>,
 }
 
 impl Default for MockMeasurementsRepository {
@@ -1748,6 +1752,8 @@ impl Default for MockMeasurementsRepository {
             return_some: AtomicBool::new(false),
             face_photo_url: std::sync::Mutex::new(None),
             video_url: std::sync::Mutex::new(None),
+            tenko_session_id: std::sync::Mutex::new(None),
+            update_tenko_methods: std::sync::Mutex::new(Vec::new()),
         }
     }
 }
@@ -1807,11 +1813,18 @@ impl MeasurementsRepository for MockMeasurementsRepository {
         &self,
         tenant_id: Uuid,
         _id: Uuid,
-        _input: &UpdateMeasurement,
-    ) -> Result<Option<Measurement>, sqlx::Error> {
+        input: &UpdateMeasurement,
+    ) -> Result<Option<UpdatedMeasurement>, sqlx::Error> {
         check_fail!(self);
+        self.update_tenko_methods
+            .lock()
+            .unwrap()
+            .push(input.tenko_method.clone());
         if self.return_some.load(Ordering::SeqCst) {
-            Ok(Some(self.sample_measurement(tenant_id)))
+            Ok(Some(UpdatedMeasurement {
+                measurement: self.sample_measurement(tenant_id),
+                tenko_session_id: *self.tenko_session_id.lock().unwrap(),
+            }))
         } else {
             Ok(None)
         }
