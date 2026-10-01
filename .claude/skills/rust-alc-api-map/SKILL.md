@@ -1,6 +1,6 @@
 ---
 name: rust-alc-api-map
-generated-from: rust-alc-api:c88d4d41b6cc880e7eebf65f33b480e8afd2bd51
+generated-from: rust-alc-api:2f1500e660b65be4418eb8483b6bc115f8c44ef3
 paths: [crates/, src/, migrations/, tests/]
 description: rust-alc-api (アルコールチェッカー基盤の Rust/Axum Cargo workspace — domain crate 群 + monolith 単一バイナリ、PostgreSQL+RLS、Cloud Run) の構造ナビゲーション。どの crate に何のルートがあるか / monolith (rust-alc-api) 一本化 (gateway + per-domain は #556 で廃止) / RLS・migration・deploy/release 分離の gotcha を 1 枚にまとめる。トリガー:「rust-alc-api」「alc-api」「alc-notify」「alc-tenko」「alc-trouble」「alc-carins」「alc-dtako」「gateway」「tenko-api」「carins-api」「dtako-api」「trouble-api」「RLS テナント」「sqlx migration」「ts-rs」「Release Wave」「Bazel」等。
 ---
@@ -142,10 +142,29 @@ router 実装として存続。旧 per-domain は同じ domain crate を単独 m
   - `alc-misc/src/repo/tenant_users.rs`: 一覧 2 本・`invite_user`・id / email 指定の DELETE・UPDATE すべて
   - `alc-notify/src/repo/notify_line_config.rs`: `get` / `get_full` / `delete` (以前の `delete` は WHERE 無しで、
     所有者接続では全テナントの LINE 設定を消していた)
-  - **そのまま残した pool 直の query** (認証前・テナント横断が本来の動き。SECURITY DEFINER 関数へ出すのは
-    別タスク): `find_user_by_google_sub` / `find_user_by_lineworks_id` / `save_refresh_token` /
-    `find_invitation_by_email` / `get_registration_status` / `list_fcm_devices` / `get_device_tenant_active` /
-    `list_all_callable_devices` / `list_dev_device_tenant_ids` / `find_overdue_configs` / `create_request`。
+  - **認証前・テナント横断が本来の動きの query は SECURITY DEFINER 関数経由 (alc-migrations 158)**。
+    tenant を立てられないので `TenantConn` には出来ず、pool 直のまま関数を呼ぶ (関数は所有者の資格で動くので、
+    所有者接続でも実行用ロールでも同じ結果)。**関数名は `alc_api.` で schema 修飾する**。対応:
+    `find_user_by_google_sub` → `alc_api.find_user_by_google_sub($1)` /
+    `find_user_by_lineworks_id` → `alc_api.find_user_by_lineworks_id($1)` /
+    `save_refresh_token` → `alc_api.save_user_refresh_token($1, $2, $3)` (**引数は user_id, token_hash, expires_at の順**) /
+    `find_invitation_by_email` → `alc_api.find_invitation_by_email($1)` /
+    `list_fcm_devices` → `alc_api.list_fcm_devices()` / `list_all_callable_devices` → `alc_api.list_all_callable_devices()` /
+    `list_dev_device_tenant_ids` → `SELECT t::text FROM alc_api.list_dev_device_tenant_ids() t` (関数は uuid を返す。
+    Rust 側は String のまま) / `find_overdue_configs` → `alc_api.list_tenko_overdue_webhook_configs()` /
+    `create_request` の INSERT → `alc_api.create_access_request($1, $2)` (tenant_id, user_id)。
+    **既存の関数に寄せた 2 つ** (`alc-devices/src/repo/devices.rs`): `get_registration_status` は `devices` への JOIN を
+    やめ、request を引いた後 `device_id` が在るときだけ `get_device_re_pair_state` (migration 122) で `settings_token` を取る
+    (2 往復になる。端末の行が無ければ None = LEFT JOIN のときと同じ) / `get_device_tenant_active` は同じ関数の
+    `tenant_id` と `status` を使い、Rust 側で `status == "active"` だけを返す
+  - **pool 直のまま残っている query** (どれも実行用ロールで通る形): `tenants` (RLS 無し) /
+    `device_registration_requests` の SELECT (`USING (true)`) と INSERT (`WITH CHECK (status = 'pending')`) /
+    `tenko_call_numbers`・`tenko_call_drivers` の SELECT (`USING (true)`。全テナントが見える) /
+    SECURITY DEFINER 関数の呼び出し。**例外**: 呼び出し元の無い `find_user_by_refresh_token_hash` /
+    `find_user_in_tenant` / `find_user_by_username` (auth.rs) と、FORCE の表を tenant 無しで叩く
+    `dtako_upload.rs` の 3 本 (`mark_upload_failed` / `get_upload_history` / `get_upload_tenant_and_key`)、
+    `staging.rs` の export は未対応のまま。**新しい query を pool 直で書くなら、この 4 種のどれかに当たること**
+    (RLS 有効の表を tenant 無しで叩くと、実行用ロールでは 42704 / 22P02 か 0 行になる)。
     `tenko_call` の `ON CONFLICT (phone_number)` と `tenant_users` の `ON CONFLICT (email)` はテナントをまたぐ
     UNIQUE に当たるままで、切り替え後は他テナントと衝突するとエラーになる (未対応)
   - **公開 route `POST /devices/test-fcm-all-exclude` は `check_internal_secret` (`X-Internal-Secret` =
@@ -153,7 +172,8 @@ router 実装として存続。旧 per-domain は同じ domain crate を単独 m
     呼び出し元は alc-app の signaling (`cf-alc-signaling` の `room-registry.ts`) で、隣の
     `/devices/fcm-notify-call` と同じ形でヘッダを付ける。secret 未設定は 503 (fail-closed)、不一致は 401
   - テストは `tests/tenant_scoped_queries_test.rs` (実 DB。superuser 接続なので RLS は素通り =
-    落ちれば query 側の条件が抜けている)
+    落ちれば query 側の条件が抜けている) と `tests/runtime_role_test.rs` (実 DB。実行用ロール `alc_api_rt` で
+    繋ぐので RLS が掛かる = 落ちれば tenant 無しで RLS の表を叩いている)
 - **dev端末 (開発用の鍵) の記録の分離 — `X-Device-Dev` → `app.device_dev` (Refs ippoan/alc-app#387)**:
   dev端末で行った点呼・測定・打刻の行は、その鍵の要求からしか見えない。**INSERT / SELECT の SQL は
   書き換えていない** — backend は検証済みの要求の印を DB の接続の設定に通すだけで、行の出し分けは
@@ -200,8 +220,9 @@ router 実装として存続。旧 per-domain は同じ domain crate を単独 m
     再送だけが `duplicates` に数えられる。**3 列の `ON CONFLICT (tenant_id, device_id, seq)` を書くと
     制約を推論できず 42P10 で INSERT が全件落ちる**
   - **テスト**: `tests/device_dev_axis_test.rs` (実 DB。dev の運行管理者の鍵の判定と、hub の同じ端末・同じ連番が両方の軸に入ること = `test_hub_same_device_and_seq_goes_into_both_axes` もここ)。ほかの DB テストは superuser で繋ぐので RLS を
-    素通りする — ここだけ `common::setup_app_state_as_app_role` (接続ごとに `SET ROLE alc_api_app`) で
-    走らせる。**staging も superuser 接続なので、staging では dev の行の読み出しは分かれない**
+    素通りする — ここと `tests/runtime_role_test.rs` だけ `common::setup_app_state_as_app_role` (接続ごとに
+    `SET ROLE alc_api_rt` = alc-migrations 158 の実行用ロール。テスト DB の表の所有者は postgres なので非所有者 =
+    本番で接続を切り替えた後と同じ立場) で走らせる。**staging も superuser 接続なので、staging では dev の行の読み出しは分かれない**
     (書いた行の `is_dev` は立つ。上の「staging は RLS 完全 bypass」と同じ理由)
 - **pre-auth SECURITY DEFINER + FORCE ROW LEVEL SECURITY の罠**: 未認証経路 (LINE webhook /
   LINE login / notify viewer `/v/{token}` 等) が cross-tenant 検索用の SECURITY DEFINER 関数
@@ -567,7 +588,8 @@ TEST_DATABASE_URL="..." cargo llvm-cov --html --open
 | ファイル | 内容 |
 |---------|------|
 | `tests/common/mod.rs` | テストハーネス (DB 接続、サーバー起動、JWT 発行ヘルパー)。migration は `migrate_and_grant` に 1 本化 (`alc_migrations::MIGRATOR` の後に `alc_migrations::LOCAL_APP_GRANTS` を流す。DB を直接開くテストも必ずこれを通す) |
-| `tests/app_role_grants_test.rs` | テスト DB の `alc_api_app` の権限が本番と揃っているか (Refs #685) — `alc_api` の表のうち `has_table_privilege('alc_api_app', 表, 'SELECT')` が false のものを列挙し 0 件を assert。新しい表の GRANT 付け忘れ (過去に本番 502) を落とす。直すのは migration 側 (bazel `db-app-role-grants` shard) |
+| `tests/app_role_grants_test.rs` | テスト DB の `alc_api_app` の権限が本番と揃っているか (Refs #685) — `alc_api` の表のうち `has_table_privilege('alc_api_app', 表, 'SELECT')` が false のものを列挙し 0 件を assert。新しい表の GRANT 付け忘れ (過去に本番 502) を落とす。直すのは migration 側 (bazel `db-app-role-grants` shard)。**実行用ロール `alc_api_rt` (alc-migrations 158) も同じファイルで検査する**: superuser・BYPASSRLS でなく表を所有していない / schema の USAGE / `_sqlx_migrations` 以外の全表に SELECT・INSERT・UPDATE・DELETE / `_sqlx_migrations` には権限が無い / SECURITY DEFINER 関数を全部呼べる。`alc_api_rt` の権限は `scripts/local_app_grants.sql` に写さない (158 の付け漏れを検出できなくなる) |
+| `tests/runtime_role_test.rs` | 実行用ロール `alc_api_rt` で繋いだサーバで、認証前・テナント横断の経路が通ること (alc-migrations 158、Refs ippoan/alc-app#387) — 陰性 (tenant 無しで `users` を読むとエラー・別テナントを立てると 0 行・招待は 0 行) / ログイン 3 経路 (Google は招待 → 作成 → 招待の消費、LINE WORKS、LINE。それぞれ新規と既存、最後に refresh token の保存) / 招待も email_domain も無い Google は 403 / refresh token は渡した user の行だけ / 端末の登録要求 → 承認 → 承認後のポーリングで `settings_token` → `pairing-tenant` と `fcm-dismiss-test` (無効にした端末・未登録は 404) / 内部用 secret 付きの `fcm-notify-call`・`test-fcm-all-exclude`・`trigger-update-dev` / 超過検知の 1 tick (通知済みの印と配信の記録) / 参加の申請の作成 → 一覧 → 承認・却下。bazel `db-runtime-role` shard |
 | `tests/common/mock_storage.rs` | インメモリ StorageBackend 実装 |
 | `tests/auth_test.rs` | JWT 認証 / X-Tenant-ID / 未認証拒否 |
 | `tests/employees_test.rs` | RLS テナント分離 / キオスクモード |

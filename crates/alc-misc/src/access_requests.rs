@@ -131,10 +131,10 @@ async fn create_request(
             })?
             .ok_or(StatusCode::NOT_FOUND)?;
 
-    // アクセスリクエストを作成
+    // アクセスリクエストを作成。申請先は申請者自身のテナントではないので、
+    // SECURITY DEFINER 関数経由で書く (migration 158)。
     let row = sqlx::query_as::<_, AccessRequestRow>(
-        r#"INSERT INTO alc_api.access_requests (tenant_id, user_id)
-           VALUES ($1, $2) RETURNING *"#,
+        "SELECT * FROM alc_api.create_access_request($1, $2)",
     )
     .bind(tenant.0)
     .bind(auth_user.user_id)

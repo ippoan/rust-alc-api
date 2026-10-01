@@ -8,7 +8,7 @@
 //! 担う。**実 DB でしか検証できない** — repository を差し替える mock テストでは 1 行も通らない。
 //!
 //! ほかの DB テストは superuser (`postgres`) で繋ぐので RLS を素通りする。ここだけは
-//! `common::setup_app_state_as_app_role` で `alc_api_app` として走らせる。行の準備と検証は
+//! `common::setup_app_state_as_app_role` で実行用ロール `alc_api_rt` として走らせる。行の準備と検証は
 //! RLS を素通りする側の pool (`admin`) で行う。
 //!
 //! 回し方は他の DB integration テストと同じ:
@@ -28,7 +28,7 @@ use uuid::Uuid;
 struct Ctx {
     /// RLS を素通りする pool (行の準備と検証用)
     admin: sqlx::PgPool,
-    /// `alc_api_app` で繋ぐ、サーバが使う側の pool
+    /// `alc_api_rt` で繋ぐ、サーバが使う側の pool
     app: sqlx::PgPool,
     base_url: String,
     tenant: Uuid,
@@ -36,7 +36,7 @@ struct Ctx {
     client: reqwest::Client,
 }
 
-/// `alc_api_app` で動くサーバを立てる
+/// `alc_api_rt` で動くサーバを立てる
 async fn setup(tenant_name: &str, max_connections: u32, reset_on_release: bool) -> Ctx {
     let admin_state = common::setup_app_state().await;
     let app_state = common::setup_app_state_as_app_role(max_connections, reset_on_release).await;

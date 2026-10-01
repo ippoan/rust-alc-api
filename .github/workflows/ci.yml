@@ -562,6 +562,12 @@ jobs:
           # 1 行も通らない。ci.yml の bazel-test-db と cache-warm.yml を同じ内容に
           # すること (check_bazel_test_matrix.sh が pair 一致を検査する)
           - { name: db-tenant-scoped-queries, target: "//:tenant_scoped_queries_test" }
+          # Refs ippoan/alc-app#387: backend を表の所有者でない実行用ロール (alc_api_rt、
+          # alc-migrations 158) で繋いだときに、認証前・テナント横断の経路 (ログイン・端末の登録・
+          # 着信の通知・超過検知・参加の申請) が SECURITY DEFINER 関数経由で通ること。
+          # RLS と関数は実 DB にしか無いので mock では 1 行も通らない。ci.yml の bazel-test-db と
+          # cache-warm.yml を同じ内容にすること (check_bazel_test_matrix.sh が pair 一致を検査する)
+          - { name: db-runtime-role, target: "//:runtime_role_test" }
           # Refs ippoan/alc-app#238 / ippoan/alc-app-s3#135: 通常点呼を点呼記録に載せる。
           # 冪等の担保は migration 140 の部分 unique + ON CONFLICT DO NOTHING に
           # 任せているので mock では 1 行も通らない。ci.yml の bazel-test-db と

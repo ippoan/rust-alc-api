@@ -342,8 +342,10 @@ fn build_app_state(
 /// RLS が効く形のテスト用 AppState (Refs ippoan/alc-app#387)。
 ///
 /// `setup_app_state` は superuser (`postgres`) で繋ぐので RLS を素通りし、行の出し分けを
-/// 検証できない。ここは接続ごとに `SET ROLE alc_api_app` して本番と同じロールで走らせる
-/// (`alc_api_app` は NOLOGIN なので直接は繋げない)。
+/// 検証できない。ここは接続ごとに `SET ROLE alc_api_rt` して、backend の実行用ロール
+/// (alc-migrations 158。表の所有者でない) で走らせる。テスト DB の表の所有者は postgres なので、
+/// `alc_api_rt` は本番で接続を切り替えた後と同じ「非所有者」の立場になる
+/// (`alc_api_rt` は migration が NOLOGIN で作るので直接は繋げない)。
 ///
 /// * migration と GRANT は流さない — 先に `setup_app_state()` を呼んでおくこと
 ///   (その AppState の pool は RLS を素通りするので、行の準備と検証に使える)
@@ -353,7 +355,7 @@ pub async fn setup_app_state_as_app_role(max_connections: u32, reset_on_release:
         .max_connections(max_connections)
         .after_connect(|conn, _meta| {
             Box::pin(async move {
-                sqlx::query("SET ROLE alc_api_app")
+                sqlx::query("SET ROLE alc_api_rt")
                     .execute(&mut *conn)
                     .await?;
                 Ok(())
@@ -370,7 +372,7 @@ pub async fn setup_app_state_as_app_role(max_connections: u32, reset_on_release:
     let pool = options
         .connect(&test_database_url())
         .await
-        .expect("Failed to connect to test DB as alc_api_app");
+        .expect("Failed to connect to test DB as alc_api_rt");
 
     let storage: Arc<dyn rust_alc_api::storage::StorageBackend> =
         Arc::new(MockStorage::new("test-bucket"));

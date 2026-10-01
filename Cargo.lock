@@ -222,8 +222,8 @@ dependencies = [
 
 [[package]]
 name = "alc-migrations"
-version = "0.157.0"
-source = "git+https://github.com/ippoan/alc-migrations?rev=4d408899a5d9516ccc111aaa8f8be208d46a9955#4d408899a5d9516ccc111aaa8f8be208d46a9955"
+version = "0.158.0"
+source = "git+https://github.com/ippoan/alc-migrations?rev=4806c1cfd3853483c14ac991fdd8dbd6c340a341#4806c1cfd3853483c14ac991fdd8dbd6c340a341"
 dependencies = [
  "sqlx",
 ]
