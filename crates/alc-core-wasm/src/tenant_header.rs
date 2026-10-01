@@ -1,7 +1,9 @@
 use axum::{extract::Request, http::StatusCode, middleware::Next, response::Response};
 use uuid::Uuid;
 
-use crate::device_dev::{device_dev_from_headers, DeviceDevSlot};
+use crate::device_dev::{
+    device_dev_from_headers, device_tenko_manager_from_headers, DeviceDevSlot,
+};
 use crate::types::{AuthUser, TenantId};
 
 /// 注入された identity ヘッダーを信頼するミドルウェア (Refs #434)
@@ -21,7 +23,8 @@ use crate::types::{AuthUser, TenantId};
 /// - `X-User-ID` / `X-User-Email` / `X-User-Role` が揃えば AuthUser も復元する
 ///   (admin 経路の role 判定はハンドラ側が AuthUser から行う)
 /// - 呼び元が request extensions に `DeviceDevSlot` を入れていれば、認証を通した後に
-///   `X-Device-Dev` の印を書く (Refs ippoan/alc-app#387)。入れ物が無ければ何もしない
+///   `X-Device-Dev` の印と、`X-Device-Role` が運行管理者用の鍵かを書く
+///   (Refs ippoan/alc-app#387)。入れ物が無ければ何もしない
 pub async fn require_tenant_header(mut req: Request, next: Next) -> Result<Response, StatusCode> {
     let tenant_id = req
         .headers()
@@ -34,6 +37,7 @@ pub async fn require_tenant_header(mut req: Request, next: Next) -> Result<Respo
 
     if let Some(slot) = req.extensions().get::<DeviceDevSlot>() {
         slot.set(device_dev_from_headers(req.headers()));
+        slot.set_tenko_manager(device_tenko_manager_from_headers(req.headers()));
     }
 
     // Gateway が注入した認証ヘッダーから AuthUser を復元
@@ -142,6 +146,45 @@ mod tests {
     async fn device_dev_not_written_when_auth_fails() {
         let got = slot_after(&[("X-Device-Dev", "1")]).await;
         assert_eq!(got, (StatusCode::UNAUTHORIZED, false));
+    }
+
+    /// `slot_after` と同じ形で、運行管理者の鍵かの印まで返す。
+    async fn slot_marks_after(headers: &[(&str, &str)]) -> (StatusCode, bool, bool) {
+        let slot = DeviceDevSlot::default();
+        let mut b = Request::builder().uri("/t");
+        for (k, v) in headers {
+            b = b.header(*k, *v);
+        }
+        let mut req = b.body(Body::empty()).unwrap();
+        req.extensions_mut().insert(slot.clone());
+        let resp = app().into_service().oneshot(req).await.unwrap();
+        (resp.status(), slot.get(), slot.is_tenko_manager())
+    }
+
+    #[tokio::test]
+    async fn device_role_written_to_slot_after_auth() {
+        let tid = Uuid::new_v4().to_string();
+        let role = ("X-Device-Role", "device-tenko-manager");
+        let got = slot_marks_after(&[("X-Tenant-ID", &tid), role]).await;
+        assert_eq!(got, (StatusCode::OK, false, true));
+        let got = slot_marks_after(&[("X-Tenant-ID", &tid), ("X-Device-Dev", "1"), role]).await;
+        assert_eq!(got, (StatusCode::OK, true, true));
+        for v in ["device-kiosk", "Device-Tenko-Manager", ""] {
+            let got = slot_marks_after(&[("X-Tenant-ID", &tid), ("X-Device-Role", v)]).await;
+            assert_eq!(got, (StatusCode::OK, false, false), "{v:?}");
+        }
+        let got = slot_marks_after(&[("X-Tenant-ID", &tid), ("X-Device-Dev", "1")]).await;
+        assert_eq!(got, (StatusCode::OK, true, false));
+    }
+
+    #[tokio::test]
+    async fn device_role_not_written_when_auth_fails() {
+        let got = slot_marks_after(&[
+            ("X-Device-Dev", "1"),
+            ("X-Device-Role", "device-tenko-manager"),
+        ])
+        .await;
+        assert_eq!(got, (StatusCode::UNAUTHORIZED, false, false));
     }
 
     #[tokio::test]
