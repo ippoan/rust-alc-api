@@ -3089,6 +3089,16 @@ async fn judge_by_device_key(
     judge_role: &str,
     headers: &[(&str, &str)],
 ) -> reqwest::Response {
+    judge_by_device_key_with_method(mock, judge_role, headers, None).await
+}
+
+/// `judge_by_device_key` に確認の方法 (`method`) を付けられる形。`None` なら body に載せない。
+async fn judge_by_device_key_with_method(
+    mock: Arc<MockTenkoSessionRepository>,
+    judge_role: &str,
+    headers: &[(&str, &str)],
+    method: Option<&str>,
+) -> reqwest::Response {
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
     tenko_state.tenko_sessions = mock;
@@ -3110,10 +3120,11 @@ async fn judge_by_device_key(
     for (k, v) in headers {
         rb = rb.header(*k, *v);
     }
-    rb.json(&serde_json::json!({ "judgment": "ok", "judged_by_employee_id": judge_id }))
-        .send()
-        .await
-        .unwrap()
+    let mut body = serde_json::json!({ "judgment": "ok", "judged_by_employee_id": judge_id });
+    if let Some(method) = method {
+        body["method"] = serde_json::json!(method);
+    }
+    rb.json(&body).send().await.unwrap()
 }
 
 #[tokio::test]
@@ -3194,6 +3205,289 @@ async fn test_record_manager_judgment_dev_tenko_manager_key_driver_judge_forbidd
 
     assert_eq!(res.status(), 403);
     assert!(mock.recorded_manager_judgment.lock().unwrap().is_none());
+}
+
+// ---- 確認の方法 `method` (通話 / 対面、Refs ippoan/alc-app#387) ----
+
+/// `tenko_method` のセッションに、`method` 付き (None なら body に載せない) の判定を送る。
+/// `already` は get() が返すセッションの manager_judgment_method (確定済みを模す)。
+async fn judge_with_method(
+    mock: Arc<MockTenkoSessionRepository>,
+    tenko_method: &str,
+    already: Option<&str>,
+    judgment: &str,
+    method: Option<serde_json::Value>,
+) -> reqwest::Response {
+    *mock.session_status.lock().unwrap() = "completed".to_string();
+    *mock.session_tenko_method.lock().unwrap() = tenko_method.to_string();
+    *mock.session_manager_judgment_method.lock().unwrap() = already.map(str::to_string);
+    let (base_url, auth_header, _, judge_id) = setup_with_mock_and_judge(mock).await;
+
+    let mut body = serde_json::json!({ "judgment": judgment, "judged_by_employee_id": judge_id });
+    if let Some(method) = method {
+        body["method"] = method;
+    }
+    client()
+        .post(format!(
+            "{base_url}/api/tenko/sessions/{}/judgment",
+            Uuid::new_v4()
+        ))
+        .header("Authorization", &auth_header)
+        .json(&body)
+        .send()
+        .await
+        .unwrap()
+}
+
+/// repo に渡った method。呼ばれていなければ外側が None
+fn recorded_method(mock: &MockTenkoSessionRepository) -> Option<Option<String>> {
+    mock.recorded_manager_judgment_method
+        .lock()
+        .unwrap()
+        .clone()
+}
+
+#[tokio::test]
+async fn test_record_manager_judgment_method_invalid_value_rejected() {
+    // IT点呼 でも、it / in_person 以外の値は 400 (repo は呼ばれない)
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    let res = judge_with_method(
+        mock.clone(),
+        "IT点呼",
+        None,
+        "ok",
+        Some(serde_json::json!("phone")),
+    )
+    .await;
+
+    assert_eq!(res.status(), 400);
+    assert_eq!(recorded_method(&mock), None);
+}
+
+#[tokio::test]
+async fn test_record_manager_judgment_it_without_method_unconfirmed_rejected() {
+    // IT点呼 を最初に確定するときは確認の方法が必須
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    let res = judge_with_method(mock.clone(), "IT点呼", None, "ok", None).await;
+
+    assert_eq!(res.status(), 400);
+    assert_eq!(recorded_method(&mock), None);
+}
+
+#[tokio::test]
+async fn test_record_manager_judgment_it_method_it_success() {
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    let res = judge_with_method(
+        mock.clone(),
+        "IT点呼",
+        None,
+        "ok",
+        Some(serde_json::json!("it")),
+    )
+    .await;
+
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["status"], "completed");
+    assert_eq!(body["manager_judgment"], "ok");
+    assert_eq!(body["manager_judgment_method"], "it");
+    assert_eq!(recorded_method(&mock), Some(Some("it".to_string())));
+}
+
+#[tokio::test]
+async fn test_record_manager_judgment_it_method_in_person_success() {
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    let res = judge_with_method(
+        mock.clone(),
+        "IT点呼",
+        None,
+        "ng",
+        Some(serde_json::json!("in_person")),
+    )
+    .await;
+
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["manager_judgment"], "ng");
+    assert_eq!(body["manager_judgment_method"], "in_person");
+    assert_eq!(recorded_method(&mock), Some(Some("in_person".to_string())));
+}
+
+#[tokio::test]
+async fn test_record_manager_judgment_it_without_method_already_confirmed_keeps_value() {
+    // 押し直し (OK / NG だけ直す): method を省いても通り、repo には None が渡る
+    // (= UPDATE の COALESCE が既存の値を保つ)
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    let res = judge_with_method(mock.clone(), "IT点呼", Some("in_person"), "ng", None).await;
+
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["manager_judgment"], "ng");
+    assert_eq!(body["manager_judgment_method"], "in_person");
+    assert_eq!(recorded_method(&mock), Some(None));
+}
+
+#[tokio::test]
+async fn test_record_manager_judgment_it_already_confirmed_method_can_change() {
+    // 確定済みでも、method を付けて押し直せばその値で上書きする
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    let res = judge_with_method(
+        mock.clone(),
+        "IT点呼",
+        Some("it"),
+        "ok",
+        Some(serde_json::json!("in_person")),
+    )
+    .await;
+
+    assert_eq!(res.status(), 200);
+    assert_eq!(recorded_method(&mock), Some(Some("in_person".to_string())));
+}
+
+#[tokio::test]
+async fn test_record_manager_judgment_non_it_with_method_rejected() {
+    // IT点呼 でない点呼方法には確認の方法を付けない (値が正しくても 400)
+    for tenko_method in ["自動点呼", "通常点呼", "遠隔点呼"] {
+        for method in ["it", "in_person"] {
+            let mock = Arc::new(MockTenkoSessionRepository::default());
+            let res = judge_with_method(
+                mock.clone(),
+                tenko_method,
+                None,
+                "ok",
+                Some(serde_json::json!(method)),
+            )
+            .await;
+
+            assert_eq!(res.status(), 400, "{tenko_method} + {method}");
+            assert_eq!(recorded_method(&mock), None);
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_record_manager_judgment_non_it_without_method_unchanged() {
+    // 既存の client (IT点呼 でない + method なし) は今までどおり通り、列は NULL のまま
+    for tenko_method in ["自動点呼", "通常点呼", "遠隔点呼"] {
+        let mock = Arc::new(MockTenkoSessionRepository::default());
+        let res = judge_with_method(mock.clone(), tenko_method, None, "ok", None).await;
+
+        assert_eq!(res.status(), 200, "{tenko_method}");
+        let body: serde_json::Value = res.json().await.unwrap();
+        assert_eq!(body["manager_judgment"], "ok");
+        assert!(body["manager_judgment_method"].is_null());
+        assert_eq!(recorded_method(&mock), Some(None));
+    }
+}
+
+#[tokio::test]
+async fn test_record_manager_judgment_method_null_is_same_as_omitted() {
+    // JSON の null は省略と同じ扱い
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    let res = judge_with_method(
+        mock.clone(),
+        "自動点呼",
+        None,
+        "ok",
+        Some(serde_json::Value::Null),
+    )
+    .await;
+
+    assert_eq!(res.status(), 200);
+    assert_eq!(recorded_method(&mock), Some(None));
+}
+
+#[tokio::test]
+async fn test_record_manager_judgment_method_checked_after_auth_and_role() {
+    // 認可と判定者の role 検査は method の検査より前 — 不正な method でも 401 / 403 が先
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_tenko_method.lock().unwrap() = "IT点呼".to_string();
+    let res = judge_by_device_key_with_method(
+        mock.clone(),
+        "manager",
+        &[("X-Device-Role", "device-tenko-manager")],
+        Some("phone"),
+    )
+    .await;
+    assert_eq!(res.status(), 401);
+
+    let res = judge_by_device_key_with_method(
+        mock.clone(),
+        "driver",
+        &[
+            ("X-Device-Dev", "1"),
+            ("X-Device-Role", "device-tenko-manager"),
+        ],
+        Some("phone"),
+    )
+    .await;
+    assert_eq!(res.status(), 403);
+    assert_eq!(recorded_method(&mock), None);
+}
+
+#[tokio::test]
+async fn test_record_manager_judgment_dev_tenko_manager_key_with_method_allowed() {
+    // dev の運行管理者の鍵 (AuthUser なし) でも、IT点呼 を method 付きで確定できる
+    for method in ["it", "in_person"] {
+        let mock = Arc::new(MockTenkoSessionRepository::default());
+        *mock.session_status.lock().unwrap() = "completed".to_string();
+        *mock.session_tenko_method.lock().unwrap() = "IT点呼".to_string();
+        let res = judge_by_device_key_with_method(
+            mock.clone(),
+            "manager",
+            &[
+                ("X-Device-Dev", "1"),
+                ("X-Device-Role", "device-tenko-manager"),
+            ],
+            Some(method),
+        )
+        .await;
+
+        assert_eq!(res.status(), 200, "{method}");
+        let body: serde_json::Value = res.json().await.unwrap();
+        assert_eq!(body["manager_judgment_method"], method);
+        assert_eq!(recorded_method(&mock), Some(Some(method.to_string())));
+    }
+}
+
+#[tokio::test]
+async fn test_record_manager_judgment_dev_tenko_manager_key_it_without_method_rejected() {
+    // 鍵の経路でも、IT点呼 の最初の確定に method が無ければ 400
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_tenko_method.lock().unwrap() = "IT点呼".to_string();
+    let res = judge_by_device_key(
+        mock.clone(),
+        "manager",
+        &[
+            ("X-Device-Dev", "1"),
+            ("X-Device-Role", "device-tenko-manager"),
+        ],
+    )
+    .await;
+
+    assert_eq!(res.status(), 400);
+    assert_eq!(recorded_method(&mock), None);
+}
+
+#[tokio::test]
+async fn test_list_sessions_accepts_method_and_pending_filter() {
+    // 新しい query (tenko_method / judgment_pending) を付けても、付けなくても一覧は 200
+    let (base_url, auth_header, _) = setup().await;
+    for query in [
+        "",
+        "?tenko_method=IT点呼&judgment_pending=true",
+        "?judgment_pending=false",
+    ] {
+        let res = client()
+            .get(format!("{base_url}/api/tenko/sessions{query}"))
+            .header("Authorization", &auth_header)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200, "{query}");
+        let body: serde_json::Value = res.json().await.unwrap();
+        assert_eq!(body["total"], 0);
+    }
 }
 
 // =========================================================================

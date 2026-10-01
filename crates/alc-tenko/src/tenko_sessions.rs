@@ -19,6 +19,7 @@ use crate::models::{
     ResumeSession, SafetyJudgment, SelfDeclaration, StartTenkoSession, SubmitAlcoholResult,
     SubmitDailyInspection, SubmitMedicalData, SubmitOperationReport, SubmitSelfDeclaration,
     TenkoDashboard, TenkoRecord, TenkoSession, TenkoSessionFilter, TenkoSessionsResponse,
+    JUDGMENT_METHOD_IN_PERSON, JUDGMENT_METHOD_IT, TENKO_METHOD_IT,
 };
 use crate::repository::TenkoSessionRepository;
 
@@ -1384,6 +1385,10 @@ async fn self_resume_session(
 ///      (`deleted_at IS NULL`)、`role` (TEXT[]) に `manager` または `admin` を
 ///      含むことをサーバ側で検証する。`manager_judgment_by` にはこの employee id
 ///      を保存する (テナント管理者アカウントの user_id ではない)
+///
+/// IT点呼 のセッションは、確定するときに確認の方法 (`method`: `it` = 通話 /
+/// `in_person` = 対面) を選ぶ (Refs ippoan/alc-app#387、検査は
+/// `judgment_method_acceptable`)。上の 2 段の検査はそのまま、その後ろで見る
 async fn record_manager_judgment(
     State(state): State<TenkoState>,
     tenant: axum::Extension<TenantId>,
@@ -1417,10 +1422,17 @@ async fn record_manager_judgment(
 
     let repo = &*state.tenko_sessions;
 
-    repo.get(tenant_id, id)
+    let current = repo
+        .get(tenant_id, id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
+
+    // 確認の方法 (通話 / 対面) の検査。画面の作りに頼らずここで決める
+    let method = body.method.as_deref();
+    if !judgment_method_acceptable(&current, method) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
 
     let session = repo
         .record_manager_judgment(
@@ -1429,6 +1441,7 @@ async fn record_manager_judgment(
             &body.judgment,
             &body.reason,
             body.judged_by_employee_id,
+            method,
         )
         .await
         .map_err(|e| {
@@ -1437,6 +1450,22 @@ async fn record_manager_judgment(
         })?;
 
     Ok(Json(session))
+}
+
+/// 判定に付いてきた確認の方法 (`method`) を、そのセッションで受けてよいか
+/// (Refs ippoan/alc-app#387)。
+///
+/// - 値があるとき: IT点呼 のセッションで、`it` / `in_person` のどちらかであること
+///   (ほかの点呼方法には確認の方法を付けない)
+/// - 値が無いとき: IT点呼 でないセッション (既存の client) はそのまま通す。IT点呼 は
+///   既に確認の方法が入っているときだけ通す (押し直しで OK / NG だけ直す)。まだ入って
+///   いなければ、確認の方法を選んで確定させる
+fn judgment_method_acceptable(session: &TenkoSession, method: Option<&str>) -> bool {
+    let is_it = session.tenko_method == TENKO_METHOD_IT;
+    match method {
+        Some(m) => is_it && (m == JUDGMENT_METHOD_IT || m == JUDGMENT_METHOD_IN_PERSON),
+        None => !is_it || session.manager_judgment_method.is_some(),
+    }
 }
 
 #[cfg(test)]

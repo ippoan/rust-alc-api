@@ -166,9 +166,11 @@ impl TenkoRecordsRepository for PgTenkoRecordsRepository {
         // (挿入後 UPDATE 不可のため) ので、都度 tenko_sessions から JOIN で引く。
         // 判定前に completed になったセッションでも、後から判定すれば反映される。
         // manager_judgment_by は employees.id (Refs ippoan/alc-app#315) なので、
-        // 帳票として読めるよう employees.name まで JOIN で引いておく
+        // 帳票として読めるよう employees.name まで JOIN で引いておく。
+        // manager_judgment_method (確認の方法) は、対面で確定した IT点呼 の点呼方法を
+        // CSV で読み替えるために引く (Refs ippoan/alc-app#387)
         let sql = format!(
-            "SELECT r.*, s.manager_judgment, s.manager_judgment_reason, e.name AS manager_judgment_by_name \
+            "SELECT r.*, s.manager_judgment, s.manager_judgment_reason, s.manager_judgment_method, e.name AS manager_judgment_by_name \
              FROM tenko_records r \
              LEFT JOIN tenko_sessions s ON s.id = r.session_id AND s.tenant_id = r.tenant_id \
              LEFT JOIN alc_api.employees e ON e.id = s.manager_judgment_by AND e.tenant_id = r.tenant_id \

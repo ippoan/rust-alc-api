@@ -422,6 +422,9 @@ pub struct MockTenkoRecordsRepository {
     /// (Refs ippoan/alc-app#315。CSV は tenko_sessions との JOIN で埋まる列なので、
     /// mock でも record 本体ではなくこのフラグで再現する)
     pub return_manager_judgment: AtomicBool,
+    /// list_all が IT点呼 (対面で確定 / 通話で確定 / 未判定) と通常点呼の 4 行を返す
+    /// (Refs ippoan/alc-app#387。確認の方法も tenko_sessions との JOIN で埋まる列)
+    pub return_it_tenko_rows: AtomicBool,
 }
 
 impl Default for MockTenkoRecordsRepository {
@@ -433,6 +436,7 @@ impl Default for MockTenkoRecordsRepository {
             return_ng_data: AtomicBool::new(false),
             return_carins_data: AtomicBool::new(false),
             return_manager_judgment: AtomicBool::new(false),
+            return_it_tenko_rows: AtomicBool::new(false),
         }
     }
 }
@@ -481,6 +485,7 @@ fn make_mock_tenko_record_for_list(tenant_id: Uuid, id: Uuid) -> TenkoRecord {
         manager_judgment: None,
         manager_judgment_reason: None,
         manager_judgment_by_name: None,
+        manager_judgment_method: None,
     }
 }
 
@@ -545,6 +550,25 @@ impl TenkoRecordsRepository for MockTenkoRecordsRepository {
                 "carins_matched_by": "cert_no",
             });
             return Ok(vec![record]);
+        }
+        if self.return_it_tenko_rows.load(Ordering::SeqCst) {
+            // (記録の tenko_method, 確認の方法, 見分け用の location)
+            let rows = [
+                ("IT点呼", Some("in_person"), "row-in-person"),
+                ("IT点呼", Some("it"), "row-it"),
+                ("IT点呼", None, "row-pending"),
+                ("通常点呼", None, "row-normal"),
+            ];
+            return Ok(rows
+                .into_iter()
+                .map(|(tenko_method, judgment_method, location)| {
+                    let mut record = make_mock_tenko_record_for_list(_tenant_id, Uuid::new_v4());
+                    record.tenko_method = tenko_method.to_string();
+                    record.manager_judgment_method = judgment_method.map(str::to_string);
+                    record.location = Some(location.to_string());
+                    record
+                })
+                .collect());
         }
         if self.return_manager_judgment.load(Ordering::SeqCst) {
             let mut record = make_mock_tenko_record_for_list(_tenant_id, Uuid::new_v4());
@@ -762,6 +786,11 @@ pub struct MockTenkoSessionRepository {
     /// record_manager_judgment に渡された (judgment, reason, judged_by_employee_id) を
     /// 検証用に記録する (Refs ippoan/alc-app#315)
     pub recorded_manager_judgment: std::sync::Mutex<Option<(String, Option<String>, Uuid)>>,
+    /// record_manager_judgment に渡された method (確認の方法)。呼ばれていなければ None、
+    /// 呼ばれたら Some(渡された値) (Refs ippoan/alc-app#387)
+    pub recorded_manager_judgment_method: std::sync::Mutex<Option<Option<String>>>,
+    /// get() が返すセッションの manager_judgment_method (既に確定済みの IT点呼 を模す)
+    pub session_manager_judgment_method: std::sync::Mutex<Option<String>>,
     /// true のとき self_resume が更新 0 行 (= 既に resumed_at が入っている) を模して
     /// None を返す (Refs ippoan/alc-app#351)
     pub already_resumed: AtomicBool,
@@ -792,6 +821,8 @@ impl Default for MockTenkoSessionRepository {
             fail_on_update_carrying_items: AtomicBool::new(false),
             created_session_tenko_method: std::sync::Mutex::new(None),
             recorded_manager_judgment: std::sync::Mutex::new(None),
+            recorded_manager_judgment_method: std::sync::Mutex::new(None),
+            session_manager_judgment_method: std::sync::Mutex::new(None),
             already_resumed: AtomicBool::new(false),
         }
     }
@@ -868,6 +899,7 @@ fn make_mock_session(
         manager_judgment: None,
         manager_judgment_reason: None,
         manager_judgment_by: None,
+        manager_judgment_method: None,
         created_at: now,
         updated_at: now,
     }
@@ -914,6 +946,7 @@ fn make_mock_tenko_record(tenant_id: Uuid, session: &TenkoSession) -> TenkoRecor
         manager_judgment: session.manager_judgment.clone(),
         manager_judgment_reason: session.manager_judgment_reason.clone(),
         manager_judgment_by_name: None,
+        manager_judgment_method: None,
     }
 }
 
@@ -939,6 +972,8 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
             has_sd,
         );
         session.tenko_method = self.session_tenko_method.lock().unwrap().clone();
+        session.manager_judgment_method =
+            self.session_manager_judgment_method.lock().unwrap().clone();
         Ok(Some(session))
     }
 
@@ -1384,10 +1419,12 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
         judgment: &str,
         reason: &Option<String>,
         judged_by_employee_id: Uuid,
+        method: Option<&str>,
     ) -> Result<TenkoSession, sqlx::Error> {
         check_fail_update!(self);
         *self.recorded_manager_judgment.lock().unwrap() =
             Some((judgment.to_string(), reason.clone(), judged_by_employee_id));
+        *self.recorded_manager_judgment_method.lock().unwrap() = Some(method.map(str::to_string));
         let employee_id = *self.session_employee_id.lock().unwrap();
         let status = self.session_status.lock().unwrap().clone();
         let tenko_type = self.session_tenko_type.lock().unwrap().clone();
@@ -1403,6 +1440,11 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
         session.manager_judgment = Some(judgment.to_string());
         session.manager_judgment_reason = reason.clone();
         session.manager_judgment_by = Some(judged_by_employee_id);
+        // 実 repo の COALESCE と同じ: 省略時は既存の値を保つ
+        session.tenko_method = self.session_tenko_method.lock().unwrap().clone();
+        session.manager_judgment_method = method
+            .map(str::to_string)
+            .or_else(|| self.session_manager_judgment_method.lock().unwrap().clone());
         Ok(session)
     }
 

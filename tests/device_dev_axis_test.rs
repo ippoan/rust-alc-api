@@ -505,6 +505,20 @@ async fn judge_as_dev_tenko_manager(
     session_id: &str,
     judge_id: &str,
 ) -> reqwest::Response {
+    judge_as_dev_tenko_manager_with_method(ctx, session_id, judge_id, None).await
+}
+
+/// `judge_as_dev_tenko_manager` に確認の方法 (`method`) を付けられる形 (None なら載せない)
+async fn judge_as_dev_tenko_manager_with_method(
+    ctx: &Ctx,
+    session_id: &str,
+    judge_id: &str,
+    method: Option<&str>,
+) -> reqwest::Response {
+    let mut body = json!({ "judgment": "ok", "judged_by_employee_id": judge_id });
+    if let Some(method) = method {
+        body["method"] = json!(method);
+    }
     ctx.client
         .post(format!(
             "{}/api/tenko/sessions/{session_id}/judgment",
@@ -513,7 +527,7 @@ async fn judge_as_dev_tenko_manager(
         .header("X-Tenant-ID", ctx.tenant.to_string())
         .header("X-Device-Dev", "1")
         .header("X-Device-Role", "device-tenko-manager")
-        .json(&json!({ "judgment": "ok", "judged_by_employee_id": judge_id }))
+        .json(&body)
         .send()
         .await
         .unwrap()
@@ -574,6 +588,130 @@ async fn test_dev_tenko_manager_key_judges_only_dev_sessions() {
                 judgment_of(&ctx, &prod_session).await,
                 (None, None, false),
                 "本番の行に判定が入っていない"
+            );
+        }
+    );
+}
+
+/// IT点呼 のセッションを 1 件作る (測定を開始 → 完了 PUT に `tenko_method`)。session の id を返す
+async fn it_tenko_session(
+    ctx: &Ctx,
+    employee_id: &str,
+    measured_at: &str,
+    dev: Option<&str>,
+) -> String {
+    let measurement = ctx
+        .create(
+            "/api/measurements/start",
+            dev,
+            json!({ "employee_id": employee_id }),
+        )
+        .await;
+    let res = ctx
+        .request(
+            reqwest::Method::PUT,
+            &format!("/api/measurements/{measurement}"),
+            dev,
+        )
+        .json(&json!({
+            "status": "completed",
+            "alcohol_value": 0.0,
+            "result_type": "normal",
+            "measured_at": measured_at,
+            "temperature": 36.5,
+            "record_as_tenko": true,
+            "tenko_method": "IT点呼",
+        }))
+        .send()
+        .await
+        .unwrap();
+    let status = res.status();
+    let text = res.text().await.unwrap();
+    assert_eq!(status, 200, "PUT measurement (dev={dev:?}): {text}");
+    let json: Value = serde_json::from_str(&text).unwrap();
+    json["tenko_session_id"].as_str().unwrap().to_string()
+}
+
+/// 未完了の IT点呼 の一覧の (total, id)
+async fn pending_it_sessions(ctx: &Ctx, dev: Option<&str>) -> (i64, Vec<String>) {
+    let path = "/api/tenko/sessions?tenko_method=IT点呼&judgment_pending=true";
+    let res = ctx.get(path, dev).await;
+    assert_eq!(res.status(), 200, "GET {path} (dev={dev:?})");
+    let body: Value = res.json().await.unwrap();
+    let total = body["total"].as_i64().unwrap();
+    (total, ctx.list_ids(path, "sessions", dev).await)
+}
+
+#[tokio::test]
+async fn test_pending_it_tenko_list_is_split_by_the_header() {
+    test_group!("未完了の IT点呼 の一覧 (dev端末の印による出し分け)");
+    let ctx = setup("Dev Axis Pending IT", 5, true).await;
+    let emp = ctx.employee("DA7").await;
+    let judge = ctx
+        .create(
+            "/api/employees",
+            None,
+            json!({ "name": "運行管理者", "code": "DA7M", "role": ["manager"] }),
+        )
+        .await;
+
+    let dev_session = it_tenko_session(&ctx, &emp, "2026-09-17T08:00:00Z", Some("1")).await;
+    let prod_session = it_tenko_session(&ctx, &emp, "2026-09-17T09:00:00Z", None).await;
+    assert!(ctx.is_dev("tenko_sessions", &dev_session).await);
+    assert!(!ctx.is_dev("tenko_sessions", &prod_session).await);
+
+    test_case!(
+        "開発用の軸の IT点呼 は開発用の要求の一覧にだけ出る",
+        {
+            assert_eq!(
+                pending_it_sessions(&ctx, Some("1")).await,
+                (1, vec![dev_session.clone()])
+            );
+            assert_eq!(
+                pending_it_sessions(&ctx, None).await,
+                (1, vec![prod_session.clone()]),
+                "本番の要求の一覧には開発用の行が出ない"
+            );
+        }
+    );
+
+    test_case!(
+        "dev の運行管理者の鍵で確定すると、開発用の一覧から消える (本番の一覧は変わらない)",
+        {
+            let res = judge_as_dev_tenko_manager(&ctx, &dev_session, &judge).await;
+            assert_eq!(res.status(), 400, "IT点呼 は確認の方法が必須");
+
+            let res =
+                judge_as_dev_tenko_manager_with_method(&ctx, &dev_session, &judge, Some("it"))
+                    .await;
+            let status = res.status();
+            let text = res.text().await.unwrap();
+            assert_eq!(status, 200, "{text}");
+            let body: Value = serde_json::from_str(&text).unwrap();
+            assert_eq!(body["manager_judgment_method"], "it");
+
+            assert_eq!(pending_it_sessions(&ctx, Some("1")).await, (0, vec![]));
+            assert_eq!(
+                pending_it_sessions(&ctx, None).await,
+                (1, vec![prod_session.clone()])
+            );
+        }
+    );
+
+    test_case!(
+        "dev の運行管理者の鍵は本番の軸の IT点呼 を確定できない",
+        {
+            let res = judge_as_dev_tenko_manager_with_method(
+                &ctx,
+                &prod_session,
+                &judge,
+                Some("in_person"),
+            )
+            .await;
+            assert_eq!(res.status(), 404);
+            assert_eq!(
+                pending_it_sessions(&ctx, None).await,
+                (1, vec![prod_session.clone()])
             );
         }
     );
