@@ -34,13 +34,16 @@ impl HubMeasurementsRepository for PgHubMeasurementsRepository {
             let recorded_at = item
                 .recorded_at_ms
                 .and_then(DateTime::from_timestamp_millis);
+            // 重複の判定は dev端末の軸 (is_dev) ごと (alc-migrations 155 の 4 列 unique を
+            // 推論させる)。is_dev は列の既定値で入る。3 列 unique (126) がまだ残っているので、
+            // 同じ端末・同じ連番が両方の軸で届くと一意違反のエラーになる (黙って捨てない)
             let res = sqlx::query(
                 r#"
                 INSERT INTO hub_measurements (
                     tenant_id, device_id, kind, payload, seq, recorded_at, session_id
                 )
                 VALUES ($1, $2, $3, $4, $5, $6, $7)
-                ON CONFLICT (tenant_id, device_id, seq) DO NOTHING
+                ON CONFLICT (tenant_id, device_id, seq, is_dev) DO NOTHING
                 "#,
             )
             .bind(tenant_id)

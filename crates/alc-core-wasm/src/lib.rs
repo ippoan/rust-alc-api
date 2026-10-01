@@ -5,9 +5,11 @@
 
 pub mod api_error;
 pub mod db_error;
+pub mod device_dev;
 pub mod tenant_header;
 pub mod types;
 
 pub use db_error::DbError;
+pub use device_dev::{device_dev_from_headers, DeviceDevSlot};
 pub use tenant_header::require_tenant_header;
 pub use types::{AuthUser, TenantId};

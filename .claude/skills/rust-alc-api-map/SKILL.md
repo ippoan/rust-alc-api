@@ -1,6 +1,6 @@
 ---
 name: rust-alc-api-map
-generated-from: rust-alc-api:2a1075c9b869684e35a3c3e55ecbdd9f4bae2140
+generated-from: rust-alc-api:6f1d38848325ea567b728a086e31c63d225713e0
 paths: [crates/, src/, migrations/, tests/]
 description: rust-alc-api (アルコールチェッカー基盤の Rust/Axum Cargo workspace — domain crate 群 + monolith 単一バイナリ、PostgreSQL+RLS、Cloud Run) の構造ナビゲーション。どの crate に何のルートがあるか / monolith (rust-alc-api) 一本化 (gateway + per-domain は #556 で廃止) / RLS・migration・deploy/release 分離の gotcha を 1 枚にまとめる。トリガー:「rust-alc-api」「alc-api」「alc-notify」「alc-tenko」「alc-trouble」「alc-carins」「alc-dtako」「gateway」「tenko-api」「carins-api」「dtako-api」「trouble-api」「RLS テナント」「sqlx migration」「ts-rs」「Release Wave」「Bazel」等。
 ---
@@ -116,6 +116,42 @@ router 実装として存続。旧 per-domain は同じ domain crate を単独 m
   `crates/alc-core/src/tenant.rs::TenantConn` が `set_current_tenant` で `app.current_tenant_id` を
   立てて RLS に委ねるが、本番 (alc_api_app) でしか効かない。staging も対象にするクエリは
   **WHERE tenant_id を明示**すること (Refs #434、sso_admin で実害)。
+- **dev端末 (開発用の鍵) の記録の分離 — `X-Device-Dev` → `app.device_dev` (Refs ippoan/alc-app#387)**:
+  dev端末で行った点呼・測定・打刻の行は、その鍵の要求からしか見えない。**INSERT / SELECT の SQL は
+  書き換えていない** — backend は検証済みの要求の印を DB の接続の設定に通すだけで、行の出し分けは
+  alc-migrations 153 の列の既定値 (`is_dev`) と RLS が担う。対象は 8 表 (`tenko_sessions` /
+  `tenko_records` / `measurements` / `hub_measurements` / `webhook_deliveries` / `equipment_failures` /
+  `tenko_carrying_item_checks` / `tenko_schedules`)。
+  - **ヘッダを読むのは 1 関数**: `alc_core_wasm::device_dev::device_dev_from_headers` (値がちょうど `"1"`
+    のときだけ dev。`true` / `0` / 空 / 欄なし / 同名の欄が 2 つ以上は dev でない)。入れ物
+    `DeviceDevSlot` (`Arc<AtomicBool>`、純 std) も同じ module — alc-core-wasm は tokio を持てないため
+  - **認証を通した要求にだけスコープが立つ**: `alc_core::auth_middleware::require_tenant_header` は
+    wasm 側の実体を包む薄い関数で、入れ物を request extensions に入れて `alc_core::device_dev::scope`
+    (tokio の task-local) を張る。実体は**認証を通した後に**入れ物へ書く (入れ物が無い worker では
+    何もしない)。`require_internal_shared_secret` は secret と tenant を通した後に同じ関数で読んで
+    スコープを張る。**外側の layer は無い** — `src/routes/mod.rs` の layer 7 か所は無改造で、認証
+    middleware を通る = スコープが在る (足し忘れる場所が無い。app は `src/main.rs` と
+    `tests/common/mod.rs` の 2 か所で別々に組み立てているので、外側の layer だと片方に書き忘れても
+    テストが緑になる)。`require_internal_jwt` (auth-worker の内部口) は印を読まない
+  - **`set_current_tenant` (Rust、`alc-core/src/tenant.rs`) のシグネチャは不変**。SQL の
+    `set_current_tenant($1)` の**後に**、`device_dev::is_device_dev()` が true のときだけ
+    `set_config('app.device_dev', '1', false)` を打つ (SQL 関数が毎回 `''` に戻すので逆順は不可)。
+    dev でないときは追加の文を打たない
+  - **スコープの外は dev でない**: 公開 route / 認証前 / バッチ (`check_overdue_schedules`) /
+    **`tokio::spawn` の先**。spawn の先で書いた行は本番の行になるので、dev かどうかは spawn の前に取る
+  - **dev の要求では点呼の webhook を発火しない**: `alc-tenko/src/tenko_sessions.rs::spawn_webhook`
+    (点呼の 5 か所の発火を 1 つにまとめた関数) が spawn の前に判定し、dev なら配信の行も作らず外部へも
+    送らない。**新しい発火を足すときはこの関数を通す** (直接 `tokio::spawn` + `fire_event` を書くと、
+    dev の要求の配信が本番の行として残る)
+  - **プールへ返すときにも消す**: `alc_core::tenant::reset_tenant_context` (`RESET app.current_tenant_id;
+    RESET app.device_dev` を 1 往復) を `src/main.rs` の `after_release` が呼ぶ
+  - **`hub_measurements` の重複判定は軸ごと**: `ON CONFLICT (tenant_id, device_id, seq, is_dev)`
+    (alc-migrations 155 の 4 列 unique を推論)。126 の 3 列 unique がまだ残っているので、同じ端末・
+    同じ連番が両方の軸で届くと一意違反のエラーになる (黙って捨てない。3 列を落とすのは後続)
+  - **テスト**: `tests/device_dev_axis_test.rs` (実 DB)。ほかの DB テストは superuser で繋ぐので RLS を
+    素通りする — ここだけ `common::setup_app_state_as_app_role` (接続ごとに `SET ROLE alc_api_app`) で
+    走らせる。**staging も superuser 接続なので、staging では dev の行の読み出しは分かれない**
+    (書いた行の `is_dev` は立つ。上の「staging は RLS 完全 bypass」と同じ理由)
 - **pre-auth SECURITY DEFINER + FORCE ROW LEVEL SECURITY の罠**: 未認証経路 (LINE webhook /
   LINE login / notify viewer `/v/{token}` 等) が cross-tenant 検索用の SECURITY DEFINER 関数
   を叩く時、対象テーブルに `FORCE ROW LEVEL SECURITY` が有効かつポリシーが

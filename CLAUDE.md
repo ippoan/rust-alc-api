@@ -17,6 +17,7 @@ Axum + PostgreSQL RLS の ALC (アルコールチェック) API。Cloud Run に�
 - main 直接 merge/push・`git checkout main`・メイン worktree のソース編集は禁止 — コード変更は必ず origin/main ベースの worktree で (hooks 強制)。削除前に必ず repo root へ cd
 - 確認なしの `deploy.sh` 実行禁止 (AskUserQuestion 2 択で確認)。本番デプロイは `/tag-release patch` のみ
 - Cloud Run handler 内 `tokio::spawn` fire-and-forget 禁止 (CPU throttle で完走しない)
+- dev端末の印 (`X-Device-Dev`) は `device_dev_from_headers` 以外で読まない / 認証前に信じない。`tokio::spawn` の先は dev でなくなる (書いた行が本番の行になる) — dev かどうかは spawn の前に `alc_core::device_dev::is_device_dev()` で取り、点呼の webhook は `spawn_webhook` を通す
 - render.sh / workflows に値ハードコード禁止 — Secret Manager + secretKeyRef。新 secret は per-secret grant、更新後は `gcloud run deploy` で新 revision 必須
 - coverage gate 対象ファイルで `tracing` マクロを複数行にしない
 - unit test を本番 DB/API に直叩きしない / 外部 API URL は const にせず struct フィールド化 (wiremock)
