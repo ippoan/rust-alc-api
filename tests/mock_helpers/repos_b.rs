@@ -1065,6 +1065,9 @@ pub struct MockEmployeeRepository {
     /// upsert_by_code 専用の in-memory store (Refs ippoan/alc-app-s3#125)。
     /// 他のメソッドはフラグ方式 (sample_employee) のままなので混ぜない。
     pub store: std::sync::Mutex<Vec<Employee>>,
+    /// get に渡された社員 id の記録。カードから社員を返す口
+    /// (Refs ippoan/alc-app#387) が、照合で決まった社員をそのまま引くことを固定する
+    pub get_calls: std::sync::Mutex<Vec<Uuid>>,
 }
 
 impl Default for MockEmployeeRepository {
@@ -1075,6 +1078,7 @@ impl Default for MockEmployeeRepository {
             return_deleted: AtomicBool::new(false),
             return_conflict: AtomicBool::new(false),
             store: std::sync::Mutex::new(vec![]),
+            get_calls: std::sync::Mutex::new(vec![]),
         }
     }
 }
@@ -1120,7 +1124,8 @@ impl EmployeeRepository for MockEmployeeRepository {
         Ok(vec![])
     }
 
-    async fn get(&self, _tenant_id: Uuid, _id: Uuid) -> Result<Option<Employee>, sqlx::Error> {
+    async fn get(&self, _tenant_id: Uuid, id: Uuid) -> Result<Option<Employee>, sqlx::Error> {
+        self.get_calls.lock().unwrap().push(id);
         check_fail!(self);
         if self.return_some.load(Ordering::SeqCst) {
             return Ok(Some(self.sample_employee()));

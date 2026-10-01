@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use alc_core::auth_middleware::TenantId;
 use alc_core::models::{
-    CreateTimePunchByCard, CreateTimecardCard, TimePunchFilter, TimePunchWithEmployee,
+    CreateTimePunchByCard, CreateTimecardCard, Employee, TimePunchFilter, TimePunchWithEmployee,
     TimePunchesResponse, TimecardCard, TimecardCardBulkUpsert, TimecardCardDeleteByCard,
     TimecardCardDeleteResult, TimecardCardUpsertSummary, MAX_BULK_UPSERT_ITEMS,
 };
@@ -38,6 +38,11 @@ pub fn tenant_router() -> Router<AppState> {
             "/timecard/cards/delete-by-card",
             post(delete_card_by_card_id),
         )
+        // カードから社員を返す読み取り専用の口 (Refs ippoan/alc-app#387)。
+        // **POST だけを登録する** (`delete-by-card` と同じ理由)。card_id を URL に
+        // 載せないため body で受ける。固定の segment は `/timecard/cards/{id}` より
+        // 優先して当たるので、`lookup` が `{id}` に食われることはない
+        .route("/timecard/cards/lookup", post(lookup_employee_by_card))
         .route("/timecard/punch", post(punch))
         .route("/timecard/punches", get(list_punches))
         .route("/timecard/punches/csv", get(export_csv))
@@ -223,6 +228,69 @@ async fn delete_card(
     }
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+// --- Lookup (読み取り専用) ---
+
+#[derive(Debug, serde::Deserialize)]
+struct CardLookup {
+    /// 欠落も空と同じ 400 にするため default で受ける (必須にすると axum が 422 を返す)
+    #[serde(default)]
+    card_id: String,
+}
+
+/// `POST /timecard/cards/lookup` — カード (社員証の IC・免許証) から社員を返す
+/// (Refs ippoan/alc-app#387)。
+///
+/// 運行管理者席の IT点呼 の受け画面が「この席の運行管理者」をカードのタッチで
+/// 登録するための口。照合は打刻と**同じ 1 か所** (`resolve_employee_by_card`) を使い、
+/// 応答は `POST /employees/lookup` と同じ `Employee`。
+///
+/// **未登録・持ち主の居ない保留カード・退職した社員はどれも 404。**
+/// `resolve_employee_by_card` は `deleted_at` を見ないので、退職は `employees.get`
+/// (`deleted_at IS NULL`) で弾く。
+///
+/// **`card_id` は応答にも `tracing` にも出さない** (`delete-by-card` と同じ理由)。
+///
+/// ★ **この口に書き込みを足すな。** 打刻しない・`timecard_cards` を更新しないことが
+/// この口の存在理由で、auth-worker が席の鍵にこの口を開ける安全性もそこに依存している。
+async fn lookup_employee_by_card(
+    State(state): State<AppState>,
+    tenant: axum::Extension<TenantId>,
+    Json(body): Json<CardLookup>,
+) -> Result<Json<Employee>, StatusCode> {
+    let tenant_id = tenant.0 .0;
+
+    // 空かどうかは照合と同じ正規化形で見る (空白だけ・区切りだけも空)。
+    // 照合へは**生値のまま**渡す — 正規化は `resolve_employee_by_card` の中の 1 回だけ
+    if normalize_card_id(&body.card_id).is_empty() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    let employee_id = alc_core::repository::timecard::resolve_employee_by_card(
+        state.timecard.as_ref(),
+        tenant_id,
+        &body.card_id,
+    )
+    .await
+    .map_err(|e| {
+        // ★ card_id はログにも出さない
+        tracing::error!("lookup_employee_by_card resolve error: {e}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+    let employee = state
+        .employees
+        .get(tenant_id, employee_id)
+        .await
+        .map_err(|e| {
+            tracing::error!("lookup_employee_by_card employee error: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    Ok(Json(employee))
 }
 
 // --- Punch ---
