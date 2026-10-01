@@ -2787,6 +2787,14 @@ async fn test_record_manager_judgment_update_db_error() {
 // auth-worker の /device-data-proxy は X-User-* を付けず、代わりに X-Device-Role (常に) と
 // X-Device-Dev: 1 (dev の鍵だけ) を付ける。テストハーネスの JWT → X-User-* 変換は
 // Authorization 前提なので、生ヘッダーで直接叩く。
+//
+// | 要求                         | 対象の記録   | 結果 |
+// |------------------------------|--------------|------|
+// | dev の運行管理者の鍵         | どれでも     | 通る |
+// | dev でない運行管理者の鍵     | IT点呼       | 通る |
+// | dev でない運行管理者の鍵     | IT点呼 でない | 403  |
+// | キオスクの鍵 (dev でも本番でも) | どれでも  | 401  |
+// | 鍵なし・AuthUser なし        | どれでも     | 401  |
 
 /// 判定者 (employees.role = `judge_role`) を返す driver_info を持つサーバを立て、
 /// `headers` (X-Tenant-ID は別に付ける) だけで判定の口を叩く。
@@ -2805,13 +2813,24 @@ async fn judge_by_device_key_with_method(
     headers: &[(&str, &str)],
     method: Option<&str>,
 ) -> reqwest::Response {
+    judge_by_device_key_with_judge(mock, Some(judge_role), headers, method).await
+}
+
+/// `judge_role` が `None` なら、判定者の社員が引けない (居ない・他テナント・削除済み) 形。
+async fn judge_by_device_key_with_judge(
+    mock: Arc<MockTenkoSessionRepository>,
+    judge_role: Option<&str>,
+    headers: &[(&str, &str)],
+    method: Option<&str>,
+) -> reqwest::Response {
     let state = crate::mock_helpers::app_state::setup_mock_app_state();
     let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
     tenko_state.tenko_sessions = mock;
     let tenant_id = uuid::Uuid::new_v4();
     let judge_id = uuid::Uuid::new_v4();
     let driver_info = Arc::new(crate::mock_helpers::MockDriverInfoRepository::default());
-    *driver_info.employee.lock().unwrap() = Some(judge_employee(tenant_id, judge_id, judge_role));
+    *driver_info.employee.lock().unwrap() =
+        judge_role.map(|role| judge_employee(tenant_id, judge_id, role));
     tenko_state.driver_info = driver_info;
     let base_url =
         crate::mock_helpers::app_state::spawn_mock_server_with_tenko(state, tenko_state.clone())
@@ -2835,7 +2854,8 @@ async fn judge_by_device_key_with_method(
 
 #[tokio::test]
 async fn test_record_manager_judgment_dev_tenko_manager_key_allowed() {
-    // dev にした運行管理者用の鍵は、AuthUser が無くても通る
+    // dev にした運行管理者用の鍵は、AuthUser が無くても通る。点呼方法では絞らない
+    // (mock の既定は IT点呼 でない記録 = 自動点呼)
     let mock = Arc::new(MockTenkoSessionRepository::default());
     *mock.session_status.lock().unwrap() = "completed".to_string();
     let res = judge_by_device_key(
@@ -2856,13 +2876,108 @@ async fn test_record_manager_judgment_dev_tenko_manager_key_allowed() {
 }
 
 #[tokio::test]
-async fn test_record_manager_judgment_prod_tenko_manager_key_rejected() {
-    // 本番の運行管理者の鍵 (role はあるが dev の印が無い) には開かない
+async fn test_record_manager_judgment_prod_tenko_manager_key_non_it_forbidden() {
+    // dev でない運行管理者の鍵は、IT点呼 でない記録を判定できない (403)。
+    // body の method では決めない — `it` を付けても 403 のまま (400 にもならない)
+    for tenko_method in ["自動点呼", "遠隔点呼", "通常点呼"] {
+        for method in [None, Some("it")] {
+            let mock = Arc::new(MockTenkoSessionRepository::default());
+            *mock.session_tenko_method.lock().unwrap() = tenko_method.to_string();
+            let res = judge_by_device_key_with_method(
+                mock.clone(),
+                "manager",
+                &[("X-Device-Role", "device-tenko-manager")],
+                method,
+            )
+            .await;
+
+            assert_eq!(res.status(), 403, "{tenko_method} {method:?}");
+            assert!(mock.recorded_manager_judgment.lock().unwrap().is_none());
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_record_manager_judgment_prod_tenko_manager_key_it_allowed() {
+    // dev でない運行管理者の鍵でも、IT点呼 の記録は判定できる。
+    // 確認の方法は通話 (`it`) でも対面 (`in_person`) でもよい
+    for method in ["it", "in_person"] {
+        let mock = Arc::new(MockTenkoSessionRepository::default());
+        *mock.session_status.lock().unwrap() = "completed".to_string();
+        *mock.session_tenko_method.lock().unwrap() = "IT点呼".to_string();
+        let res = judge_by_device_key_with_method(
+            mock.clone(),
+            "manager",
+            &[("X-Device-Role", "device-tenko-manager")],
+            Some(method),
+        )
+        .await;
+
+        assert_eq!(res.status(), 200, "{method}");
+        let body: serde_json::Value = res.json().await.unwrap();
+        assert_eq!(body["manager_judgment"], "ok");
+        assert_eq!(body["manager_judgment_method"], method);
+        assert_eq!(recorded_method(&mock), Some(Some(method.to_string())));
+    }
+}
+
+#[tokio::test]
+async fn test_record_manager_judgment_prod_tenko_manager_key_it_without_method_rejected() {
+    // dev でない運行管理者の鍵でも、IT点呼 の最初の確定に method が無ければ 400
     let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_tenko_method.lock().unwrap() = "IT点呼".to_string();
     let res = judge_by_device_key(
         mock.clone(),
         "manager",
         &[("X-Device-Role", "device-tenko-manager")],
+    )
+    .await;
+
+    assert_eq!(res.status(), 400);
+    assert!(mock.recorded_manager_judgment.lock().unwrap().is_none());
+}
+
+#[tokio::test]
+async fn test_record_manager_judgment_prod_tenko_manager_key_judge_still_verified() {
+    // dev でない運行管理者の鍵でも、判定者 (judged_by_employee_id) の検証は残る:
+    // 社員が引けない (居ない・他テナント・削除済み) / manager でも admin でもない → 403
+    for judge_role in [None, Some("driver")] {
+        let mock = Arc::new(MockTenkoSessionRepository::default());
+        *mock.session_tenko_method.lock().unwrap() = "IT点呼".to_string();
+        let res = judge_by_device_key_with_judge(
+            mock.clone(),
+            judge_role,
+            &[("X-Device-Role", "device-tenko-manager")],
+            Some("it"),
+        )
+        .await;
+
+        assert_eq!(res.status(), 403, "{judge_role:?}");
+        assert!(mock.recorded_manager_judgment.lock().unwrap().is_none());
+    }
+}
+
+#[tokio::test]
+async fn test_record_manager_judgment_without_device_key_rejected() {
+    // 鍵なし・AuthUser なし (X-Tenant-ID だけ) は、IT点呼 の記録でも 401
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_tenko_method.lock().unwrap() = "IT点呼".to_string();
+    let res = judge_by_device_key_with_method(mock.clone(), "manager", &[], Some("it")).await;
+
+    assert_eq!(res.status(), 401);
+    assert!(mock.recorded_manager_judgment.lock().unwrap().is_none());
+}
+
+#[tokio::test]
+async fn test_record_manager_judgment_prod_kiosk_key_rejected() {
+    // dev でないキオスクの鍵 (乗務員側) は、IT点呼 の記録でも 401
+    let mock = Arc::new(MockTenkoSessionRepository::default());
+    *mock.session_tenko_method.lock().unwrap() = "IT点呼".to_string();
+    let res = judge_by_device_key_with_method(
+        mock.clone(),
+        "manager",
+        &[("X-Device-Role", "device-kiosk")],
+        Some("it"),
     )
     .await;
 
@@ -2882,12 +2997,14 @@ async fn test_record_manager_judgment_dev_without_role_rejected() {
 
 #[tokio::test]
 async fn test_record_manager_judgment_dev_kiosk_key_rejected() {
-    // dev のキオスクの鍵 (乗務員側) は弾く
+    // dev のキオスクの鍵 (乗務員側) は、IT点呼 の記録でも弾く
     let mock = Arc::new(MockTenkoSessionRepository::default());
-    let res = judge_by_device_key(
+    *mock.session_tenko_method.lock().unwrap() = "IT点呼".to_string();
+    let res = judge_by_device_key_with_method(
         mock.clone(),
         "manager",
         &[("X-Device-Dev", "1"), ("X-Device-Role", "device-kiosk")],
+        Some("it"),
     )
     .await;
 
@@ -3111,7 +3228,7 @@ async fn test_record_manager_judgment_method_checked_after_auth_and_role() {
     let res = judge_by_device_key_with_method(
         mock.clone(),
         "manager",
-        &[("X-Device-Role", "device-tenko-manager")],
+        &[("X-Device-Role", "device-kiosk")],
         Some("phone"),
     )
     .await;
