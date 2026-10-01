@@ -63,6 +63,21 @@ pub struct TenkoSchedulesResponse {
     pub per_page: i64,
 }
 
+// --- 点呼方法 / 判定の確認の方法 (Refs ippoan/alc-app#387) ---
+//
+// 値はここ 1 か所に置き、handler・CSV から同じ定数を使う。
+
+/// 点呼方法 `IT点呼` (`tenko_sessions.tenko_method` / `tenko_records.tenko_method`)。
+/// 通常点呼の流れの最後に運行管理者と通話する方法で、判定が付くまでは未完了として扱う
+pub const TENKO_METHOD_IT: &str = "IT点呼";
+/// 記録簿の CSV に出す点呼方法。対面で確定した IT点呼 の記録だけをこの値に読み替える
+/// (DB には書かない — `tenko_method` の CHECK にこの値は無い)
+pub const TENKO_METHOD_IN_PERSON: &str = "対面点呼";
+/// 判定の確認の方法: 通話で確認した (`tenko_sessions.manager_judgment_method`)
+pub const JUDGMENT_METHOD_IT: &str = "it";
+/// 判定の確認の方法: 本人が来て対面で確認した
+pub const JUDGMENT_METHOD_IN_PERSON: &str = "in_person";
+
 // --- Tenko Session (点呼セッション) ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -143,6 +158,10 @@ pub struct TenkoSession {
     /// user_id ではない — 「どの運行管理者が判断したか」を表す値が要るため
     #[serde(default)]
     pub manager_judgment_by: Option<Uuid>,
+    /// 判定の確認の方法 (migration 157、Refs ippoan/alc-app#387)。
+    /// `it` = 通話で確認 / `in_person` = 対面で確認 / NULL = 未確定、または IT点呼 でない
+    #[serde(default)]
+    pub manager_judgment_method: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -197,6 +216,11 @@ pub struct TenkoSessionFilter {
     pub employee_id: Option<Uuid>,
     pub status: Option<String>,
     pub tenko_type: Option<String>,
+    /// 点呼方法 (`IT点呼` など) で絞る (Refs ippoan/alc-app#387)
+    pub tenko_method: Option<String>,
+    /// `true` のとき、運行管理者の判定がまだ付いていないものだけに絞る。
+    /// `false` と未指定は絞らない
+    pub judgment_pending: Option<bool>,
     pub date_from: Option<DateTime<Utc>>,
     pub date_to: Option<DateTime<Utc>>,
     pub page: Option<i64>,
@@ -265,6 +289,12 @@ pub struct TenkoRecord {
     /// CSV 用の JOIN で名前まで引いておく
     #[sqlx(default)]
     pub manager_judgment_by_name: Option<String>,
+    /// 判定の確認の方法 (`it` / `in_person`)。CSV 用の JOIN だけが引く。
+    /// 対面で確定した IT点呼 の点呼方法を CSV で読み替えるのに使う (Refs ippoan/alc-app#387)。
+    /// CSV の読み替えのためだけの欄なので JSON には出さない (記録の応答の形を変えない)
+    #[sqlx(default)]
+    #[serde(skip)]
+    pub manager_judgment_method: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -412,6 +442,11 @@ pub struct RecordManagerJudgment {
     #[serde(default)]
     pub reason: Option<String>,
     pub judged_by_employee_id: Uuid,
+    /// 確認の方法 (`it` = 通話 / `in_person` = 対面)。IT点呼 のセッションを最初に確定する
+    /// ときは必須、IT点呼 でないセッションには付けられない (ハンドラ側で検査。
+    /// Refs ippoan/alc-app#387)。省略時は既存の値を保つ
+    #[serde(default)]
+    pub method: Option<String>,
 }
 
 /// 遠隔点呼への切り替え (Refs ippoan/alc-app-s3#135)。

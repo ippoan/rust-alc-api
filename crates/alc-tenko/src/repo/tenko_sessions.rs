@@ -59,6 +59,14 @@ impl TenkoSessionRepository for PgTenkoSessionRepository {
             conditions.push(format!("s.tenko_type = ${param_idx}"));
             param_idx += 1;
         }
+        if filter.tenko_method.is_some() {
+            conditions.push(format!("s.tenko_method = ${param_idx}"));
+            param_idx += 1;
+        }
+        // 未判定だけに絞る。bind は無いので param_idx は進めない
+        if filter.judgment_pending == Some(true) {
+            conditions.push("s.manager_judgment IS NULL".to_string());
+        }
         if filter.date_from.is_some() {
             conditions.push(format!("s.started_at >= ${param_idx}"));
             param_idx += 1;
@@ -81,6 +89,9 @@ impl TenkoSessionRepository for PgTenkoSessionRepository {
         if let Some(ref tenko_type) = filter.tenko_type {
             count_query = count_query.bind(tenko_type);
         }
+        if let Some(ref tenko_method) = filter.tenko_method {
+            count_query = count_query.bind(tenko_method);
+        }
         if let Some(date_from) = filter.date_from {
             count_query = count_query.bind(date_from);
         }
@@ -102,6 +113,9 @@ impl TenkoSessionRepository for PgTenkoSessionRepository {
         }
         if let Some(ref tenko_type) = filter.tenko_type {
             query = query.bind(tenko_type);
+        }
+        if let Some(ref tenko_method) = filter.tenko_method {
+            query = query.bind(tenko_method);
         }
         if let Some(date_from) = filter.date_from {
             query = query.bind(date_from);
@@ -604,22 +618,26 @@ impl TenkoSessionRepository for PgTenkoSessionRepository {
         judgment: &str,
         reason: &Option<String>,
         judged_by_employee_id: Uuid,
+        method: Option<&str>,
     ) -> Result<TenkoSession, sqlx::Error> {
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
+        // 確認の方法は省略時に既存の値を保つ (押し直しで OK / NG だけ直せるように)
         sqlx::query_as::<_, TenkoSession>(
             r#"
             UPDATE tenko_sessions SET
                 manager_judgment = $1,
                 manager_judgment_reason = $2,
                 manager_judgment_by = $3,
+                manager_judgment_method = COALESCE($4, manager_judgment_method),
                 updated_at = NOW()
-            WHERE id = $4 AND tenant_id = $5
+            WHERE id = $5 AND tenant_id = $6
             RETURNING *
             "#,
         )
         .bind(judgment)
         .bind(reason)
         .bind(judged_by_employee_id)
+        .bind(method)
         .bind(id)
         .bind(tenant_id)
         .fetch_one(&mut *tc.conn)

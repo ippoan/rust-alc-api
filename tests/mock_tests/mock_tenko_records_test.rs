@@ -640,3 +640,68 @@ async fn test_export_csv_with_safety_judgment_failed_items() {
     assert!(header.contains("resumed_at"));
     assert!(header.contains("resume_reason"));
 }
+
+// =========================================================================
+// CSV の点呼方法の読み替え (Refs ippoan/alc-app#387)
+// =========================================================================
+
+#[test]
+fn test_csv_tenko_method_rewrites_only_in_person_it() {
+    use alc_tenko::tenko_records::csv_tenko_method;
+
+    // IT点呼 の 3 通り (対面で確定 / 通話で確定 / 未判定) + 想定外の値
+    assert_eq!(csv_tenko_method("IT点呼", Some("in_person")), "対面点呼");
+    assert_eq!(csv_tenko_method("IT点呼", Some("it")), "IT点呼");
+    assert_eq!(csv_tenko_method("IT点呼", None), "IT点呼");
+    assert_eq!(csv_tenko_method("IT点呼", Some("other")), "IT点呼");
+    // IT点呼 以外は、確認の方法が何であっても記録の値のまま
+    for method in ["通常点呼", "自動点呼", "遠隔点呼"] {
+        assert_eq!(csv_tenko_method(method, None), method);
+        assert_eq!(csv_tenko_method(method, Some("in_person")), method);
+        assert_eq!(csv_tenko_method(method, Some("it")), method);
+    }
+}
+
+#[tokio::test]
+async fn test_export_csv_in_person_it_row_reads_as_in_person_tenko() {
+    // 対面で確定した IT点呼 の行だけ、tenko_method が対面の点呼になる。列は増えない
+    let mock = Arc::new(MockTenkoRecordsRepository::default());
+    mock.return_it_tenko_rows.store(true, Ordering::SeqCst);
+    let state = crate::mock_helpers::app_state::setup_mock_app_state();
+    let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
+    tenko_state.tenko_records = mock;
+    let base_url =
+        crate::mock_helpers::app_state::spawn_mock_server_with_tenko(state, tenko_state).await;
+    let jwt = crate::common::create_test_jwt(uuid::Uuid::new_v4(), "admin");
+
+    let res = reqwest::Client::new()
+        .get(format!("{base_url}/api/tenko/records/csv"))
+        .header("Authorization", format!("Bearer {jwt}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let bytes = res.bytes().await.unwrap();
+    let csv_str = std::str::from_utf8(&bytes[3..]).unwrap();
+
+    let mut lines = csv_str.lines();
+    let header: Vec<&str> = lines.next().unwrap().split(',').collect();
+    assert!(!header.contains(&"manager_judgment_method"));
+    assert_eq!(header.iter().filter(|h| **h == "tenko_method").count(), 1);
+    let method_idx = header.iter().position(|h| *h == "tenko_method").unwrap();
+    let location_idx = header.iter().position(|h| *h == "location").unwrap();
+
+    // 見分け用の location → その行の tenko_method
+    let by_row: std::collections::HashMap<String, String> = lines
+        .map(|line| {
+            let cols: Vec<&str> = line.split(',').collect();
+            assert_eq!(cols.len(), header.len());
+            (cols[location_idx].to_string(), cols[method_idx].to_string())
+        })
+        .collect();
+    assert_eq!(by_row.len(), 4);
+    assert_eq!(by_row["row-in-person"], "対面点呼");
+    assert_eq!(by_row["row-it"], "IT点呼");
+    assert_eq!(by_row["row-pending"], "IT点呼");
+    assert_eq!(by_row["row-normal"], "通常点呼");
+}

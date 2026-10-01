@@ -8,7 +8,10 @@ use axum::{
 };
 use uuid::Uuid;
 
-use crate::models::{TenkoRecord, TenkoRecordFilter, TenkoRecordsResponse};
+use crate::models::{
+    TenkoRecord, TenkoRecordFilter, TenkoRecordsResponse, JUDGMENT_METHOD_IN_PERSON,
+    TENKO_METHOD_IN_PERSON, TENKO_METHOD_IT,
+};
 use crate::TenkoState;
 use alc_core::auth_middleware::TenantId;
 
@@ -204,7 +207,7 @@ async fn export_csv(
             r.id.to_string(),
             r.employee_name.clone(),
             r.tenko_type.clone(),
-            r.tenko_method.clone(),
+            csv_tenko_method(&r.tenko_method, r.manager_judgment_method.as_deref()).to_string(),
             r.status.clone(),
             r.responsible_manager_name.clone().unwrap_or_default(),
             r.started_at.map_or(String::new(), |t| t.to_rfc3339()),
@@ -262,6 +265,19 @@ async fn export_csv(
         )
         .body(Body::from(bom_data))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+/// CSV に出す点呼方法 (Refs ippoan/alc-app#387)。
+///
+/// IT点呼 の記録を運行管理者が**対面で**確定したときだけ、対面の点呼として出す。
+/// 通話で確定・未判定・IT点呼 以外は記録の値のまま。`tenko_records` は作成後に書き換え
+/// られないので、出力のときに読み替える (JSON の応答は読み替えない)
+pub fn csv_tenko_method<'a>(tenko_method: &'a str, judgment_method: Option<&str>) -> &'a str {
+    if tenko_method == TENKO_METHOD_IT && judgment_method == Some(JUDGMENT_METHOD_IN_PERSON) {
+        TENKO_METHOD_IN_PERSON
+    } else {
+        tenko_method
+    }
 }
 
 /// record_data (記録時のセッションの JSON) の文字列の値。無い / NULL は空欄
