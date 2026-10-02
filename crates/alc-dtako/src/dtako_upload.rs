@@ -110,7 +110,7 @@ async fn upload_zip(
                 .map_err(internal_err)?;
 
             // CSV split (non-blocking): 失敗件数を split_failed として応答に載せる
-            let split_outcome = try_split_csv(&state, upload_id).await;
+            let split_outcome = try_split_csv(&state, tenant_id, upload_id).await;
             let (split_unko_nos, split_unko_nos_total) =
                 cap_unko_nos(split_outcome.succeeded_unko_nos);
             let (split_failed_unko_nos, split_failed_unko_nos_total) =
@@ -130,7 +130,7 @@ async fn upload_zip(
         Err(e) => {
             let _ = state
                 .dtako_upload
-                .mark_upload_failed(upload_id, &e.to_string())
+                .mark_upload_failed(tenant_id, upload_id, &e.to_string())
                 .await;
             Err((StatusCode::BAD_REQUEST, e.to_string()))
         }
@@ -995,9 +995,13 @@ pub(crate) struct SplitCsvOutcome {
 /// `succeeded_unko_nos` / `failed_unko_nos` は空のまま (捏造しない)。呼び手は
 /// split_failed の非ゼロで気づければ十分なため。個別 CSV PUT のリトライは
 /// `split_csv_from_r2` 内で完結している。
-pub(crate) async fn try_split_csv(state: &DtakoState, upload_id: Uuid) -> SplitCsvOutcome {
+pub(crate) async fn try_split_csv(
+    state: &DtakoState,
+    tenant_id: Uuid,
+    upload_id: Uuid,
+) -> SplitCsvOutcome {
     for attempt in 1..=SPLIT_RETRY_ATTEMPTS {
-        match split_csv_from_r2(state, upload_id).await {
+        match split_csv_from_r2(state, tenant_id, upload_id).await {
             Ok(outcome) => return outcome,
             Err(e) if attempt < SPLIT_RETRY_ATTEMPTS => {
                 tracing::warn!("CSV split retry {attempt}/{SPLIT_RETRY_ATTEMPTS}: {e}");
@@ -1027,16 +1031,14 @@ pub(crate) async fn try_split_csv(state: &DtakoState, upload_id: Uuid) -> SplitC
 /// 関数ごとリトライする。
 pub(crate) async fn split_csv_from_r2(
     state: &DtakoState,
+    tenant_id: Uuid,
     upload_id: Uuid,
 ) -> Result<SplitCsvOutcome, anyhow::Error> {
-    let record = state
+    let r2_zip_key = state
         .dtako_upload
-        .get_upload_tenant_and_key(upload_id)
+        .get_upload_zip_key(tenant_id, upload_id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("upload {} not found", upload_id))?;
-
-    let tenant_id = record.tenant_id;
-    let r2_zip_key = record.r2_zip_key;
 
     let dtako_st = state
         .dtako_storage
@@ -1186,11 +1188,13 @@ pub(crate) async fn split_csv_from_r2(
 /// R2 に保存済みの ZIP をダウンロード
 async fn internal_download(
     State(state): State<DtakoState>,
+    tenant: axum::Extension<TenantId>,
     Path(upload_id): Path<Uuid>,
 ) -> Result<Response, (StatusCode, String)> {
+    let tenant_id = tenant.0 .0;
     let record = state
         .dtako_upload
-        .get_upload_history(upload_id)
+        .get_upload_history(tenant_id, upload_id)
         .await
         .map_err(internal_err)?
         .ok_or_else(|| {
@@ -1242,12 +1246,14 @@ async fn internal_download(
 /// R2 に保存済みの ZIP を再処理
 async fn internal_rerun(
     State(state): State<DtakoState>,
+    tenant: axum::Extension<TenantId>,
     Path(upload_id): Path<Uuid>,
 ) -> Result<Json<UploadResponse>, (StatusCode, String)> {
+    let tenant_id = tenant.0 .0;
     // upload_history から r2_zip_key を取得
     let record = state
         .dtako_upload
-        .get_upload_history(upload_id)
+        .get_upload_history(tenant_id, upload_id)
         .await
         .map_err(internal_err)?
         .ok_or_else(|| {
@@ -1257,7 +1263,6 @@ async fn internal_rerun(
             )
         })?;
 
-    let tenant_id = record.tenant_id;
     let r2_zip_key = record.r2_zip_key;
     let filename = record.filename;
 
@@ -1292,7 +1297,7 @@ async fn internal_rerun(
                 .map_err(internal_err)?;
 
             // CSV split (non-blocking): 失敗件数を split_failed として応答に載せる
-            let split_outcome = try_split_csv(&state, upload_id).await;
+            let split_outcome = try_split_csv(&state, tenant_id, upload_id).await;
             let (split_unko_nos, split_unko_nos_total) =
                 cap_unko_nos(split_outcome.succeeded_unko_nos);
             let (split_failed_unko_nos, split_failed_unko_nos_total) =
@@ -1312,7 +1317,7 @@ async fn internal_rerun(
         Err(e) => {
             let _ = state
                 .dtako_upload
-                .mark_upload_failed(upload_id, &e.to_string())
+                .mark_upload_failed(tenant_id, upload_id, &e.to_string())
                 .await;
             Err((StatusCode::BAD_REQUEST, e.to_string()))
         }
@@ -1810,13 +1815,14 @@ async fn list_uploads(
 /// 認証付きCSV分割エンドポイント
 async fn split_csv_handler(
     State(state): State<DtakoState>,
-    _tenant: axum::Extension<TenantId>,
+    tenant: axum::Extension<TenantId>,
     Path(upload_id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let tenant_id = tenant.0 .0;
     tracing::info!("split-csv (auth) called: upload_id={}", upload_id);
 
     // 生の anyhow エラー (内部パス / SQL 片等) を 500 body に echo しない (Refs #393 M-1)
-    let outcome = split_csv_from_r2(&state, upload_id)
+    let outcome = split_csv_from_r2(&state, tenant_id, upload_id)
         .await
         .map_err(internal_err)?;
     // POST /api/upload と同じキー名・同じ意味にする (Refs ohishi-exp/rust-ichibanboshi#205 の 51)。
@@ -1883,7 +1889,7 @@ pub async fn split_csv_all_core(
                 let s = success.clone();
                 let f = failed.clone();
                 async move {
-                    match split_csv_from_r2(&st, uid).await {
+                    match split_csv_from_r2(&st, tenant_id, uid).await {
                         Ok(_) => {
                             s.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         }

@@ -72,44 +72,49 @@ impl DtakoUploadRepository for PgDtakoUploadRepository {
 
     async fn mark_upload_failed(
         &self,
+        tenant_id: Uuid,
         upload_id: Uuid,
         error_msg: &str,
     ) -> Result<(), sqlx::Error> {
-        // No tenant context needed — update by ID only
-        let mut conn = self.pool.acquire().await?;
+        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
         sqlx::query(
-            "UPDATE alc_api.dtako_upload_history SET status = 'failed', error_message = $1 WHERE id = $2",
+            "UPDATE alc_api.dtako_upload_history SET status = 'failed', error_message = $1 WHERE id = $2 AND tenant_id = $3",
         )
         .bind(error_msg)
         .bind(upload_id)
-        .execute(&mut *conn)
+        .bind(tenant_id)
+        .execute(&mut *tc.conn)
         .await?;
         Ok(())
     }
 
     async fn get_upload_history(
         &self,
+        tenant_id: Uuid,
         upload_id: Uuid,
     ) -> Result<Option<UploadHistoryRecord>, sqlx::Error> {
-        let mut conn = self.pool.acquire().await?;
+        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
         sqlx::query_as::<_, UploadHistoryRecord>(
-            "SELECT tenant_id, r2_zip_key, filename FROM alc_api.dtako_upload_history WHERE id = $1",
+            "SELECT tenant_id, r2_zip_key, filename FROM alc_api.dtako_upload_history WHERE id = $1 AND tenant_id = $2",
         )
         .bind(upload_id)
-        .fetch_optional(&mut *conn)
+        .bind(tenant_id)
+        .fetch_optional(&mut *tc.conn)
         .await
     }
 
-    async fn get_upload_tenant_and_key(
+    async fn get_upload_zip_key(
         &self,
+        tenant_id: Uuid,
         upload_id: Uuid,
-    ) -> Result<Option<UploadTenantAndKey>, sqlx::Error> {
-        let mut conn = self.pool.acquire().await?;
-        sqlx::query_as::<_, UploadTenantAndKey>(
-            "SELECT tenant_id, r2_zip_key FROM alc_api.dtako_upload_history WHERE id = $1",
+    ) -> Result<Option<String>, sqlx::Error> {
+        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
+        sqlx::query_scalar::<_, String>(
+            "SELECT r2_zip_key FROM alc_api.dtako_upload_history WHERE id = $1 AND tenant_id = $2",
         )
         .bind(upload_id)
-        .fetch_optional(&mut *conn)
+        .bind(tenant_id)
+        .fetch_optional(&mut *tc.conn)
         .await
     }
 

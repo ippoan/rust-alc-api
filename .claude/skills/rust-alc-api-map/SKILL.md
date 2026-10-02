@@ -1,6 +1,6 @@
 ---
 name: rust-alc-api-map
-generated-from: rust-alc-api:4f96141f6db258c36b28c880e27000b14391edba
+generated-from: rust-alc-api:9c5934792203b7ab5113f9ebef312ff0255f19ce
 paths: [crates/, src/, migrations/, tests/]
 description: rust-alc-api (アルコールチェッカー基盤の Rust/Axum Cargo workspace — domain crate 群 + monolith 単一バイナリ、PostgreSQL+RLS、Cloud Run) の構造ナビゲーション。どの crate に何のルートがあるか / monolith (rust-alc-api) 一本化 (gateway + per-domain は #556 で廃止) / RLS・migration・deploy/release 分離の gotcha を 1 枚にまとめる。トリガー:「rust-alc-api」「alc-api」「alc-notify」「alc-tenko」「alc-trouble」「alc-carins」「alc-dtako」「gateway」「tenko-api」「carins-api」「dtako-api」「trouble-api」「RLS テナント」「sqlx migration」「ts-rs」「Release Wave」「Bazel」等。
 ---
@@ -220,6 +220,10 @@ router 実装として存続。旧 per-domain は同じ domain crate を単独 m
   - `alc-misc/src/repo/tenant_users.rs`: 一覧 2 本・`invite_user`・id / email 指定の DELETE・UPDATE すべて
   - `alc-notify/src/repo/notify_line_config.rs`: `get` / `get_full` / `delete` (以前の `delete` は WHERE 無しで、
     所有者接続では全テナントの LINE 設定を消していた)
+  - `alc-dtako/src/repo/dtako_upload.rs`: アップロード履歴を id で引く 3 本 = `mark_upload_failed(tenant_id, upload_id, …)` /
+    `get_upload_history(tenant_id, upload_id)` / `get_upload_zip_key(tenant_id, upload_id)` (旧 `get_upload_tenant_and_key`)。
+    `/internal/download/{id}`・`/internal/rerun/{id}`・`/split-csv/{id}` は `Extension<TenantId>` を渡すので、
+    別テナントの `upload_id` は存在しない id と同じ応答 (download / rerun は 404、split-csv は 500) になる
   - **認証前・テナント横断が本来の動きの query は SECURITY DEFINER 関数経由 (alc-migrations 158)**。
     tenant を立てられないので `TenantConn` には出来ず、pool 直のまま関数を呼ぶ (関数は所有者の資格で動くので、
     所有者接続でも実行用ロールでも同じ結果)。**関数名は `alc_api.` で schema 修飾する**。対応:
@@ -239,8 +243,7 @@ router 実装として存続。旧 per-domain は同じ domain crate を単独 m
     `device_registration_requests` の SELECT (`USING (true)`) と INSERT (`WITH CHECK (status = 'pending')`) /
     `tenko_call_numbers`・`tenko_call_drivers` の SELECT (`USING (true)`。全テナントが見える) /
     SECURITY DEFINER 関数の呼び出し。**例外**: 呼び出し元の無い `find_user_by_refresh_token_hash` /
-    `find_user_in_tenant` / `find_user_by_username` (auth.rs) と、FORCE の表を tenant 無しで叩く
-    `dtako_upload.rs` の 3 本 (`mark_upload_failed` / `get_upload_history` / `get_upload_tenant_and_key`)、
+    `find_user_in_tenant` / `find_user_by_username` (auth.rs) と、
     `staging.rs` の export は未対応のまま。**新しい query を pool 直で書くなら、この 4 種のどれかに当たること**
     (RLS 有効の表を tenant 無しで叩くと、実行用ロールでは 42704 / 22P02 か 0 行になる)。
     `tenko_call` の `ON CONFLICT (phone_number)` と `tenant_users` の `ON CONFLICT (email)` はテナントをまたぐ

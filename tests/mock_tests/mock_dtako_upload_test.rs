@@ -5,9 +5,9 @@ use std::sync::Arc;
 
 use crate::common::mock_storage::MockStorage;
 use crate::mock_helpers::app_state::setup_mock_app_state;
-use crate::mock_helpers::MockDtakoUploadRepository;
+use crate::mock_helpers::{MockDtakoUploadRepository, UploadTenantAndKey};
 use rust_alc_api::db::repository::dtako_upload::{
-    DtakoDriverOpRow, DtakoOpRow, UploadHistoryRecord, UploadTenantAndKey,
+    DtakoDriverOpRow, DtakoOpRow, UploadHistoryRecord,
 };
 
 /// Helper: set up mock AppState + spawn test server + create JWT.
@@ -376,7 +376,7 @@ async fn test_dtako_rerun_db_error() {
 }
 
 // =========================================================================
-// POST /api/split-csv/{id} — not found (get_upload_tenant_and_key returns None)
+// POST /api/split-csv/{id} — not found (get_upload_zip_key returns None)
 // =========================================================================
 
 #[tokio::test]
@@ -1325,7 +1325,7 @@ async fn test_dtako_split_csv_all_with_uploads() {
 
     let mock = MockDtakoUploadRepository::default();
     *mock.uploads_needing_split.lock().unwrap() = vec![(upload_id, "test.zip".to_string())];
-    // split_csv_from_r2 needs get_upload_tenant_and_key
+    // split_csv_from_r2 needs get_upload_zip_key
     *mock.tenant_and_key.lock().unwrap() = Some(UploadTenantAndKey {
         tenant_id,
         r2_zip_key: zip_key.clone(),
@@ -2500,7 +2500,11 @@ async fn test_dtako_rerun_process_zip_failure() {
     let zip_bytes = create_missing_kudgivt_zip();
     dtako_storage.insert_file(&zip_key, zip_bytes);
 
-    let state = setup_with_storage_and_mock(mock, dtako_storage);
+    // failed_marks をテストから読むため Arc を手元にも残す
+    let mock = Arc::new(mock);
+    let mut state = setup_mock_app_state();
+    state.dtako_upload = mock.clone();
+    state.dtako_storage = Some(dtako_storage);
     let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
     let jwt = crate::common::create_test_jwt(tenant_id, "admin");
     let client = reqwest::Client::new();
@@ -2515,6 +2519,100 @@ async fn test_dtako_rerun_process_zip_failure() {
     assert_eq!(res.status(), 400);
     let body = res.text().await.unwrap();
     assert!(body.contains("KUDGIVT"));
+
+    // 失敗の印は、要求のテナントとその upload_id で付ける
+    let marks = mock.failed_marks.lock().unwrap().clone();
+    assert_eq!(marks.len(), 1, "{marks:?}");
+    assert_eq!((marks[0].0, marks[0].1), (tenant_id, upload_id));
+    assert!(marks[0].2.contains("KUDGIVT"), "{marks:?}");
+}
+
+// =========================================================================
+// 別テナントの upload_id は、3 つの口のどれでも「見つからない」
+// (ハンドラが要求のテナントを repo に渡していることの確認)
+// =========================================================================
+
+#[tokio::test]
+async fn test_dtako_upload_id_of_other_tenant_is_not_found() {
+    let owner = Uuid::new_v4();
+    let other = Uuid::new_v4();
+    let upload_id = Uuid::new_v4();
+    let zip_key = format!("{}/uploads/{}/test.zip", owner, upload_id);
+
+    let mock = MockDtakoUploadRepository::default();
+    *mock.upload_history.lock().unwrap() = Some(UploadHistoryRecord {
+        tenant_id: owner,
+        r2_zip_key: zip_key.clone(),
+        filename: "test.zip".to_string(),
+    });
+    *mock.tenant_and_key.lock().unwrap() = Some(UploadTenantAndKey {
+        tenant_id: owner,
+        r2_zip_key: zip_key.clone(),
+    });
+
+    let dtako_storage = Arc::new(MockStorage::new("dtako-bucket"));
+    let zip_bytes = crate::common::create_test_dtako_zip();
+    dtako_storage.insert_file(&zip_key, zip_bytes.clone());
+
+    let mock = Arc::new(mock);
+    let mut state = setup_mock_app_state();
+    state.dtako_upload = mock.clone();
+    state.dtako_storage = Some(dtako_storage);
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let other_auth = format!("Bearer {}", crate::common::create_test_jwt(other, "admin"));
+    let client = reqwest::Client::new();
+
+    // download: 存在しない id と同じ 404
+    let res = client
+        .get(format!("{base_url}/api/internal/download/{upload_id}"))
+        .header("Authorization", &other_auth)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 404);
+    assert_eq!(
+        res.text().await.unwrap(),
+        format!("upload {upload_id} not found")
+    );
+
+    // rerun: 存在しない id と同じ 404。再処理も失敗の印も走らない
+    let res = client
+        .post(format!("{base_url}/api/internal/rerun/{upload_id}"))
+        .header("Authorization", &other_auth)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 404);
+    assert_eq!(
+        res.text().await.unwrap(),
+        format!("upload {upload_id} not found")
+    );
+    assert!(mock.failed_marks.lock().unwrap().is_empty());
+
+    // split-csv: 存在しない id と同じ 500 (test_dtako_split_csv_not_found)。分割は走らない
+    let res = client
+        .post(format!("{base_url}/api/split-csv/{upload_id}"))
+        .header("Authorization", &other_auth)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 500);
+    assert!(mock
+        .last_update_has_kudgivt_unko_nos
+        .lock()
+        .unwrap()
+        .is_none());
+
+    // 持ち主のテナントからは引ける (上の「見つからない」が id の間違いでないこと)
+    let owner_auth = format!("Bearer {}", crate::common::create_test_jwt(owner, "admin"));
+    let res = client
+        .get(format!("{base_url}/api/internal/download/{upload_id}"))
+        .header("Authorization", &owner_auth)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    assert_eq!(res.bytes().await.unwrap().len(), zip_bytes.len());
 }
 
 // =========================================================================
@@ -3047,7 +3145,7 @@ async fn test_dtako_split_csv_all_duplicate_filename_both_processed() {
         (upload_id1, "csvdata.zip".to_string()),
         (upload_id2, "csvdata.zip".to_string()),
     ];
-    // get_upload_tenant_and_key はどちらの upload_id でも同じ zip_key を返す mock
+    // get_upload_zip_key はどちらの upload_id でも同じ zip_key を返す mock
     // (r2_zip_key で判定していないことを示すため、あえて同名 zip を共有させる)
     *mock.tenant_and_key.lock().unwrap() = Some(UploadTenantAndKey {
         tenant_id,

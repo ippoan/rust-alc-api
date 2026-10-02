@@ -19,7 +19,6 @@ use rust_alc_api::db::repository::dtako_tickets::DtakoTicketsRepository;
 use rust_alc_api::db::repository::dtako_upload::{
     DtakoDriverOpRow, DtakoOpRow, DtakoUploadRepository, InsertDailyWorkHoursParams,
     InsertOperationParams, InsertSegmentParams, ReuploadChangeInput, UploadHistoryRecord,
-    UploadTenantAndKey,
 };
 use rust_alc_api::db::repository::dtako_vehicles::DtakoVehiclesRepository;
 use rust_alc_api::db::repository::dtako_work_times::{DtakoWorkTimesRepository, WorkTimeItem};
@@ -478,6 +477,14 @@ impl DtakoTicketsRepository for MockDtakoTicketsRepository {
 // MockDtakoUploadRepository
 // =============================================================================
 
+/// `get_upload_zip_key` が返す行 (mock 用)。渡された tenant と `tenant_id` が合うときだけ
+/// `r2_zip_key` を返す。
+#[derive(Debug, Clone)]
+pub struct UploadTenantAndKey {
+    pub tenant_id: Uuid,
+    pub r2_zip_key: String,
+}
+
 pub struct MockDtakoUploadRepository {
     pub fail_next: AtomicBool,
     /// create_upload_history を tenant FK 違反 (dtako_upload_history_tenant_id_fkey) 相当の
@@ -486,6 +493,8 @@ pub struct MockDtakoUploadRepository {
     pub fail_update_has_kudgivt: AtomicBool,
     pub upload_history: std::sync::Mutex<Option<UploadHistoryRecord>>,
     pub tenant_and_key: std::sync::Mutex<Option<UploadTenantAndKey>>,
+    /// `mark_upload_failed` に渡された `(tenant_id, upload_id, error_msg)` を記録する
+    pub failed_marks: std::sync::Mutex<Vec<(Uuid, Uuid, String)>>,
     pub driver_cd: std::sync::Mutex<Option<String>>,
     pub employee_id: std::sync::Mutex<Option<Uuid>>,
     pub operations: std::sync::Mutex<Vec<DtakoOpRow>>,
@@ -516,6 +525,7 @@ impl Default for MockDtakoUploadRepository {
             fail_update_has_kudgivt: AtomicBool::new(false),
             upload_history: std::sync::Mutex::new(None),
             tenant_and_key: std::sync::Mutex::new(None),
+            failed_marks: std::sync::Mutex::new(vec![]),
             driver_cd: std::sync::Mutex::new(None),
             employee_id: std::sync::Mutex::new(None),
             operations: std::sync::Mutex::new(vec![]),
@@ -581,27 +591,40 @@ impl DtakoUploadRepository for MockDtakoUploadRepository {
 
     async fn mark_upload_failed(
         &self,
-        _upload_id: Uuid,
-        _error_msg: &str,
+        tenant_id: Uuid,
+        upload_id: Uuid,
+        error_msg: &str,
     ) -> Result<(), sqlx::Error> {
         check_fail!(self);
+        self.failed_marks
+            .lock()
+            .unwrap()
+            .push((tenant_id, upload_id, error_msg.to_string()));
         Ok(())
     }
 
+    /// 実 DB repo 相当: 渡された tenant の行だけを返す (別テナントは `None`)
     async fn get_upload_history(
         &self,
+        tenant_id: Uuid,
         _upload_id: Uuid,
     ) -> Result<Option<UploadHistoryRecord>, sqlx::Error> {
         check_fail!(self);
-        Ok(self.upload_history.lock().unwrap().clone())
+        let record = self.upload_history.lock().unwrap().clone();
+        Ok(record.filter(|r| r.tenant_id == tenant_id))
     }
 
-    async fn get_upload_tenant_and_key(
+    /// 実 DB repo 相当: 渡された tenant の行の保存先だけを返す (別テナントは `None`)
+    async fn get_upload_zip_key(
         &self,
+        tenant_id: Uuid,
         _upload_id: Uuid,
-    ) -> Result<Option<UploadTenantAndKey>, sqlx::Error> {
+    ) -> Result<Option<String>, sqlx::Error> {
         check_fail!(self);
-        Ok(self.tenant_and_key.lock().unwrap().clone())
+        let record = self.tenant_and_key.lock().unwrap().clone();
+        Ok(record
+            .filter(|r| r.tenant_id == tenant_id)
+            .map(|r| r.r2_zip_key))
     }
 
     async fn list_uploads(&self, _tenant_id: Uuid) -> Result<Vec<serde_json::Value>, sqlx::Error> {

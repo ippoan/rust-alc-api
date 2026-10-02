@@ -10,13 +10,6 @@ pub struct UploadHistoryRecord {
     pub filename: String,
 }
 
-/// dtako_upload_history (tenant_id, r2_zip_key) のみ
-#[derive(Debug, Clone, sqlx::FromRow)]
-pub struct UploadTenantAndKey {
-    pub tenant_id: Uuid,
-    pub r2_zip_key: String,
-}
-
 /// recalculate 用の operations 行
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct DtakoOpRow {
@@ -156,18 +149,26 @@ pub trait DtakoUploadRepository: Send + Sync {
         r2_zip_key: &str,
     ) -> Result<(), sqlx::Error>;
 
-    async fn mark_upload_failed(&self, upload_id: Uuid, error_msg: &str)
-        -> Result<(), sqlx::Error>;
+    async fn mark_upload_failed(
+        &self,
+        tenant_id: Uuid,
+        upload_id: Uuid,
+        error_msg: &str,
+    ) -> Result<(), sqlx::Error>;
 
+    /// `tenant_id` の履歴だけを引く。別テナントの `upload_id` は `None`。
     async fn get_upload_history(
         &self,
+        tenant_id: Uuid,
         upload_id: Uuid,
     ) -> Result<Option<UploadHistoryRecord>, sqlx::Error>;
 
-    async fn get_upload_tenant_and_key(
+    /// `tenant_id` の履歴の ZIP の保存先 (`r2_zip_key`)。別テナントの `upload_id` は `None`。
+    async fn get_upload_zip_key(
         &self,
+        tenant_id: Uuid,
         upload_id: Uuid,
-    ) -> Result<Option<UploadTenantAndKey>, sqlx::Error>;
+    ) -> Result<Option<String>, sqlx::Error>;
 
     async fn list_uploads(&self, tenant_id: Uuid) -> Result<Vec<serde_json::Value>, sqlx::Error>;
 

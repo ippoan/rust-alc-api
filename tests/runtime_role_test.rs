@@ -28,8 +28,8 @@ use uuid::Uuid;
 
 use alc_core::tenant::TenantConn;
 use rust_alc_api::db::repository::{
-    AuthRepository, PgAuthRepository, PgTenantUsersRepository, PgTenkoOverdueRepository,
-    PgWebhookRepository, TenantUsersRepository,
+    AuthRepository, DtakoUploadRepository, PgAuthRepository, PgDtakoUploadRepository,
+    PgTenantUsersRepository, PgTenkoOverdueRepository, PgWebhookRepository, TenantUsersRepository,
 };
 
 const FCM_SECRET: &str = "runtime-role-fcm-secret";
@@ -1202,4 +1202,203 @@ async fn rls_check_reports_drift_when_a_table_is_forced() {
     assert_eq!(after["drift"]["matches_expected"], true, "{after}");
     assert_eq!(after["verdicts"]["drift"], true, "{after}");
     assert_eq!(after["ok"], true, "{after}");
+}
+
+// ============================================================
+// 9. 運行 CSV のアップロード履歴を id で引く (Refs ippoan/auth-worker#605)
+// ============================================================
+
+/// アップロード履歴の行を 1 つ作る (RLS を素通りする側の pool で)
+async fn insert_upload_history(admin: &sqlx::PgPool, tenant: Uuid, zip_key: &str) -> Uuid {
+    sqlx::query_scalar(
+        "INSERT INTO alc_api.dtako_upload_history (tenant_id, filename, r2_zip_key, status) \
+         VALUES ($1, 'rt.zip', $2, 'completed') RETURNING id",
+    )
+    .bind(tenant)
+    .bind(zip_key)
+    .fetch_one(admin)
+    .await
+    .expect("dtako_upload_history insert failed")
+}
+
+async fn upload_status(admin: &sqlx::PgPool, upload_id: Uuid) -> (String, Option<String>) {
+    sqlx::query_as("SELECT status, error_message FROM alc_api.dtako_upload_history WHERE id = $1")
+        .bind(upload_id)
+        .fetch_one(admin)
+        .await
+        .unwrap()
+}
+
+fn sqlstate(err: &sqlx::Error) -> Option<String> {
+    err.as_database_error()
+        .and_then(|e| e.code())
+        .map(|c| c.to_string())
+}
+
+/// 自分のテナントの履歴は、実行用ロールの接続で id から引けて、失敗の印も付く
+#[tokio::test]
+async fn upload_history_lookups_work_for_own_tenant() {
+    let ctx = setup().await;
+    let tenant = common::create_test_tenant(&ctx.admin, "RT Upload Own").await;
+    let zip_key = format!("{tenant}/uploads/{}/rt.zip", unique("own"));
+    let upload_id = insert_upload_history(&ctx.admin, tenant, &zip_key).await;
+    let repo = PgDtakoUploadRepository::new(ctx.app.clone());
+
+    let record = repo
+        .get_upload_history(tenant, upload_id)
+        .await
+        .expect("get_upload_history failed")
+        .expect("自分のテナントの履歴が見つからない");
+    assert_eq!(record.tenant_id, tenant);
+    assert_eq!(record.r2_zip_key, zip_key);
+    assert_eq!(record.filename, "rt.zip");
+
+    let key = repo
+        .get_upload_zip_key(tenant, upload_id)
+        .await
+        .expect("get_upload_zip_key failed");
+    assert_eq!(key.as_deref(), Some(zip_key.as_str()));
+
+    repo.mark_upload_failed(tenant, upload_id, "boom")
+        .await
+        .expect("mark_upload_failed failed");
+    assert_eq!(
+        upload_status(&ctx.admin, upload_id).await,
+        ("failed".to_string(), Some("boom".to_string()))
+    );
+
+    // 存在しない id は None
+    let missing = Uuid::new_v4();
+    assert!(repo
+        .get_upload_history(tenant, missing)
+        .await
+        .unwrap()
+        .is_none());
+    assert_eq!(
+        repo.get_upload_zip_key(tenant, missing).await.unwrap(),
+        None
+    );
+}
+
+/// 別テナントの `upload_id` は「見つからない」。失敗の印も付かない (行が変わらない)。
+/// 口 (download / rerun) も、存在しない id と同じ 404 を返す。
+#[tokio::test]
+async fn upload_history_of_other_tenant_is_not_found() {
+    let ctx = setup().await;
+    let tenant_a = common::create_test_tenant(&ctx.admin, "RT Upload A").await;
+    let tenant_b = common::create_test_tenant(&ctx.admin, "RT Upload B").await;
+    let zip_key = format!("{tenant_a}/uploads/{}/rt.zip", unique("other"));
+    let upload_id = insert_upload_history(&ctx.admin, tenant_a, &zip_key).await;
+    let repo = PgDtakoUploadRepository::new(ctx.app.clone());
+
+    assert!(repo
+        .get_upload_history(tenant_b, upload_id)
+        .await
+        .expect("get_upload_history failed")
+        .is_none());
+    assert_eq!(
+        repo.get_upload_zip_key(tenant_b, upload_id)
+            .await
+            .expect("get_upload_zip_key failed"),
+        None
+    );
+    repo.mark_upload_failed(tenant_b, upload_id, "boom")
+        .await
+        .expect("mark_upload_failed failed");
+    assert_eq!(
+        upload_status(&ctx.admin, upload_id).await,
+        ("completed".to_string(), None),
+        "別テナントからの失敗の印で行が変わった"
+    );
+
+    let auth_b = format!("Bearer {}", common::create_test_jwt(tenant_b, "admin"));
+    let res = ctx
+        .client
+        .get(ctx.url(&format!("/api/internal/download/{upload_id}")))
+        .header("Authorization", &auth_b)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 404);
+    assert_eq!(
+        res.text().await.unwrap(),
+        format!("upload {upload_id} not found")
+    );
+    let res = ctx
+        .client
+        .post(ctx.url(&format!("/api/internal/rerun/{upload_id}")))
+        .header("Authorization", &auth_b)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 404);
+    // split-csv の「見つからない」は、存在しない id と同じ 500
+    let res = ctx
+        .client
+        .post(ctx.url(&format!("/api/split-csv/{upload_id}")))
+        .header("Authorization", &auth_b)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 500);
+    assert_eq!(
+        upload_status(&ctx.admin, upload_id).await,
+        ("completed".to_string(), None)
+    );
+
+    // 持ち主のテナントからは引ける (上の「見つからない」が id の間違いでないこと)
+    assert!(repo
+        .get_upload_history(tenant_a, upload_id)
+        .await
+        .unwrap()
+        .is_some());
+}
+
+/// テナントを設定しない接続 (実行用ロール) で `dtako_upload_history` を読むとエラーになる。
+/// 接続が新品のとき (設定が未定義 = 42704) と、一度設定して RESET した後 (空文字 = 22P02) の両方。
+/// (= id だけで引く query は、テナントを設定した接続でないと動かない)
+#[tokio::test]
+async fn upload_history_read_without_tenant_fails() {
+    let ctx = setup().await;
+    let tenant = common::create_test_tenant(&ctx.admin, "RT Upload No Tenant").await;
+    let zip_key = format!("{tenant}/uploads/{}/rt.zip", unique("no-tenant"));
+    let upload_id = insert_upload_history(&ctx.admin, tenant, &zip_key).await;
+    const READ: &str = "SELECT count(*) FROM alc_api.dtako_upload_history WHERE id = $1";
+
+    // 新品の接続 (pool を通さない。一度もテナントを設定していない)
+    let mut conn = <sqlx::PgConnection as sqlx::Connection>::connect(&common::test_database_url())
+        .await
+        .expect("Failed to connect to test DB");
+    sqlx::query("SET ROLE alc_api_rt")
+        .execute(&mut conn)
+        .await
+        .unwrap();
+    let err = sqlx::query_scalar::<_, i64>(READ)
+        .bind(upload_id)
+        .fetch_one(&mut conn)
+        .await
+        .expect_err("テナント未設定 (新品の接続) で dtako_upload_history を読めた");
+    assert_eq!(sqlstate(&err).as_deref(), Some("42704"), "{err}");
+
+    // 同じ接続で、テナントを設定すれば読める
+    alc_core::tenant::set_current_tenant(&mut conn, &tenant.to_string())
+        .await
+        .unwrap();
+    let visible: i64 = sqlx::query_scalar(READ)
+        .bind(upload_id)
+        .fetch_one(&mut conn)
+        .await
+        .unwrap();
+    assert_eq!(visible, 1);
+
+    // RESET した後 (pool へ返した接続と同じ状態) は、また読めない
+    alc_core::tenant::reset_tenant_context(&mut conn)
+        .await
+        .unwrap();
+    let err = sqlx::query_scalar::<_, i64>(READ)
+        .bind(upload_id)
+        .fetch_one(&mut conn)
+        .await
+        .expect_err("テナント未設定 (RESET 後の接続) で dtako_upload_history を読めた");
+    assert_eq!(sqlstate(&err).as_deref(), Some("22P02"), "{err}");
 }
