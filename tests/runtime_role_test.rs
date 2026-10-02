@@ -42,12 +42,13 @@ struct Ctx {
     base_url: String,
     fcm: Arc<common::MockFcmSender>,
     client: reqwest::Client,
-    /// 実行用ロールの属性を一時的に変えるテスト (rls-check の陽性対照) と重ならないための共有ロック
+    /// 実行用ロールの属性・表の FORCE を一時的に変えるテスト (rls-check の陽性対照) と重ならないための共有ロック
     _role_attrs: Option<tokio::sync::RwLockReadGuard<'static, ()>>,
 }
 
-/// 実行用ロール `alc_api_rt` の属性を変えるテストは write、それ以外は read で取る。
-/// 属性の変更は DB 全体に効く (ほかの接続の RLS も外れる) ので、同じ binary の中で直列にする。
+/// 実行用ロール `alc_api_rt` の属性や表の FORCE を変えるテストは write、それ以外は read で取る。
+/// どちらの変更も DB 全体に効く (ほかの接続の RLS が外れる・rls-check の合否が変わる) ので、
+/// 同じ binary の中で直列にする。
 static ROLE_ATTRS: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
 
 /// `alc_api_rt` で動くサーバを立てる (FCM は送信を記録するだけの mock)
@@ -862,25 +863,36 @@ async fn rls_check_passes_for_runtime_role() {
     assert_eq!(body["invariants"]["violation_count"], 0, "{body}");
     assert_eq!(body["invariants"]["violations"], json!([]));
 
-    // 違反が無くても、流した検査 6 つが番号 0〜5 の順に 0 件で並ぶ
+    // 違反が無くても、流した検査が全部 (crate の一覧の番号の順 = 0〜8) 0 件で並ぶ
     let checks = body["invariants"]["checks"].as_array().unwrap();
     let numbers: Vec<i64> = checks
         .iter()
         .map(|c| c["check_no"].as_i64().unwrap())
         .collect();
-    assert_eq!(numbers, [0, 1, 2, 3, 4, 5], "{body}");
+    let listed: Vec<i64> = alc_migrations::RLS_INVARIANT_CHECKS
+        .iter()
+        .map(|&(check_no, _)| i64::from(check_no))
+        .collect();
+    assert_eq!(numbers, listed, "{body}");
+    assert_eq!(numbers.first(), Some(&0));
+    assert_eq!(
+        numbers.last(),
+        Some(&8),
+        "検査 6・7・8 が並んでいない: {body}"
+    );
     for check in checks {
         assert_eq!(sorted_keys(check), ["check_no", "title", "violations"]);
         assert!(!check["title"].as_str().unwrap().is_empty());
         assert_eq!(check["violations"], 0, "{check}");
     }
 
-    // 状態 (カタログの実物): 最上位の key は 5 個で、組ごとの表の数の合計が表の総数と合う
+    // 状態 (カタログの実物): 最上位の key は 6 個で、組ごとの表の数の合計が表の総数と合う
     let state = &body["state"];
     assert!(state.is_object(), "state が取れていない: {body}");
     assert_eq!(
         sorted_keys(state),
         [
+            "policy_names",
             "security_definer_functions",
             "sequences",
             "table_count",
@@ -897,6 +909,38 @@ async fn rls_check_passes_for_runtime_role() {
         .map(|group| group["count"].as_i64().unwrap())
         .sum();
     assert_eq!(grouped, table_count);
+    assert_eq!(
+        state["policy_names"].as_object().unwrap().len() as i64,
+        table_count
+    );
+
+    // 履歴との食い違い: テスト DB は全 migration を 0 から当てた状態なので、期待する状態と一致する
+    // (所有者のロール名は比べない)
+    let drift = &body["drift"];
+    assert_eq!(drift["matches_expected"], true, "{drift}");
+    assert_eq!(drift["tables"], json!([]), "{drift}");
+    assert_eq!(drift["functions"], json!([]), "{drift}");
+    assert!(drift["views"].is_null(), "{drift}");
+    assert!(drift["sequences"].is_null(), "{drift}");
+    assert_eq!(drift["unreadable"], json!([]), "{drift}");
+    assert_eq!(
+        sorted_keys(drift),
+        [
+            "functions",
+            "matches_expected",
+            "sequences",
+            "tables",
+            "unreadable",
+            "views"
+        ]
+    );
+
+    // 合否の内訳は 4 つちょうどで、全部 true
+    assert_eq!(
+        body["verdicts"],
+        json!({ "invariants": true, "runtime_role": true, "migrations": true, "drift": true }),
+        "{body}"
+    );
     assert_eq!(body["migrations"]["matches_binary"], true, "{body}");
     assert!(body["migrations"]["applied"].as_i64().unwrap() > 0);
     assert_eq!(
@@ -920,12 +964,14 @@ async fn rls_check_passes_for_runtime_role() {
         sorted_keys(&body),
         [
             "connections",
+            "drift",
             "invariants",
             "migrations",
             "ok",
             "owner_role_connected",
             "runtime_role",
-            "state"
+            "state",
+            "verdicts"
         ]
     );
     assert_eq!(
@@ -1035,6 +1081,9 @@ async fn rls_check_reports_bypassrls_on_runtime_role() {
     assert_eq!(status, 200, "{text}");
     let body: Value = serde_json::from_str(&text).unwrap();
     assert_eq!(body["ok"], false, "{body}");
+    assert_eq!(body["verdicts"]["invariants"], false, "{body}");
+    assert_eq!(body["verdicts"]["runtime_role"], false, "{body}");
+    assert_eq!(body["verdicts"]["migrations"], true, "{body}");
     assert_eq!(body["runtime_role"]["rolbypassrls"], true);
     assert_eq!(body["runtime_role"]["is_runtime_role"], true);
     let violations = body["invariants"]["violations"].as_array().unwrap();
@@ -1067,5 +1116,90 @@ async fn rls_check_reports_bypassrls_on_runtime_role() {
     // 戻した後は合格に戻る
     let after = ctx.rls_check_ok("").await;
     assert_eq!(after["runtime_role"]["rolbypassrls"], false);
+    assert_eq!(after["ok"], true, "{after}");
+}
+
+/// 陽性対照: 表の状態が migration の履歴からずれると (ここでは FORCE ROW LEVEL SECURITY を付ける)、
+/// 口は `drift` にその表を挙げ、`verdicts.drift` と `ok` を false にする。不変条件の合否は変わらない。
+///
+/// rls-check の合否は DB 全体の状態で決まるので `ROLE_ATTRS` を write で取り、同じ binary のほかの
+/// テストを待たせる。ALTER と戻しの間では assert しない (途中で落ちて FORCE が残らないように、
+/// 応答は Result のまま持ち、戻してから見る)。
+#[tokio::test]
+async fn rls_check_reports_drift_when_a_table_is_forced() {
+    let _exclusive = ROLE_ATTRS.write().await;
+    let ctx = setup_unlocked().await;
+    let token = common::create_test_internal_jwt();
+
+    // RLS 有効・FORCE 無しの表を 1 つ (名前の昇順の先頭)。名前はカタログから取る
+    let table: String = sqlx::query_scalar(
+        "SELECT c.relname::text FROM pg_class c \
+          WHERE c.relnamespace = 'alc_api'::regnamespace AND c.relkind = 'r' \
+            AND c.relrowsecurity AND NOT c.relforcerowsecurity \
+          ORDER BY c.relname LIMIT 1",
+    )
+    .fetch_one(&ctx.admin)
+    .await
+    .unwrap();
+
+    let altered = sqlx::query(&format!(
+        "ALTER TABLE alc_api.\"{table}\" FORCE ROW LEVEL SECURITY"
+    ))
+    .execute(&ctx.admin)
+    .await;
+    let response = ctx.rls_check("", Some(&token)).await;
+    sqlx::query(&format!(
+        "ALTER TABLE alc_api.\"{table}\" NO FORCE ROW LEVEL SECURITY"
+    ))
+    .execute(&ctx.admin)
+    .await
+    .expect("表を NO FORCE ROW LEVEL SECURITY に戻せなかった");
+
+    altered.expect("ALTER TABLE ... FORCE ROW LEVEL SECURITY failed");
+    let (status, text) = response.unwrap();
+    assert_eq!(status, 200, "{text}");
+    let body: Value = serde_json::from_str(&text).unwrap();
+    let drift = &body["drift"];
+    assert_eq!(drift["matches_expected"], false, "{drift}");
+    let tables = drift["tables"].as_array().unwrap();
+    assert_eq!(tables.len(), 1, "FORCE を付けた表だけが載る: {drift}");
+    let drifted = &tables[0];
+    assert_eq!(drifted["name"], table.as_str());
+    assert_eq!(drifted["expected"]["rls_forced"], false, "{drifted}");
+    assert_eq!(drifted["actual"]["rls_forced"], true, "{drifted}");
+    assert_eq!(
+        sorted_keys(drifted),
+        [
+            "actual",
+            "actual_policy_names",
+            "expected",
+            "expected_policy_names",
+            "name"
+        ]
+    );
+    // 所有者のロール名は、比べる対象にも、食い違いの表示にも入らない
+    assert!(drifted["actual"].get("owner").is_none(), "{drifted}");
+    assert_eq!(
+        drifted["expected_policy_names"], drifted["actual_policy_names"],
+        "{drifted}"
+    );
+    assert_eq!(drift["functions"], json!([]), "{drift}");
+    assert!(drift["views"].is_null(), "{drift}");
+    assert!(drift["sequences"].is_null(), "{drift}");
+    assert_eq!(drift["unreadable"], json!([]), "{drift}");
+
+    // 合否: drift だけが false。不変条件の検査は FORCE の有無では変わらない
+    assert_eq!(
+        body["verdicts"],
+        json!({ "invariants": true, "runtime_role": true, "migrations": true, "drift": false }),
+        "{body}"
+    );
+    assert_eq!(body["invariants"]["violation_count"], 0, "{body}");
+    assert_eq!(body["ok"], false, "{body}");
+
+    // 戻した後は合格に戻る
+    let after = ctx.rls_check_ok("").await;
+    assert_eq!(after["drift"]["matches_expected"], true, "{after}");
+    assert_eq!(after["verdicts"]["drift"], true, "{after}");
     assert_eq!(after["ok"], true, "{after}");
 }

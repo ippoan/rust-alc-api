@@ -1,6 +1,6 @@
 ---
 name: rust-alc-api-map
-generated-from: rust-alc-api:2e54216794cc160dcdc9173e20bf044255fbd3d9
+generated-from: rust-alc-api:4f96141f6db258c36b28c880e27000b14391edba
 paths: [crates/, src/, migrations/, tests/]
 description: rust-alc-api (アルコールチェッカー基盤の Rust/Axum Cargo workspace — domain crate 群 + monolith 単一バイナリ、PostgreSQL+RLS、Cloud Run) の構造ナビゲーション。どの crate に何のルートがあるか / monolith (rust-alc-api) 一本化 (gateway + per-domain は #556 で廃止) / RLS・migration・deploy/release 分離の gotcha を 1 枚にまとめる。トリガー:「rust-alc-api」「alc-api」「alc-notify」「alc-tenko」「alc-trouble」「alc-carins」「alc-dtako」「gateway」「tenko-api」「carins-api」「dtako-api」「trouble-api」「RLS テナント」「sqlx migration」「ts-rs」「Release Wave」「Bazel」等。
 ---
@@ -95,7 +95,8 @@ router 実装として存続。旧 per-domain は同じ domain crate を単独 m
   (`require_internal_jwt` の配下) に merge してあり、無認証の health の並びには置かない。
   root の `src/routes/` に在るのは `alc_migrations` に依存しているのが root crate だけだから
   (`crates/` 側に migration 一式の依存を足さない)。
-  - **返すもの** (key は契約で固定。auth-worker の tool がこの形を読む): `ok` /
+  - **返すもの** (key は契約で固定。auth-worker の tool がこの形を読む。最上位は 9 個): `ok` /
+    `verdicts{invariants, runtime_role, migrations, drift}` (合否の内訳。4 個ちょうど・全部 boolean) /
     `migrations{applied, max_version, binary_count, binary_max_version, matches_binary}`
     (`alc_api.migration_status()` = alc-migrations 160 の SECURITY DEFINER 関数と、binary に埋め込まれた
     `alc_migrations::MIGRATOR` の件数・最大 version) /
@@ -104,18 +105,43 @@ router 実装として存続。旧 per-domain は同じ domain crate を単独 m
     `connections[{usename, count}]` (`pg_stat_activity` の `alc_api` 系のロールごとの接続数) /
     `owner_role_connected` (表の所有者のロールが繋いでいるか) /
     `invariants{violation_count, violations[{check_no, object, detail}], checks[{check_no, title, violations}]}` /
-    `state` (最上位の 7 個目)。
-    `ok` = 違反 0 件 かつ 実行用ロールで繋いでいる かつ 属性 4 つが false かつ `matches_binary`
-    (純関数 `is_ok`)。**`owner_role_connected` は `ok` に入れない** (migration の job の実行中は所有者ロールが一時的に繋ぐ)
-  - **`invariants.checks` と `state` は「何を検査し、DB が実際にどうだったか」を返った値で確かめる材料で、
-    `ok` はどちらも見ていない** (`state` から合否を作ると、検査が alc-migrations と backend の 2 か所に分かれる。
-    足したい合否は alc-migrations の検査 SQL に検査として足す)。`checks` は
+    `state` / `drift` (object か null)。
+  - **`ok` の決め方 = `verdicts` の 4 つが全部 true** (`ok` は `verdicts` から計算する = `Verdicts::ok`。
+    内訳は純関数 `verdicts`)。**`ok` が false のとき、どれが原因かは `verdicts` で読む**:
+    `invariants` = 違反 0 件 / `runtime_role` = 実行用ロールで繋いでいる かつ 属性 4 つが false /
+    `migrations` = `matches_binary` / `drift` = `drift` が取れていて `drift.matches_expected`
+    (**`state` を取れず `drift` が null なら false** = 検査できていないものを合格にしない)。
+    **`owner_role_connected` は合否に入れない** (migration の job の実行中は所有者ロールが一時的に繋ぐ)
+  - **`drift` = migration の履歴との食い違い**: 同じ transaction で取った `state` を、
+    `alc_migrations::RLS_EXPECTED_STATE` (全 migration を 0 から当てた DB の状態の JSON。正本は alc-migrations の
+    `ci/expected_rls_state.json` で、あちらの CI が「実物 = このファイル」を強制している) と比べたもの
+    (純関数 `compute_drift(expected, actual)`。**比べるための問い合わせは足さない・期待する状態の写しを置かない**)。
+    形は `{matches_expected, tables[{name, expected, actual, expected_policy_names, actual_policy_names}],
+    functions[{signature, expected, actual}], views, sequences, unreadable[]}`。
+    - **表は「組」ではなく表の単位で比べる**: `tables` の組を `names` で開いて「表の名前 → 表の状態」にする
+      (表の状態 = 組から `names`・`count`・`owner` を除いたもの)。組の割れ方が違っても、表ごとの状態が同じなら一致。
+      載るのは、状態が違う・`policy_names` が違う・片方にしか無い表だけ (無い側は null)。名前の昇順
+    - **`owner` (所有者のロール名) は比べない**: 名前は環境で違う (テスト DB は postgres) ので、期待する状態には
+      元から無く、実物の側からも落として比べる。出し分けに効く `runtime_role_can_act_as_owner` (真偽) は比べる。
+      これで本番・テスト DB・alc-migrations の CI の 2 軸が、読み替えなしで同じ期待値と比べられる
+    - `functions` は `security_definer_functions` を署名で突き合わせ (署名の昇順)、`views` / `sequences` は
+      違うときだけ `{expected, actual}` (同じなら null)
+    - **黙って一致にしない**: 最上位に知らない key が在る・形が読めない (配列のはずが違う・同じ表が 2 回出る等) ときは
+      `unreadable` に `expected.<key>` / `actual.<key>` を入れ、`matches_expected` は false (`unreadable` は
+      無ければ空配列で、key は常に出す)。`RLS_EXPECTED_STATE` が JSON として読めなければ 500 にせず `drift: null`
+    - 配列 (`policies`・policy の名前・`runtime_role_privileges`) は SQL の側で並びが固定なので、並べ替えずに比べる。
+      式と署名の文字列は PostgreSQL の版と接続の search_path に依る — **全部の表・関数が一斉に drift になったら、
+      版か search_path が変わったことを疑う**
+    - RLS の状態を変える migration を取り込むとき (rev を上げるとき) は、期待する状態も同じ rev で付いてくる
+  - **`invariants.checks` は「何を検査したか」を返った値で確かめる材料で、合否には入れない**
+    (不変条件として足したい合否は alc-migrations の検査 SQL に検査として足す)。`checks` は
     `alc_migrations::RLS_INVARIANT_CHECKS` (番号と題) を順に並べ、違反の行を番号で数えたもの
-    (純関数 `build_checks`。違反が無くても毎回 6 要素。一覧に無い番号の違反は題 `(一覧に無い検査)` で
-    番号の昇順に末尾へ足す。数の合計 = `violation_count`)。`state` は `alc_migrations::RLS_STATE_QUERY`
+    (純関数 `build_checks`。違反が無くても毎回、一覧の全件 = いまは検査 0〜8 の 9 要素。一覧に無い番号の違反は
+    題 `(一覧に無い検査)` で番号の昇順に末尾へ足す。数の合計 = `violation_count`)。`state` は `alc_migrations::RLS_STATE_QUERY`
     (`alc_api` schema のカタログの実物を 1 行 1 列の JSON で返す 1 文) の値をそのまま入れる
     (`serde_json::Value`。形の正本は alc-migrations の `ci/rls_state.sql` で、ここでは名指しで写さない)。
-    **`state` は取れなければ null で、主の結果を道連れにしない** (200 のまま。失敗はログに 1 行)。
+    **`state` は取れなければ null で、主の結果を道連れにしない** (200 のまま。失敗はログに 1 行。
+    `drift` も null になり、`verdicts.drift` と `ok` は false)。
     そのために**状態の問い合わせは transaction の最後に流す** (PostgreSQL は transaction の中で文が失敗すると
     以後の文が全部失敗する。`fetch_state` より後に問い合わせを足さない)
   - **引数を足さない**: extractor は `State` だけ (`Query` / `Path` / `Json` を書かない)。SQL・表名・テナントを受ける
@@ -123,15 +149,20 @@ router 実装として存続。旧 per-domain は同じ domain crate を単独 m
   - **transaction は `begin_read_only(pool)` からだけ取る** (`pool.begin()` → `SET TRANSACTION READ ONLY`。
     最初の問い合わせより前に流す)。最後は rollback。固定の問い合わせ (主の 5 つ + 状態の 1 つ) はどれも bind する値が無く、
     `format!` で SQL を組み立てない
-  - **検査 SQL・状態の SQL の写しを置かない**: 不変条件の検査は `alc_migrations::RLS_INVARIANTS_QUERY`、
-    状態は `alc_migrations::RLS_STATE_QUERY` をそのまま流す
-    (加工・連結しない。正本は alc-migrations の `ci/check_rls_invariants.sql` / `ci/rls_state.sql`)
+  - **検査 SQL・状態の SQL・期待する状態の写しを置かない**: 不変条件の検査は `alc_migrations::RLS_INVARIANTS_QUERY`、
+    状態は `alc_migrations::RLS_STATE_QUERY` をそのまま流し、期待する状態は `alc_migrations::RLS_EXPECTED_STATE` を読む
+    (加工・連結しない。正本は alc-migrations の `ci/check_rls_invariants.sql` / `ci/rls_state.sql` /
+    `ci/expected_rls_state.json`)
   - **行のデータを返さない・ログに出さない**: 返すのはカタログ由来のロール名・表名・関数名・真偽・件数だけ。
     `pg_stat_activity` から読む列は `usename` と件数だけ。失敗は 500 で、本文は固定の文言
     (`internal_error_msg`。SQL・カタログの中身を載せない)
-  - テスト: `ok` の判定・`checks` の組み立て・応答の key は同ファイルの unit、実 DB は `tests/runtime_role_test.rs` の `rls_check_*`
-    (新しいテストファイルは作らない = bazel の配線を増やさない)。陽性対照 (`ALTER ROLE alc_api_rt BYPASSRLS`) は
-    DB 全体に効くので、同ファイルの `ROLE_ATTRS` (tokio の RwLock) を write で取り、ほかのテストは `setup()` が read で取る
+  - テスト: `verdicts` と `ok`・`compute_drift` (fixture は架空の名前)・`checks` の組み立て・応答の key は同ファイルの unit、
+    実 DB は `tests/runtime_role_test.rs` の `rls_check_*` (新しいテストファイルは作らない = bazel の配線を増やさない)。
+    陽性対照 2 つ (`ALTER ROLE alc_api_rt BYPASSRLS` = 不変条件とロールの内訳が false /
+    `ALTER TABLE … FORCE ROW LEVEL SECURITY` = `drift` の内訳だけが false) は DB 全体に効くので、
+    同ファイルの `ROLE_ATTRS` (tokio の RwLock) を write で取り、ほかのテストは `setup()` が read で取る。
+    **テスト DB が期待する状態と一致すること (`drift.matches_expected == true`) も実 DB のテストが固定している** —
+    テストの初期化が `alc_api` schema に object を足すと、ここが落ちる
 - **gateway (廃止済み、Refs #556 PR2)**: 旧 `crates/gateway` は auth + reverse proxy で
   `is_public_route` 判定して per-domain へ振る役だったが、本番・staging とも休眠のため削除。
   introspect 検証 + identity 注入は **auth-worker の `/alc-proxy` / `/alc-internal-proxy` 系**が
@@ -643,7 +674,7 @@ TEST_DATABASE_URL="..." cargo llvm-cov --html --open
 |---------|------|
 | `tests/common/mod.rs` | テストハーネス (DB 接続、サーバー起動、JWT 発行ヘルパー)。migration は `migrate_and_grant` に 1 本化 (`alc_migrations::MIGRATOR` の後に `alc_migrations::LOCAL_APP_GRANTS` を流す。DB を直接開くテストも必ずこれを通す) |
 | `tests/app_role_grants_test.rs` | テスト DB の `alc_api_app` の権限が本番と揃っているか (Refs #685) — `alc_api` の表のうち `has_table_privilege('alc_api_app', 表, 'SELECT')` が false のものを列挙し 0 件を assert。新しい表の GRANT 付け忘れ (過去に本番 502) を落とす。直すのは migration 側 (bazel `db-app-role-grants` shard)。**実行用ロール `alc_api_rt` (alc-migrations 158) も同じファイルで検査する**: superuser・BYPASSRLS でなく表を所有していない / schema の USAGE / `_sqlx_migrations` 以外の全表に SELECT・INSERT・UPDATE・DELETE / `_sqlx_migrations` には権限が無い / SECURITY DEFINER 関数を全部呼べる。`alc_api_rt` の権限は `scripts/local_app_grants.sql` に写さない (158 の付け漏れを検出できなくなる) |
-| `tests/runtime_role_test.rs` | 実行用ロール `alc_api_rt` で繋いだサーバで、認証前・テナント横断の経路が通ること (alc-migrations 158、Refs ippoan/alc-app#387) — 陰性 (tenant 無しで `users` を読むとエラー・別テナントを立てると 0 行・招待は 0 行) / ログイン 3 経路 (Google は招待 → 作成 → 招待の消費、LINE WORKS、LINE。それぞれ新規と既存、最後に refresh token の保存) / 招待も email_domain も無い Google は 403 / refresh token は渡した user の行だけ / 端末の登録要求 → 承認 → 承認後のポーリングで `settings_token` → `pairing-tenant` と `fcm-dismiss-test` (無効にした端末・未登録は 404) / 内部用 secret 付きの `fcm-notify-call`・`test-fcm-all-exclude`・`trigger-update-dev` / 超過検知の 1 tick (通知済みの印と配信の記録) / 参加の申請の作成 → 一覧 → 承認・却下 / 内部用の口 `GET /api/internal/rls-check` (Refs ippoan/auth-worker#605。実行用ロールで全部合格・応答の key が契約ちょうど・`invariants.checks` が番号 0〜5 の 6 要素で全部 0・`state` の最上位の key が 5 個で組ごとの表の数の合計 = `table_count` / 認可なし・不正な Bearer は 401 / query を付けても同じ応答 / `begin_read_only` の transaction で INSERT が 25006 / `ALTER ROLE alc_api_rt BYPASSRLS` で `ok=false` と検査 4 の違反 → 戻す)。実行用ロールの属性を変えるテストは `ROLE_ATTRS` を write で取り、ほかは `setup()` が read で取る。bazel `db-runtime-role` shard |
+| `tests/runtime_role_test.rs` | 実行用ロール `alc_api_rt` で繋いだサーバで、認証前・テナント横断の経路が通ること (alc-migrations 158、Refs ippoan/alc-app#387) — 陰性 (tenant 無しで `users` を読むとエラー・別テナントを立てると 0 行・招待は 0 行) / ログイン 3 経路 (Google は招待 → 作成 → 招待の消費、LINE WORKS、LINE。それぞれ新規と既存、最後に refresh token の保存) / 招待も email_domain も無い Google は 403 / refresh token は渡した user の行だけ / 端末の登録要求 → 承認 → 承認後のポーリングで `settings_token` → `pairing-tenant` と `fcm-dismiss-test` (無効にした端末・未登録は 404) / 内部用 secret 付きの `fcm-notify-call`・`test-fcm-all-exclude`・`trigger-update-dev` / 超過検知の 1 tick (通知済みの印と配信の記録) / 参加の申請の作成 → 一覧 → 承認・却下 / 内部用の口 `GET /api/internal/rls-check` (Refs ippoan/auth-worker#605。実行用ロールで全部合格・応答の key が契約ちょうど・`invariants.checks` が `RLS_INVARIANT_CHECKS` の番号 (0〜8) の順で全部 0・`state` の最上位の key が 6 個で組ごとの表の数の合計 = `table_count`・`drift.matches_expected` が true で `verdicts` の 4 つが true / 認可なし・不正な Bearer は 401 / query を付けても同じ応答 / `begin_read_only` の transaction で INSERT が 25006 / `ALTER ROLE alc_api_rt BYPASSRLS` で `ok=false` と検査 4 の違反・`verdicts.invariants` と `verdicts.runtime_role` が false → 戻す / 表 1 つに `FORCE ROW LEVEL SECURITY` を付けると `drift.tables` にその表だけが載り `verdicts.drift` と `ok` が false、`verdicts.invariants` は true のまま → 戻す)。実行用ロールの属性・表の FORCE を変えるテストは `ROLE_ATTRS` を write で取り、ほかは `setup()` が read で取る。bazel `db-runtime-role` shard |
 | `tests/common/mock_storage.rs` | インメモリ StorageBackend 実装 |
 | `tests/auth_test.rs` | JWT 認証 / X-Tenant-ID / 未認証拒否 |
 | `tests/employees_test.rs` | RLS テナント分離 / キオスクモード |
