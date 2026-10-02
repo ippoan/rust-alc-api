@@ -242,6 +242,11 @@ pub struct UpdateMeasurement {
     /// (Refs ippoan/alc-app#387)
     #[serde(default)]
     pub tenko_method: Option<String>,
+    /// 運転者の本人確認の方法 (`license` / `ic_card` / `remote_punch` / `nfc_card` / `manual`)。
+    /// 点呼セッションに書くだけで、認可の判断には使わない。無ければ NULL (記録なし)。
+    /// POST ([`CreateMeasurement`]) には無い (Refs ippoan/alc-app#387)
+    #[serde(default)]
+    pub identity_method: Option<String>,
     /// 詳細は [`CreateMeasurement::carins_cert_no`]。
     #[serde(default)]
     pub carins_cert_no: Option<String>,

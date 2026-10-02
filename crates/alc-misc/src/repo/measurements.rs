@@ -81,10 +81,12 @@ impl MeasurementsRepository for PgMeasurementsRepository {
         .fetch_one(&mut *tx)
         .await?;
 
-        // POST は点呼方法を受けない (従来どおり通常点呼)。点呼セッションの id も返さない
+        // POST は点呼方法・本人確認の方法を受けない (従来どおり通常点呼・記録なし)。
+        // 点呼セッションの id も返さない
         let tenko = NormalTenkoInput {
             tenko_type: input.tenko_type.as_deref(),
             tenko_method: None,
+            identity_method: None,
             carins_cert_no: input.carins_cert_no.as_deref(),
             carins_vehicle_id: input.carins_vehicle_id.as_deref(),
         };
@@ -149,6 +151,7 @@ impl MeasurementsRepository for PgMeasurementsRepository {
         let tenko = NormalTenkoInput {
             tenko_type: input.tenko_type.as_deref(),
             tenko_method: input.tenko_method.as_deref(),
+            identity_method: input.identity_method.as_deref(),
             carins_cert_no: input.carins_cert_no.as_deref(),
             carins_vehicle_id: input.carins_vehicle_id.as_deref(),
         };

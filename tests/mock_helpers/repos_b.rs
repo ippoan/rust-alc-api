@@ -1748,6 +1748,8 @@ pub struct MockMeasurementsRepository {
     pub tenko_session_id: std::sync::Mutex<Option<Uuid>>,
     /// `update` に届いた `tenko_method` (呼ばれるたびに積む)
     pub update_tenko_methods: std::sync::Mutex<Vec<Option<String>>>,
+    /// `update` に届いた `identity_method` (呼ばれるたびに積む)
+    pub update_identity_methods: std::sync::Mutex<Vec<Option<String>>>,
 }
 
 impl Default for MockMeasurementsRepository {
@@ -1759,6 +1761,7 @@ impl Default for MockMeasurementsRepository {
             video_url: std::sync::Mutex::new(None),
             tenko_session_id: std::sync::Mutex::new(None),
             update_tenko_methods: std::sync::Mutex::new(Vec::new()),
+            update_identity_methods: std::sync::Mutex::new(Vec::new()),
         }
     }
 }
@@ -1825,6 +1828,10 @@ impl MeasurementsRepository for MockMeasurementsRepository {
             .lock()
             .unwrap()
             .push(input.tenko_method.clone());
+        self.update_identity_methods
+            .lock()
+            .unwrap()
+            .push(input.identity_method.clone());
         if self.return_some.load(Ordering::SeqCst) {
             Ok(Some(UpdatedMeasurement {
                 measurement: self.sample_measurement(tenant_id),

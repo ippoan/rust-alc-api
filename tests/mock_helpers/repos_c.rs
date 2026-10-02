@@ -791,6 +791,8 @@ pub struct MockTenkoSessionRepository {
     pub recorded_manager_judgment_method: std::sync::Mutex<Option<Option<String>>>,
     /// get() が返すセッションの manager_judgment_method (既に確定済みの IT点呼 を模す)
     pub session_manager_judgment_method: std::sync::Mutex<Option<String>>,
+    /// get() が返すセッションの identity_method (運転者の本人確認の方法)
+    pub session_identity_method: std::sync::Mutex<Option<String>>,
     /// true のとき self_resume が更新 0 行 (= 既に resumed_at が入っている) を模して
     /// None を返す (Refs ippoan/alc-app#351)
     pub already_resumed: AtomicBool,
@@ -823,6 +825,7 @@ impl Default for MockTenkoSessionRepository {
             recorded_manager_judgment: std::sync::Mutex::new(None),
             recorded_manager_judgment_method: std::sync::Mutex::new(None),
             session_manager_judgment_method: std::sync::Mutex::new(None),
+            session_identity_method: std::sync::Mutex::new(None),
             already_resumed: AtomicBool::new(false),
         }
     }
@@ -900,6 +903,7 @@ fn make_mock_session(
         manager_judgment_reason: None,
         manager_judgment_by: None,
         manager_judgment_method: None,
+        identity_method: None,
         created_at: now,
         updated_at: now,
     }
@@ -974,6 +978,7 @@ impl TenkoSessionRepository for MockTenkoSessionRepository {
         session.tenko_method = self.session_tenko_method.lock().unwrap().clone();
         session.manager_judgment_method =
             self.session_manager_judgment_method.lock().unwrap().clone();
+        session.identity_method = self.session_identity_method.lock().unwrap().clone();
         Ok(Some(session))
     }
 
