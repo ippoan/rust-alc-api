@@ -838,14 +838,19 @@ pub fn parse_ferry_periods_from_text(text: &str) -> Vec<(String, NaiveDateTime, 
     periods
 }
 
+/// フェリー 1 回の分数 (秒を 30 秒で四捨五入)。
+pub fn ferry_period_minutes(start: NaiveDateTime, end: NaiveDateTime) -> i32 {
+    let secs = (end - start).num_seconds();
+    ((secs + 30) / 60) as i32
+}
+
 /// parse_ferry_periods_from_text の結果から unko_no → 合計フェリー分を算出
 fn ferry_minutes_from_periods(
     periods: &[(String, NaiveDateTime, NaiveDateTime)],
 ) -> HashMap<String, i32> {
     let mut ferry_map = HashMap::new();
     for (unko_no, s, e) in periods {
-        let secs = (*e - *s).num_seconds();
-        let mins = ((secs + 30) / 60) as i32;
+        let mins = ferry_period_minutes(*s, *e);
         if mins > 0 {
             *ferry_map.entry(unko_no.clone()).or_insert(0) += mins;
         }

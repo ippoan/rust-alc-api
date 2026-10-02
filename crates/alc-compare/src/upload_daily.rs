@@ -24,6 +24,30 @@ pub struct FerryData {
     pub periods: Vec<(NaiveDateTime, NaiveDateTime)>,
 }
 
+/// 運行 1 件ぶんの KUDGFRY の CSV テキスト (UTF-8 に decode 済み) から [`FerryData`] を作る。
+///
+/// 行の読み方は [`crate::parse_ferry_periods_from_text`] (1 行目は見出し・列 10 と 11 が開始と終了)。テキストは運行 1 件ぶんの
+/// 前提なので、列 0 (運行NO) は見ない。分数は [`crate::ferry_period_minutes`] で、0 分以下の行は数えない。
+/// 合計が 0 分以下なら `None`。`start_times`・`periods` は数えた行の順。
+pub fn ferry_data_from_text(text: &str) -> Option<FerryData> {
+    let mut total_minutes = 0i32;
+    let mut start_times = Vec::new();
+    let mut periods = Vec::new();
+    for (_, start, end) in crate::parse_ferry_periods_from_text(text) {
+        let mins = crate::ferry_period_minutes(start, end);
+        if mins > 0 {
+            total_minutes += mins;
+            start_times.push(start);
+            periods.push((start, end));
+        }
+    }
+    (total_minutes > 0).then_some(FerryData {
+        total_minutes,
+        start_times,
+        periods,
+    })
+}
+
 /// 保存するセグメント 1 件 (`dtako_daily_work_segments` の 1 行ぶん)。
 #[derive(Debug, Clone, PartialEq)]
 pub struct DailySegment {
@@ -835,5 +859,71 @@ mod tests {
                 assert_eq!(segment.clone(), segment);
             }
         );
+    }
+
+    #[test]
+    fn test_ferry_data_from_text() {
+        test_group!("日別の集計 (アップロード)");
+        let head = "運行NO,1,2,3,4,5,6,7,8,9,開始,終了\n";
+        let line = |start: &str, end: &str| format!("X,1,2,3,4,5,6,7,8,9,{start},{end}\n");
+        test_case!(
+            "KUDGFRY: 複数行の合計・開始時刻と期間は数えた行の順・列 0 は見ない",
+            {
+                let text = format!(
+                    "{head}{}{}",
+                    line("2026/03/02 10:00:00", "2026/03/02 11:30:00"),
+                    line("2026/03/02 20:00:00", "2026/03/02 20:45:00")
+                );
+                let data = ferry_data_from_text(&text).unwrap();
+                assert_eq!(data.total_minutes, 135);
+                assert_eq!(data.start_times, vec![at(2, 10, 0), at(2, 20, 0)]);
+                assert_eq!(
+                    data.periods,
+                    vec![(at(2, 10, 0), at(2, 11, 30)), (at(2, 20, 0), at(2, 20, 45))]
+                );
+            }
+        );
+        test_case!(
+            "KUDGFRY: 秒は 30 秒で四捨五入 (29 秒は 0 分で数えない・30 秒は 1 分)",
+            {
+                let text = format!(
+                    "{head}{}{}{}",
+                    line("2026/03/02 10:00:00", "2026/03/02 10:00:29"),
+                    line("2026/03/02 11:00:00", "2026/03/02 11:00:30"),
+                    line("2026/03/02 12:00:00", "2026/03/02 12:01:29")
+                );
+                let data = ferry_data_from_text(&text).unwrap();
+                assert_eq!(data.total_minutes, 2);
+                assert_eq!(
+                    data.start_times,
+                    vec![dt(2026, 3, 2, 11, 0, 0), dt(2026, 3, 2, 12, 0, 0)]
+                );
+            }
+        );
+        test_case!(
+            "KUDGFRY: 0 分・負・列が足りない行・日時の不正は数えず、合計が 0 なら None",
+            {
+                let text = format!(
+                    "{head}{}{}X,1,2\n{}",
+                    line("2026/03/02 10:00:00", "2026/03/02 10:00:00"),
+                    line("2026/03/02 11:00:00", "2026/03/02 10:00:00"),
+                    line("2026-03-02 10:00", "2026/03/02 11:00:00")
+                );
+                assert!(ferry_data_from_text(&text).is_none());
+                assert!(ferry_data_from_text("").is_none());
+                assert!(ferry_data_from_text(head).is_none());
+            }
+        );
+        test_case!("KUDGFRY: 時が空白詰めの時刻 (%k) も読む", {
+            let text = format!(
+                "{head}{}",
+                line("2026/03/02  9:00:00", "2026/03/02 10:30:00")
+            );
+            let data = ferry_data_from_text(&text).unwrap();
+            assert_eq!(
+                (data.total_minutes, data.periods.clone()),
+                (90, vec![(at(2, 9, 0), at(2, 10, 30))])
+            );
+        });
     }
 }

@@ -1,4 +1,4 @@
-use chrono::{NaiveDate, NaiveDateTime};
+use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 
 /// KUDGURI.csv の1行をパースした結果
 #[derive(Debug, Clone)]
@@ -218,6 +218,56 @@ pub fn parse_kudguri(csv_text: &str) -> Result<Vec<KudguriRow>, anyhow::Error> {
     Ok(rows)
 }
 
+/// 再計算で、DB に保存された運行 1 行から [`KudguriRow`] を作るための値 (DB の型に依らない素の値)。
+///
+/// backend の再計算 (`alc-dtako`) と分割 worker (ippoan/alc-dtako-worker) が、同じ [`RecalcOperation::into_kudguri_row`] を呼ぶ。
+#[derive(Debug, Clone, PartialEq)]
+pub struct RecalcOperation {
+    pub unko_no: String,
+    pub reading_date: NaiveDate,
+    pub operation_date: Option<NaiveDate>,
+    pub driver_cd: String,
+    pub departure_at: Option<DateTime<Utc>>,
+    pub return_at: Option<DateTime<Utc>>,
+    pub total_distance: Option<f64>,
+    pub drive_time_general: Option<i32>,
+    pub drive_time_highway: Option<i32>,
+    pub drive_time_bypass: Option<i32>,
+}
+
+impl RecalcOperation {
+    /// [`KudguriRow`] にする。DB に無い欄は空 (文字列は空・数値は `None`・`crew_role` は 0・`raw_data` は `Null`)。
+    /// 日時は UTC の値の壁時計をそのまま使う (`naive_utc`)。
+    pub fn into_kudguri_row(self) -> KudguriRow {
+        KudguriRow {
+            unko_no: self.unko_no,
+            reading_date: self.reading_date,
+            operation_date: self.operation_date,
+            office_cd: String::new(),
+            office_name: String::new(),
+            vehicle_cd: String::new(),
+            vehicle_name: String::new(),
+            driver_cd: self.driver_cd,
+            driver_name: String::new(),
+            crew_role: 0,
+            departure_at: self.departure_at.map(|dt| dt.naive_utc()),
+            return_at: self.return_at.map(|dt| dt.naive_utc()),
+            garage_out_at: None,
+            garage_in_at: None,
+            meter_start: None,
+            meter_end: None,
+            total_distance: self.total_distance,
+            drive_time_general: self.drive_time_general,
+            drive_time_highway: self.drive_time_highway,
+            drive_time_bypass: self.drive_time_bypass,
+            safety_score: None,
+            economy_score: None,
+            total_score: None,
+            raw_data: serde_json::Value::Null,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -280,5 +330,103 @@ mod tests {
             assert!(!msg.contains("運行NO"), "got: {msg}");
             assert!(!msg.contains("読取日"), "got: {msg}");
         });
+    }
+
+    #[test]
+    fn test_recalc_operation_into_kudguri_row() {
+        test_group!("CSVパーサー");
+        test_case!(
+            "再計算: DB の運行の行から KudguriRow を作る (DB に無い欄は空・日時は UTC の壁時計)",
+            {
+                let at = |h, m| {
+                    NaiveDate::from_ymd_opt(2026, 3, 2)
+                        .unwrap()
+                        .and_hms_opt(h, m, 0)
+                        .unwrap()
+                };
+                let op = RecalcOperation {
+                    unko_no: "T-1".into(),
+                    reading_date: NaiveDate::from_ymd_opt(2026, 3, 3).unwrap(),
+                    operation_date: NaiveDate::from_ymd_opt(2026, 3, 2),
+                    driver_cd: "D-ONE".into(),
+                    departure_at: Some(at(8, 15).and_utc()),
+                    return_at: Some(at(17, 45).and_utc()),
+                    total_distance: Some(123.5),
+                    drive_time_general: Some(100),
+                    drive_time_highway: Some(200),
+                    drive_time_bypass: Some(30),
+                };
+                let row = op.into_kudguri_row();
+                assert_eq!(row.unko_no, "T-1");
+                assert_eq!(
+                    row.reading_date,
+                    NaiveDate::from_ymd_opt(2026, 3, 3).unwrap()
+                );
+                assert_eq!(row.operation_date, NaiveDate::from_ymd_opt(2026, 3, 2));
+                assert_eq!(row.driver_cd, "D-ONE");
+                assert_eq!(row.departure_at, Some(at(8, 15)));
+                assert_eq!(row.return_at, Some(at(17, 45)));
+                assert_eq!(row.total_distance, Some(123.5));
+                assert_eq!(
+                    (
+                        row.drive_time_general,
+                        row.drive_time_highway,
+                        row.drive_time_bypass
+                    ),
+                    (Some(100), Some(200), Some(30))
+                );
+                let names = [
+                    &row.office_cd,
+                    &row.office_name,
+                    &row.vehicle_cd,
+                    &row.vehicle_name,
+                    &row.driver_name,
+                ];
+                assert!(names.iter().all(|s| s.is_empty()));
+                assert_eq!(
+                    (row.crew_role, row.garage_out_at, row.garage_in_at),
+                    (0, None, None)
+                );
+                assert_eq!((row.meter_start, row.meter_end), (None, None));
+                assert_eq!(
+                    (row.safety_score, row.economy_score, row.total_score),
+                    (None, None, None)
+                );
+                assert_eq!(row.raw_data, serde_json::Value::Null);
+            }
+        );
+        test_case!(
+            "再計算: 乗務員CD が空・日時と数値が無い行",
+            {
+                let op = RecalcOperation {
+                    unko_no: "T-2".into(),
+                    reading_date: NaiveDate::from_ymd_opt(2026, 3, 3).unwrap(),
+                    operation_date: None,
+                    driver_cd: String::new(),
+                    departure_at: None,
+                    return_at: None,
+                    total_distance: None,
+                    drive_time_general: None,
+                    drive_time_highway: None,
+                    drive_time_bypass: None,
+                };
+                let row = op.clone().into_kudguri_row();
+                assert_eq!((row.driver_cd.as_str(), row.operation_date), ("", None));
+                assert_eq!(
+                    (row.departure_at, row.return_at, row.total_distance),
+                    (None, None, None)
+                );
+                assert_eq!(
+                    (
+                        row.drive_time_general,
+                        row.drive_time_highway,
+                        row.drive_time_bypass
+                    ),
+                    (None, None, None)
+                );
+                assert_eq!(format!("{op:?}").len(), format!("{:?}", op.clone()).len());
+                assert_eq!(op.clone(), op);
+            }
+        );
     }
 }

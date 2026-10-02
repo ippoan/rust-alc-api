@@ -172,6 +172,14 @@ pub fn parse_kudgivt_for_crew(
         .collect())
 }
 
+/// 同じ (運行NO, イベントCD, 開始日時) の行を 1 つにする (最初に出た行を残す。残る行の順はそのまま)。
+/// 再計算で、同じ KUDGIVT が複数の zip に入っているときに使う。
+pub fn dedup_kudgivt_rows(mut rows: Vec<KudgivtRow>) -> Vec<KudgivtRow> {
+    let mut seen = std::collections::HashSet::new();
+    rows.retain(|row| seen.insert((row.unko_no.clone(), row.event_cd.clone(), row.start_at)));
+    rows
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -331,6 +339,49 @@ mod tests {
                 assert!(err.to_string().contains("missing required columns"));
                 let err = parse_kudgivt_for_crew(b"", 1).unwrap_err();
                 assert_eq!(err.to_string(), "empty CSV");
+            }
+        );
+    }
+
+    #[test]
+    fn test_dedup_kudgivt_rows() {
+        test_group!("CSVパーサー");
+        let date = NaiveDate::from_ymd_opt(2026, 3, 2).unwrap();
+        let row = |unko: &str, cd: &str, hour: u32, name: &str| KudgivtRow {
+            unko_no: unko.into(),
+            reading_date: date,
+            driver_cd: "D-ONE".into(),
+            driver_name: name.into(),
+            crew_role: 1,
+            start_at: date.and_hms_opt(hour, 0, 0).unwrap(),
+            end_at: None,
+            event_cd: cd.into(),
+            event_name: String::new(),
+            duration_minutes: None,
+            section_distance: None,
+        };
+        let names = |rows: &[KudgivtRow]| {
+            rows.iter()
+                .map(|r| r.driver_name.clone())
+                .collect::<Vec<_>>()
+        };
+        test_case!("KUDGIVT の重複: (運行NO, イベントCD, 開始日時) が同じ行は最初の 1 つだけ残り、順はそのまま", {
+            let rows = vec![
+                row("T-1", "201", 8, "a"),
+                row("T-1", "202", 8, "b"),
+                row("T-1", "201", 8, "c"),
+                row("T-2", "201", 8, "d"),
+                row("T-1", "201", 9, "e"),
+                row("T-2", "201", 8, "f"),
+            ];
+            assert_eq!(names(&dedup_kudgivt_rows(rows)), ["a", "b", "d", "e"]);
+        });
+        test_case!(
+            "KUDGIVT の重複: 重複が無ければそのまま・空は空",
+            {
+                let rows = vec![row("T-1", "201", 8, "a"), row("T-1", "201", 9, "b")];
+                assert_eq!(names(&dedup_kudgivt_rows(rows)), ["a", "b"]);
+                assert!(dedup_kudgivt_rows(Vec::new()).is_empty());
             }
         );
     }

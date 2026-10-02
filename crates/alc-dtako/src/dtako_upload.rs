@@ -11,14 +11,14 @@ use uuid::Uuid;
 
 use crate::dtako_operation_changes::load_before_minutes;
 use crate::DtakoState;
-use alc_compare::upload_daily::{compute_daily_hours, FerryData};
+use alc_compare::upload_daily::{compute_daily_hours, ferry_data_from_text, FerryData};
 use alc_core::auth_middleware::TenantId;
 use alc_core::repository::dtako_upload::{
     InsertDailyWorkHoursParams, InsertOperationParams, InsertSegmentParams, ReuploadChangeInput,
 };
 use alc_csv_parser;
 use alc_csv_parser::kudgivt::{parse_kudgivt, KudgivtRow};
-use alc_csv_parser::kudguri::KudguriRow;
+use alc_csv_parser::kudguri::{KudguriRow, RecalcOperation};
 use alc_csv_parser::operation_changes::minutes_for;
 use alc_csv_parser::work_segments::EventClass;
 use tokio_stream::StreamExt;
@@ -320,40 +320,13 @@ async fn load_ferry_minutes(
     for (unko_no, result) in results {
         if let Ok(bytes) = result {
             let text = alc_csv_parser::decode_shift_jis(&bytes);
-            let mut total_ferry = 0i32;
-            let mut start_times = Vec::new();
-            let mut periods = Vec::new();
-            for line in text.lines().skip(1) {
-                let cols: Vec<&str> = line.split(',').collect();
-                if cols.len() <= 11 {
-                    continue;
+            // KUDGFRY のテキスト → 合計分・開始時刻・期間 (alc-compare。分割 worker と共有)
+            if let Some(ferry) = ferry_data_from_text(&text) {
+                for &(start, end) in &ferry.periods {
+                    let mins = alc_compare::ferry_period_minutes(start, end);
+                    tracing::debug!("Ferry {}: {}min ({} → {})", unko_no, mins, start, end);
                 }
-                let start =
-                    chrono::NaiveDateTime::parse_from_str(cols[10].trim(), "%Y/%m/%d %H:%M:%S")
-                        .ok();
-                let end =
-                    chrono::NaiveDateTime::parse_from_str(cols[11].trim(), "%Y/%m/%d %H:%M:%S")
-                        .ok();
-                if let (Some(start), Some(end)) = (start, end) {
-                    let secs = (end - start).num_seconds();
-                    let mins = ((secs + 30) / 60) as i32;
-                    if mins > 0 {
-                        total_ferry += mins;
-                        start_times.push(start);
-                        periods.push((start, end));
-                        tracing::debug!("Ferry {}: {}min ({} → {})", unko_no, mins, start, end);
-                    }
-                }
-            }
-            if total_ferry > 0 {
-                ferry_map.insert(
-                    unko_no,
-                    FerryData {
-                        total_minutes: total_ferry,
-                        start_times,
-                        periods,
-                    },
-                );
+                ferry_map.insert(unko_no, ferry);
             }
         }
     }
@@ -556,9 +529,7 @@ async fn load_kudgivt_from_zips(
     // 重複排除: 同じ(unko_no, event_cd, start_at)のイベントは1つだけ保持
     // 複数ZIPに同じKUDGIVTデータが含まれる場合の対策
     let before = all_kudgivt.len();
-    let mut seen = std::collections::HashSet::new();
-    all_kudgivt
-        .retain(|row| seen.insert((row.unko_no.clone(), row.event_cd.clone(), row.start_at)));
+    let all_kudgivt = alc_csv_parser::kudgivt::dedup_kudgivt_rows(all_kudgivt);
     let msg = format!(
         "Total KUDGIVT from ZIPs: {} rows (deduped from {})",
         all_kudgivt.len(),
@@ -1009,33 +980,23 @@ pub async fn recalculate_all_core(
         .fetch_operations_for_recalc(tenant_id, month_start, fetch_end)
         .await?;
 
+    // DB の運行の行 → KudguriRow (alc-csv-parser。分割 worker と共有)
     let ops: Vec<KudguriRow> = op_rows
         .iter()
-        .map(|r| KudguriRow {
-            unko_no: r.unko_no.clone(),
-            reading_date: r.reading_date,
-            operation_date: r.operation_date,
-            office_cd: String::new(),
-            office_name: String::new(),
-            vehicle_cd: String::new(),
-            vehicle_name: String::new(),
-            driver_cd: r.driver_cd.clone().unwrap_or_default(),
-            driver_name: String::new(),
-            crew_role: 0,
-            departure_at: r.departure_at.map(|dt| dt.naive_utc()),
-            return_at: r.return_at.map(|dt| dt.naive_utc()),
-            garage_out_at: None,
-            garage_in_at: None,
-            meter_start: None,
-            meter_end: None,
-            total_distance: r.total_distance,
-            drive_time_general: r.drive_time_general,
-            drive_time_highway: r.drive_time_highway,
-            drive_time_bypass: r.drive_time_bypass,
-            safety_score: None,
-            economy_score: None,
-            total_score: None,
-            raw_data: serde_json::Value::Null,
+        .map(|r| {
+            RecalcOperation {
+                unko_no: r.unko_no.clone(),
+                reading_date: r.reading_date,
+                operation_date: r.operation_date,
+                driver_cd: r.driver_cd.clone().unwrap_or_default(),
+                departure_at: r.departure_at,
+                return_at: r.return_at,
+                total_distance: r.total_distance,
+                drive_time_general: r.drive_time_general,
+                drive_time_highway: r.drive_time_highway,
+                drive_time_bypass: r.drive_time_bypass,
+            }
+            .into_kudguri_row()
         })
         .collect();
 
@@ -1178,33 +1139,23 @@ async fn load_driver_ops_as_kudguri(
         .load_driver_operations(tenant_id, driver_id, month_start, fetch_end)
         .await?;
 
+    // DB の運行の行 → KudguriRow (alc-csv-parser。分割 worker と共有)
     Ok(op_rows
         .iter()
-        .map(|r| KudguriRow {
-            unko_no: r.unko_no.clone(),
-            reading_date: r.reading_date,
-            operation_date: r.operation_date,
-            office_cd: String::new(),
-            office_name: String::new(),
-            vehicle_cd: String::new(),
-            vehicle_name: String::new(),
-            driver_cd: driver_cd.to_string(),
-            driver_name: String::new(),
-            crew_role: 0,
-            departure_at: r.departure_at.map(|dt| dt.naive_utc()),
-            return_at: r.return_at.map(|dt| dt.naive_utc()),
-            garage_out_at: None,
-            garage_in_at: None,
-            meter_start: None,
-            meter_end: None,
-            total_distance: r.total_distance,
-            drive_time_general: r.drive_time_general,
-            drive_time_highway: r.drive_time_highway,
-            drive_time_bypass: r.drive_time_bypass,
-            safety_score: None,
-            economy_score: None,
-            total_score: None,
-            raw_data: serde_json::Value::Null,
+        .map(|r| {
+            RecalcOperation {
+                unko_no: r.unko_no.clone(),
+                reading_date: r.reading_date,
+                operation_date: r.operation_date,
+                driver_cd: driver_cd.to_string(),
+                departure_at: r.departure_at,
+                return_at: r.return_at,
+                total_distance: r.total_distance,
+                drive_time_general: r.drive_time_general,
+                drive_time_highway: r.drive_time_highway,
+                drive_time_bypass: r.drive_time_bypass,
+            }
+            .into_kudguri_row()
         })
         .collect())
 }
