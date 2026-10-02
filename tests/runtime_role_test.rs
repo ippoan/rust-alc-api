@@ -42,10 +42,24 @@ struct Ctx {
     base_url: String,
     fcm: Arc<common::MockFcmSender>,
     client: reqwest::Client,
+    /// 実行用ロールの属性を一時的に変えるテスト (rls-check の陽性対照) と重ならないための共有ロック
+    _role_attrs: Option<tokio::sync::RwLockReadGuard<'static, ()>>,
 }
+
+/// 実行用ロール `alc_api_rt` の属性を変えるテストは write、それ以外は read で取る。
+/// 属性の変更は DB 全体に効く (ほかの接続の RLS も外れる) ので、同じ binary の中で直列にする。
+static ROLE_ATTRS: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
 
 /// `alc_api_rt` で動くサーバを立てる (FCM は送信を記録するだけの mock)
 async fn setup() -> Ctx {
+    let guard = ROLE_ATTRS.read().await;
+    let mut ctx = setup_unlocked().await;
+    ctx._role_attrs = Some(guard);
+    ctx
+}
+
+/// [`setup`] の本体。`ROLE_ATTRS` を自分で取っている呼び出し元だけが直接呼ぶ。
+async fn setup_unlocked() -> Ctx {
     let admin_state = common::setup_app_state().await;
     let mut app_state = common::setup_app_state_as_app_role(5, true).await;
     let fcm = Arc::new(common::MockFcmSender::new());
@@ -59,6 +73,7 @@ async fn setup() -> Ctx {
         base_url,
         fcm,
         client: reqwest::Client::new(),
+        _role_attrs: None,
     }
 }
 
@@ -90,6 +105,29 @@ impl Ctx {
             .send()
             .await
             .unwrap()
+    }
+
+    /// 内部用の口 `GET /api/internal/rls-check` を叩く (`query` は `?a=b` の形か空、`bearer` は無ければ付けない)
+    async fn rls_check(&self, query: &str, bearer: Option<&str>) -> reqwest::Result<(u16, String)> {
+        let mut req = self
+            .client
+            .get(self.url(&format!("/api/internal/rls-check{query}")));
+        if let Some(token) = bearer {
+            req = req.header("Authorization", format!("Bearer {token}"));
+        }
+        let res = req.send().await?;
+        let status = res.status().as_u16();
+        Ok((status, res.text().await?))
+    }
+
+    /// 内部用の認可を通して rls-check を叩き、200 の JSON を返す
+    async fn rls_check_ok(&self, query: &str) -> Value {
+        let (status, text) = self
+            .rls_check(query, Some(&common::create_test_internal_jwt()))
+            .await
+            .unwrap();
+        assert_eq!(status, 200, "GET /api/internal/rls-check{query}: {text}");
+        serde_json::from_str(&text).unwrap()
     }
 
     /// 内部口で user を解決 / 作成し、応答の JSON を返す
@@ -785,4 +823,249 @@ async fn access_request_create_list_approve_decline() {
     assert_eq!(list("?status=pending").await, 0);
     assert_eq!(list("?status=approved").await, 1);
     assert_eq!(list("?status=declined").await, 1);
+}
+
+// ============================================================
+// 8. 内部用の口 rls-check (Refs ippoan/auth-worker#605)
+// ============================================================
+
+fn sorted_keys(value: &Value) -> Vec<String> {
+    let mut keys: Vec<String> = value.as_object().unwrap().keys().cloned().collect();
+    keys.sort();
+    keys
+}
+
+/// 繋いでいるロールの数は、同じ DB を使うほかの接続で変わりうるので比べない
+fn without_connections(mut body: Value) -> Value {
+    let map = body.as_object_mut().unwrap();
+    map.remove("connections");
+    map.remove("owner_role_connected");
+    body
+}
+
+/// 実行用ロールの接続 + 内部用の認可で、検査が全部通る。応答の key は契約ちょうど。
+#[tokio::test]
+async fn rls_check_passes_for_runtime_role() {
+    let ctx = setup().await;
+    let body = ctx.rls_check_ok("").await;
+
+    assert_eq!(body["runtime_role"]["current_user"], "alc_api_rt");
+    assert_eq!(body["runtime_role"]["is_runtime_role"], true);
+    for attr in [
+        "rolsuper",
+        "rolbypassrls",
+        "rolinherit",
+        "member_of_table_owner",
+    ] {
+        assert_eq!(body["runtime_role"][attr], false, "{attr}: {body}");
+    }
+    assert_eq!(body["invariants"]["violation_count"], 0, "{body}");
+    assert_eq!(body["invariants"]["violations"], json!([]));
+
+    // 違反が無くても、流した検査 6 つが番号 0〜5 の順に 0 件で並ぶ
+    let checks = body["invariants"]["checks"].as_array().unwrap();
+    let numbers: Vec<i64> = checks
+        .iter()
+        .map(|c| c["check_no"].as_i64().unwrap())
+        .collect();
+    assert_eq!(numbers, [0, 1, 2, 3, 4, 5], "{body}");
+    for check in checks {
+        assert_eq!(sorted_keys(check), ["check_no", "title", "violations"]);
+        assert!(!check["title"].as_str().unwrap().is_empty());
+        assert_eq!(check["violations"], 0, "{check}");
+    }
+
+    // 状態 (カタログの実物): 最上位の key は 5 個で、組ごとの表の数の合計が表の総数と合う
+    let state = &body["state"];
+    assert!(state.is_object(), "state が取れていない: {body}");
+    assert_eq!(
+        sorted_keys(state),
+        [
+            "security_definer_functions",
+            "sequences",
+            "table_count",
+            "tables",
+            "views"
+        ]
+    );
+    let table_count = state["table_count"].as_i64().unwrap();
+    assert!(table_count > 0);
+    let grouped: i64 = state["tables"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|group| group["count"].as_i64().unwrap())
+        .sum();
+    assert_eq!(grouped, table_count);
+    assert_eq!(body["migrations"]["matches_binary"], true, "{body}");
+    assert!(body["migrations"]["applied"].as_i64().unwrap() > 0);
+    assert_eq!(
+        body["migrations"]["applied"],
+        body["migrations"]["binary_count"]
+    );
+    assert_eq!(
+        body["migrations"]["max_version"],
+        body["migrations"]["binary_max_version"]
+    );
+    assert_eq!(body["ok"], true, "{body}");
+
+    // テストの pool は接続後に SET ROLE するので、pg_stat_activity の usename はログインロールになり、
+    // 実行用ロールの行は出ない。ここでは形だけを見る (要素の key は src 側の単体テストで固定)。
+    for conn in body["connections"].as_array().expect("connections は配列") {
+        assert_eq!(sorted_keys(conn), ["count", "usename"]);
+    }
+    assert!(body["owner_role_connected"].is_boolean());
+
+    assert_eq!(
+        sorted_keys(&body),
+        [
+            "connections",
+            "invariants",
+            "migrations",
+            "ok",
+            "owner_role_connected",
+            "runtime_role",
+            "state"
+        ]
+    );
+    assert_eq!(
+        sorted_keys(&body["migrations"]),
+        [
+            "applied",
+            "binary_count",
+            "binary_max_version",
+            "matches_binary",
+            "max_version"
+        ]
+    );
+    assert_eq!(
+        sorted_keys(&body["runtime_role"]),
+        [
+            "current_user",
+            "is_runtime_role",
+            "member_of_table_owner",
+            "rolbypassrls",
+            "rolinherit",
+            "rolsuper"
+        ]
+    );
+    assert_eq!(
+        sorted_keys(&body["invariants"]),
+        ["checks", "violation_count", "violations"]
+    );
+}
+
+/// 内部用の認可が無ければ 401 (無認証の口ではない)
+#[tokio::test]
+async fn rls_check_requires_internal_auth() {
+    let ctx = setup().await;
+    for bearer in [None, Some("not-a-valid-token")] {
+        let (status, text) = ctx.rls_check("", bearer).await.unwrap();
+        assert_eq!(status, 401, "bearer {bearer:?}: {text}");
+        assert!(
+            !text.contains("runtime_role"),
+            "401 の本文に検査の結果が出ている: {text}"
+        );
+    }
+}
+
+/// 口は引数を読まない: query を付けても応答は同じ
+#[tokio::test]
+async fn rls_check_ignores_query_parameters() {
+    let ctx = setup().await;
+    let plain = ctx.rls_check_ok("").await;
+    let with_query = ctx.rls_check_ok("?sql=select+1&table=users").await;
+    assert_eq!(
+        without_connections(with_query),
+        without_connections(plain.clone())
+    );
+    assert_eq!(plain["ok"], true, "{plain}");
+}
+
+/// 口が使う transaction は読み取り専用: 書き込みは SQLSTATE 25006 で落ち、読み取りは通る
+#[tokio::test]
+async fn rls_check_transaction_is_read_only() {
+    let ctx = setup().await;
+    let mut tx = rust_alc_api::routes::rls_check::begin_read_only(&ctx.app)
+        .await
+        .unwrap();
+
+    let read_only: String = sqlx::query_scalar("SHOW transaction_read_only")
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
+    assert_eq!(read_only, "on");
+
+    let err = sqlx::query("INSERT INTO alc_api.tenants (name, slug) VALUES ($1, $2)")
+        .bind("RT Read Only")
+        .bind(unique("read-only"))
+        .execute(&mut *tx)
+        .await
+        .expect_err("読み取り専用の transaction で INSERT が通った");
+    let code = err
+        .as_database_error()
+        .and_then(|e| e.code())
+        .map(|c| c.to_string());
+    assert_eq!(code.as_deref(), Some("25006"), "{err}");
+    tx.rollback().await.unwrap();
+}
+
+/// 陽性対照: 実行用ロールに BYPASSRLS が付くと、口は ok = false を返し、検査 4 の違反を挙げる。
+///
+/// 属性の変更は DB 全体に効くので `ROLE_ATTRS` を write で取り、同じ binary のほかのテストを待たせる
+/// (CI は shard ごとに DB が別)。ALTER と戻しの間では assert しない (途中で落ちて属性が残らないように、
+/// 応答は Result のまま持ち、戻してから見る)。
+#[tokio::test]
+async fn rls_check_reports_bypassrls_on_runtime_role() {
+    let _exclusive = ROLE_ATTRS.write().await;
+    let ctx = setup_unlocked().await;
+    let token = common::create_test_internal_jwt();
+
+    let altered = sqlx::query("ALTER ROLE alc_api_rt BYPASSRLS")
+        .execute(&ctx.admin)
+        .await;
+    let response = ctx.rls_check("", Some(&token)).await;
+    sqlx::query("ALTER ROLE alc_api_rt NOBYPASSRLS")
+        .execute(&ctx.admin)
+        .await
+        .expect("alc_api_rt を NOBYPASSRLS に戻せなかった");
+
+    altered.expect("ALTER ROLE alc_api_rt BYPASSRLS failed");
+    let (status, text) = response.unwrap();
+    assert_eq!(status, 200, "{text}");
+    let body: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(body["ok"], false, "{body}");
+    assert_eq!(body["runtime_role"]["rolbypassrls"], true);
+    assert_eq!(body["runtime_role"]["is_runtime_role"], true);
+    let violations = body["invariants"]["violations"].as_array().unwrap();
+    assert!(
+        violations
+            .iter()
+            .any(|v| v["check_no"] == 4 && v["object"] == "role alc_api_rt"),
+        "検査 4 の違反が無い: {body}"
+    );
+    assert_eq!(
+        body["invariants"]["violation_count"].as_u64(),
+        Some(violations.len() as u64)
+    );
+    for violation in violations {
+        assert_eq!(sorted_keys(violation), ["check_no", "detail", "object"]);
+    }
+    let checks = body["invariants"]["checks"].as_array().unwrap();
+    let check_4 = checks.iter().find(|c| c["check_no"] == 4).unwrap();
+    assert!(check_4["violations"].as_i64().unwrap() >= 1, "{body}");
+    let total: i64 = checks
+        .iter()
+        .map(|c| c["violations"].as_i64().unwrap())
+        .sum();
+    assert_eq!(total, violations.len() as i64);
+    assert!(
+        body["state"].is_object(),
+        "違反が在っても state は返る: {body}"
+    );
+
+    // 戻した後は合格に戻る
+    let after = ctx.rls_check_ok("").await;
+    assert_eq!(after["runtime_role"]["rolbypassrls"], false);
+    assert_eq!(after["ok"], true, "{after}");
 }
