@@ -29,7 +29,7 @@ use alc_vein::repo::{sql, VeinTemplateRow, VeinTemplatesRepository};
 use chrono::{DateTime, Utc};
 use futures_util::future::BoxFuture;
 use futures_util::lock::Mutex;
-use tokio_postgres::{Client, Transaction};
+use tokio_postgres::{Client, SimpleQueryMessage, Transaction};
 use uuid::Uuid;
 use worker::{console_error, Date};
 
@@ -95,6 +95,22 @@ impl WorkerVeinTemplatesRepository {
         tx.commit().await.map_err(db_err)?;
         self.add_db_ms(started);
         Ok(out)
+    }
+
+    /// この接続の `current_user` (`GET /internal/db-role` 用、Refs ippoan/auth-worker#605)。
+    /// **テナントを取らないので `in_tenant_tx` を通さず、トランザクションも張らない単発の 1 文。**
+    /// `simple_query` は prepared statement を作らないので、transaction mode のプーラーでも
+    /// 42P05 にならない (握る Statement が無く、後から Close が飛ばない)。
+    /// 失敗は `None` (エラーの詳細は呼び出し側にもログにも出さない)。
+    pub async fn current_user(&self) -> Option<String> {
+        let started = Date::now().as_millis();
+        let client = self.client.lock().await;
+        let messages = client.simple_query("SELECT current_user").await;
+        self.add_db_ms(started);
+        messages.ok()?.iter().find_map(|m| match m {
+            SimpleQueryMessage::Row(row) => row.get(0).map(str::to_owned),
+            _ => None,
+        })
     }
 
     fn add_db_ms(&self, started: u64) {

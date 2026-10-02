@@ -3,6 +3,7 @@
 //! repo だけを tokio-postgres の実装 ([`repo::WorkerVeinTemplatesRepository`]) に差し替える。
 //! DB への経路 (staging = Container 内の PgBouncer、本番 = Supabase のプーラー) は
 //! [`db::connect`] の 1 か所で出し分ける。monolith と同じく `/api` 付きでも受ける。
+//! それとは別に、接続のロール名を返す `GET /internal/db-role` ([`db_role`]) を素にだけ持つ。
 //!
 //! **この Worker は JWT を検証せず、auth-worker が付け直した tenant ヘッダーを信頼する**
 //! (`alc_core_wasm::require_tenant_header`)。本番の到達経路は auth-worker からの Service Binding
@@ -12,6 +13,7 @@
 //! 保護する (Access を通らないリクエストは Worker に届かない。README 参照)。
 
 mod db;
+mod db_role;
 mod repo;
 mod tcp;
 mod vein_db;
@@ -32,11 +34,20 @@ use crate::repo::WorkerVeinTemplatesRepository;
 
 pub use crate::vein_db::VeinDb;
 
-fn router(state: VeinState) -> Router {
+/// `internal` (tenant ヘッダーを要求しない口、[`db_role`]) は**素にだけ** merge し、`/api` の nest には
+/// 出さない (auth-worker の proxy が転送する `/api/vein/…` から届かないようにするため)。
+///
+/// **`internal` は `vein` より先に merge する。** axum の `merge` は fallback を後から merge した側の
+/// もので置き換えるので、後に置くと、どの route にも当たらない path の fallback から tenant の layer が
+/// 外れる (ヘッダー無しの未定義の path が 401 でなく 404 になる)。
+fn router(state: VeinState, internal: Router) -> Router {
     let vein = tenant_router()
         .layer(middleware::from_fn(require_tenant_header))
         .with_state(state);
-    Router::new().merge(vein.clone()).nest("/api", vein)
+    Router::new()
+        .merge(internal)
+        .merge(vein.clone())
+        .nest("/api", vein)
 }
 
 fn error_response(status: StatusCode, code: &str) -> Response<Body> {
@@ -70,7 +81,8 @@ async fn fetch(req: HttpRequest, env: Env, _ctx: Context) -> Result<Response<Bod
     let state = VeinState {
         templates: repo.clone(),
     };
-    let mut resp = match router(state).call(req).await {
+    let internal = db_role::internal_router(repo.clone());
+    let mut resp = match router(state, internal).call(req).await {
         Ok(r) => r,
         Err(e) => match e {},
     };
