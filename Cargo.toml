@@ -1,9 +1,6 @@
 [workspace]
 members = [".", "crates/alc-auth", "crates/alc-auth-jwt", "crates/alc-camera", "crates/alc-carins", "crates/alc-core", "crates/alc-core-wasm", "crates/alc-csv-parser", "crates/alc-compare", "crates/alc-devices", "crates/alc-dtako", "crates/alc-maintenance", "crates/alc-misc", "crates/alc-notify", "crates/alc-pdf", "crates/alc-storage", "crates/alc-tenko", "crates/alc-trouble", "crates/alc-vein"]
 resolver = "2"
-# wasm 専用の workers-rs Worker は独立 workspace (自前の Cargo.lock)。monolith の
-# cargo test / Bazel (crate_universe) に入れない (Refs #680 / #683)。
-exclude = ["workers/vein"]
 
 # 暗号 bignum crate だけ opt-level=3 で最適化 (Refs #438)。
 #

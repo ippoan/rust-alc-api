@@ -15,8 +15,6 @@ front/
 **/bindings/
 types/
 workers/*
-# workers-rs の Worker (独立 workspace、Refs #680 / #683)
-!workers/vein/
 node_modules/
 .wrangler/
 .claude/*

@@ -134,68 +134,6 @@ jobs:
       CI_APP_ID: ${{ secrets.CI_APP_ID }}
       CI_APP_PRIVATE_KEY: ${{ secrets.CI_APP_PRIVATE_KEY }}
 
-  # 指静脈 (vein) の Worker (workers/vein、workers-rs + tokio-postgres、Refs #680 / #683 / #691)。
-  # monolith の workspace から exclude した独立 workspace なので、fmt / clippy / build をここで回す。
-  # 先頭の check-exposure.sh は「外から素で届かない」(本番は workers_dev / preview_urls = false、
-  # route / routes 無し。workers_dev = true は Cloudflare Access で守る env.staging だけ) の検査 —
-  # この Worker は X-Tenant-ID を信頼するので、崩れたら #556 と同じ穴になる。
-  # check-exposure-test.sh はその陰性対照 (wrangler.toml を崩すと exit 1 になること)。
-  vein-worker:
-    name: Vein Worker (wasm)
-    needs: [pr-limit]
-    if: "always() && !(github.ref == 'refs/heads/main' && github.event_name == 'push') && (needs.pr-limit.result == 'success' || needs.pr-limit.result == 'skipped')"
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: workers/vein
-    steps:
-      - uses: actions/checkout@v4
-      - name: 外から直接届かないことの検査 (wrangler.toml)
-        run: bash scripts/check-exposure.sh
-      - name: check-exposure.sh の陰性対照
-        run: bash scripts/check-exposure-test.sh
-      # staging の DB (Cloudflare Containers、container/) が空の DB から migration を流して
-      # PgBouncer まで立ち上がること。migration を足したときに staging だけ壊れるのを防ぐ
-      - name: staging DB の Container image が起動する
-        run: |
-          docker build -q -f container/Dockerfile -t vein-db ../..
-          docker run -d --name vein-db -p 6432:6432 vein-db
-          for _ in $(seq 1 60); do
-            if psql "postgresql://alc_api_app@127.0.0.1:6432/postgres" -Atc 'SELECT 1' >/dev/null 2>&1; then break; fi
-            sleep 1
-          done
-          docker logs vein-db 2>&1 | grep '^\[vein-db'
-          # RLS が効く alc_api_app で、種のテナントの乗務員が見える
-          n=$(psql "postgresql://alc_api_app@127.0.0.1:6432/postgres" -Atc "BEGIN; SELECT set_config('app.current_tenant_id', '0a000000-0000-4000-8000-00000000000a', true); SELECT count(*) FROM alc_api.employees; COMMIT;" | sed -n 3p)
-          echo "employees (tenant A) = ${n}"
-          [ "$n" = 7 ] || { docker logs vein-db; exit 1; }
-      # private repo ippoan/vein-match (vein-match / vein-match-search の git 依存) の取得用 (README 参照)
-      - uses: ippoan/ci-workflows/.github/actions/private-git-auth@main
-        with:
-          app-id: ${{ secrets.CI_APP_ID }}
-          private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
-          repositories: vein-match
-      - uses: dtolnay/rust-toolchain@1.92.0
-        with:
-          targets: wasm32-unknown-unknown
-          components: rustfmt, clippy
-      - uses: swatinem/rust-cache@v2
-        with:
-          workspaces: workers/vein
-          shared-key: vein-worker
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: cargo fmt --check
-      - run: cargo clippy --target wasm32-unknown-unknown --release -- -D warnings
-      # worker-build の版は wrangler.toml の [build] command と揃える
-      - run: cargo install -q worker-build@0.8.7 --locked
-      - run: worker-build --release
-      - name: bundle サイズ (上限 10MB は gzip 後)
-        run: |
-          raw=$(stat -c%s build/index_bg.wasm)
-          gz=$(gzip -9c build/index_bg.wasm | wc -c)
-          echo "alc-vein wasm: raw=${raw} B / gzip=${gz} B" | tee -a "$GITHUB_STEP_SUMMARY"
-          [ "$gz" -lt 10000000 ] || { echo "::error::gzip 後 ${gz} B が 10MB を超えた"; exit 1; }
-
   test-lib:
     name: Tests (lib)
     needs: [pr-limit]
@@ -979,12 +917,11 @@ jobs:
     # docker-dev (Tag dev) は needs に入れない: :dev は front repo の
     # docker-compose.test.yml 用の可変タグでしかなく、本番 image は tag push の
     # build-image が作る (Refs #609)。したがって :dev の上書き競合は無害。
-    needs: [check, vein-worker, bazel-tests-ok, bazel-coverage-gate, build-image, deploy, drift-check-staging]
+    needs: [check, bazel-tests-ok, bazel-coverage-gate, build-image, deploy, drift-check-staging]
     if: >-
       always() &&
       github.event_name == 'pull_request' &&
       needs.check.result == 'success' &&
-      needs.vein-worker.result == 'success' &&
       needs.bazel-tests-ok.result == 'success' &&
       needs.bazel-coverage-gate.result == 'success' &&
       needs.build-image.result == 'success' &&
