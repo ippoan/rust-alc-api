@@ -82,6 +82,8 @@ pub use alc_trouble::tickets as trouble_tickets;
 pub use alc_trouble::workflow as trouble_workflow;
 pub use alc_vein::routes as vein;
 
+pub mod rls_check;
+
 use axum::{middleware as axum_middleware, Extension, Router};
 
 use crate::auth::google::GoogleTokenVerifier;
@@ -131,6 +133,8 @@ pub fn router(
         // device_id から有効な端末の tenant を返す内部口。auth-worker の
         // pair-internal が tenant 決定に使う (Refs ippoan/auth-worker#544)。
         .merge(devices::internal_router())
+        // RLS が効いているかの固定の検査 (引数なし・読み取りだけ、Refs ippoan/auth-worker#605)。
+        .merge(rls_check::internal_router())
         .layer(axum_middleware::from_fn(require_internal_jwt))
         // OIDC 検証設定 (Refs #479 — HS256 dual-accept 撤去で OIDC 一本化)。
         // require_internal_jwt の外側に置き、ハンドラ実行時に Extension を解決

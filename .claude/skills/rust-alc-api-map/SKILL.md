@@ -1,6 +1,6 @@
 ---
 name: rust-alc-api-map
-generated-from: rust-alc-api:b213d7572d03d94a408281ae54b60dc4aa0eda95
+generated-from: rust-alc-api:118ba3a802e33eb62a8962b086bb86f172e8edaa
 paths: [crates/, src/, migrations/, tests/]
 description: rust-alc-api (アルコールチェッカー基盤の Rust/Axum Cargo workspace — domain crate 群 + monolith 単一バイナリ、PostgreSQL+RLS、Cloud Run) の構造ナビゲーション。どの crate に何のルートがあるか / monolith (rust-alc-api) 一本化 (gateway + per-domain は #556 で廃止) / RLS・migration・deploy/release 分離の gotcha を 1 枚にまとめる。トリガー:「rust-alc-api」「alc-api」「alc-notify」「alc-tenko」「alc-trouble」「alc-carins」「alc-dtako」「gateway」「tenko-api」「carins-api」「dtako-api」「trouble-api」「RLS テナント」「sqlx migration」「ts-rs」「Release Wave」「Bazel」等。
 ---
@@ -89,6 +89,36 @@ router 実装として存続。旧 per-domain は同じ domain crate を単独 m
   **JWT_SECRET は rust から全撤去済み (#479 完了)**: main.rs の env 読取 / `Extension(JwtSecret)` /
   render.sh の secretKeyRef 注入 / `alc-auth-jwt` の HS256 発行・検証関数 / health_canary を全て削除。
   rust バイナリは HS256 鍵を一切持たず、JWT の発行・検証は auth-worker が単独で担う。
+- **RLS が効いているかの内部用の口 `GET /api/internal/rls-check`** (`src/routes/rls_check.rs`、Refs ippoan/auth-worker#605):
+  migration を本番に当てた後にオーナーが SQL エディタで手で見ていたものを 1 回で返す。呼び手は auth-worker の
+  MCP の tool (既存の内部用の経路 = Google OIDC、`aud=alc-api-internal`)。`internal_protected`
+  (`require_internal_jwt` の配下) に merge してあり、無認証の health の並びには置かない。
+  root の `src/routes/` に在るのは `alc_migrations` に依存しているのが root crate だけだから
+  (`crates/` 側に migration 一式の依存を足さない)。
+  - **返すもの** (key は契約で固定。auth-worker の tool がこの形を読む): `ok` /
+    `migrations{applied, max_version, binary_count, binary_max_version, matches_binary}`
+    (`alc_api.migration_status()` = alc-migrations 160 の SECURITY DEFINER 関数と、binary に埋め込まれた
+    `alc_migrations::MIGRATOR` の件数・最大 version) /
+    `runtime_role{current_user, is_runtime_role, rolsuper, rolbypassrls, rolinherit, member_of_table_owner}`
+    (実行用ロール `alc_api_rt` の `pg_roles` の行。行が無ければ 500) /
+    `connections[{usename, count}]` (`pg_stat_activity` の `alc_api` 系のロールごとの接続数) /
+    `owner_role_connected` (表の所有者のロールが繋いでいるか) /
+    `invariants{violation_count, violations[{check_no, object, detail}]}`。
+    `ok` = 違反 0 件 かつ 実行用ロールで繋いでいる かつ 属性 4 つが false かつ `matches_binary`
+    (純関数 `is_ok`)。**`owner_role_connected` は `ok` に入れない** (migration の job の実行中は所有者ロールが一時的に繋ぐ)
+  - **引数を足さない**: extractor は `State` だけ (`Query` / `Path` / `Json` を書かない)。SQL・表名・テナントを受ける
+    入口を作らない。query を付けても読まない
+  - **transaction は `begin_read_only(pool)` からだけ取る** (`pool.begin()` → `SET TRANSACTION READ ONLY`。
+    最初の問い合わせより前に流す)。最後は rollback。固定の問い合わせ 5 つはどれも bind する値が無く、
+    `format!` で SQL を組み立てない
+  - **検査 SQL の写しを置かない**: 不変条件の検査は `alc_migrations::RLS_INVARIANTS_QUERY` をそのまま流す
+    (加工・連結しない。正本は alc-migrations の `ci/check_rls_invariants.sql`)
+  - **行のデータを返さない・ログに出さない**: 返すのはカタログ由来のロール名・表名・関数名・真偽・件数だけ。
+    `pg_stat_activity` から読む列は `usename` と件数だけ。失敗は 500 で、本文は固定の文言
+    (`internal_error_msg`。SQL・カタログの中身を載せない)
+  - テスト: `ok` の判定と応答の key は同ファイルの unit、実 DB は `tests/runtime_role_test.rs` の `rls_check_*`
+    (新しいテストファイルは作らない = bazel の配線を増やさない)。陽性対照 (`ALTER ROLE alc_api_rt BYPASSRLS`) は
+    DB 全体に効くので、同ファイルの `ROLE_ATTRS` (tokio の RwLock) を write で取り、ほかのテストは `setup()` が read で取る
 - **gateway (廃止済み、Refs #556 PR2)**: 旧 `crates/gateway` は auth + reverse proxy で
   `is_public_route` 判定して per-domain へ振る役だったが、本番・staging とも休眠のため削除。
   introspect 検証 + identity 注入は **auth-worker の `/alc-proxy` / `/alc-internal-proxy` 系**が
@@ -600,7 +630,7 @@ TEST_DATABASE_URL="..." cargo llvm-cov --html --open
 |---------|------|
 | `tests/common/mod.rs` | テストハーネス (DB 接続、サーバー起動、JWT 発行ヘルパー)。migration は `migrate_and_grant` に 1 本化 (`alc_migrations::MIGRATOR` の後に `alc_migrations::LOCAL_APP_GRANTS` を流す。DB を直接開くテストも必ずこれを通す) |
 | `tests/app_role_grants_test.rs` | テスト DB の `alc_api_app` の権限が本番と揃っているか (Refs #685) — `alc_api` の表のうち `has_table_privilege('alc_api_app', 表, 'SELECT')` が false のものを列挙し 0 件を assert。新しい表の GRANT 付け忘れ (過去に本番 502) を落とす。直すのは migration 側 (bazel `db-app-role-grants` shard)。**実行用ロール `alc_api_rt` (alc-migrations 158) も同じファイルで検査する**: superuser・BYPASSRLS でなく表を所有していない / schema の USAGE / `_sqlx_migrations` 以外の全表に SELECT・INSERT・UPDATE・DELETE / `_sqlx_migrations` には権限が無い / SECURITY DEFINER 関数を全部呼べる。`alc_api_rt` の権限は `scripts/local_app_grants.sql` に写さない (158 の付け漏れを検出できなくなる) |
-| `tests/runtime_role_test.rs` | 実行用ロール `alc_api_rt` で繋いだサーバで、認証前・テナント横断の経路が通ること (alc-migrations 158、Refs ippoan/alc-app#387) — 陰性 (tenant 無しで `users` を読むとエラー・別テナントを立てると 0 行・招待は 0 行) / ログイン 3 経路 (Google は招待 → 作成 → 招待の消費、LINE WORKS、LINE。それぞれ新規と既存、最後に refresh token の保存) / 招待も email_domain も無い Google は 403 / refresh token は渡した user の行だけ / 端末の登録要求 → 承認 → 承認後のポーリングで `settings_token` → `pairing-tenant` と `fcm-dismiss-test` (無効にした端末・未登録は 404) / 内部用 secret 付きの `fcm-notify-call`・`test-fcm-all-exclude`・`trigger-update-dev` / 超過検知の 1 tick (通知済みの印と配信の記録) / 参加の申請の作成 → 一覧 → 承認・却下。bazel `db-runtime-role` shard |
+| `tests/runtime_role_test.rs` | 実行用ロール `alc_api_rt` で繋いだサーバで、認証前・テナント横断の経路が通ること (alc-migrations 158、Refs ippoan/alc-app#387) — 陰性 (tenant 無しで `users` を読むとエラー・別テナントを立てると 0 行・招待は 0 行) / ログイン 3 経路 (Google は招待 → 作成 → 招待の消費、LINE WORKS、LINE。それぞれ新規と既存、最後に refresh token の保存) / 招待も email_domain も無い Google は 403 / refresh token は渡した user の行だけ / 端末の登録要求 → 承認 → 承認後のポーリングで `settings_token` → `pairing-tenant` と `fcm-dismiss-test` (無効にした端末・未登録は 404) / 内部用 secret 付きの `fcm-notify-call`・`test-fcm-all-exclude`・`trigger-update-dev` / 超過検知の 1 tick (通知済みの印と配信の記録) / 参加の申請の作成 → 一覧 → 承認・却下 / 内部用の口 `GET /api/internal/rls-check` (Refs ippoan/auth-worker#605。実行用ロールで全部合格・応答の key が契約ちょうど / 認可なし・不正な Bearer は 401 / query を付けても同じ応答 / `begin_read_only` の transaction で INSERT が 25006 / `ALTER ROLE alc_api_rt BYPASSRLS` で `ok=false` と検査 4 の違反 → 戻す)。実行用ロールの属性を変えるテストは `ROLE_ATTRS` を write で取り、ほかは `setup()` が read で取る。bazel `db-runtime-role` shard |
 | `tests/common/mock_storage.rs` | インメモリ StorageBackend 実装 |
 | `tests/auth_test.rs` | JWT 認証 / X-Tenant-ID / 未認証拒否 |
 | `tests/employees_test.rs` | RLS テナント分離 / キオスクモード |
