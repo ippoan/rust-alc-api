@@ -34,6 +34,7 @@ host:port へ繋ぐだけで、宛先の形 (プーラーか直接か) は接続
 - **binding `VEIN_DATABASE_URL` が在るのに読めない (型が違う / 取得に失敗 / 値が無い) ときは 500** (`internal_error`) で、
   4 の `DATABASE_URL` へは戻らない (古い secret へ黙って戻らないため)。4 へ落ちるのは binding が無いときだけ。
 - worker 自身の secret `DATABASE_URL` (`wrangler secret put`) は、ローカル (`tests/run-local.sh`) 専用の経路として残る。
+  ローカルの `wrangler dev` は **`--env local`** (binding を持たない env。deploy しない) で立てる — `--env` なしだと、トップレベルの `VEIN_DATABASE_URL` が「在るが読めない」に見えて全リクエストが 500 になる。
   本番に残っている古い worker secret は、Secrets Store への切り替えを確かめた後に消す。
 
 ## 到達面

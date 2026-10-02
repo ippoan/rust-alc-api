@@ -34,7 +34,7 @@ log="$(mktemp)"
 # 本番と同じ口 (DATABASE_URL、src/db.rs) を平文 (sslmode=disable) で手元の DB へ向ける。
 # 平文はローカル専用フラグ ALLOW_INSECURE_DB=1 があるときだけ許される (無ければ TLS を強制)
 case "$APP_DB_URL" in *sslmode=*) url="$APP_DB_URL" ;; *\?*) url="$APP_DB_URL&sslmode=disable" ;; *) url="$APP_DB_URL?sslmode=disable" ;; esac
-npx --yes "wrangler@${WRANGLER_VERSION:-4.143.0}" dev --port "$PORT" --ip 127.0.0.1 --var "DATABASE_URL:$url" --var ALLOW_INSECURE_DB:1 >"$log" 2>&1 &
+npx --yes "wrangler@${WRANGLER_VERSION:-4.143.0}" dev --env local --port "$PORT" --ip 127.0.0.1 --var "DATABASE_URL:$url" --var ALLOW_INSECURE_DB:1 >"$log" 2>&1 &
 pid=$!
 cleanup() {
   local rc=$?

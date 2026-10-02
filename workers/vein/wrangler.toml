@@ -96,3 +96,11 @@ class_name = "VeinDb"
 [[env.staging.migrations]]
 tag = "v1"
 new_sqlite_classes = ["VeinDb"]
+
+# ローカル (tests/run-local.sh・tests/bench-local.sh の `wrangler dev --env local`) 専用。deploy しない。
+# Secrets Store の binding を持たない (binding は env に継承されない) ので、src/db.rs は文字列 DATABASE_URL の段で繋ぐ。
+# --env なしの `wrangler dev` は、トップレベルの VEIN_DATABASE_URL が「在るが読めない」に見えて 500 になる
+[env.local]
+name = "alc-vein-local"
+workers_dev = false
+preview_urls = false
