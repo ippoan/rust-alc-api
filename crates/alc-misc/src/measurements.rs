@@ -23,6 +23,11 @@ const VALID_TENKO_TYPES: [&str; 3] = ["normal", "pre_operation", "post_operation
 /// 別の流れなので、この口からは作らせない (Refs ippoan/alc-app#387)
 const VALID_TENKO_METHODS: [&str; 2] = ["通常点呼", "IT点呼"];
 
+/// 測定の保存 (PUT) で指定できる、運転者の本人確認の方法
+/// (`tenko_sessions_identity_method_check` と同じ 5 つ。Refs ippoan/alc-app#387)
+const VALID_IDENTITY_METHODS: [&str; 5] =
+    ["license", "ic_card", "remote_punch", "nfc_card", "manual"];
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route(
@@ -94,6 +99,12 @@ async fn update_measurement(
 
     if let Some(ref method) = body.tenko_method {
         if !VALID_TENKO_METHODS.contains(&method.as_str()) {
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    }
+
+    if let Some(ref method) = body.identity_method {
+        if !VALID_IDENTITY_METHODS.contains(&method.as_str()) {
             return Err(StatusCode::BAD_REQUEST);
         }
     }

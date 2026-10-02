@@ -35,6 +35,9 @@ pub struct NormalTenkoInput<'a> {
     pub tenko_type: Option<&'a str>,
     /// `None` → `通常点呼`。session と record の両方に同じ値を書く
     pub tenko_method: Option<&'a str>,
+    /// 運転者の本人確認の方法 (migration 159)。`None` → NULL (記録なし)。
+    /// session の列にだけ書く (record には `record_data` 経由で入る)
+    pub identity_method: Option<&'a str>,
     /// 運行者端末が電子車検証から読んだ管理番号 (Refs ippoan/alc-app-s3#110)
     pub carins_cert_no: Option<&'a str>,
     /// 同じく車両 ID
@@ -47,6 +50,7 @@ pub struct NormalTenkoInput<'a> {
 /// * `tenko_type` が `None` → `normal`
 /// * 既に記録済み (同じ測定、または同じ乗務員・同じ測定時刻) → `Ok(None)`
 ///   — migration 141 の部分 unique に `ON CONFLICT DO NOTHING` で任せる
+///   (先勝ち。2 回目の保存の `identity_method` も書かない)
 /// * 電子車検証の番号があれば、同じ transaction で carins を照合して期限を写す
 ///   ([`carins_expiry`])。照合に失敗しても記録は作る
 pub async fn record(
@@ -73,7 +77,8 @@ pub async fn record(
             medical_manual_input,
             responsible_manager_name, cancel_reason,
             started_at, completed_at, tenko_method,
-            carins_cert_no, carins_vehicle_id, carins_expires_on, carins_matched_by
+            carins_cert_no, carins_vehicle_id, carins_expires_on, carins_matched_by,
+            identity_method
         )
         VALUES (
             $1, $2, NULL, $3, $4,
@@ -83,7 +88,8 @@ pub async fn record(
             $15,
             NULL, $16,
             $17, NOW(), $18,
-            $19, $20, $21, $22
+            $19, $20, $21, $22,
+            $23
         )
         ON CONFLICT DO NOTHING
         RETURNING *
@@ -111,6 +117,7 @@ pub async fn record(
     .bind(input.carins_vehicle_id)
     .bind(carins_expires_on)
     .bind(carins_matched_by)
+    .bind(input.identity_method)
     .fetch_optional(&mut *conn)
     .await?;
 

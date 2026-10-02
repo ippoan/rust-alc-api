@@ -951,6 +951,111 @@ async fn test_update_measurement_response_adds_only_tenko_session_id() {
 }
 
 // =========================================================================
+// PUT /api/measurements/{id} — identity_method (運転者の本人確認の方法)
+// (Refs ippoan/alc-app#387)
+// =========================================================================
+
+#[tokio::test]
+async fn test_update_measurement_invalid_identity_method() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+
+    let mock = Arc::new(MockMeasurementsRepository::default());
+    // repository まで届いたら 500 になる = 400 は repository より前で返っている
+    mock.fail_next.store(true, Ordering::SeqCst);
+
+    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
+    state.measurements = mock.clone();
+    let tenant_id = Uuid::new_v4();
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+    let client = reqwest::Client::new();
+
+    // 5 つの値に完全一致しないものは通さない (大文字・前後の空白・別の綴りも)
+    for method in ["face", "", "IC_CARD", "ic-card", " license", "免許証"] {
+        let id = Uuid::new_v4();
+        let body = serde_json::json!({
+            "status": "completed",
+            "record_as_tenko": true,
+            "identity_method": method,
+        });
+
+        let res = client
+            .put(format!("{base_url}/api/measurements/{id}"))
+            .header("Authorization", format!("Bearer {jwt}"))
+            .json(&body)
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(res.status(), 400, "identity_method={method:?} は 400");
+    }
+    assert!(
+        mock.update_identity_methods.lock().unwrap().is_empty(),
+        "400 は repository を呼ばない"
+    );
+}
+
+#[tokio::test]
+async fn test_update_measurement_identity_method_reaches_repository() {
+    let _guard = crate::common::ENV_LOCK.lock().unwrap();
+    std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+
+    let mock = Arc::new(MockMeasurementsRepository::default());
+    mock.return_some.store(true, Ordering::SeqCst);
+
+    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
+    state.measurements = mock.clone();
+    let tenant_id = Uuid::new_v4();
+    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
+    let client = reqwest::Client::new();
+
+    // 未指定 (既存の client) と 5 つの値
+    let methods = [
+        None,
+        Some("license"),
+        Some("ic_card"),
+        Some("remote_punch"),
+        Some("nfc_card"),
+        Some("manual"),
+    ];
+    for method in methods {
+        let id = Uuid::new_v4();
+        let mut body = serde_json::json!({
+            "status": "completed",
+            "record_as_tenko": true,
+        });
+        if let Some(method) = method {
+            body["identity_method"] = Value::from(method);
+        }
+
+        let res = client
+            .put(format!("{base_url}/api/measurements/{id}"))
+            .header("Authorization", format!("Bearer {jwt}"))
+            .json(&body)
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(res.status(), 200, "identity_method={method:?} は通る");
+    }
+    assert_eq!(
+        *mock.update_identity_methods.lock().unwrap(),
+        methods.map(|m| m.map(str::to_string)).to_vec(),
+        "repository には送られた値がそのまま渡る (未指定は None)"
+    );
+    assert!(
+        mock.update_tenko_methods
+            .lock()
+            .unwrap()
+            .iter()
+            .all(Option::is_none),
+        "点呼方法は identity_method に引きずられない (未指定のまま)"
+    );
+}
+
+// =========================================================================
 // PUT /api/measurements/{id} — invalid JSON (400)
 // =========================================================================
 

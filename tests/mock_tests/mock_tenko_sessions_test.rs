@@ -222,6 +222,32 @@ async fn test_get_session_found() {
 }
 
 #[tokio::test]
+async fn test_get_session_returns_identity_method() {
+    // 運転者の本人確認の方法は応答にそのまま出る。記録が無ければ欄は在って null
+    // (Refs ippoan/alc-app#387)
+    for method in [None, Some("ic_card"), Some("license")] {
+        let mock = Arc::new(MockTenkoSessionRepository::default());
+        *mock.session_identity_method.lock().unwrap() = method.map(str::to_string);
+        let (base_url, auth_header, _) = setup_with_mock(mock).await;
+
+        let res = client()
+            .get(format!("{base_url}/api/tenko/sessions/{}", Uuid::new_v4()))
+            .header("Authorization", &auth_header)
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(res.status(), 200);
+        let body: serde_json::Value = res.json().await.unwrap();
+        assert!(
+            body.as_object().unwrap().contains_key("identity_method"),
+            "欄は常に在る (identity_method={method:?})"
+        );
+        assert_eq!(body["identity_method"], serde_json::json!(method));
+    }
+}
+
+#[tokio::test]
 async fn test_get_session_not_found() {
     let mock = Arc::new(MockTenkoSessionRepository::default());
     mock.return_session.store(false, Ordering::SeqCst);

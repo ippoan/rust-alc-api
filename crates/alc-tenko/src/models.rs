@@ -162,6 +162,12 @@ pub struct TenkoSession {
     /// `it` = 通話で確認 / `in_person` = 対面で確認 / NULL = 未確定、または IT点呼 でない
     #[serde(default)]
     pub manager_judgment_method: Option<String>,
+    /// 運転者の本人確認の方法 (migration 159、Refs ippoan/alc-app#387)。
+    /// `license` / `ic_card` / `remote_punch` / `nfc_card` / `manual`。
+    /// 通常点呼の測定の保存 (PUT) だけが書く。NULL = 記録なし
+    /// (この列より前の記録・方法を送らない端末・ほかの点呼の流れ)。認可の判断には使わない
+    #[serde(default)]
+    pub identity_method: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

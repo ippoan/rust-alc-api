@@ -1477,6 +1477,37 @@ async fn session_rows(
     .unwrap()
 }
 
+/// 測定に紐づく session の identity_method と、record の record_data の同じ値。
+/// record 側は (key が在るか, 値)
+async fn identity_methods(
+    pool: &sqlx::PgPool,
+    tenant_id: Uuid,
+    measurement_id: &str,
+) -> (Vec<Option<String>>, Vec<(bool, Option<String>)>) {
+    let mid = Uuid::parse_str(measurement_id).unwrap();
+    let sessions = sqlx::query_scalar::<_, Option<String>>(
+        "SELECT identity_method FROM alc_api.tenko_sessions
+         WHERE tenant_id = $1 AND measurement_id = $2",
+    )
+    .bind(tenant_id)
+    .bind(mid)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    let records = sqlx::query_as::<_, (bool, Option<String>)>(
+        "SELECT r.record_data ? 'identity_method', r.record_data->>'identity_method'
+         FROM alc_api.tenko_records r
+         JOIN alc_api.tenko_sessions s ON s.id = r.session_id
+         WHERE r.tenant_id = $1 AND s.measurement_id = $2",
+    )
+    .bind(tenant_id)
+    .bind(mid)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    (sessions, records)
+}
+
 /// テナント内の点呼セッション / 点呼記録の件数 (点呼方法を問わない)
 async fn counts_any_method(pool: &sqlx::PgPool, tenant_id: Uuid) -> (i64, i64) {
     let sessions: i64 =
@@ -1648,17 +1679,23 @@ async fn test_put_resend_returns_same_session_id() {
             let measured_at = "2026-09-13T03:00:00Z";
 
             let m_id = start_measurement(&client, &base_url, &auth, emp_id).await;
-            let body = completed_body(
+            let mut body = completed_body(
                 "normal",
                 measured_at,
                 true,
                 Some("pre_operation"),
                 Some("IT点呼"),
             );
+            body["identity_method"] = Value::from("ic_card");
 
             let first = put_measurement_ok(&client, &base_url, &auth, &m_id, &body).await;
             let first_id = first["tenko_session_id"].as_str().unwrap().to_string();
             assert_eq!(counts_any_method(state.pool(), tenant).await, (1, 1));
+            let ic_card = (
+                vec![Some("ic_card".to_string())],
+                vec![(true, Some("ic_card".to_string()))],
+            );
+            assert_eq!(identity_methods(state.pool(), tenant, &m_id).await, ic_card);
 
             // 同じ内容で再送 (ON CONFLICT DO NOTHING は対象指定なしなので、
             // 行数と id の両方で確かめる)
@@ -1694,6 +1731,23 @@ async fn test_put_resend_returns_same_session_id() {
             );
             assert_eq!(counts_any_method(state.pool(), tenant).await, (1, 1));
 
+            // 本人確認の方法も先勝ち: 送らない再送 (上) でも、別の値の再送でも書き換えない
+            assert_eq!(
+                identity_methods(state.pool(), tenant, &m_id).await,
+                ic_card,
+                "identity_method を送らない再送で NULL に戻らない"
+            );
+            let mut as_manual = body.clone();
+            as_manual["identity_method"] = Value::from("manual");
+            let again = put_measurement_ok(&client, &base_url, &auth, &m_id, &as_manual).await;
+            assert_eq!(again["tenko_session_id"], first_id);
+            assert_eq!(
+                identity_methods(state.pool(), tenant, &m_id).await,
+                ic_card,
+                "別の値の再送でも、先に記録された本人確認の方法のまま"
+            );
+            assert_eq!(counts_any_method(state.pool(), tenant).await, (1, 1));
+
             // 同じ乗務員・同じ測定時刻の別の測定 (offline 保存へ回った経路) は
             // (employee_id, started_at) の unique が弾く。その測定には session が
             // 紐づいていないので、応答の id は null
@@ -1702,6 +1756,119 @@ async fn test_put_resend_returns_same_session_id() {
             assert_eq!(json["status"], "completed", "測定自体は保存される");
             assert!(json["tenko_session_id"].is_null());
             assert_eq!(counts_any_method(state.pool(), tenant).await, (1, 1));
+        }
+    );
+}
+
+#[tokio::test]
+async fn test_put_identity_method_is_stored_on_session_and_record_data() {
+    test_group!("通常点呼 → 点呼記録 (本人確認の方法)");
+    test_case!(
+        "identity_method は session の列と record_data に入り、省略は NULL、応答に出る",
+        {
+            let state = common::setup_app_state().await;
+            let base_url = common::spawn_test_server(state.clone()).await;
+            let tenant = common::create_test_tenant(state.pool(), "Identity Method").await;
+            let jwt = common::create_test_jwt(tenant, "admin");
+            let auth = format!("Bearer {jwt}");
+            let client = reqwest::Client::new();
+
+            let emp =
+                common::create_test_employee(&client, &base_url, &auth, "運行者", "NT35").await;
+            let emp_id = emp["id"].as_str().unwrap();
+
+            // 5 つの値。点呼方法 (通常点呼 / IT点呼) とは独立に書かれる
+            let cases = [
+                ("license", None),
+                ("ic_card", Some("IT点呼")),
+                ("remote_punch", None),
+                ("nfc_card", Some("通常点呼")),
+                ("manual", Some("IT点呼")),
+            ];
+            for (i, (identity, tenko_method)) in cases.into_iter().enumerate() {
+                let measured_at = format!("2026-09-14T1{i}:00:00Z");
+                let m_id = start_measurement(&client, &base_url, &auth, emp_id).await;
+                let mut body = completed_body("normal", &measured_at, true, None, tenko_method);
+                body["identity_method"] = Value::from(identity);
+                let json = put_measurement_ok(&client, &base_url, &auth, &m_id, &body).await;
+                assert!(
+                    !json.as_object().unwrap().contains_key("identity_method"),
+                    "測定の応答の形は変えていない"
+                );
+
+                assert_eq!(
+                    identity_methods(state.pool(), tenant, &m_id).await,
+                    (
+                        vec![Some(identity.to_string())],
+                        vec![(true, Some(identity.to_string()))]
+                    ),
+                    "session の列と record_data の両方に入る (identity_method={identity})"
+                );
+                let method = tenko_method.unwrap_or("通常点呼").to_string();
+                let expected = vec![("normal".to_string(), method)];
+                assert_eq!(
+                    type_and_method(state.pool(), tenant, &m_id).await,
+                    (expected.clone(), expected),
+                    "点呼方法は identity_method に引きずられない"
+                );
+
+                // 点呼セッションの応答に出る
+                let session_id = json["tenko_session_id"].as_str().unwrap();
+                let res = client
+                    .get(format!("{base_url}/api/tenko/sessions/{session_id}"))
+                    .header("Authorization", &auth)
+                    .send()
+                    .await
+                    .unwrap();
+                assert_eq!(res.status(), 200);
+                let session: Value = res.json().await.unwrap();
+                assert_eq!(session["identity_method"], identity);
+            }
+
+            // 省略 (既存の端末): 列は NULL、record_data には key が在って null
+            let m_id = start_measurement(&client, &base_url, &auth, emp_id).await;
+            let body = completed_body("normal", "2026-09-14T20:00:00Z", true, None, None);
+            let json = put_measurement_ok(&client, &base_url, &auth, &m_id, &body).await;
+            let none = (vec![None], vec![(true, None)]);
+            assert_eq!(identity_methods(state.pool(), tenant, &m_id).await, none);
+            let session_id = json["tenko_session_id"].as_str().unwrap();
+            let res = client
+                .get(format!("{base_url}/api/tenko/sessions/{session_id}"))
+                .header("Authorization", &auth)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 200);
+            let session: Value = res.json().await.unwrap();
+            assert!(session.as_object().unwrap().contains_key("identity_method"));
+            assert!(session["identity_method"].is_null());
+
+            // 先勝ち: 省略で記録された後に値を付けて再送しても NULL のまま
+            let mut with_value = body.clone();
+            with_value["identity_method"] = Value::from("license");
+            let again = put_measurement_ok(&client, &base_url, &auth, &m_id, &with_value).await;
+            assert_eq!(again["tenko_session_id"], session_id);
+            assert_eq!(
+                identity_methods(state.pool(), tenant, &m_id).await,
+                none,
+                "2 回目の保存は書かない"
+            );
+            assert_eq!(counts_any_method(state.pool(), tenant).await, (6, 6));
+
+            // 知らない値は 400 (測定も更新しない・session も作らない)
+            let m_id = start_measurement(&client, &base_url, &auth, emp_id).await;
+            let mut bad = completed_body("normal", "2026-09-14T21:00:00Z", true, None, None);
+            bad["identity_method"] = Value::from("face");
+            let res = put_measurement(&client, &base_url, &auth, &m_id, &bad).await;
+            assert_eq!(res.status(), 400);
+            let status: String =
+                sqlx::query_scalar("SELECT status FROM alc_api.measurements WHERE id = $1")
+                    .bind(Uuid::parse_str(&m_id).unwrap())
+                    .fetch_one(state.pool())
+                    .await
+                    .unwrap();
+            assert_eq!(status, "started", "400 の PUT は測定を更新しない");
+            assert_eq!(counts_any_method(state.pool(), tenant).await, (6, 6));
         }
     );
 }
@@ -1821,6 +1988,7 @@ async fn test_post_ignores_tenko_method() {
                     "measured_at": "2026-09-13T07:00:00Z",
                     "record_as_tenko": true,
                     "tenko_method": "IT点呼",
+                    "identity_method": "ic_card",
                 }))
                 .send()
                 .await
@@ -1836,6 +2004,11 @@ async fn test_post_ignores_tenko_method() {
             assert_eq!(
                 type_and_method(state.pool(), tenant, m["id"].as_str().unwrap()).await,
                 (normal.clone(), normal)
+            );
+            // POST は本人確認の方法も受けない (記録なし = NULL)
+            assert_eq!(
+                identity_methods(state.pool(), tenant, m["id"].as_str().unwrap()).await,
+                (vec![None], vec![(true, None)])
             );
         }
     );
