@@ -227,7 +227,6 @@ mod tests {
             event_name: String::new(),
             duration_minutes: dur,
             section_distance: None,
-            raw_data: json!({}),
         }
     }
 

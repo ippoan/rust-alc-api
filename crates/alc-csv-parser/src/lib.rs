@@ -31,6 +31,41 @@ pub fn decode_shift_jis(bytes: &[u8]) -> String {
     decoded.into_owned()
 }
 
+/// UTF-8 として読めればそのまま、読めなければ Shift_JIS として decode する。
+///
+/// 分割で保存先に置く運行ごとの CSV は UTF-8 (分割のときに [`decode_shift_jis`] を通す)。
+/// 古い Shift_JIS のままのデータも読めるようにするための fallback。
+pub fn decode_utf8_or_shift_jis(bytes: &[u8]) -> String {
+    match std::str::from_utf8(bytes) {
+        Ok(s) => s.to_owned(),
+        Err(_) => decode_shift_jis(bytes),
+    }
+}
+
+/// 名前 (大文字にして比べる) に `marker` を含む最初のエントリの中身を、Shift_JIS として decode する。
+fn entry_text(files: &[(String, Vec<u8>)], marker: &str) -> Option<String> {
+    let (_, bytes) = files
+        .iter()
+        .find(|(name, _)| name.to_uppercase().contains(marker))?;
+    Some(decode_shift_jis(bytes))
+}
+
+/// zip の中身 ((名前, バイト列) の列) から KUDGURI の CSV を選んで parse する。
+/// 名前に `KUDGURI` を含むエントリが無ければ `None` (無いときの扱いは呼び手が決める)。
+pub fn kudguri_rows_in(
+    files: &[(String, Vec<u8>)],
+) -> Option<Result<Vec<kudguri::KudguriRow>, anyhow::Error>> {
+    entry_text(files, "KUDGURI").map(|text| kudguri::parse_kudguri(&text))
+}
+
+/// zip の中身 ((名前, バイト列) の列) から KUDGIVT の CSV を選んで parse する。
+/// 名前に `KUDGIVT` を含むエントリが無ければ `None` (無いときの扱いは呼び手が決める)。
+pub fn kudgivt_rows_in(
+    files: &[(String, Vec<u8>)],
+) -> Option<Result<Vec<kudgivt::KudgivtRow>, anyhow::Error>> {
+    entry_text(files, "KUDGIVT").map(|text| kudgivt::parse_kudgivt(&text))
+}
+
 /// 運行NOでCSVデータをグループ化
 /// 各CSVファイルから運行NOを抽出し、運行NO→行データのマップを返す
 pub fn group_csv_by_unko_no(csv_text: &str) -> std::collections::HashMap<String, Vec<String>> {
@@ -107,6 +142,21 @@ pub fn split_csv_entry(key_tenant: &str, name: &str, bytes: &[u8]) -> Vec<SplitF
         });
     }
     files
+}
+
+/// `requested` のうち `matched` に無いもの (印を付けようとして、当たる行が無かった運行NO)。
+///
+/// 運行NO は乗務員ごとに複数行あることが在るので、行数ではなく集合で比べる
+/// (`requested` に重複が在れば、重複ぶんもそのまま返す)。
+pub fn find_unmatched_kudgivt_unko_nos<'a>(
+    requested: &'a [String],
+    matched: &std::collections::HashSet<String>,
+) -> Vec<&'a str> {
+    requested
+        .iter()
+        .filter(|u| !matched.contains(u.as_str()))
+        .map(|u| u.as_str())
+        .collect()
 }
 
 /// 一覧をソートして `limit` 件に切り、(切った一覧, 切る前の総数) を返す (重複は除かない)。
@@ -207,6 +257,110 @@ mod tests {
         test_group!("CSVパーサー");
         test_case!("空CSVのヘッダーはNone", {
             assert_eq!(csv_header(""), None);
+        });
+    }
+
+    #[test]
+    fn decode_utf8_or_shift_jis_reads_utf8_as_is() {
+        assert_eq!(
+            decode_utf8_or_shift_jis("運行NO,読取日".as_bytes()),
+            "運行NO,読取日"
+        );
+    }
+
+    #[test]
+    fn decode_utf8_or_shift_jis_falls_back_to_shift_jis() {
+        // "運行NO,読取日" の Shift-JIS bytes。UTF-8 として不正なので、一致するのは
+        // フォールバックが走った場合だけ。
+        let sjis: &[u8] = &[
+            0x89, 0x5e, 0x8d, 0x73, 0x4e, 0x4f, 0x2c, 0x93, 0xc7, 0x8e, 0xe6, 0x93, 0xfa,
+        ];
+        assert_eq!(decode_utf8_or_shift_jis(sjis), "運行NO,読取日");
+    }
+
+    #[test]
+    fn decode_utf8_or_shift_jis_replaces_bytes_valid_in_neither() {
+        // UTF-8 としても Shift_JIS としても読めないバイトは、Shift_JIS の decode が置換文字にする (落ちない)
+        let decoded = decode_utf8_or_shift_jis(&[b'a', 0xff, b'b']);
+        assert!(decoded.starts_with('a') && decoded.ends_with('b'));
+        assert!(decoded.contains('\u{fffd}'), "{decoded:?}");
+    }
+
+    /// crew_role 1 (運転手) / 2 (副運転手) で同じ unko_no が 2 行 UPDATE されても
+    /// (RETURNING が 2 行返る想定)、集合比較なら誤検知しない。これが今回の本題:
+    /// 件数比較 (rows_affected) に戻すとこのケースで再び誤検知する。
+    #[test]
+    fn duplicate_rows_for_same_unko_no_do_not_produce_false_positive() {
+        use std::collections::HashSet;
+        let requested = vec!["1001".to_string(), "1002".to_string(), "1003".to_string()];
+        let matched: HashSet<String> = ["1001", "1001", "1002", "1003"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        assert!(find_unmatched_kudgivt_unko_nos(&requested, &matched).is_empty());
+    }
+
+    #[test]
+    fn missing_unko_no_is_reported() {
+        use std::collections::HashSet;
+        let requested = vec!["1001".to_string(), "1002".to_string(), "1003".to_string()];
+        let matched: HashSet<String> = ["1001", "1003"].into_iter().map(String::from).collect();
+        assert_eq!(
+            find_unmatched_kudgivt_unko_nos(&requested, &matched),
+            vec!["1002"]
+        );
+    }
+
+    const KUDGURI_CSV: &str = "運行NO,読取日,運行日,事業所CD,事業所名,車輌CD,車輌名,乗務員CD1,乗務員名１,対象乗務員区分,出社日時,退社日時,出庫日時,帰庫日時,総走行距離,一般道運転時間,高速道運転時間,バイパス運転時間\n\
+        1001,2026/03/01,2026/03/01,OFF01,テスト事業所,VH01,車両A,DR01,運転者A,1,2026/03/01 08:00:00,2026/03/01 18:00:00,2026/03/01 08:30:00,2026/03/01 17:30:00,150.5,300,60,20\n";
+    const KUDGIVT_CSV: &str = "運行NO,読取日,乗務員CD1,乗務員名１,対象乗務員区分,開始日時,終了日時,イベントCD,イベント名,区間時間,区間距離\n\
+        1001,2026/03/01,DR01,運転者A,1,2026/03/01 08:00:00,2026/03/01 08:30:00,100,出庫,30,0\n\
+        1001,2026/03/01,DR01,運転者A,1,2026/03/01 12:00:00,2026/03/01 13:00:00,301,休憩,60,0\n";
+
+    #[test]
+    fn test_kudguri_and_kudgivt_rows_in() {
+        test_group!("zip の中身から選ぶ");
+        // 名前は大文字にして比べる (小文字・ディレクトリ付きでも当たる)。中身は Shift_JIS
+        let files = vec![
+            ("readme.txt".to_string(), b"x".to_vec()),
+            ("data/kudguri.csv".to_string(), sjis(KUDGURI_CSV)),
+            ("KUDGIVT.csv".to_string(), sjis(KUDGIVT_CSV)),
+        ];
+        test_case!("両方在る", {
+            let kudguri = kudguri_rows_in(&files).unwrap().unwrap();
+            assert_eq!(kudguri.len(), 1);
+            assert_eq!(kudguri[0].unko_no, "1001");
+            assert_eq!(kudguri[0].office_name, "テスト事業所");
+            let kudgivt = kudgivt_rows_in(&files).unwrap().unwrap();
+            let cds: Vec<&str> = kudgivt.iter().map(|r| r.event_cd.as_str()).collect();
+            assert_eq!(cds, ["100", "301"]);
+            assert_eq!(kudgivt[1].event_name, "休憩");
+        });
+        test_case!("KUDGURI が無い・KUDGIVT が無い → None", {
+            assert!(kudguri_rows_in(&files[..1]).is_none());
+            assert!(kudguri_rows_in(&files[2..]).is_none());
+            assert!(kudgivt_rows_in(&files[..2]).is_none());
+            assert!(kudgivt_rows_in(&[]).is_none());
+        });
+        test_case!(
+            "同じ名前を含むエントリが複数在れば、最初のものを使う",
+            {
+                let two = vec![
+                    ("KUDGIVT.csv".to_string(), sjis(KUDGIVT_CSV)),
+                    ("old/KUDGIVT.csv".to_string(), b"broken".to_vec()),
+                ];
+                assert_eq!(kudgivt_rows_in(&two).unwrap().unwrap().len(), 2);
+            }
+        );
+        test_case!("在るが parse できない → Some(Err)", {
+            let bad = vec![
+                ("KUDGURI.csv".to_string(), b"a,b\n1,2\n".to_vec()),
+                ("KUDGIVT.csv".to_string(), Vec::new()),
+            ];
+            let err = kudguri_rows_in(&bad).unwrap().unwrap_err();
+            assert!(err.to_string().contains("missing required columns"));
+            let err = kudgivt_rows_in(&bad).unwrap().unwrap_err();
+            assert_eq!(err.to_string(), "empty CSV");
         });
     }
 

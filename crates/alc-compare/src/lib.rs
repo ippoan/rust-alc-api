@@ -711,14 +711,12 @@ pub fn compare_drivers(
 // ========== ZIP → インメモリ計算 ==========
 
 fn default_classifications() -> HashMap<String, EventClass> {
-    let mut m = HashMap::new();
-    m.insert("201".to_string(), EventClass::Drive);
-    m.insert("202".to_string(), EventClass::Cargo);
-    m.insert("203".to_string(), EventClass::Cargo);
-    m.insert("204".to_string(), EventClass::Cargo); // その他 → 荷役
-    m.insert("302".to_string(), EventClass::RestSplit);
-    m.insert("301".to_string(), EventClass::Break);
-    m
+    // 分類の値は alc-csv-parser の既定の表から引く (表は 1 つ)。
+    // ここに並べた 6 コード以外は map に入れない (`get` が `None` のまま)
+    ["201", "202", "203", "204", "302", "301"]
+        .into_iter()
+        .map(|cd| (cd.to_string(), work_segments::default_classification(cd).1))
+        .collect()
 }
 
 /// 実働ベースの時間外深夜計算
@@ -2108,50 +2106,6 @@ fn aggregate_events_by_day<'a>(
     }
 
     (day_work_events, calendar_day_total)
-}
-
-/// ZIPからCsvDriverDataを生成（IOラッパー）
-pub fn process_zip(
-    zip_bytes: &[u8],
-    target_year: i32,
-    target_month: u32,
-) -> Result<Vec<CsvDriverData>, String> {
-    let zip_files =
-        csv_parser::extract_zip(zip_bytes).map_err(|e| format!("ZIP展開エラー: {e}"))?;
-
-    let kudguri_bytes = zip_files
-        .iter()
-        .find(|(n, _)| n.to_uppercase().contains("KUDGURI"))
-        .ok_or("KUDGURI.csv が見つかりません")?;
-    let kudgivt_bytes = zip_files
-        .iter()
-        .find(|(n, _)| n.to_uppercase().contains("KUDGIVT"))
-        .ok_or("KUDGIVT.csv が見つかりません")?;
-
-    let kudguri_text = csv_parser::decode_shift_jis(&kudguri_bytes.1);
-    let kudgivt_text = csv_parser::decode_shift_jis(&kudgivt_bytes.1);
-
-    let kudguri_rows = csv_parser::kudguri::parse_kudguri(&kudguri_text)
-        .map_err(|e| format!("KUDGURIパースエラー: {e}"))?;
-    let kudgivt_rows = csv_parser::kudgivt::parse_kudgivt(&kudgivt_text)
-        .map_err(|e| format!("KUDGIVTパースエラー: {e}"))?;
-
-    let mut kudgivt_by_unko: HashMap<String, Vec<&KudgivtRow>> = HashMap::new();
-    for row in &kudgivt_rows {
-        kudgivt_by_unko
-            .entry(row.unko_no.clone())
-            .or_default()
-            .push(row);
-    }
-    let ferry_info = FerryInfo::from_zip_files(&zip_files, &kudgivt_by_unko);
-
-    process_parsed_data(
-        &kudguri_rows,
-        &kudgivt_rows,
-        &ferry_info,
-        target_year,
-        target_month,
-    )
 }
 
 /// パース済みデータからCsvDriverDataを生成（IO分離済み・テスト可能）
@@ -4167,7 +4121,6 @@ U002,x,x,x,x,x,x,x,x,x,2026/02/02 22:00:00,2026/02/03 06:00:00\n";
             event_name: "".into(),
             duration_minutes: Some(dur),
             section_distance: None,
-            raw_data: serde_json::Value::Null,
         }
     }
 
@@ -4897,10 +4850,9 @@ U001,x,x,x,x,x,x,x,x,x,2026/02/01 10:00:00,2026/02/01 11:30:00\n";
         });
     }
 
-    // ---- process_zip: ZIP → CsvDriverData (L2089-2130) ----
+    // ---- zip の中身 (KUDGURI・KUDGIVT の Shift_JIS のエントリ) → CsvDriverData ----
     #[test]
-    fn test_process_zip() {
-        use std::io::Write;
+    fn test_process_parsed_data_from_shift_jis_entries() {
         let kudguri_csv = "運行NO,読取日,運行日,事業所CD,事業所名,車輌CD,車輌名,乗務員CD1,乗務員名１,対象乗務員区分,出社日時,退社日時,出庫日時,帰庫日時,総走行距離,一般道運転時間,高速道運転時間,バイパス運転時間\n\
             1001,2026/03/01,2026/03/01,OFF01,テスト事業所,VH01,車両A,DR01,運転者A,1,2026/03/01 08:00:00,2026/03/01 18:00:00,2026/03/01 08:30:00,2026/03/01 17:30:00,150.5,300,60,20\n";
         let kudgivt_csv = "運行NO,読取日,乗務員CD1,乗務員名１,対象乗務員区分,開始日時,終了日時,イベントCD,イベント名,区間時間,区間距離\n\
@@ -4910,17 +4862,21 @@ U001,x,x,x,x,x,x,x,x,x,2026/02/01 10:00:00,2026/02/01 11:30:00\n";
             1001,2026/03/01,DR01,運転者A,1,2026/03/01 13:00:00,2026/03/01 17:30:00,200,運転,270,75.5\n";
         let (kudguri_bytes, _, _) = encoding_rs::SHIFT_JIS.encode(kudguri_csv);
         let (kudgivt_bytes, _, _) = encoding_rs::SHIFT_JIS.encode(kudgivt_csv);
-        let mut buf = std::io::Cursor::new(Vec::new());
-        {
-            let mut zip = zip::ZipWriter::new(&mut buf);
-            let options = zip::write::SimpleFileOptions::default();
-            zip.start_file("KUDGURI.csv", options).unwrap();
-            zip.write_all(&kudguri_bytes).unwrap();
-            zip.start_file("KUDGIVT.csv", options).unwrap();
-            zip.write_all(&kudgivt_bytes).unwrap();
-            zip.finish().unwrap();
+        let zip_files = vec![
+            ("KUDGURI.csv".to_string(), kudguri_bytes.to_vec()),
+            ("KUDGIVT.csv".to_string(), kudgivt_bytes.to_vec()),
+        ];
+        let kudguri_rows = csv_parser::kudguri_rows_in(&zip_files).unwrap().unwrap();
+        let kudgivt_rows = csv_parser::kudgivt_rows_in(&zip_files).unwrap().unwrap();
+        let mut kudgivt_by_unko: HashMap<String, Vec<&KudgivtRow>> = HashMap::new();
+        for row in &kudgivt_rows {
+            kudgivt_by_unko
+                .entry(row.unko_no.clone())
+                .or_default()
+                .push(row);
         }
-        let result = process_zip(&buf.into_inner(), 2026, 3);
+        let ferry_info = FerryInfo::from_zip_files(&zip_files, &kudgivt_by_unko);
+        let result = process_parsed_data(&kudguri_rows, &kudgivt_rows, &ferry_info, 2026, 3);
         assert!(result.is_ok());
         let drivers = result.unwrap();
         assert!(!drivers.is_empty());

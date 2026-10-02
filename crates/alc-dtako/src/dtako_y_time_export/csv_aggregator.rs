@@ -3,29 +3,14 @@
 //! 既存の `alc_csv_parser` を流用し、本機能のためだけに新しい parsing は導入しない。
 
 use alc_core::storage::{StorageBackend, StorageError};
-use alc_csv_parser::decode_shift_jis;
-use alc_csv_parser::kudgivt::{parse_kudgivt, KudgivtRow};
-use alc_csv_parser::work_segments::{split_by_rest, EventClass, WorkSegment};
+use alc_csv_parser::kudgivt::{parse_kudgivt_for_crew, KudgivtRow};
+use alc_csv_parser::work_segments::{
+    default_classification, split_by_rest, EventClass, WorkSegment,
+};
 use chrono::NaiveDateTime;
 use std::collections::HashMap;
 
 use super::builder::SegmentInput;
-
-/// イベント分類マップを default_classification 相当で組み立てる。
-///
-/// `dtako_upload::default_classification` と同じマッピングを inline 化することで、
-/// この read-only エンドポイントは tenant の event_classifications テーブルに対する
-/// upsert 副作用を起こさない。tenant が分類を上書きしている場合 (例: 110 を Drive に
-/// 再分類) には対応しないが、Phase 1 のスコープでは default のみで充分。
-fn classify(event_cd: &str) -> EventClass {
-    match event_cd {
-        "201" => EventClass::Drive,
-        "202" | "203" | "204" => EventClass::Cargo,
-        "302" => EventClass::RestSplit,
-        "301" => EventClass::Break,
-        _ => EventClass::Ignore,
-    }
-}
 
 /// 1 unko_no 分の処理エラー。`thiserror` を新たに依存追加せず手動 impl。
 #[derive(Debug)]
@@ -79,19 +64,16 @@ pub async fn fetch_and_parse_kudgivt(
 ) -> Result<Vec<KudgivtRow>, AggregatorError> {
     let key = build_kudgivt_key(tenant_id, unko_no, r2_prefix);
     let bytes = storage.download(&key).await?;
-    // まず UTF-8 として試す。失敗したら (= 古い Shift-JIS データ) decode_shift_jis にフォールバック
-    let text = match std::str::from_utf8(&bytes) {
-        Ok(s) => s.to_owned(),
-        Err(_) => decode_shift_jis(&bytes),
-    };
-    let rows = parse_kudgivt(&text).map_err(|e| AggregatorError::Parse(e.to_string()))?;
-    Ok(rows
-        .into_iter()
-        .filter(|r| r.crew_role == crew_role)
-        .collect())
+    // UTF-8 → 駄目なら Shift_JIS → parse → crew_role で絞る、は alc-csv-parser (分割 worker と共有)
+    parse_kudgivt_for_crew(&bytes, crew_role).map_err(|e| AggregatorError::Parse(e.to_string()))
 }
 
 /// 1 運行 (KUDGIVT events + departure/return) を `Vec<SegmentInput>` に変換する。
+///
+/// 分類は既定の表 (`alc_csv_parser::work_segments::default_classification`) だけを使う。
+/// この read-only エンドポイントは tenant の event_classifications テーブルに対する
+/// upsert 副作用を起こさない。tenant が分類を上書きしている場合 (例: 110 を Drive に
+/// 再分類) には対応しないが、Phase 1 のスコープでは default のみで充分。
 ///
 /// - `split_by_rest` で WorkSegment を出す
 /// - 各 segment 内の 301 events を sum し rest_minutes として付与
@@ -105,7 +87,7 @@ pub fn build_segment_inputs(
 ) -> Vec<SegmentInput> {
     let classifications: HashMap<String, EventClass> = events
         .iter()
-        .map(|e| (e.event_cd.clone(), classify(&e.event_cd)))
+        .map(|e| (e.event_cd.clone(), default_classification(&e.event_cd).1))
         .collect();
 
     let event_refs: Vec<&KudgivtRow> = events.iter().collect();
@@ -199,7 +181,6 @@ mod tests {
             event_name: "x".into(),
             duration_minutes: dur,
             section_distance: None,
-            raw_data: serde_json::json!({}),
         }
     }
 
@@ -221,14 +202,14 @@ mod tests {
     }
 
     #[test]
-    fn classify_default_mapping_covers_known_codes() {
-        assert_eq!(classify("201"), EventClass::Drive);
-        assert_eq!(classify("202"), EventClass::Cargo);
-        assert_eq!(classify("203"), EventClass::Cargo);
-        assert_eq!(classify("204"), EventClass::Cargo);
-        assert_eq!(classify("301"), EventClass::Break);
-        assert_eq!(classify("302"), EventClass::RestSplit);
-        assert_eq!(classify("999"), EventClass::Ignore);
+    fn default_mapping_covers_known_codes() {
+        assert_eq!(default_classification("201").1, EventClass::Drive);
+        assert_eq!(default_classification("202").1, EventClass::Cargo);
+        assert_eq!(default_classification("203").1, EventClass::Cargo);
+        assert_eq!(default_classification("204").1, EventClass::Cargo);
+        assert_eq!(default_classification("301").1, EventClass::Break);
+        assert_eq!(default_classification("302").1, EventClass::RestSplit);
+        assert_eq!(default_classification("999").1, EventClass::Ignore);
     }
 
     #[test]
