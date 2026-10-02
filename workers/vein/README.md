@@ -9,21 +9,33 @@ Durable Object (`src/vein_db.rs`) と workers-rs への載せ方
 
 ## DB への経路 (`src/db.rs` の 1 か所で出し分ける)
 
-どの経路も間に **transaction mode のプーラー**が入る (Cloudflare の DB 接続プールは使わない — staging で同じ経路を
-通せないため。#691)。
+上から順に見て、最初にあったものを使う (Cloudflare の DB 接続プールは使わない — staging で同じ経路を
+通せないため。#691)。1・2 とローカルは間に **transaction mode のプーラー** (PgBouncer) が入る。3 は接続文字列の
+host:port へ繋ぐだけで、宛先の形 (プーラーか直接か) は接続文字列しだい (repo の RLS はトランザクション単位なので、どちらでも動く作り)。
 
-| env | 経路 | プーラー |
-|---|---|---|
-| staging (`--env staging`、**一時**、#695) | Worker → Workers VPC の binding `VEIN_DB_VPC` (VPC Service 型、TCP) → 既存の Cloudflare Tunnel → 運用者の Linux 機の docker (`127.0.0.1:6432` にだけ bind) | 手元で動かす `container/` の image 内の PgBouncer |
-| staging (fallback、#691) | Worker → Durable Object `VeinDb` へ TCP (`Stub::connect`) → Container の 6432 へ中継。`VEIN_DB_VPC` を外して deploy するとこちらに戻る | Container 内の PgBouncer (`container/`) |
-| 本番 (トップレベル) | secret `DATABASE_URL` の host:port へ Worker の TCP (STARTTLS)。未設定なら 503 | Supabase のプーラー (6543) |
-| ローカル | `DATABASE_URL` (`sslmode=disable`) + var `ALLOW_INSECURE_DB=1` のときだけ手元の PgBouncer へ平文 | 手元の PgBouncer |
+| 順 | env | 読むもの | 経路 |
+|---|---|---|---|
+| 1 | staging (`--env staging`、**一時**、#695) | Workers VPC の binding `VEIN_DB_VPC` (VPC Service 型、TCP) | Worker → 既存の Cloudflare Tunnel → 運用者の Linux 機の docker (`127.0.0.1:6432` にだけ bind。手元で動かす `container/` の image 内の PgBouncer) |
+| 2 | staging (fallback、#691) | Durable Object の binding `VEIN_DB` | Worker → `VeinDb` へ TCP (`Stub::connect`) → Container の 6432 (PgBouncer、`container/`) へ中継。`VEIN_DB_VPC` を外して deploy するとこちらに戻る |
+| 3 | 本番 (トップレベル) | Secrets Store の binding `VEIN_DATABASE_URL` (secret の名前 `alc-app-database-url-rt`。backend と同じ実行用ロールの接続文字列。Refs ippoan/auth-worker#605) | 接続文字列の host:port へ Worker の TCP (STARTTLS、常に TLS) |
+| 4 | ローカル | 文字列 `DATABASE_URL` (worker 自身の secret / `wrangler dev --var`) | 接続文字列の host:port へ STARTTLS。`sslmode=disable` + var `ALLOW_INSECURE_DB=1` のときだけ手元の PgBouncer へ平文 |
 
-`src/db.rs` は binding (`VEIN_DB_VPC` → `VEIN_DB`) を secret `DATABASE_URL` より先に見る。どちらの binding も
+どれも無ければ 503 (`database_not_configured`)。`src/db.rs` は binding (`VEIN_DB_VPC` → `VEIN_DB`) を接続文字列
+(`VEIN_DATABASE_URL` → `DATABASE_URL`) より先に見る。どちらの binding も
 平文 (trust 認証) なので本番 (トップレベル) に置かないことを `scripts/check-exposure.sh` が検査する。
-本番の接続文字列の設定とデプロイは別タスク。`ALLOW_INSECURE_DB` はローカル専用 (`wrangler dev --var` /
-`.dev.vars`) で、無ければ `sslmode=disable` でも TLS を強制する。wrangler.toml の vars に書かないことを
+`ALLOW_INSECURE_DB` はローカル専用 (`wrangler dev --var` /
+`.dev.vars`) で、読むのは 4 の段だけ。無ければ `sslmode=disable` でも TLS を強制する。wrangler.toml の vars に書かないことを
 `scripts/check-exposure.sh` が検査する。
+
+### 本番の接続文字列の入れ直し
+
+- GCP Secret Manager の secret `alc-app-database-url-rt` を、secret 管理の MCP で Cloudflare の Secrets Store へ
+  コピーする (値は人にも LLM にも見えない)。Worker は毎リクエスト読むので、**次の要求から効く (deploy は要らない)**。
+- **binding `VEIN_DATABASE_URL` が在るのに読めない (型が違う / 取得に失敗 / 値が無い) ときは 500** (`internal_error`) で、
+  4 の `DATABASE_URL` へは戻らない (古い secret へ黙って戻らないため)。4 へ落ちるのは binding が無いときだけ。
+- worker 自身の secret `DATABASE_URL` (`wrangler secret put`) は、ローカル (`tests/run-local.sh`) 専用の経路として残る。
+  ローカルの `wrangler dev` は **`--env local`** (binding を持たない env。deploy しない) で立てる — `--env` なしだと、トップレベルの `VEIN_DATABASE_URL` が「在るが読めない」に見えて全リクエストが 500 になる。
+  本番に残っている古い worker secret は、Secrets Store への切り替えを確かめた後に消す。
 
 ## 到達面
 
@@ -108,7 +120,7 @@ npx wrangler@4.144.0 deploy --env staging   # 4.78.0 以上なら可
 - **Worker の実行場所は `[env.staging.placement] region` で DB の近く (Tunnel の繋がる関西) に固定する。**
   指定しないとリクエストが入った colo (実測で SIN) で動き、DB の往復ごとに海を越えて一覧の p50 が 944ms になる
   (固定後は入口が SIN でも `cf-placement: remote-KIX` で動き、DB 部分は connect 37ms + db 120ms)
-- 本番 (トップレベルの `[placement]`) は `aws:ap-northeast-1` (東京)。DB (Supabase のプーラー) の近くで動かす。
+- 本番 (トップレベルの `[placement]`) は `aws:ap-northeast-1` (東京)。DB の近くで動かす。
   staging と同じくヒントであり、実際に動いた場所は応答ヘッダー `cf-placement` で分かる
 - DB は止まらないので cold start は無い。ディスクは揮発のまま (unit の再起動で空の DB から作り直す)
 

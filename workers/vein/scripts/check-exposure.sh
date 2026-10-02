@@ -10,7 +10,8 @@
 #     (staging の workers.dev は Cloudflare Access で保護する前提。README 参照)
 #   - トップレベル (本番) に平文 (NoTls + trust) で繋ぐ DB の binding が無い: vpc_services /
 #     vpc_networks (Workers VPC、#695) と durable_objects の VEIN_DB (Container、#691)。
-#     src/db.rs は binding を secret DATABASE_URL より先に見るので、本番に紛れると TLS を強制する
+#     src/db.rs はこれらの binding を接続文字列 (Secrets Store の binding VEIN_DATABASE_URL →
+#     文字列 DATABASE_URL) より先に見るので、本番に紛れると TLS を強制する
 #     経路を飛ばして平文に落ちる。これらは env.staging にだけ置く
 # 違えば exit 1。CI で毎回走らせる。陰性対照は scripts/check-exposure-test.sh。
 #
