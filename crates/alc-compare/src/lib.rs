@@ -6,6 +6,8 @@
 #[macro_use]
 mod test_macros;
 
+pub mod upload_daily;
+
 use std::collections::{BTreeMap, HashMap};
 
 use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
