@@ -22,6 +22,10 @@ path = "crates/alc-csv-parser/src/kudguri.rs"
 type = "unit"
 
 [[files]]
+path = "crates/alc-csv-parser/src/operation_changes.rs"
+type = "unit"
+
+[[files]]
 path = "crates/alc-csv-parser/src/work_segments.rs"
 type = "unit"
 

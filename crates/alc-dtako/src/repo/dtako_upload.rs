@@ -416,8 +416,8 @@ impl DtakoUploadRepository for PgDtakoUploadRepository {
         params: &InsertOperationParams,
         change: &ReuploadChangeInput,
     ) -> Result<bool, sqlx::Error> {
-        use crate::dtako_operation_changes::{compose_snapshot, snapshot_changed};
         use crate::repo::dtako_operation_changes::{fetch_snapshots, insert_change, NewChange};
+        use alc_csv_parser::operation_changes::{compose_snapshot, snapshot_changed};
 
         let mut tx = self.pool.begin().await?;
         alc_core::tenant::set_current_tenant(&mut tx, &tenant_id.to_string()).await?;
