@@ -673,3 +673,448 @@ async fn test_punches_expose_card_kind() {
         }
     );
 }
+
+// ---------------------------------------------------------------------------
+// 免許証 1 回のタッチ = 打刻の一覧では 1 行 (Refs ippoan/alc-app#387)
+//
+// 免許証を端末にタッチすると `kind = 'timecard'` の行が入り、そのまま点呼を始めると
+// `kind = 'license'` の行がもう 1 行入る。`hub_measurements` の行は両方残したまま、
+// 一覧・件数・CSV・当日の一覧からは、対の打刻が在る license の行だけを外す。
+// ---------------------------------------------------------------------------
+
+/// 対のテストの基準時刻 (2025-07-12T06:00:00Z)。各行はここからの秒差で置く
+const FOLD_BASE_EPOCH: i64 = 1_752_300_000;
+
+/// `hub_measurements` に置く 1 行
+struct HubRow {
+    device: &'static str,
+    kind: &'static str,
+    /// `timecard` は `payload.card_id`、`license` は `payload.nfc_id` に入る (ファームと同じ形)。
+    /// None はその項目を載せない
+    card: Option<&'static str>,
+    /// `FOLD_BASE_EPOCH` からの秒差
+    at: i64,
+    is_dev: bool,
+}
+
+impl HubRow {
+    fn timecard(card: &'static str, at: i64) -> Self {
+        Self {
+            device: "cores3-1",
+            kind: "timecard",
+            card: Some(card),
+            at,
+            is_dev: false,
+        }
+    }
+
+    fn license(card: &'static str, at: i64) -> Self {
+        Self {
+            kind: "license",
+            ..Self::timecard(card, at)
+        }
+    }
+
+    fn payload(&self) -> Value {
+        match (self.kind, self.card) {
+            ("timecard", Some(card)) => json!({ "card_id": card, "card_kind": "license" }),
+            ("timecard", None) => json!({ "card_kind": "license" }),
+            (_, Some(card)) => json!({ "type": "license", "nfc_id": card }),
+            (_, None) => json!({ "type": "license" }),
+        }
+    }
+}
+
+/// 行を直接入れて id を返す。時刻と dev の軸 (`is_dev`) を行ごとに決めるため、ingest の口は通さない
+/// (`pool` は RLS を素通りする側)。`recorded_at` は SQL の式で渡す
+async fn insert_hub_row_at(
+    pool: &sqlx::PgPool,
+    tenant: Uuid,
+    seq: i64,
+    row: &HubRow,
+    recorded_at_sql: &str,
+) -> String {
+    let id: Uuid = sqlx::query_scalar(&format!(
+        r#"INSERT INTO hub_measurements
+               (tenant_id, device_id, kind, payload, seq, recorded_at, is_dev)
+           VALUES ($1, $2, $3, $4, $5, {recorded_at_sql}, $6)
+           RETURNING id"#
+    ))
+    .bind(tenant)
+    .bind(row.device)
+    .bind(row.kind)
+    .bind(row.payload())
+    .bind(seq)
+    .bind(row.is_dev)
+    .fetch_one(pool)
+    .await
+    .unwrap_or_else(|e| panic!("hub_measurements に行を入れられない: {e}"));
+    id.to_string()
+}
+
+/// `rows` を順に入れて id を返す (seq は並び順)
+async fn insert_hub_rows(pool: &sqlx::PgPool, tenant: Uuid, rows: &[HubRow]) -> Vec<String> {
+    let mut ids = Vec::new();
+    for (i, row) in rows.iter().enumerate() {
+        let at = format!("to_timestamp({})", FOLD_BASE_EPOCH + row.at);
+        ids.push(insert_hub_row_at(pool, tenant, i as i64, row, &at).await);
+    }
+    ids
+}
+
+/// 一覧・件数・CSV の 3 つの口から見えた行
+struct Listed {
+    /// 一覧の (kind, id)。kind の順
+    rows: Vec<(String, String)>,
+    total: i64,
+    /// CSV のデータ行の数 (ヘッダを除く)
+    csv_rows: usize,
+    /// CSV の「区分」が点呼の行の数
+    csv_tenko_rows: usize,
+}
+
+impl Listed {
+    fn kinds(&self) -> Vec<&str> {
+        self.rows.iter().map(|(kind, _)| kind.as_str()).collect()
+    }
+
+    fn ids(&self) -> Vec<&str> {
+        self.rows.iter().map(|(_, id)| id.as_str()).collect()
+    }
+}
+
+/// 一覧と CSV を引く。`dev` が true なら dev端末の印を付ける
+async fn listed(client: &reqwest::Client, base_url: &str, auth: &str, dev: bool) -> Listed {
+    let get = |path: &str| {
+        let rb = client
+            .get(format!("{base_url}{path}"))
+            .header("Authorization", auth);
+        if dev {
+            rb.header("X-Device-Dev", "1")
+        } else {
+            rb
+        }
+    };
+
+    let res = get("/api/timecard/punches").send().await.unwrap();
+    assert_eq!(res.status(), 200, "GET /api/timecard/punches");
+    let body: Value = res.json().await.unwrap();
+    let mut rows: Vec<(String, String)> = body["punches"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| {
+            (
+                p["kind"].as_str().unwrap().to_string(),
+                p["id"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect();
+    rows.sort();
+
+    let res = get("/api/timecard/punches/csv").send().await.unwrap();
+    assert_eq!(res.status(), 200, "GET /api/timecard/punches/csv");
+    let bytes = res.bytes().await.unwrap();
+    let csv = std::str::from_utf8(&bytes[3..]).unwrap();
+    let lines: Vec<&str> = csv.lines().filter(|l| !l.trim().is_empty()).collect();
+
+    Listed {
+        rows,
+        total: body["total"].as_i64().unwrap(),
+        csv_rows: lines.len() - 1,
+        csv_tenko_rows: lines.iter().filter(|l| l.contains(",点呼,")).count(),
+    }
+}
+
+#[tokio::test]
+async fn test_license_row_is_folded_into_its_timecard_punch() {
+    test_group!("timecard punches (免許証のタッチは 1 行)");
+
+    let state = common::setup_app_state().await;
+    let base_url = common::spawn_test_server(state.clone()).await;
+    let client = reqwest::Client::new();
+
+    // (題, 入れる行, 一覧に出る kind)。license の行はどれも基準時刻 (秒差 0) に置く
+    let both = vec!["license", "timecard"];
+    let cases: Vec<(&str, Vec<HubRow>, Vec<&str>)> = vec![
+        (
+            "対の 2 行 (同じ機体・同じカード・6 秒差) → 打刻の 1 行",
+            vec![HubRow::timecard("LIC-A", -6), HubRow::license("LIC-A", 0)],
+            vec!["timecard"],
+        ),
+        (
+            "打刻だけの回 → 1 行",
+            vec![HubRow::timecard("LIC-A", -6)],
+            vec!["timecard"],
+        ),
+        (
+            "対の無い license の行 → 出る",
+            vec![HubRow::license("LIC-A", 0)],
+            vec!["license"],
+        ),
+        (
+            "境界: ちょうど 30 秒前の打刻 → 外す",
+            vec![HubRow::timecard("LIC-A", -30), HubRow::license("LIC-A", 0)],
+            vec!["timecard"],
+        ),
+        (
+            "境界: 同時刻の打刻 → 外す",
+            vec![HubRow::timecard("LIC-A", 0), HubRow::license("LIC-A", 0)],
+            vec!["timecard"],
+        ),
+        (
+            "31 秒前の打刻 → 外さない",
+            vec![HubRow::timecard("LIC-A", -31), HubRow::license("LIC-A", 0)],
+            both.clone(),
+        ),
+        (
+            "license の行より後の打刻 → 外さない",
+            vec![HubRow::timecard("LIC-A", 1), HubRow::license("LIC-A", 0)],
+            both.clone(),
+        ),
+        (
+            "別の機体の打刻 → 外さない",
+            vec![
+                HubRow {
+                    device: "cores3-2",
+                    ..HubRow::timecard("LIC-A", -6)
+                },
+                HubRow::license("LIC-A", 0),
+            ],
+            both.clone(),
+        ),
+        (
+            "別のカードの打刻 → 外さない",
+            vec![HubRow::timecard("LIC-B", -6), HubRow::license("LIC-A", 0)],
+            both.clone(),
+        ),
+        (
+            "カードの値がどちらにも無い 2 行 → 対にしない",
+            vec![
+                HubRow {
+                    card: None,
+                    ..HubRow::timecard("", -6)
+                },
+                HubRow {
+                    card: None,
+                    ..HubRow::license("", 0)
+                },
+            ],
+            both.clone(),
+        ),
+        // ↓ 2 件は RLS を素通りする接続 (このテストの pool) だから両方の軸が見える。
+        //   対の判定が is_dev を自分で見ていないと、license の行が消える
+        (
+            "dev の機体の打刻は、本番の license の行を外さない",
+            vec![
+                HubRow {
+                    is_dev: true,
+                    ..HubRow::timecard("LIC-A", -6)
+                },
+                HubRow::license("LIC-A", 0),
+            ],
+            both.clone(),
+        ),
+        (
+            "本番の打刻は、dev の機体の license の行を外さない",
+            vec![
+                HubRow::timecard("LIC-A", -6),
+                HubRow {
+                    is_dev: true,
+                    ..HubRow::license("LIC-A", 0)
+                },
+            ],
+            both.clone(),
+        ),
+    ];
+
+    for (i, (label, rows, expected)) in cases.iter().enumerate() {
+        test_case!(label, {
+            let tenant = common::create_test_tenant(state.pool(), &format!("Punch Fold {i}")).await;
+            let auth = format!("Bearer {}", common::create_test_jwt(tenant, "admin"));
+            let ids = insert_hub_rows(state.pool(), tenant, rows).await;
+
+            let got = listed(&client, &base_url, &auth, false).await;
+            assert_eq!(&got.kinds(), expected, "一覧: {label}");
+            assert_eq!(got.total, expected.len() as i64, "total: {label}");
+            assert_eq!(got.csv_rows, expected.len(), "CSV の行数: {label}");
+            assert_eq!(
+                got.csv_tenko_rows,
+                expected.iter().filter(|k| **k == "license").count(),
+                "CSV の点呼の行: {label}"
+            );
+            // 残る打刻の行は、入れた timecard の行そのもの (行を作り替えていない)
+            for (row, id) in rows.iter().zip(&ids) {
+                assert_eq!(
+                    got.ids().contains(&id.as_str()),
+                    row.kind == "timecard" || expected.contains(&"license"),
+                    "{} の行: {label}",
+                    row.kind
+                );
+            }
+
+            // 行そのものは消していない (導出だけを変えている)
+            let stored: i64 =
+                sqlx::query_scalar("SELECT count(*) FROM hub_measurements WHERE tenant_id = $1")
+                    .bind(tenant)
+                    .fetch_one(state.pool())
+                    .await
+                    .unwrap();
+            assert_eq!(
+                stored,
+                rows.len() as i64,
+                "hub_measurements の行数: {label}"
+            );
+        });
+    }
+}
+
+#[tokio::test]
+async fn test_license_row_is_not_folded_across_tenants() {
+    test_group!("timecard punches (免許証のタッチは 1 行: テナント)");
+
+    test_case!("別テナントの打刻の行とは対にならない", {
+        // RLS を素通りする接続なので、対の判定が tenant_id を自分で見ていないと
+        // テナント A の license の行が、テナント B の打刻のせいで消える
+        let state = common::setup_app_state().await;
+        let base_url = common::spawn_test_server(state.clone()).await;
+        let client = reqwest::Client::new();
+        let tenant_a = common::create_test_tenant(state.pool(), "Punch Fold T1").await;
+        let tenant_b = common::create_test_tenant(state.pool(), "Punch Fold T2").await;
+
+        insert_hub_rows(state.pool(), tenant_a, &[HubRow::license("LIC-A", 0)]).await;
+        insert_hub_rows(state.pool(), tenant_b, &[HubRow::timecard("LIC-A", -6)]).await;
+
+        for (tenant, expected) in [(tenant_a, "license"), (tenant_b, "timecard")] {
+            let auth = format!("Bearer {}", common::create_test_jwt(tenant, "admin"));
+            let got = listed(&client, &base_url, &auth, false).await;
+            assert_eq!(got.kinds(), vec![expected]);
+            assert_eq!(got.total, 1);
+            assert_eq!(got.csv_rows, 1);
+        }
+    });
+}
+
+#[tokio::test]
+async fn test_today_punches_fold_the_license_row() {
+    test_group!("timecard punches (免許証のタッチは 1 行: 当日の一覧)");
+
+    test_case!("対の license の行は当日の一覧に出ない", {
+        let state = common::setup_app_state().await;
+        let base_url = common::spawn_test_server(state.clone()).await;
+        let tenant = common::create_test_tenant(state.pool(), "Punch Fold Today").await;
+        let auth = format!("Bearer {}", common::create_test_jwt(tenant, "admin"));
+        let client = reqwest::Client::new();
+
+        let emp =
+            common::create_test_employee(&client, &base_url, &auth, "免許 一郎", "E040").await;
+        let employee_id = emp["id"].as_str().unwrap().to_string();
+        // 免許証の 2 行は employees.nfc_id で社員に結び付く
+        sqlx::query("UPDATE employees SET nfc_id = 'LIC-TODAY' WHERE id = $1")
+            .bind(Uuid::parse_str(&employee_id).unwrap())
+            .execute(state.pool())
+            .await
+            .unwrap();
+        // ブラウザの打刻 (当日の一覧を返す口) 用のカード
+        let res = client
+            .post(format!("{base_url}/api/timecard/cards"))
+            .header("Authorization", &auth)
+            .json(&json!({ "employee_id": employee_id, "card_id": "FOLDBROWSER01" }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 201);
+
+        // JST の今日 0 時の 1 秒後にタッチ、6 秒後に点呼を始めた 2 行
+        let mut ids = Vec::new();
+        for (seq, (row, secs)) in [
+            (HubRow::timecard("LIC-TODAY", 0), 1),
+            (HubRow::license("LIC-TODAY", 0), 7),
+        ]
+        .iter()
+        .enumerate()
+        {
+            let at = format!(
+                "((now() AT TIME ZONE 'Asia/Tokyo')::date::timestamp + interval '{secs} seconds')
+                 AT TIME ZONE 'Asia/Tokyo'"
+            );
+            ids.push(insert_hub_row_at(state.pool(), tenant, seq as i64, row, &at).await);
+        }
+
+        let res = client
+            .post(format!("{base_url}/api/timecard/punch"))
+            .header("Authorization", &auth)
+            .json(&json!({ "card_id": "FOLDBROWSER01" }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 201);
+        let body: Value = res.json().await.unwrap();
+        let today: Vec<&str> = body["today_punches"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["id"].as_str().unwrap())
+            .collect();
+
+        // タッチの打刻 + いま打った行 = 2 件。license の行は入らない
+        assert_eq!(today.len(), 2, "{body}");
+        assert!(today.contains(&ids[0].as_str()), "打刻の行が無い: {body}");
+        assert!(
+            !today.contains(&ids[1].as_str()),
+            "license の行が出ている: {body}"
+        );
+    });
+}
+
+/// 実行用ロール `alc_api_rt` (RLS が効く) でも同じ結果になること。
+/// 接続の作り方は `tests/device_dev_axis_test.rs` と同じ
+#[tokio::test]
+async fn test_license_row_fold_as_app_role() {
+    test_group!("timecard punches (免許証のタッチは 1 行: 実行用ロール)");
+
+    let admin_state = common::setup_app_state().await;
+    let admin = admin_state.pool().clone();
+    let base_url =
+        common::spawn_test_server(common::setup_app_state_as_app_role(5, true).await).await;
+    let tenant = common::create_test_tenant(&admin, "Punch Fold App Role").await;
+    let auth = format!("Bearer {}", common::create_test_jwt(tenant, "admin"));
+    let client = reqwest::Client::new();
+
+    // 本番の軸: カード A の対 + カード B の打刻だけ。dev の軸: カード B の license だけ
+    // (同じ機体・同じカード・6 秒差だが、軸が違うので対ではない)
+    let ids = insert_hub_rows(
+        &admin,
+        tenant,
+        &[
+            HubRow::timecard("LIC-A", -6),
+            HubRow::license("LIC-A", 0),
+            HubRow::timecard("LIC-B", -6),
+            HubRow {
+                is_dev: true,
+                ..HubRow::license("LIC-B", 0)
+            },
+        ],
+    )
+    .await;
+
+    test_case!("本番の軸: 対の license の行だけが外れる", {
+        let got = listed(&client, &base_url, &auth, false).await;
+        assert_eq!(got.kinds(), vec!["timecard", "timecard"]);
+        assert_eq!(got.total, 2);
+        assert_eq!(got.csv_rows, 2);
+        assert_eq!(got.csv_tenko_rows, 0);
+        assert!(!got.ids().contains(&ids[1].as_str()), "対の license の行");
+    });
+
+    test_case!(
+        "dev の軸: 本番の打刻は dev の license の行を外さない",
+        {
+            let got = listed(&client, &base_url, &auth, true).await;
+            assert_eq!(got.ids(), vec![ids[3].as_str()]);
+            assert_eq!(got.kinds(), vec!["license"]);
+            assert_eq!(got.total, 1);
+            assert_eq!(got.csv_tenko_rows, 1);
+        }
+    );
+}

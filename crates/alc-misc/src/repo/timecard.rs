@@ -78,6 +78,16 @@ fn build_punch_where(
 ///
 /// `alc_core::repository::timecard::normalize_card_id` (trim + 小文字 + `':'` 除去)
 /// の SQL 版。**片方だけ変えると照合が静かに外れる**ので、変えるときは両方同時に。
+///
+/// # 免許証 1 回のタッチは 1 行にまとめる (Refs ippoan/alc-app#387)
+///
+/// 免許証を端末にタッチすると `kind = 'timecard'` (タッチの時点の打刻) が入り、そのまま
+/// 点呼を始めると `kind = 'license'` がもう 1 行入る。**行は両方残し、一覧から外すのは
+/// 対の打刻が在る `license` の行だけ** (残るのはタッチした時刻の打刻)。対の条件は
+/// 同じ `tenant_id`・`is_dev`・`device_id`、打刻の `payload.card_id` = `license` の
+/// `payload.nfc_id`、打刻の時刻が `license` の 30 秒前〜同時刻。`employee_id` は使わない
+/// (2 行で引き方が違い、食い違いうる)。対の無い `license` の行 (打刻を送らない経路で
+/// 点呼を始めた回) はそのまま出る。
 const PUNCHES_CTE: &str = r#"
 WITH p AS (
     SELECT
@@ -111,6 +121,25 @@ WITH p AS (
            ON e_nfc.tenant_id = hm.tenant_id
           AND e_nfc.nfc_id = COALESCE(hm.payload->>'card_id', hm.payload->>'nfc_id')
     WHERE hm.tenant_id = $1 AND hm.kind IN ('timecard', 'license')
+      -- 免許証 1 回のタッチは 2 行になる (タッチの打刻 kind = 'timecard' と、点呼を
+      -- 始めた時点の kind = 'license')。対の打刻が在る license の行は一覧から外す。
+      -- tenant_id と is_dev は RLS に頼らずここにも書く (RLS が効かないロールで、
+      -- 別テナントや dev端末の打刻が本番の license の行を隠さないように)。
+      -- 30 秒 = ファームがタッチから点呼の開始までを待つ上限 15 秒 + 時計の補正と
+      -- 送信の遅れの余裕。bind にしない (4 か所の bind の順がずれる)
+      AND NOT EXISTS (
+          SELECT 1
+          FROM hub_measurements pair
+          WHERE hm.kind = 'license'
+            AND pair.tenant_id = hm.tenant_id
+            AND pair.is_dev = hm.is_dev
+            AND pair.device_id = hm.device_id
+            AND pair.kind = 'timecard'
+            AND pair.payload->>'card_id' = hm.payload->>'nfc_id'
+            AND COALESCE(pair.recorded_at, pair.created_at)
+                BETWEEN COALESCE(hm.recorded_at, hm.created_at) - interval '30 seconds'
+                    AND COALESCE(hm.recorded_at, hm.created_at)
+      )
 )
 "#;
 
