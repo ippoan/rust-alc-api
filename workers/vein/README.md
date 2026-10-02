@@ -53,6 +53,31 @@ Durable Object (`src/vein_db.rs`) と workers-rs への載せ方
 別のサーバー接続へ回り、`prepared statement "s1" already exists` (42P05) になる (staging で実測)。
 詳細は `src/repo.rs`。
 
+## 接続ロールを返す口 `GET /internal/db-role` (Refs ippoan/auth-worker#605)
+
+**目的**: この Worker の DB 接続がどのロールで繋がっているかを確かめる。vein が触る表には
+FORCE ROW LEVEL SECURITY の無いものがあり、表の所有者で繋ぐと RLS が掛からない。実行用ロール
+(`alc_api_rt`、非所有者) で繋いでいるかを、auth-worker の MCP tool (`verify_rls`) が Service Binding で
+1 回呼んで確かめる。
+
+- **引数なし。** path・query・header・body を読まない。同じ接続に `SELECT current_user` を 1 文流すだけ
+  (書き込み・`SET`・トランザクションなし。テナントを取らないので `in_tenant_tx` は通さない)。
+  `simple_query` で流すので prepared statement を作らず、上の 42P05 は起きない
+- **返す値** (200):
+
+  ```json
+  { "current_user": "alc_api_rt", "is_runtime_role": true }
+  ```
+
+  `is_runtime_role` は `current_user` が `alc_api_rt` と一致するか。失敗 (問い合わせのエラー) は 500
+  `{"error":"internal_error"}`。接続文字列・ホスト・DB 名・版・エラーの詳細は、応答にもログにも出さない
+- **`/api` の外・tenant ヘッダーの layer の外に置く** (`src/lib.rs` の `router` で素にだけ merge する)。
+  auth-worker の proxy がブラウザ・端末から vein に転送するのは `/api/vein` で始まる path だけなので、
+  `/internal/db-role` には proxy からは届かず、auth-worker のコードが binding で直接呼んだときだけ届く。
+  `/api/internal/db-role` は 404。**path を `/api/…` や `/vein/…` に変えないこと**
+- staging は workers.dev が Access 配下で開いているので、Access を通る者はこの口を呼べる
+  (返るのは staging の設定に直書きのロール名だけ)
+
 ## staging の DB (手元の docker + Workers VPC、一時、#695)
 
 Container 経路は止まった後の cold start (約 3.5 秒)・置き場所が `APAC` までしか絞れない (往復 60〜140ms)・
