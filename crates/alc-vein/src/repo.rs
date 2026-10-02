@@ -43,8 +43,8 @@ impl From<VeinTemplateRow> for VeinTemplateItem {
     }
 }
 
-/// `vein_templates` の SQL。sqlx の Pg 実装 (モノリス) と Workers の Hyperdrive 実装
-/// (workers/vein、tokio-postgres) の両方がこれを使う (placeholder はどちらも `$n`)。
+/// `vein_templates` の SQL。sqlx の Pg 実装 (モノリス) が使う (placeholder は `$n`)。
+/// Worker の実装は ippoan/alc-vein-worker に移った (そちらは自分の写しを持つ)。
 /// RLS に加えて `WHERE tenant_id` を明示する。
 pub mod sql {
     /// 乗務員のテンプレートを登録し直す。$1 tenant_id / $2 employee_id / $3 template → updated_at (乗務員が居なければ 0 行)。

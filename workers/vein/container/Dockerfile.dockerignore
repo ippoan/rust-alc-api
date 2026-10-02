@@ -1,8 +1,0 @@
-# build context は repo のルート。Dockerfile が COPY するものだけを通す。
-*
-!scripts/init_local_db.sql
-!scripts/local_app_grants.sql
-!migrations/
-!workers/vein/tests/seed.sql
-!workers/vein/container/pgbouncer.ini
-!workers/vein/container/start.sh

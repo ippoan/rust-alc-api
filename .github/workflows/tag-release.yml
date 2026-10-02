@@ -2,14 +2,6 @@ name: Tag Release
 
 on:
   workflow_dispatch:
-    inputs:
-      target:
-        description: 'タグを打つ対象 (backend = monolith の v* / worker-vein = workers/vein の worker-vein-v*)'
-        type: choice
-        options:
-          - backend
-          - worker-vein
-        default: backend
 
 permissions:
   contents: write
@@ -17,7 +9,4 @@ permissions:
 jobs:
   release:
     uses: ippoan/ci-workflows/.github/workflows/tag-release.yml@main
-    with:
-      # worker-vein は worker-vein-v0.0.1 形式のタグになり、vein-deploy.yml が本番へデプロイする
-      prefix: ${{ inputs.target == 'worker-vein' && 'worker-vein-' || '' }}
     secrets: inherit
