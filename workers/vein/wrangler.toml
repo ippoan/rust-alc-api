@@ -23,12 +23,20 @@ command = "cargo install -q worker-build@0.8.7 && worker-build --release"
 [version_metadata]
 binding = "CF_VERSION_METADATA"
 
-# 本番の DB (Supabase のプーラー) は aws:ap-northeast-1。Worker をその近くで動かす
+# 本番の DB は aws:ap-northeast-1。Worker をその近くで動かす
 [placement]
 region = "aws:ap-northeast-1"
 
-# 本番の DB: secret DATABASE_URL (Supabase のプーラー 6543、transaction mode) へ Worker の TCP
-# (STARTTLS) で繋ぐ (src/db.rs)。secret の設定と本番のデプロイは別タスク。未設定なら 503。
+# 本番の DB: Secrets Store の secret (backend と同じ実行用ロールの接続文字列) を binding VEIN_DATABASE_URL で
+# 毎リクエスト読み、その host:port へ Worker の TCP (STARTTLS) で繋ぐ (src/db.rs。Refs ippoan/auth-worker#605)。
+# 入れ直しは Secrets Store の secret を更新するだけで、次の要求から効く (deploy は要らない)。
+# binding が在るのに読めないときは 500 (worker 自身の secret DATABASE_URL へは落ちない)。
+# env.staging には置かない (staging は VPC の経路で、読まれない)。store_id は auth-worker の wrangler.toml と同じ store。
+# ★ この表は [placement] の後に置く (前の方に表を足すと scripts/check-exposure-test.sh の陰性対照が効かなくなる)
+[[secrets_store_secrets]]
+binding = "VEIN_DATABASE_URL"
+store_id = "bd7bc91a3e5f4111add4acf6cb4b8733"
+secret_name = "alc-app-database-url-rt"
 
 # staging: DB は一時的に (#695) 運用者の Linux 機の docker (container/ の image、127.0.0.1:6432) に置き、
 # Workers VPC の binding VEIN_DB_VPC (VPC Service 型) から既存の Tunnel 経由で繋ぐ (src/db.rs)。
