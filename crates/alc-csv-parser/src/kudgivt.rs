@@ -328,10 +328,7 @@ mod tests {
             {
                 let err =
                     parse_kudgivt_for_crew("運行NO,読取日\ndata1,data2".as_bytes(), 1).unwrap_err();
-                assert!(
-                    err.to_string().contains("missing required columns"),
-                    "{err}"
-                );
+                assert!(err.to_string().contains("missing required columns"));
                 let err = parse_kudgivt_for_crew(b"", 1).unwrap_err();
                 assert_eq!(err.to_string(), "empty CSV");
             }

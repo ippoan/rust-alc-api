@@ -282,10 +282,7 @@ mod tests {
     fn decode_utf8_or_shift_jis_replaces_bytes_valid_in_neither() {
         // UTF-8 としても Shift_JIS としても読めないバイトは、Shift_JIS の decode が置換文字にする (落ちない)
         let decoded = decode_utf8_or_shift_jis(&[b'a', 0xff, b'b']);
-        assert!(
-            decoded.starts_with('a') && decoded.ends_with('b'),
-            "{decoded:?}"
-        );
+        assert!(decoded.starts_with('a') && decoded.ends_with('b'));
         assert!(decoded.contains('\u{fffd}'), "{decoded:?}");
     }
 
@@ -361,10 +358,7 @@ mod tests {
                 ("KUDGIVT.csv".to_string(), Vec::new()),
             ];
             let err = kudguri_rows_in(&bad).unwrap().unwrap_err();
-            assert!(
-                err.to_string().contains("missing required columns"),
-                "{err}"
-            );
+            assert!(err.to_string().contains("missing required columns"));
             let err = kudgivt_rows_in(&bad).unwrap().unwrap_err();
             assert_eq!(err.to_string(), "empty CSV");
         });
