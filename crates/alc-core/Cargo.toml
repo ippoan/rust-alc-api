@@ -9,6 +9,8 @@ unexpected_cfgs = { level = "allow", check-cfg = ['cfg(coverage)'] }
 [dependencies]
 alc-auth-jwt = { path = "../alc-auth-jwt" }
 alc-core-wasm = { path = "../alc-core-wasm", features = ["sqlx"] }
+# `OperationMinutes` (変更記録の分数の型) の定義元。zip の展開は引かない
+alc-csv-parser = { path = "../alc-csv-parser", default-features = false }
 anyhow = "1"
 async-trait = "0.1"
 axum = "0.8"

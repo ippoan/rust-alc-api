@@ -4,6 +4,7 @@ mod test_macros;
 
 pub mod kudgivt;
 pub mod kudguri;
+pub mod operation_changes;
 pub mod work_segments;
 
 #[cfg(feature = "zip-extract")]

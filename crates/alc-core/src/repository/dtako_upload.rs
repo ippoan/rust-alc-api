@@ -112,15 +112,8 @@ pub struct InsertOperationParams {
     pub r2_key_prefix: String,
 }
 
-/// 1 運行・1 crew_role ぶんの KUDGIVT 区間時間の合計 (分)。イベントCD の既定分類
-/// (201 運転 / 202-204 荷役 / 301 休憩 / 302 休息) で振り分ける。
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct OperationMinutes {
-    pub drive_minutes: i32,
-    pub cargo_minutes: i32,
-    pub break_minutes: i32,
-    pub rest_minutes: i32,
-}
+/// 1 運行・1 crew_role ぶんの KUDGIVT 区間時間の合計 (分)。定義は alc-csv-parser (分割 worker と共有)。
+pub use alc_csv_parser::operation_changes::OperationMinutes;
 
 /// 上げ直しの変更記録に要る、DB の外で決まる値。
 #[derive(Debug, Clone)]

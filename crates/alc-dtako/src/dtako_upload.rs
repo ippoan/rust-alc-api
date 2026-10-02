@@ -9,7 +9,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::dtako_operation_changes::{load_before_minutes, minutes_for};
+use crate::dtako_operation_changes::load_before_minutes;
 use crate::DtakoState;
 use alc_core::auth_middleware::TenantId;
 use alc_core::repository::dtako_upload::{
@@ -18,6 +18,7 @@ use alc_core::repository::dtako_upload::{
 use alc_csv_parser;
 use alc_csv_parser::kudgivt::{parse_kudgivt, KudgivtRow};
 use alc_csv_parser::kudguri::KudguriRow;
+use alc_csv_parser::operation_changes::minutes_for;
 use alc_csv_parser::work_segments::EventClass;
 use tokio_stream::StreamExt;
 

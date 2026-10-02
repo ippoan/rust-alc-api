@@ -107,6 +107,7 @@ version = "0.1.0"
 dependencies = [
  "alc-auth-jwt",
  "alc-core-wasm",
+ "alc-csv-parser",
  "anyhow",
  "async-trait",
  "axum",

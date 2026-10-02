@@ -52,7 +52,7 @@ pub(crate) async fn insert_change(
     conn: &mut PgConnection,
     c: &NewChange<'_>,
 ) -> Result<(), sqlx::Error> {
-    let driver_cd = crate::dtako_operation_changes::record_driver_cd(c.before, c.after);
+    let driver_cd = alc_csv_parser::operation_changes::record_driver_cd(c.before, c.after);
     sqlx::query(
         r#"INSERT INTO alc_api.dtako_operation_changes
                (tenant_id, unko_no, crew_role, driver_cd, upload_id, reason, before, after)
