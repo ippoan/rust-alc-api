@@ -189,17 +189,44 @@ async fn connect_url(
     handshake(config, socket, PassthroughTls).await
 }
 
+/// 原因の文の長さの上限 (ランタイムが返す文をそのまま載せるので、際限なく出さない)
+const CAUSE_MAX_CHARS: usize = 300;
+
+/// エラーの文に、原因 (`source()`) の文を `: ` でつないで足す。source が無ければエラーの文だけ。
+///
+/// 通信エラーの原因は Workers のランタイムが返す文 (`Socket` が `io::Error` に包む) で、中身はランタイムしだい。
+/// 宛先が混ざっても出さないよう、接続設定の host と同じ文字列は `<host>` に置き換える
+/// (接続文字列・ユーザー名・パスワードはここでは組み立てない)。
+fn with_causes(e: &(dyn std::error::Error + 'static), config: &Config) -> String {
+    let mut out = e.to_string();
+    let mut source = e.source();
+    while let Some(cause) = source {
+        let mut text = cause.to_string();
+        // wasm の Host は Tcp だけ (unix socket の variant は cfg(unix))
+        for tokio_postgres::config::Host::Tcp(h) in config.get_hosts() {
+            if !h.is_empty() {
+                text = text.replace(h.as_str(), "<host>");
+            }
+        }
+        out.push_str(": ");
+        out.extend(text.chars().take(CAUSE_MAX_CHARS));
+        source = cause.source();
+    }
+    out
+}
+
 async fn handshake<T>(config: Config, socket: Socket, tls: T) -> Result<Client, ConnectError>
 where
     T: tokio_postgres::tls::TlsConnect<Socket>,
     T::Stream: Send + 'static,
 {
     let (client, connection) = config.connect_raw(socket, tls).await.map_err(|e| {
-        // tokio_postgres::Error の Display は "db error" だけなので、DB の message も載せる
-        let detail = e
-            .as_db_error()
-            .map(|db| format!("{} ({})", db.message(), db.code().code()))
-            .unwrap_or_else(|| e.to_string());
+        // tokio_postgres::Error の Display は種別の文だけ ("db error" / "error communicating with the server")
+        // なので、DB エラーなら message と code を、それ以外なら原因 (source) の文を載せる
+        let detail = match e.as_db_error() {
+            Some(db) => format!("{} ({})", db.message(), db.code().code()),
+            None => with_causes(&e, &config),
+        };
         ConnectError::Other(format!("postgres handshake: {detail}"))
     })?;
     wasm_bindgen_futures::spawn_local(async move {
