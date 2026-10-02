@@ -68,7 +68,7 @@ use alc_core::repository::dtako_y_time_export::{
     DtakoDriverOperation, UnsplitOperation as DbUnsplitOperation, YTimeExportOperation,
 };
 use alc_core::storage::{ListedObject, StorageBackend};
-use alc_csv_parser::decode_shift_jis;
+use alc_csv_parser::decode_utf8_or_shift_jis;
 use axum::{
     extract::{Query, State},
     http::StatusCode,
@@ -810,7 +810,8 @@ fn assemble(
     for p in planned {
         match &fetched[p.key_idx] {
             Ok(bytes) => {
-                let (headers, rows) = parse_csv(&decode_csv_bytes(bytes));
+                // R2 の per-unko CSV は split 時に UTF-8 化済み。古い Shift-JIS データのために fallback を残す
+                let (headers, rows) = parse_csv(&decode_utf8_or_shift_jis(bytes));
                 operations.push(DtakoEventsOperation {
                     unko_no: p.unko_no,
                     crew_role: p.crew_role,
@@ -868,15 +869,6 @@ fn reject_paging_params(
         ));
     }
     Ok(())
-}
-
-/// R2 の per-unko CSV は split 時に UTF-8 化済み。古い Shift-JIS データのために
-/// フォールバックを残す (`csv_aggregator` と同じ判断)。
-fn decode_csv_bytes(bytes: &[u8]) -> String {
-    match std::str::from_utf8(bytes) {
-        Ok(s) => s.to_owned(),
-        Err(_) => decode_shift_jis(bytes),
-    }
 }
 
 /// CSV → `(headers, rows)`。`dtako_csv_proxy` と同じ素朴な split
@@ -979,25 +971,6 @@ mod tests {
         let (headers, rows) = parse_csv("");
         assert_eq!(headers, vec![""]);
         assert!(rows.is_empty());
-    }
-
-    #[test]
-    fn decode_csv_bytes_reads_utf8_as_is() {
-        assert_eq!(
-            decode_csv_bytes("運行NO,読取日".as_bytes()),
-            "運行NO,読取日"
-        );
-    }
-
-    #[test]
-    fn decode_csv_bytes_falls_back_to_shift_jis() {
-        // "運行NO,読取日" の Shift-JIS bytes。UTF-8 として不正なので、一致するのは
-        // フォールバックが走った場合だけ。encoding_rs を alc-dtako の dev-dependency に
-        // 足さずに済ませるため直書きする。
-        let sjis: &[u8] = &[
-            0x89, 0x5e, 0x8d, 0x73, 0x4e, 0x4f, 0x2c, 0x93, 0xc7, 0x8e, 0xe6, 0x93, 0xfa,
-        ];
-        assert_eq!(decode_csv_bytes(sjis), "運行NO,読取日");
     }
 
     fn planned(unko_no: &str, key_idx: usize) -> PlannedOp {

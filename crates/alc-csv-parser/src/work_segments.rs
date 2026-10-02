@@ -153,6 +153,35 @@ pub enum EventClass {
     Ignore,    // 無視 (101=実車, 103=高速道, 412=アイドリング等)
 }
 
+impl EventClass {
+    /// 分類の文字列 (DB の `classification` 列の値) → 分類。知らない文字列は `Ignore`。
+    pub fn from_classification_str(classification: &str) -> Self {
+        match classification {
+            "drive" => EventClass::Drive,
+            "cargo" => EventClass::Cargo,
+            "work" => EventClass::Drive, // legacy fallback
+            "rest_split" => EventClass::RestSplit,
+            "break" => EventClass::Break,
+            _ => EventClass::Ignore,
+        }
+    }
+}
+
+/// イベントCD の既定の分類 → (分類の文字列, 分類)。未登録のコードは `("ignore", Ignore)`。
+///
+/// 既定の分類の表はこの 1 つ (backend の `alc-dtako`・`alc-compare` と、分割 worker が同じものを呼ぶ)。
+pub fn default_classification(event_cd: &str) -> (&'static str, EventClass) {
+    match event_cd {
+        "201" => ("drive", EventClass::Drive),          // 走行(運転)
+        "202" => ("cargo", EventClass::Cargo),          // 積み
+        "203" => ("cargo", EventClass::Cargo),          // 降し
+        "204" => ("cargo", EventClass::Cargo),          // その他 → 荷役
+        "302" => ("rest_split", EventClass::RestSplit), // 休息
+        "301" => ("break", EventClass::Break),          // 休憩
+        _ => ("ignore", EventClass::Ignore),            // その他は無視
+    }
+}
+
 /// 1つの連続勤務区間
 #[derive(Debug, Clone)]
 pub struct WorkSegment {
@@ -501,8 +530,53 @@ mod tests {
             event_name: "test".to_string(),
             duration_minutes: duration,
             section_distance: None,
-            raw_data: serde_json::Value::Null,
         }
+    }
+
+    #[test]
+    fn test_default_classification() {
+        test_group!("イベント分類");
+        test_case!("既定の分類: 6 コードと未登録", {
+            assert_eq!(default_classification("201"), ("drive", EventClass::Drive));
+            assert_eq!(default_classification("202"), ("cargo", EventClass::Cargo));
+            assert_eq!(default_classification("203"), ("cargo", EventClass::Cargo));
+            assert_eq!(default_classification("204"), ("cargo", EventClass::Cargo));
+            assert_eq!(
+                default_classification("302"),
+                ("rest_split", EventClass::RestSplit)
+            );
+            assert_eq!(default_classification("301"), ("break", EventClass::Break));
+            assert_eq!(
+                default_classification("110"),
+                ("ignore", EventClass::Ignore)
+            );
+            assert_eq!(default_classification(""), ("ignore", EventClass::Ignore));
+        });
+    }
+
+    #[test]
+    fn test_event_class_from_classification_str() {
+        test_group!("イベント分類");
+        test_case!(
+            "分類の文字列 → 分類 (work は旧い値で Drive、未知は Ignore)",
+            {
+                let from = EventClass::from_classification_str;
+                assert_eq!(from("drive"), EventClass::Drive);
+                assert_eq!(from("cargo"), EventClass::Cargo);
+                assert_eq!(from("work"), EventClass::Drive);
+                assert_eq!(from("rest_split"), EventClass::RestSplit);
+                assert_eq!(from("break"), EventClass::Break);
+                assert_eq!(from("ignore"), EventClass::Ignore);
+                assert_eq!(from("DRIVE"), EventClass::Ignore);
+                assert_eq!(from(""), EventClass::Ignore);
+            }
+        );
+        test_case!("既定の分類の文字列は、同じ分類に戻る", {
+            for cd in ["201", "202", "203", "204", "302", "301", "999"] {
+                let (s, class) = default_classification(cd);
+                assert_eq!(EventClass::from_classification_str(s), class, "{cd}");
+            }
+        });
     }
 
     fn dt(y: i32, m: u32, d: u32, h: u32, mi: u32) -> NaiveDateTime {

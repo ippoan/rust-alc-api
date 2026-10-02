@@ -14,7 +14,6 @@ pub struct KudgivtRow {
     pub event_name: String,
     pub duration_minutes: Option<i32>,
     pub section_distance: Option<f64>,
-    pub raw_data: serde_json::Value,
 }
 
 struct ColumnIndex {
@@ -125,15 +124,6 @@ pub fn parse_kudgivt(csv_text: &str) -> Result<Vec<KudgivtRow>, anyhow::Error> {
         }
         let fields: Vec<&str> = line.split(',').collect();
 
-        let mut raw_map = serde_json::Map::new();
-        for (i, header) in headers.iter().enumerate() {
-            let val = fields.get(i).map(|s| s.trim()).unwrap_or("");
-            raw_map.insert(
-                header.trim().to_string(),
-                serde_json::Value::String(val.to_string()),
-            );
-        }
-
         let unko_no = get_field(&fields, col_idx.unko_no).to_string();
         let reading_date_str = get_field(&fields, col_idx.reading_date);
         let reading_date = parse_date(reading_date_str)
@@ -160,11 +150,26 @@ pub fn parse_kudgivt(csv_text: &str) -> Result<Vec<KudgivtRow>, anyhow::Error> {
             event_name: get_field(&fields, col_idx.event_name).to_string(),
             duration_minutes: get_opt_field(&fields, col_idx.duration_minutes).and_then(parse_i32),
             section_distance: get_opt_field(&fields, col_idx.section_distance).and_then(parse_f64),
-            raw_data: serde_json::Value::Object(raw_map),
         });
     }
 
     Ok(rows)
+}
+
+/// 保存先に置かれた運行 1 件ぶんの KUDGIVT.csv のバイト列を読み、`crew_role` の行だけを返す。
+///
+/// 分割で置かれる CSV は UTF-8。古い Shift_JIS のままのデータも読めるよう
+/// [`crate::decode_utf8_or_shift_jis`] を通す。エラーは [`parse_kudgivt`] のもの。
+pub fn parse_kudgivt_for_crew(
+    bytes: &[u8],
+    crew_role: i32,
+) -> Result<Vec<KudgivtRow>, anyhow::Error> {
+    let text = crate::decode_utf8_or_shift_jis(bytes);
+    let rows = parse_kudgivt(&text)?;
+    Ok(rows
+        .into_iter()
+        .filter(|r| r.crew_role == crew_role)
+        .collect())
 }
 
 #[cfg(test)]
@@ -206,9 +211,6 @@ mod tests {
             // 副運転手の行は対象乗務員CD が採用される (乗務員CD1 の "2" ではない)
             assert_eq!(rows[1].driver_cd, "77");
             assert_eq!(rows[1].crew_role, 2);
-            // raw_data には両方の列がそのまま残る
-            assert_eq!(rows[1].raw_data["乗務員CD1"], "2");
-            assert_eq!(rows[1].raw_data["対象乗務員CD"], "77");
         });
     }
 
@@ -268,5 +270,71 @@ mod tests {
             assert!(msg.contains("イベントCD"), "got: {msg}");
             assert!(!msg.contains("運行NO"), "got: {msg}");
         });
+    }
+
+    /// 乗務員 2 人 (対象乗務員区分 1 と 2) の行を持つ CSV
+    const TWO_CREW_CSV: &str = "運行NO,読取日,乗務員CD1,乗務員名１,対象乗務員CD,対象乗務員区分,開始日時,イベントCD,イベント名\n\
+        1001,2026/03/01,2,テスト運転者,2,1,2026/03/01 08:00:00,201,運転\n\
+        1001,2026/03/01,2,テスト運転者,77,2,2026/03/01 09:00:00,302,休息\n\
+        1001,2026/03/01,2,テスト運転者,2,1,2026/03/01 10:00:00,301,休憩\n";
+
+    #[test]
+    fn test_parse_kudgivt_for_crew_utf8() {
+        test_group!("CSVパーサー");
+        test_case!(
+            "UTF-8 のバイト列を読み、crew_role の行だけを返す",
+            {
+                let rows = parse_kudgivt_for_crew(TWO_CREW_CSV.as_bytes(), 1).unwrap();
+                let cds: Vec<&str> = rows.iter().map(|r| r.event_cd.as_str()).collect();
+                assert_eq!(cds, ["201", "301"]);
+                assert!(rows.iter().all(|r| r.crew_role == 1 && r.driver_cd == "2"));
+
+                let rows = parse_kudgivt_for_crew(TWO_CREW_CSV.as_bytes(), 2).unwrap();
+                assert_eq!(rows.len(), 1);
+                assert_eq!(
+                    (rows[0].event_cd.as_str(), rows[0].driver_cd.as_str()),
+                    ("302", "77")
+                );
+
+                // 該当の crew_role が居なければ空
+                assert!(parse_kudgivt_for_crew(TWO_CREW_CSV.as_bytes(), 3)
+                    .unwrap()
+                    .is_empty());
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_kudgivt_for_crew_shift_jis() {
+        test_group!("CSVパーサー");
+        test_case!(
+            "Shift_JIS のバイト列 (古いデータ) も同じ結果になる",
+            {
+                let sjis = encoding_rs::SHIFT_JIS.encode(TWO_CREW_CSV).0.to_vec();
+                assert!(std::str::from_utf8(&sjis).is_err());
+                let rows = parse_kudgivt_for_crew(&sjis, 1).unwrap();
+                assert_eq!(rows.len(), 2);
+                assert_eq!(rows[0].driver_name, "テスト運転者");
+                assert_eq!(rows[1].event_name, "休憩");
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_kudgivt_for_crew_parse_error() {
+        test_group!("CSVパーサー");
+        test_case!(
+            "parse の失敗は parse_kudgivt のエラーのまま返る",
+            {
+                let err =
+                    parse_kudgivt_for_crew("運行NO,読取日\ndata1,data2".as_bytes(), 1).unwrap_err();
+                assert!(
+                    err.to_string().contains("missing required columns"),
+                    "{err}"
+                );
+                let err = parse_kudgivt_for_crew(b"", 1).unwrap_err();
+                assert_eq!(err.to_string(), "empty CSV");
+            }
+        );
     }
 }

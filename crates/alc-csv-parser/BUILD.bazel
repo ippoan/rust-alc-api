@@ -15,4 +15,6 @@ rust_library(
 rust_test(
     name = "alc-csv-parser_test",
     crate = ":alc-csv-parser",
+    # zip のテスト (`extract_zip`) が黙って外れないよう、test にも明示する
+    crate_features = ["zip-extract"],
 )

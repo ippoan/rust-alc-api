@@ -17,7 +17,7 @@ use alc_core::repository::dtako_upload::{
 };
 use alc_csv_parser;
 use alc_csv_parser::kudgivt::{parse_kudgivt, KudgivtRow};
-use alc_csv_parser::kudguri::{parse_kudguri, KudguriRow};
+use alc_csv_parser::kudguri::KudguriRow;
 use alc_csv_parser::work_segments::EventClass;
 use tokio_stream::StreamExt;
 
@@ -180,14 +180,9 @@ async fn process_zip(
     // 2. Extract ZIP
     let files = alc_csv_parser::extract_zip(zip_bytes)?;
 
-    // 3. Find and parse KUDGURI.csv
-    let kudguri_file = files
-        .iter()
-        .find(|(name, _)| name.to_uppercase().contains("KUDGURI"))
-        .ok_or_else(|| anyhow::anyhow!("KUDGURI.csv not found in ZIP"))?;
-
-    let csv_text = alc_csv_parser::decode_shift_jis(&kudguri_file.1);
-    let rows = parse_kudguri(&csv_text)?;
+    // 3. Find and parse KUDGURI.csv (選び方と decode は alc-csv-parser。分割 worker と共有)
+    let rows = alc_csv_parser::kudguri_rows_in(&files)
+        .ok_or_else(|| anyhow::anyhow!("KUDGURI.csv not found in ZIP"))??;
     tracing::info!("KUDGURI parsed: {} rows (tenant={})", rows.len(), tenant_id);
 
     if rows.is_empty() {
@@ -195,13 +190,8 @@ async fn process_zip(
     }
 
     // 3b. Find and parse KUDGIVT.csv
-    let kudgivt_file = files
-        .iter()
-        .find(|(name, _)| name.to_uppercase().contains("KUDGIVT"))
-        .ok_or_else(|| anyhow::anyhow!("KUDGIVT.csv not found in ZIP"))?;
-
-    let kudgivt_text = alc_csv_parser::decode_shift_jis(&kudgivt_file.1);
-    let kudgivt_rows = parse_kudgivt(&kudgivt_text)?;
+    let kudgivt_rows = alc_csv_parser::kudgivt_rows_in(&files)
+        .ok_or_else(|| anyhow::anyhow!("KUDGIVT.csv not found in ZIP"))??;
     let msg = format!(
         "KUDGIVT parsed: {} rows (tenant={})",
         kudgivt_rows.len(),
@@ -785,12 +775,8 @@ async fn load_kudgivt_from_zips(
         {
             Ok(zip_bytes) => match alc_csv_parser::extract_zip(&zip_bytes) {
                 Ok(files) => {
-                    if let Some((_, bytes)) = files
-                        .iter()
-                        .find(|(name, _)| name.to_uppercase().contains("KUDGIVT"))
-                    {
-                        let text = alc_csv_parser::decode_shift_jis(bytes);
-                        match parse_kudgivt(&text) {
+                    if let Some(parsed) = alc_csv_parser::kudgivt_rows_in(&files) {
+                        match parsed {
                             Ok(rows) => {
                                 tracing::info!("KUDGIVT from ZIP {}: {} rows", zip_key, rows.len());
                                 all_kudgivt.extend(rows);
@@ -836,14 +822,7 @@ async fn load_or_init_classifications(
 
     let mut map: HashMap<String, EventClass> = HashMap::new();
     for (cd, cls) in &existing {
-        let ec = match cls.as_str() {
-            "drive" => EventClass::Drive,
-            "cargo" => EventClass::Cargo,
-            "work" => EventClass::Drive, // legacy fallback
-            "rest_split" => EventClass::RestSplit,
-            "break" => EventClass::Break,
-            _ => EventClass::Ignore,
-        };
+        let ec = EventClass::from_classification_str(cls.as_str());
         map.insert(cd.clone(), ec);
     }
 
@@ -867,17 +846,7 @@ async fn load_or_init_classifications(
     Ok(map)
 }
 
-pub fn default_classification(event_cd: &str) -> (&'static str, EventClass) {
-    match event_cd {
-        "201" => ("drive", EventClass::Drive),          // 走行(運転)
-        "202" => ("cargo", EventClass::Cargo),          // 積み
-        "203" => ("cargo", EventClass::Cargo),          // 降し
-        "204" => ("cargo", EventClass::Cargo),          // その他 → 荷役
-        "302" => ("rest_split", EventClass::RestSplit), // 休息
-        "301" => ("break", EventClass::Break),          // 休憩
-        _ => ("ignore", EventClass::Ignore),            // その他は無視
-    }
-}
+pub use alc_csv_parser::work_segments::default_classification;
 
 pub fn internal_err(e: impl std::fmt::Display) -> (StatusCode, String) {
     tracing::error!("internal error: {e}");
@@ -900,51 +869,6 @@ pub fn tenant_fk_or_internal_err(e: sqlx::Error, tenant_id: Uuid) -> (StatusCode
         return (StatusCode::BAD_REQUEST, msg);
     }
     internal_err(e)
-}
-
-/// `update_has_kudgivt` に渡した `requested` のうち、実際に更新された集合 `matched`
-/// に無いものを求める。`matched` は `unko_no` の**集合**なので、1 つの `unko_no` が
-/// 運転手/副運転手で複数行 DB 更新されても (`UNIQUE(tenant_id, unko_no, crew_role)`)
-/// ここでは 1 件に畳まれる — 件数 (rows_affected) 比較だと誤検知するのはこのため
-/// (Refs ohishi-exp/rust-ichibanboshi#205 の 31)。
-fn find_unmatched_kudgivt_unko_nos<'a>(
-    requested: &'a [String],
-    matched: &std::collections::HashSet<String>,
-) -> Vec<&'a str> {
-    requested
-        .iter()
-        .filter(|u| !matched.contains(u.as_str()))
-        .map(|u| u.as_str())
-        .collect()
-}
-
-#[cfg(test)]
-mod has_kudgivt_matching_tests {
-    use super::find_unmatched_kudgivt_unko_nos;
-    use std::collections::HashSet;
-
-    /// crew_role 1 (運転手) / 2 (副運転手) で同じ unko_no が 2 行 UPDATE されても
-    /// (RETURNING が 2 行返る想定)、集合比較なら誤検知しない。これが今回の本題:
-    /// 件数比較 (rows_affected) に戻すとこのケースで再び誤検知する。
-    #[test]
-    fn duplicate_rows_for_same_unko_no_do_not_produce_false_positive() {
-        let requested = vec!["1001".to_string(), "1002".to_string(), "1003".to_string()];
-        let matched: HashSet<String> = ["1001", "1001", "1002", "1003"]
-            .into_iter()
-            .map(String::from)
-            .collect();
-        assert!(find_unmatched_kudgivt_unko_nos(&requested, &matched).is_empty());
-    }
-
-    #[test]
-    fn missing_unko_no_is_reported() {
-        let requested = vec!["1001".to_string(), "1002".to_string(), "1003".to_string()];
-        let matched: HashSet<String> = ["1001", "1003"].into_iter().map(String::from).collect();
-        assert_eq!(
-            find_unmatched_kudgivt_unko_nos(&requested, &matched),
-            vec!["1002"]
-        );
-    }
 }
 
 /// 年月から月初・月末を計算 (month==12 の年跨ぎ対応)
@@ -1134,7 +1058,7 @@ pub(crate) async fn split_csv_from_r2(
         // unko_no は突合キーのずれ (R2 側は trim しない生文字列、DB 側は trim 済み) を
         // 疑う材料としてそのまま warn に出す (正規化はまだしない、Refs
         // ohishi-exp/rust-ichibanboshi#205 の 31)。
-        let missing = find_unmatched_kudgivt_unko_nos(&kudgivt_unko_nos, &matched);
+        let missing = alc_csv_parser::find_unmatched_kudgivt_unko_nos(&kudgivt_unko_nos, &matched);
         if !missing.is_empty() {
             let sample: Vec<&str> = missing.iter().take(5).copied().collect();
             tracing::warn!("has_kudgivt not applied: {} unko_no(s)", missing.len());
