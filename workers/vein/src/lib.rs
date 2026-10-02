@@ -36,14 +36,18 @@ pub use crate::vein_db::VeinDb;
 
 /// `internal` (tenant ヘッダーを要求しない口、[`db_role`]) は**素にだけ** merge し、`/api` の nest には
 /// 出さない (auth-worker の proxy が転送する `/api/vein/…` から届かないようにするため)。
+///
+/// **`internal` は `vein` より先に merge する。** axum の `merge` は fallback を後から merge した側の
+/// もので置き換えるので、後に置くと、どの route にも当たらない path の fallback から tenant の layer が
+/// 外れる (ヘッダー無しの未定義の path が 401 でなく 404 になる)。
 fn router(state: VeinState, internal: Router) -> Router {
     let vein = tenant_router()
         .layer(middleware::from_fn(require_tenant_header))
         .with_state(state);
     Router::new()
+        .merge(internal)
         .merge(vein.clone())
         .nest("/api", vein)
-        .merge(internal)
 }
 
 fn error_response(status: StatusCode, code: &str) -> Response<Body> {

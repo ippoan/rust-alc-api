@@ -69,12 +69,18 @@ FORCE ROW LEVEL SECURITY の無いものがあり、表の所有者で繋ぐと 
   { "current_user": "alc_api_rt", "is_runtime_role": true }
   ```
 
-  `is_runtime_role` は `current_user` が `alc_api_rt` と一致するか。失敗 (問い合わせのエラー) は 500
-  `{"error":"internal_error"}`。接続文字列・ホスト・DB 名・版・エラーの詳細は、応答にもログにも出さない
+  `is_runtime_role` は `current_user` が `alc_api_rt` と一致するか。接続文字列・ホスト・DB 名・版は返さない
+- **失敗**: 問い合わせ (`SELECT current_user`) のエラーは 500 `{"error":"internal_error"}` で、DB のエラー文は
+  応答にもログにも出さない (ログは固定の 1 行だけ)。**接続の失敗はこの口より手前**で、ほかの口と同じく
+  `fetch` が扱う — 応答は 500 `{"error":"internal_error"}` か 503 `{"error":"database_not_configured"}`、
+  原因は今までどおり `fetch` が Workers のログに出す
 - **`/api` の外・tenant ヘッダーの layer の外に置く** (`src/lib.rs` の `router` で素にだけ merge する)。
   auth-worker の proxy がブラウザ・端末から vein に転送するのは `/api/vein` で始まる path だけなので、
   `/internal/db-role` には proxy からは届かず、auth-worker のコードが binding で直接呼んだときだけ届く。
-  `/api/internal/db-role` は 404。**path を `/api/…` や `/vein/…` に変えないこと**
+  `/api/internal/db-role` に route は無く、ほかの未定義の path と同じ扱い (tenant ヘッダー無しは 401、
+  有りは 404)。**path を `/api/…` や `/vein/…` に変えないこと**
+- `router` では **この口の Router を alc-vein の Router より先に merge する** (axum の `merge` は fallback を
+  後から merge した側で置き換える。後に置くと、未定義の path の fallback から tenant の layer が外れる)
 - staging は workers.dev が Access 配下で開いているので、Access を通る者はこの口を呼べる
   (返るのは staging の設定に直書きのロール名だけ)
 
