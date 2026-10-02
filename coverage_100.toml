@@ -256,6 +256,10 @@ type = "mock"
 path = "crates/alc-compare/src/lib.rs"
 type = "combined"
 
+[[files]]
+path = "crates/alc-compare/src/upload_daily.rs"
+type = "unit"
+
 # --- alc-pdf ---
 
 [[files]]

@@ -17,7 +17,6 @@ use crate::{
 };
 
 /// フェリーデータ（合計分 + 各エントリの開始時刻）
-#[derive(Debug, Clone)]
 pub struct FerryData {
     pub total_minutes: i32,
     pub start_times: Vec<NaiveDateTime>,
@@ -269,4 +268,572 @@ pub fn compute_daily_hours(
     }
 
     day_map
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{dt, make_kudgivt, make_kudguri};
+    use chrono::NaiveTime;
+
+    /// 既定の分類 (201 運転 / 202〜204 荷役 / 302 休息 / 301 休憩)。
+    fn cls() -> HashMap<String, EventClass> {
+        ["201", "202", "203", "204", "302", "301"]
+            .into_iter()
+            .map(|cd| {
+                let class = alc_csv_parser::work_segments::default_classification(cd).1;
+                (cd.to_string(), class)
+            })
+            .collect()
+    }
+
+    /// 出力を key の順に並べる (HashMap の順に依らずに比べるため)。
+    fn sorted(map: HashMap<DayKey, DailyHours>) -> Vec<(DayKey, DailyHours)> {
+        let mut entries: Vec<_> = map.into_iter().collect();
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        entries
+    }
+
+    /// 乗務員CD を指定した KUDGIVT の 1 行 (`make_kudgivt` は乗務員CD が固定のため)。
+    fn evt(unko: &str, driver: &str, start: NaiveDateTime, cd: &str, dur: i32) -> KudgivtRow {
+        let mut e = make_kudgivt(unko, start, cd, dur);
+        e.driver_cd = driver.into();
+        e
+    }
+
+    /// 日エントリの key (乗務員CD, 2026-03-`day`, `hour`:00:00)。
+    fn key(driver: &str, day: u32, hour: u32) -> DayKey {
+        let date = NaiveDate::from_ymd_opt(2026, 3, day).unwrap();
+        (
+            driver.to_string(),
+            date,
+            NaiveTime::from_hms_opt(hour, 0, 0).unwrap(),
+        )
+    }
+
+    /// 2026-03-`day` の `hour`:`min`:00。
+    fn at(day: u32, hour: u32, min: u32) -> NaiveDateTime {
+        dt(2026, 3, day, hour, min, 0)
+    }
+
+    /// フェリー 1 回 (開始〜終了) を 1 運行に付ける。
+    fn ferry(unko: &str, start: NaiveDateTime, end: NaiveDateTime) -> HashMap<String, FerryData> {
+        let data = FerryData {
+            total_minutes: (end - start).num_minutes() as i32,
+            start_times: vec![start],
+            periods: vec![(start, end)],
+        };
+        HashMap::from([(unko.to_string(), data)])
+    }
+
+    fn no_ferry() -> HashMap<String, FerryData> {
+        HashMap::new()
+    }
+
+    #[test]
+    fn test_single_operation_single_day() {
+        test_group!("日別の集計 (アップロード)");
+        test_case!("1 運行 1 日: 運転・休憩・荷役・運転", {
+            let mut op = make_kudguri("T1", "D01", at(2, 8, 0), at(2, 17, 0));
+            op.total_distance = Some(123.5);
+            let events = vec![
+                evt("T1", "D01", at(2, 8, 0), "201", 240),
+                evt("T1", "D01", at(2, 12, 0), "301", 60),
+                evt("T1", "D01", at(2, 13, 0), "202", 60),
+                evt("T1", "D01", at(2, 14, 0), "201", 180),
+            ];
+            let got = sorted(compute_daily_hours(&[op], &events, &cls(), &no_ferry()));
+            let segment = DailySegment {
+                unko_no: "T1".into(),
+                segment_index: 0,
+                start_at: at(2, 8, 0),
+                end_at: at(2, 17, 0),
+                work_minutes: 540,
+                labor_minutes: 480,
+                late_night_minutes: 0,
+                drive_minutes: 420,
+                cargo_minutes: 60,
+            };
+            let hours = DailyHours {
+                total_work_minutes: 540,
+                total_labor_minutes: 480,
+                late_night_minutes: 0,
+                drive_minutes: 420,
+                cargo_minutes: 60,
+                total_distance: 123.5,
+                operation_count: 1,
+                unko_nos: vec!["T1".into()],
+                segments: vec![segment],
+                rest_event_minutes: 0,
+                overlap_drive_minutes: 0,
+                overlap_cargo_minutes: 0,
+                overlap_break_minutes: 0,
+                overlap_restraint_minutes: 0,
+                ot_late_night_minutes: 0,
+            };
+            assert_eq!(got, vec![(key("D01", 2, 8), hours)]);
+        });
+    }
+
+    #[test]
+    fn test_overnight_operation_splits_at_midnight() {
+        test_group!("日別の集計 (アップロード)");
+        test_case!(
+            "日またぎ: 日エントリは 1 つ、セグメントは 0 時で 2 つ。運転は長さの比で按分",
+            {
+                let op = make_kudguri("T2", "D01", at(2, 20, 0), at(3, 6, 0));
+                let events = vec![
+                    evt("T2", "D01", at(2, 20, 0), "201", 300),
+                    evt("T2", "D01", at(3, 1, 0), "301", 60),
+                    evt("T2", "D01", at(3, 2, 0), "201", 240),
+                ];
+                let got = sorted(compute_daily_hours(&[op], &events, &cls(), &no_ferry()));
+                let before_midnight = DailySegment {
+                    unko_no: "T2".into(),
+                    segment_index: 0,
+                    start_at: at(2, 20, 0),
+                    end_at: at(3, 0, 0),
+                    work_minutes: 240,
+                    labor_minutes: 216,
+                    late_night_minutes: 120,
+                    drive_minutes: 216,
+                    cargo_minutes: 0,
+                };
+                let after_midnight = DailySegment {
+                    unko_no: "T2".into(),
+                    segment_index: 1,
+                    start_at: at(3, 0, 0),
+                    end_at: at(3, 6, 0),
+                    work_minutes: 360,
+                    labor_minutes: 324,
+                    late_night_minutes: 300,
+                    drive_minutes: 324,
+                    cargo_minutes: 0,
+                };
+                let hours = DailyHours {
+                    total_work_minutes: 600,
+                    total_labor_minutes: 540,
+                    late_night_minutes: 360,
+                    drive_minutes: 540,
+                    cargo_minutes: 0,
+                    total_distance: 0.0,
+                    operation_count: 1,
+                    unko_nos: vec!["T2".into()],
+                    segments: vec![before_midnight, after_midnight],
+                    rest_event_minutes: 0,
+                    overlap_drive_minutes: 0,
+                    overlap_cargo_minutes: 0,
+                    overlap_break_minutes: 0,
+                    overlap_restraint_minutes: 0,
+                    ot_late_night_minutes: 0,
+                };
+                assert_eq!(got, vec![(key("D01", 2, 20), hours)]);
+            }
+        );
+    }
+
+    #[test]
+    fn test_two_operations_join_into_one_day() {
+        test_group!("日別の集計 (アップロード)");
+        test_case!(
+            "同じ乗務員・同じ日の 2 運行は 1 つの日エントリ。距離は運行の合計",
+            {
+                let mut first = make_kudguri("T3", "D01", at(2, 8, 0), at(2, 12, 0));
+                first.total_distance = Some(10.0);
+                let mut second = make_kudguri("T4", "D01", at(2, 13, 0), at(2, 17, 0));
+                second.total_distance = Some(20.25);
+                let events = vec![
+                    evt("T3", "D01", at(2, 8, 0), "201", 240),
+                    evt("T4", "D01", at(2, 13, 0), "201", 200),
+                    evt("T4", "D01", at(2, 16, 20), "203", 40),
+                ];
+                let got = sorted(compute_daily_hours(
+                    &[first, second],
+                    &events,
+                    &cls(),
+                    &no_ferry(),
+                ));
+                // セグメントの運転・荷役は、日の合計 (440・40) を長さの比 (240:240) で分ける
+                let morning = DailySegment {
+                    unko_no: "T3".into(),
+                    segment_index: 0,
+                    start_at: at(2, 8, 0),
+                    end_at: at(2, 12, 0),
+                    work_minutes: 240,
+                    labor_minutes: 240,
+                    late_night_minutes: 0,
+                    drive_minutes: 220,
+                    cargo_minutes: 20,
+                };
+                let afternoon = DailySegment {
+                    unko_no: "T4".into(),
+                    segment_index: 0,
+                    start_at: at(2, 13, 0),
+                    end_at: at(2, 17, 0),
+                    work_minutes: 240,
+                    labor_minutes: 240,
+                    late_night_minutes: 0,
+                    drive_minutes: 220,
+                    cargo_minutes: 20,
+                };
+                let hours = DailyHours {
+                    total_work_minutes: 540,
+                    total_labor_minutes: 480,
+                    late_night_minutes: 0,
+                    drive_minutes: 440,
+                    cargo_minutes: 40,
+                    total_distance: 30.25,
+                    operation_count: 2,
+                    unko_nos: vec!["T3".into(), "T4".into()],
+                    segments: vec![morning, afternoon],
+                    rest_event_minutes: 0,
+                    overlap_drive_minutes: 0,
+                    overlap_cargo_minutes: 0,
+                    overlap_break_minutes: 0,
+                    overlap_restraint_minutes: 0,
+                    ot_late_night_minutes: 0,
+                };
+                assert_eq!(got, vec![(key("D01", 2, 8), hours)]);
+            }
+        );
+    }
+
+    #[test]
+    fn test_two_crew_members_get_separate_entries() {
+        test_group!("日別の集計 (アップロード)");
+        test_case!(
+            "2 人乗務: 乗務員ごとに日エントリ (イベントは運行NO で束ねるので、同じ値になる)",
+            {
+                let driver = make_kudguri("T5", "D01", at(2, 8, 0), at(2, 16, 0));
+                let mut helper = make_kudguri("T5", "D02", at(2, 8, 0), at(2, 16, 0));
+                helper.crew_role = 2;
+                let mut helper_event = evt("T5", "D02", at(2, 12, 0), "201", 240);
+                helper_event.crew_role = 2;
+                let events = vec![evt("T5", "D01", at(2, 8, 0), "201", 240), helper_event];
+                let got = sorted(compute_daily_hours(
+                    &[driver, helper],
+                    &events,
+                    &cls(),
+                    &no_ferry(),
+                ));
+                let segment = DailySegment {
+                    unko_no: "T5".into(),
+                    segment_index: 0,
+                    start_at: at(2, 8, 0),
+                    end_at: at(2, 16, 0),
+                    work_minutes: 480,
+                    labor_minutes: 480,
+                    late_night_minutes: 0,
+                    drive_minutes: 480,
+                    cargo_minutes: 0,
+                };
+                let hours = DailyHours {
+                    total_work_minutes: 480,
+                    total_labor_minutes: 480,
+                    late_night_minutes: 0,
+                    drive_minutes: 480,
+                    cargo_minutes: 0,
+                    total_distance: 0.0,
+                    operation_count: 1,
+                    unko_nos: vec!["T5".into()],
+                    segments: vec![segment],
+                    rest_event_minutes: 0,
+                    overlap_drive_minutes: 0,
+                    overlap_cargo_minutes: 0,
+                    overlap_break_minutes: 0,
+                    overlap_restraint_minutes: 0,
+                    ot_late_night_minutes: 0,
+                };
+                let want = vec![(key("D01", 2, 8), hours.clone()), (key("D02", 2, 8), hours)];
+                assert_eq!(got, want);
+            }
+        );
+    }
+
+    #[test]
+    fn test_rest_split_makes_two_days_and_counts_rest_minutes() {
+        test_group!("日別の集計 (アップロード)");
+        test_case!("休息 (302) で日エントリが分かれる。休息の分数は始業の日に付き、長さ 0 の休息は数えない", {
+            let op = make_kudguri("T6", "D01", at(2, 6, 0), at(3, 12, 0));
+            let events = vec![
+                evt("T6", "D01", at(2, 6, 0), "201", 480),
+                evt("T6", "D01", at(2, 14, 0), "302", 600),
+                evt("T6", "D01", at(3, 0, 0), "302", 0),
+                evt("T6", "D01", at(3, 0, 0), "201", 720),
+            ];
+            let got = sorted(compute_daily_hours(&[op], &events, &cls(), &no_ferry()));
+            let first_segment = DailySegment {
+                unko_no: "T6".into(),
+                segment_index: 0,
+                start_at: at(2, 6, 0),
+                end_at: at(2, 14, 0),
+                work_minutes: 480,
+                labor_minutes: 480,
+                late_night_minutes: 0,
+                drive_minutes: 480,
+                cargo_minutes: 0,
+            };
+            let first = DailyHours {
+                total_work_minutes: 480,
+                total_labor_minutes: 480,
+                late_night_minutes: 0,
+                drive_minutes: 480,
+                cargo_minutes: 0,
+                total_distance: 0.0,
+                operation_count: 1,
+                unko_nos: vec!["T6".into()],
+                segments: vec![first_segment],
+                rest_event_minutes: 600,
+                overlap_drive_minutes: 360,
+                overlap_cargo_minutes: 0,
+                overlap_break_minutes: 0,
+                overlap_restraint_minutes: 360,
+                ot_late_night_minutes: 0,
+            };
+            let second_segment = DailySegment {
+                unko_no: "T6".into(),
+                segment_index: 0,
+                start_at: at(3, 0, 0),
+                end_at: at(3, 12, 0),
+                work_minutes: 720,
+                labor_minutes: 720,
+                late_night_minutes: 300,
+                drive_minutes: 720,
+                cargo_minutes: 0,
+            };
+            let second = DailyHours {
+                total_work_minutes: 720,
+                total_labor_minutes: 720,
+                late_night_minutes: 300,
+                drive_minutes: 720,
+                cargo_minutes: 0,
+                total_distance: 0.0,
+                operation_count: 1,
+                unko_nos: vec!["T6".into()],
+                segments: vec![second_segment],
+                rest_event_minutes: 0,
+                overlap_drive_minutes: 0,
+                overlap_cargo_minutes: 0,
+                overlap_break_minutes: 0,
+                overlap_restraint_minutes: 0,
+                ot_late_night_minutes: 0,
+            };
+            assert_eq!(got, vec![(key("D01", 2, 6), first), (key("D01", 3, 0), second)]);
+        });
+    }
+
+    /// フェリーの場面の共通の形: 8:00〜18:00 の 1 運行 (セグメントは 600 分のまま)。
+    fn ferry_day(labor: i32) -> Vec<(DayKey, DailyHours)> {
+        let segment = DailySegment {
+            unko_no: "T7".into(),
+            segment_index: 0,
+            start_at: at(2, 8, 0),
+            end_at: at(2, 18, 0),
+            work_minutes: 600,
+            labor_minutes: labor,
+            late_night_minutes: 0,
+            drive_minutes: labor,
+            cargo_minutes: 0,
+        };
+        let hours = DailyHours {
+            total_work_minutes: labor,
+            total_labor_minutes: labor,
+            late_night_minutes: 0,
+            drive_minutes: labor,
+            cargo_minutes: 0,
+            total_distance: 0.0,
+            operation_count: 1,
+            unko_nos: vec!["T7".into()],
+            segments: vec![segment],
+            rest_event_minutes: 0,
+            overlap_drive_minutes: 0,
+            overlap_cargo_minutes: 0,
+            overlap_break_minutes: 0,
+            overlap_restraint_minutes: 0,
+            ot_late_night_minutes: 0,
+        };
+        vec![(key("D01", 2, 8), hours)]
+    }
+
+    #[test]
+    fn test_ferry_minutes_are_deducted() {
+        test_group!("日別の集計 (アップロード)");
+        let op = make_kudguri("T7", "D01", at(2, 8, 0), at(2, 18, 0));
+        // フェリーは 11:05〜12:55 (110 分)
+        let on_board = ferry("T7", at(2, 11, 5), at(2, 12, 55));
+        test_case!(
+            "フェリーの開始に最寄りの休憩 (301) が在る",
+            {
+                let events = vec![
+                    evt("T7", "D01", at(2, 8, 0), "201", 180),
+                    evt("T7", "D01", at(2, 11, 0), "301", 120),
+                    evt("T7", "D01", at(2, 13, 0), "201", 300),
+                ];
+                let got = sorted(compute_daily_hours(
+                    &[op.clone()],
+                    &events,
+                    &cls(),
+                    &on_board,
+                ));
+                assert_eq!(got, ferry_day(480));
+            }
+        );
+        test_case!(
+            "休憩が無い (運転だけ) → フェリーの 110 分を引く",
+            {
+                let events = vec![evt("T7", "D01", at(2, 8, 0), "201", 600)];
+                let got = sorted(compute_daily_hours(
+                    &[op.clone()],
+                    &events,
+                    &cls(),
+                    &on_board,
+                ));
+                assert_eq!(got, ferry_day(490));
+            }
+        );
+        test_case!(
+            "フェリーの運行に KUDGIVT が 1 行も無い → 0 分のまま (負にしない)",
+            {
+                let got = sorted(compute_daily_hours(&[op.clone()], &[], &cls(), &on_board));
+                assert_eq!(got, ferry_day(0));
+            }
+        );
+    }
+
+    #[test]
+    fn test_segment_outside_departure_return_falls_back_to_first_unko() {
+        test_group!("日別の集計 (アップロード)");
+        test_case!(
+            "セグメントが運行の出発〜帰着に収まらない → 日エントリの最初の運行NO に付ける",
+            {
+                // 帰着は 12:00 だが、イベントは 7:00 から 480 分 (15:00 まで) 在る
+                let op = make_kudguri("T8", "D01", at(2, 8, 0), at(2, 12, 0));
+                let events = vec![evt("T8", "D01", at(2, 7, 0), "201", 480)];
+                let got = sorted(compute_daily_hours(&[op], &events, &cls(), &no_ferry()));
+                let inside = DailySegment {
+                    unko_no: "T8".into(),
+                    segment_index: 0,
+                    start_at: at(2, 8, 0),
+                    end_at: at(2, 12, 0),
+                    work_minutes: 240,
+                    labor_minutes: 274,
+                    late_night_minutes: 0,
+                    drive_minutes: 274,
+                    cargo_minutes: 0,
+                };
+                // 12:00〜15:00 は帰着より後 = どの運行の出発〜帰着にも収まらない
+                let outside = DailySegment {
+                    unko_no: "T8".into(),
+                    segment_index: 1,
+                    start_at: at(2, 12, 0),
+                    end_at: at(2, 15, 0),
+                    work_minutes: 180,
+                    labor_minutes: 206,
+                    late_night_minutes: 0,
+                    drive_minutes: 206,
+                    cargo_minutes: 0,
+                };
+                let hours = DailyHours {
+                    total_work_minutes: 480,
+                    total_labor_minutes: 480,
+                    late_night_minutes: 0,
+                    drive_minutes: 480,
+                    cargo_minutes: 0,
+                    total_distance: 0.0,
+                    operation_count: 1,
+                    unko_nos: vec!["T8".into()],
+                    segments: vec![inside, outside],
+                    rest_event_minutes: 0,
+                    overlap_drive_minutes: 0,
+                    overlap_cargo_minutes: 0,
+                    overlap_break_minutes: 0,
+                    overlap_restraint_minutes: 0,
+                    ot_late_night_minutes: 0,
+                };
+                assert_eq!(got, vec![(key("D01", 2, 8), hours)]);
+            }
+        );
+        test_case!(
+            "帰着の時刻が無い運行 → セグメントは無く、日エントリの開始は 0 時",
+            {
+                let mut op = make_kudguri("T9", "D01", at(2, 8, 0), at(2, 17, 0));
+                op.return_at = None;
+                let events = vec![evt("T9", "D01", at(2, 8, 0), "201", 300)];
+                let got = sorted(compute_daily_hours(&[op], &events, &cls(), &no_ferry()));
+                let hours = DailyHours {
+                    total_work_minutes: 300,
+                    total_labor_minutes: 300,
+                    late_night_minutes: 0,
+                    drive_minutes: 300,
+                    cargo_minutes: 0,
+                    total_distance: 0.0,
+                    operation_count: 1,
+                    unko_nos: vec!["T9".into()],
+                    segments: vec![],
+                    rest_event_minutes: 0,
+                    overlap_drive_minutes: 0,
+                    overlap_cargo_minutes: 0,
+                    overlap_break_minutes: 0,
+                    overlap_restraint_minutes: 0,
+                    ot_late_night_minutes: 0,
+                };
+                assert_eq!(got, vec![(key("D01", 2, 0), hours)]);
+            }
+        );
+    }
+
+    #[test]
+    fn test_no_operations_yields_no_entries() {
+        test_group!("日別の集計 (アップロード)");
+        test_case!("運行が無ければ日エントリも無い", {
+            let got = compute_daily_hours(&[], &[], &cls(), &no_ferry());
+            assert!(got.is_empty());
+        });
+    }
+
+    #[test]
+    fn test_saved_values() {
+        test_group!("日別の集計 (アップロード)");
+        let hours = |late_night: i32, ot_late_night: i32| DailyHours {
+            total_work_minutes: 600,
+            total_labor_minutes: 480,
+            late_night_minutes: late_night,
+            drive_minutes: 420,
+            cargo_minutes: 60,
+            total_distance: 0.0,
+            operation_count: 1,
+            unko_nos: vec![],
+            segments: vec![],
+            rest_event_minutes: 0,
+            overlap_drive_minutes: 0,
+            overlap_cargo_minutes: 0,
+            overlap_break_minutes: 0,
+            overlap_restraint_minutes: 0,
+            ot_late_night_minutes: ot_late_night,
+        };
+        test_case!(
+            "保存する total_drive_minutes は労働の合計 (運転 + 荷役)",
+            {
+                assert_eq!(hours(0, 0).saved_total_drive_minutes(), 480);
+            }
+        );
+        test_case!(
+            "保存する late_night_minutes は時間外の深夜を引いた値 (負にしない)",
+            {
+                assert_eq!(hours(100, 30).saved_late_night_minutes(), 70);
+                assert_eq!(hours(30, 30).saved_late_night_minutes(), 0);
+                assert_eq!(hours(10, 30).saved_late_night_minutes(), 0);
+            }
+        );
+        test_case!(
+            "型は Debug で出せる (テストの失敗時の表示用)",
+            {
+                let shown = format!("{:?}", hours(1, 2));
+                assert!(shown.starts_with("DailyHours { total_work_minutes: 600"));
+                let segment = ferry_day(1).remove(0).1.segments.remove(0);
+                assert!(format!("{segment:?}").starts_with("DailySegment { unko_no: \"T7\""));
+                assert_eq!(segment.clone(), segment);
+            }
+        );
+    }
 }

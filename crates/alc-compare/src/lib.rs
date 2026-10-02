@@ -2313,19 +2313,20 @@ fn build_csv_driver_data(
     result
 }
 
+/// テストの helper (`mod tests` と `upload_daily` のテストが共用する)。
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use chrono::NaiveDate;
+pub(crate) mod test_support {
+    use super::csv_parser;
+    use chrono::{NaiveDate, NaiveDateTime};
 
-    fn dt(y: i32, m: u32, d: u32, h: u32, mi: u32, s: u32) -> NaiveDateTime {
+    pub(crate) fn dt(y: i32, m: u32, d: u32, h: u32, mi: u32, s: u32) -> NaiveDateTime {
         NaiveDate::from_ymd_opt(y, m, d)
             .unwrap()
             .and_hms_opt(h, mi, s)
             .unwrap()
     }
 
-    fn make_kudguri(
+    pub(crate) fn make_kudguri(
         unko_no: &str,
         driver_cd: &str,
         dep: NaiveDateTime,
@@ -2358,6 +2359,34 @@ mod tests {
             raw_data: serde_json::Value::Null,
         }
     }
+
+    pub(crate) fn make_kudgivt(
+        unko_no: &str,
+        start: NaiveDateTime,
+        event_cd: &str,
+        dur: i32,
+    ) -> csv_parser::kudgivt::KudgivtRow {
+        csv_parser::kudgivt::KudgivtRow {
+            unko_no: unko_no.into(),
+            reading_date: start.date(),
+            driver_cd: "1001".into(),
+            driver_name: "Test".into(),
+            crew_role: 1,
+            start_at: start,
+            end_at: Some(start + chrono::Duration::minutes(dur as i64)),
+            event_cd: event_cd.into(),
+            event_name: "".into(),
+            duration_minutes: Some(dur),
+            section_distance: None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::test_support::{dt, make_kudgivt, make_kudguri};
+    use super::*;
+    use chrono::NaiveDate;
 
     fn make_csv_day(date: &str, start: &str, end: &str, drive: &str, subtotal: &str) -> CsvDayRow {
         CsvDayRow {
@@ -4105,27 +4134,6 @@ U002,x,x,x,x,x,x,x,x,x,2026/02/02 22:00:00,2026/02/03 06:00:00\n";
     }
 
     // ---- ferry_break_overlap ----
-    fn make_kudgivt(
-        unko_no: &str,
-        start: NaiveDateTime,
-        event_cd: &str,
-        dur: i32,
-    ) -> csv_parser::kudgivt::KudgivtRow {
-        csv_parser::kudgivt::KudgivtRow {
-            unko_no: unko_no.into(),
-            reading_date: start.date(),
-            driver_cd: "1001".into(),
-            driver_name: "Test".into(),
-            crew_role: 1,
-            start_at: start,
-            end_at: Some(start + chrono::Duration::minutes(dur as i64)),
-            event_cd: event_cd.into(),
-            event_name: "".into(),
-            duration_minutes: Some(dur),
-            section_distance: None,
-        }
-    }
-
     #[test]
     fn test_ferry_break_overlap_with_301() {
         test_group!("比較ロジック");
