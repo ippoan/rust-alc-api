@@ -505,62 +505,6 @@ pub fn setup_mock_maintenance_state() -> alc_maintenance::MaintenanceState {
     }
 }
 
-/// 指静脈の mock repo (Refs ippoan/vein-match#20)。mock テストは vein の口を叩かないので、
-/// 空の一覧・乗務員なし・書き戻しなしを返すだけ (口の挙動は alc-vein の単体テストと
-/// tests/vein_templates_test.rs が見る)。
-pub struct MockVeinTemplatesRepository;
-
-#[async_trait]
-impl alc_vein::repo::VeinTemplatesRepository for MockVeinTemplatesRepository {
-    async fn upsert(
-        &self,
-        _tenant_id: Uuid,
-        _employee_id: Uuid,
-        _template: &str,
-    ) -> Result<Option<chrono::DateTime<chrono::Utc>>, alc_core_wasm::DbError> {
-        Ok(None)
-    }
-
-    async fn list(
-        &self,
-        _tenant_id: Uuid,
-    ) -> Result<Vec<alc_vein::repo::VeinTemplateRow>, alc_core_wasm::DbError> {
-        Ok(vec![])
-    }
-
-    async fn registration_count(
-        &self,
-        _tenant_id: Uuid,
-        _employee_id: Uuid,
-    ) -> Result<(i64, bool), alc_core_wasm::DbError> {
-        Ok((0, false))
-    }
-
-    async fn update_learned(
-        &self,
-        _tenant_id: Uuid,
-        _id: Uuid,
-        _template: &str,
-        _read_updated_at: chrono::DateTime<chrono::Utc>,
-    ) -> Result<bool, alc_core_wasm::DbError> {
-        Ok(false)
-    }
-
-    async fn delete(
-        &self,
-        _tenant_id: Uuid,
-        _employee_id: Uuid,
-    ) -> Result<bool, alc_core_wasm::DbError> {
-        Ok(false)
-    }
-}
-
-pub fn setup_mock_vein_state() -> alc_vein::VeinState {
-    alc_vein::VeinState {
-        templates: Arc::new(MockVeinTemplatesRepository),
-    }
-}
-
 /// camera ドメインの mock CameraState (Refs #556)。差し替えたい field を上書き
 /// してから `spawn_mock_server_with_camera` に渡す。
 pub fn setup_mock_camera_state() -> alc_camera::CameraState {
@@ -665,7 +609,6 @@ pub async fn spawn_mock_server(state: AppState) -> String {
         setup_mock_trouble_state(),
         setup_mock_camera_state(),
         setup_mock_maintenance_state(),
-        setup_mock_vein_state(),
     )
     .await
 }
@@ -681,7 +624,6 @@ pub async fn spawn_mock_server_with_tenko(
         setup_mock_trouble_state(),
         setup_mock_camera_state(),
         setup_mock_maintenance_state(),
-        setup_mock_vein_state(),
     )
     .await
 }
@@ -697,7 +639,6 @@ pub async fn spawn_mock_server_with_trouble(
         trouble_state,
         setup_mock_camera_state(),
         setup_mock_maintenance_state(),
-        setup_mock_vein_state(),
     )
     .await
 }
@@ -713,7 +654,6 @@ pub async fn spawn_mock_server_with_camera(
         setup_mock_trouble_state(),
         camera_state,
         setup_mock_maintenance_state(),
-        setup_mock_vein_state(),
     )
     .await
 }
@@ -729,7 +669,6 @@ pub async fn spawn_mock_server_with_maintenance(
         setup_mock_trouble_state(),
         setup_mock_camera_state(),
         maintenance_state,
-        setup_mock_vein_state(),
     )
     .await
 }
