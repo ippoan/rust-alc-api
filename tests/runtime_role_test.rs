@@ -861,6 +861,42 @@ async fn rls_check_passes_for_runtime_role() {
     }
     assert_eq!(body["invariants"]["violation_count"], 0, "{body}");
     assert_eq!(body["invariants"]["violations"], json!([]));
+
+    // 違反が無くても、流した検査 6 つが番号 0〜5 の順に 0 件で並ぶ
+    let checks = body["invariants"]["checks"].as_array().unwrap();
+    let numbers: Vec<i64> = checks
+        .iter()
+        .map(|c| c["check_no"].as_i64().unwrap())
+        .collect();
+    assert_eq!(numbers, [0, 1, 2, 3, 4, 5], "{body}");
+    for check in checks {
+        assert_eq!(sorted_keys(check), ["check_no", "title", "violations"]);
+        assert!(!check["title"].as_str().unwrap().is_empty());
+        assert_eq!(check["violations"], 0, "{check}");
+    }
+
+    // 状態 (カタログの実物): 最上位の key は 5 個で、組ごとの表の数の合計が表の総数と合う
+    let state = &body["state"];
+    assert!(state.is_object(), "state が取れていない: {body}");
+    assert_eq!(
+        sorted_keys(state),
+        [
+            "security_definer_functions",
+            "sequences",
+            "table_count",
+            "tables",
+            "views"
+        ]
+    );
+    let table_count = state["table_count"].as_i64().unwrap();
+    assert!(table_count > 0);
+    let grouped: i64 = state["tables"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|group| group["count"].as_i64().unwrap())
+        .sum();
+    assert_eq!(grouped, table_count);
     assert_eq!(body["migrations"]["matches_binary"], true, "{body}");
     assert!(body["migrations"]["applied"].as_i64().unwrap() > 0);
     assert_eq!(
@@ -888,7 +924,8 @@ async fn rls_check_passes_for_runtime_role() {
             "migrations",
             "ok",
             "owner_role_connected",
-            "runtime_role"
+            "runtime_role",
+            "state"
         ]
     );
     assert_eq!(
@@ -914,7 +951,7 @@ async fn rls_check_passes_for_runtime_role() {
     );
     assert_eq!(
         sorted_keys(&body["invariants"]),
-        ["violation_count", "violations"]
+        ["checks", "violation_count", "violations"]
     );
 }
 
@@ -1014,6 +1051,18 @@ async fn rls_check_reports_bypassrls_on_runtime_role() {
     for violation in violations {
         assert_eq!(sorted_keys(violation), ["check_no", "detail", "object"]);
     }
+    let checks = body["invariants"]["checks"].as_array().unwrap();
+    let check_4 = checks.iter().find(|c| c["check_no"] == 4).unwrap();
+    assert!(check_4["violations"].as_i64().unwrap() >= 1, "{body}");
+    let total: i64 = checks
+        .iter()
+        .map(|c| c["violations"].as_i64().unwrap())
+        .sum();
+    assert_eq!(total, violations.len() as i64);
+    assert!(
+        body["state"].is_object(),
+        "違反が在っても state は返る: {body}"
+    );
 
     // 戻した後は合格に戻る
     let after = ctx.rls_check_ok("").await;

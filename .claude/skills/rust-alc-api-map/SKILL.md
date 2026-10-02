@@ -103,20 +103,33 @@ router 実装として存続。旧 per-domain は同じ domain crate を単独 m
     (実行用ロール `alc_api_rt` の `pg_roles` の行。行が無ければ 500) /
     `connections[{usename, count}]` (`pg_stat_activity` の `alc_api` 系のロールごとの接続数) /
     `owner_role_connected` (表の所有者のロールが繋いでいるか) /
-    `invariants{violation_count, violations[{check_no, object, detail}]}`。
+    `invariants{violation_count, violations[{check_no, object, detail}], checks[{check_no, title, violations}]}` /
+    `state` (最上位の 7 個目)。
     `ok` = 違反 0 件 かつ 実行用ロールで繋いでいる かつ 属性 4 つが false かつ `matches_binary`
     (純関数 `is_ok`)。**`owner_role_connected` は `ok` に入れない** (migration の job の実行中は所有者ロールが一時的に繋ぐ)
+  - **`invariants.checks` と `state` は「何を検査し、DB が実際にどうだったか」を返った値で確かめる材料で、
+    `ok` はどちらも見ていない** (`state` から合否を作ると、検査が alc-migrations と backend の 2 か所に分かれる。
+    足したい合否は alc-migrations の検査 SQL に検査として足す)。`checks` は
+    `alc_migrations::RLS_INVARIANT_CHECKS` (番号と題) を順に並べ、違反の行を番号で数えたもの
+    (純関数 `build_checks`。違反が無くても毎回 6 要素。一覧に無い番号の違反は題 `(一覧に無い検査)` で
+    番号の昇順に末尾へ足す。数の合計 = `violation_count`)。`state` は `alc_migrations::RLS_STATE_QUERY`
+    (`alc_api` schema のカタログの実物を 1 行 1 列の JSON で返す 1 文) の値をそのまま入れる
+    (`serde_json::Value`。形の正本は alc-migrations の `ci/rls_state.sql` で、ここでは名指しで写さない)。
+    **`state` は取れなければ null で、主の結果を道連れにしない** (200 のまま。失敗はログに 1 行)。
+    そのために**状態の問い合わせは transaction の最後に流す** (PostgreSQL は transaction の中で文が失敗すると
+    以後の文が全部失敗する。`fetch_state` より後に問い合わせを足さない)
   - **引数を足さない**: extractor は `State` だけ (`Query` / `Path` / `Json` を書かない)。SQL・表名・テナントを受ける
     入口を作らない。query を付けても読まない
   - **transaction は `begin_read_only(pool)` からだけ取る** (`pool.begin()` → `SET TRANSACTION READ ONLY`。
-    最初の問い合わせより前に流す)。最後は rollback。固定の問い合わせ 5 つはどれも bind する値が無く、
+    最初の問い合わせより前に流す)。最後は rollback。固定の問い合わせ (主の 5 つ + 状態の 1 つ) はどれも bind する値が無く、
     `format!` で SQL を組み立てない
-  - **検査 SQL の写しを置かない**: 不変条件の検査は `alc_migrations::RLS_INVARIANTS_QUERY` をそのまま流す
-    (加工・連結しない。正本は alc-migrations の `ci/check_rls_invariants.sql`)
+  - **検査 SQL・状態の SQL の写しを置かない**: 不変条件の検査は `alc_migrations::RLS_INVARIANTS_QUERY`、
+    状態は `alc_migrations::RLS_STATE_QUERY` をそのまま流す
+    (加工・連結しない。正本は alc-migrations の `ci/check_rls_invariants.sql` / `ci/rls_state.sql`)
   - **行のデータを返さない・ログに出さない**: 返すのはカタログ由来のロール名・表名・関数名・真偽・件数だけ。
     `pg_stat_activity` から読む列は `usename` と件数だけ。失敗は 500 で、本文は固定の文言
     (`internal_error_msg`。SQL・カタログの中身を載せない)
-  - テスト: `ok` の判定と応答の key は同ファイルの unit、実 DB は `tests/runtime_role_test.rs` の `rls_check_*`
+  - テスト: `ok` の判定・`checks` の組み立て・応答の key は同ファイルの unit、実 DB は `tests/runtime_role_test.rs` の `rls_check_*`
     (新しいテストファイルは作らない = bazel の配線を増やさない)。陽性対照 (`ALTER ROLE alc_api_rt BYPASSRLS`) は
     DB 全体に効くので、同ファイルの `ROLE_ATTRS` (tokio の RwLock) を write で取り、ほかのテストは `setup()` が read で取る
 - **gateway (廃止済み、Refs #556 PR2)**: 旧 `crates/gateway` は auth + reverse proxy で
@@ -630,7 +643,7 @@ TEST_DATABASE_URL="..." cargo llvm-cov --html --open
 |---------|------|
 | `tests/common/mod.rs` | テストハーネス (DB 接続、サーバー起動、JWT 発行ヘルパー)。migration は `migrate_and_grant` に 1 本化 (`alc_migrations::MIGRATOR` の後に `alc_migrations::LOCAL_APP_GRANTS` を流す。DB を直接開くテストも必ずこれを通す) |
 | `tests/app_role_grants_test.rs` | テスト DB の `alc_api_app` の権限が本番と揃っているか (Refs #685) — `alc_api` の表のうち `has_table_privilege('alc_api_app', 表, 'SELECT')` が false のものを列挙し 0 件を assert。新しい表の GRANT 付け忘れ (過去に本番 502) を落とす。直すのは migration 側 (bazel `db-app-role-grants` shard)。**実行用ロール `alc_api_rt` (alc-migrations 158) も同じファイルで検査する**: superuser・BYPASSRLS でなく表を所有していない / schema の USAGE / `_sqlx_migrations` 以外の全表に SELECT・INSERT・UPDATE・DELETE / `_sqlx_migrations` には権限が無い / SECURITY DEFINER 関数を全部呼べる。`alc_api_rt` の権限は `scripts/local_app_grants.sql` に写さない (158 の付け漏れを検出できなくなる) |
-| `tests/runtime_role_test.rs` | 実行用ロール `alc_api_rt` で繋いだサーバで、認証前・テナント横断の経路が通ること (alc-migrations 158、Refs ippoan/alc-app#387) — 陰性 (tenant 無しで `users` を読むとエラー・別テナントを立てると 0 行・招待は 0 行) / ログイン 3 経路 (Google は招待 → 作成 → 招待の消費、LINE WORKS、LINE。それぞれ新規と既存、最後に refresh token の保存) / 招待も email_domain も無い Google は 403 / refresh token は渡した user の行だけ / 端末の登録要求 → 承認 → 承認後のポーリングで `settings_token` → `pairing-tenant` と `fcm-dismiss-test` (無効にした端末・未登録は 404) / 内部用 secret 付きの `fcm-notify-call`・`test-fcm-all-exclude`・`trigger-update-dev` / 超過検知の 1 tick (通知済みの印と配信の記録) / 参加の申請の作成 → 一覧 → 承認・却下 / 内部用の口 `GET /api/internal/rls-check` (Refs ippoan/auth-worker#605。実行用ロールで全部合格・応答の key が契約ちょうど / 認可なし・不正な Bearer は 401 / query を付けても同じ応答 / `begin_read_only` の transaction で INSERT が 25006 / `ALTER ROLE alc_api_rt BYPASSRLS` で `ok=false` と検査 4 の違反 → 戻す)。実行用ロールの属性を変えるテストは `ROLE_ATTRS` を write で取り、ほかは `setup()` が read で取る。bazel `db-runtime-role` shard |
+| `tests/runtime_role_test.rs` | 実行用ロール `alc_api_rt` で繋いだサーバで、認証前・テナント横断の経路が通ること (alc-migrations 158、Refs ippoan/alc-app#387) — 陰性 (tenant 無しで `users` を読むとエラー・別テナントを立てると 0 行・招待は 0 行) / ログイン 3 経路 (Google は招待 → 作成 → 招待の消費、LINE WORKS、LINE。それぞれ新規と既存、最後に refresh token の保存) / 招待も email_domain も無い Google は 403 / refresh token は渡した user の行だけ / 端末の登録要求 → 承認 → 承認後のポーリングで `settings_token` → `pairing-tenant` と `fcm-dismiss-test` (無効にした端末・未登録は 404) / 内部用 secret 付きの `fcm-notify-call`・`test-fcm-all-exclude`・`trigger-update-dev` / 超過検知の 1 tick (通知済みの印と配信の記録) / 参加の申請の作成 → 一覧 → 承認・却下 / 内部用の口 `GET /api/internal/rls-check` (Refs ippoan/auth-worker#605。実行用ロールで全部合格・応答の key が契約ちょうど・`invariants.checks` が番号 0〜5 の 6 要素で全部 0・`state` の最上位の key が 5 個で組ごとの表の数の合計 = `table_count` / 認可なし・不正な Bearer は 401 / query を付けても同じ応答 / `begin_read_only` の transaction で INSERT が 25006 / `ALTER ROLE alc_api_rt BYPASSRLS` で `ok=false` と検査 4 の違反 → 戻す)。実行用ロールの属性を変えるテストは `ROLE_ATTRS` を write で取り、ほかは `setup()` が read で取る。bazel `db-runtime-role` shard |
 | `tests/common/mock_storage.rs` | インメモリ StorageBackend 実装 |
 | `tests/auth_test.rs` | JWT 認証 / X-Tenant-ID / 未認証拒否 |
 | `tests/employees_test.rs` | RLS テナント分離 / キオスクモード |
