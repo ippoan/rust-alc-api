@@ -6,9 +6,11 @@ pub mod kudgivt;
 pub mod kudguri;
 pub mod work_segments;
 
+#[cfg(feature = "zip-extract")]
 use std::io::Read;
 
 /// ZIP バイト列を展開し、(ファイル名, バイト列) のリストを返す
+#[cfg(feature = "zip-extract")]
 pub fn extract_zip(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, anyhow::Error> {
     let cursor = std::io::Cursor::new(bytes);
     let mut archive = zip::ZipArchive::new(cursor)?;
@@ -54,10 +56,72 @@ pub fn csv_header(csv_text: &str) -> Option<&str> {
     csv_text.lines().next()
 }
 
+/// 分割した 1 ファイル (保存先に置く 1 object)。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SplitFile {
+    /// `{key_tenant}/unko/{unko_no}/{CSV名}`
+    pub key: String,
+    /// UTF-8。ヘッダ + '\n' + 各行 + '\n'
+    pub content: Vec<u8>,
+    pub is_kudgivt: bool,
+    pub unko_no: String,
+}
+
+/// zip の 1 エントリ (名前と Shift_JIS のバイト列) を運行NO ごとに分ける。
+/// 名前が `.csv` で終わらない (小文字化して判定) エントリは空を返す。
+///
+/// backend と分割 worker (ippoan/alc-dtako-worker) が同じこの関数を呼ぶ (同じ key・同じバイト列を出すため)。
+/// 戻りの並びは不定 (運行NO の HashMap の順)。
+pub fn split_csv_entry(key_tenant: &str, name: &str, bytes: &[u8]) -> Vec<SplitFile> {
+    if !name.to_lowercase().ends_with(".csv") {
+        return Vec::new();
+    }
+    let utf8_text = decode_shift_jis(bytes);
+    let header = csv_header(&utf8_text);
+    let grouped = group_csv_by_unko_no(&utf8_text);
+    let is_kudgivt = name.to_uppercase().contains("KUDGIVT");
+
+    let mut files = Vec::new();
+    for (unko_no, lines) in &grouped {
+        let csv_name = name
+            .rsplit('/')
+            .next()
+            .unwrap_or(name)
+            .to_uppercase()
+            .replace(".CSV", ".csv");
+        let key = format!("{}/unko/{}/{}", key_tenant, unko_no, csv_name);
+        let mut content = String::new();
+        if let Some(h) = header {
+            content.push_str(h);
+            content.push('\n');
+        }
+        for line in lines {
+            content.push_str(line);
+            content.push('\n');
+        }
+        files.push(SplitFile {
+            key,
+            content: content.into_bytes(),
+            is_kudgivt,
+            unko_no: unko_no.clone(),
+        });
+    }
+    files
+}
+
+/// 一覧をソートして `limit` 件に切り、(切った一覧, 切る前の総数) を返す (重複は除かない)。
+pub fn cap_sorted(mut list: Vec<String>, limit: usize) -> (Vec<String>, usize) {
+    list.sort();
+    let total = list.len();
+    list.truncate(limit);
+    (list, total)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    #[cfg(feature = "zip-extract")]
     #[test]
     fn test_extract_zip() {
         test_group!("CSVパーサー");
@@ -81,6 +145,7 @@ mod tests {
         });
     }
 
+    #[cfg(feature = "zip-extract")]
     #[test]
     fn test_extract_zip_invalid() {
         test_group!("CSVパーサー");
@@ -142,6 +207,211 @@ mod tests {
         test_group!("CSVパーサー");
         test_case!("空CSVのヘッダーはNone", {
             assert_eq!(csv_header(""), None);
+        });
+    }
+
+    /// Shift_JIS のバイト列にする (テストの入力用)
+    fn sjis(text: &str) -> Vec<u8> {
+        encoding_rs::SHIFT_JIS.encode(text).0.to_vec()
+    }
+
+    /// key → (content, is_kudgivt, unko_no)。並びに依らずに比べる
+    type SplitMap = std::collections::BTreeMap<String, (Vec<u8>, bool, String)>;
+
+    fn split_map(key_tenant: &str, name: &str, bytes: &[u8]) -> SplitMap {
+        let files = split_csv_entry(key_tenant, name, bytes);
+        let n = files.len();
+        let map: SplitMap = files
+            .into_iter()
+            .map(|f| (f.key, (f.content, f.is_kudgivt, f.unko_no)))
+            .collect();
+        assert_eq!(map.len(), n);
+        map
+    }
+
+    fn expect(items: &[(&str, &[u8], bool, &str)]) -> SplitMap {
+        items
+            .iter()
+            .map(|(k, c, kud, u)| (k.to_string(), (c.to_vec(), *kud, u.to_string())))
+            .collect()
+    }
+
+    #[test]
+    fn test_split_csv_entry_not_csv() {
+        test_group!("CSV分割");
+        test_case!(".csv 以外は空", {
+            assert_eq!(split_csv_entry("t", "readme.txt", b"h\n1,a\n"), vec![]);
+            assert_eq!(split_csv_entry("t", "KUDGIVT.csv.bak", b"h\n1,a\n"), vec![]);
+            assert_eq!(split_csv_entry("t", "csv", b"h\n1,a\n"), vec![]);
+        });
+    }
+
+    #[test]
+    fn test_split_csv_entry_multiple_unko_nos() {
+        test_group!("CSV分割");
+        test_case!("複数の運行NO・空行を飛ばす", {
+            let csv = b"unko,name\n1001,a\n1002,b\n\n   \n1001,c\n";
+            assert_eq!(
+                split_map("tenant-a", "KUDGURI.csv", csv),
+                expect(&[
+                    (
+                        "tenant-a/unko/1001/KUDGURI.csv",
+                        b"unko,name\n1001,a\n1001,c\n",
+                        false,
+                        "1001"
+                    ),
+                    (
+                        "tenant-a/unko/1002/KUDGURI.csv",
+                        b"unko,name\n1002,b\n",
+                        false,
+                        "1002"
+                    ),
+                ])
+            );
+        });
+    }
+
+    #[test]
+    fn test_split_csv_entry_uppercase_extension() {
+        test_group!("CSV分割");
+        test_case!(
+            "大文字の .CSV・小文字の名前は大文字化して拡張子だけ小文字",
+            {
+                assert_eq!(
+                    split_map("t", "kudgivt.CSV", b"h\n7,x\n"),
+                    expect(&[("t/unko/7/KUDGIVT.csv", b"h\n7,x\n", true, "7")])
+                );
+                assert_eq!(
+                    split_map("t", "Sokudo.Csv", b"h\n7,x\n"),
+                    expect(&[("t/unko/7/SOKUDO.csv", b"h\n7,x\n", false, "7")])
+                );
+            }
+        );
+    }
+
+    #[test]
+    fn test_split_csv_entry_directory_in_name() {
+        test_group!("CSV分割");
+        test_case!(
+            "ディレクトリ付きの名前は basename を key に使う",
+            {
+                assert_eq!(
+                    split_map("t", "a/b/KUDGIVT.csv", b"h\n7,x\n"),
+                    expect(&[("t/unko/7/KUDGIVT.csv", b"h\n7,x\n", true, "7")])
+                );
+            }
+        );
+        test_case!("KUDGIVT の判定はフルパスの名前で効く", {
+            assert_eq!(
+                split_map("t", "KUDGIVT/x.csv", b"h\n7,x\n"),
+                expect(&[("t/unko/7/X.csv", b"h\n7,x\n", true, "7")])
+            );
+            assert_eq!(
+                split_map("t", "other/x.csv", b"h\n7,x\n"),
+                expect(&[("t/unko/7/X.csv", b"h\n7,x\n", false, "7")])
+            );
+        });
+    }
+
+    #[test]
+    fn test_split_csv_entry_header_only_or_empty() {
+        test_group!("CSV分割");
+        test_case!("ヘッダだけ・空の入力は空", {
+            assert_eq!(split_csv_entry("t", "KUDGIVT.csv", b"unko,name\n"), vec![]);
+            assert_eq!(split_csv_entry("t", "KUDGIVT.csv", b"unko,name"), vec![]);
+            assert_eq!(split_csv_entry("t", "KUDGIVT.csv", b""), vec![]);
+        });
+    }
+
+    #[test]
+    fn test_split_csv_entry_crlf() {
+        test_group!("CSV分割");
+        test_case!(
+            "CRLF の入力は LF で出る・末尾に改行が無くても付く",
+            {
+                assert_eq!(
+                    split_map("t", "KUDGIVT.csv", b"h1,h2\r\n7,x\r\n8,y"),
+                    expect(&[
+                        ("t/unko/7/KUDGIVT.csv", b"h1,h2\n7,x\n", true, "7"),
+                        ("t/unko/8/KUDGIVT.csv", b"h1,h2\n8,y\n", true, "8"),
+                    ])
+                );
+            }
+        );
+    }
+
+    #[test]
+    fn test_split_csv_entry_first_column_is_the_key_as_is() {
+        test_group!("CSV分割");
+        test_case!(
+            "先頭の列をそのまま運行NO に使う (空白・引用符を整えない)",
+            {
+                assert_eq!(
+                    split_map("t", "KUDGIVT.csv", b"h\n 7,x\n\"7\",y\n,z\n"),
+                    expect(&[
+                        ("t/unko/ 7/KUDGIVT.csv", b"h\n 7,x\n", true, " 7"),
+                        ("t/unko/\"7\"/KUDGIVT.csv", b"h\n\"7\",y\n", true, "\"7\""),
+                        ("t/unko//KUDGIVT.csv", b"h\n,z\n", true, ""),
+                    ])
+                );
+            }
+        );
+    }
+
+    #[test]
+    fn test_split_csv_entry_shift_jis() {
+        test_group!("CSV分割");
+        test_case!("Shift_JIS の日本語は UTF-8 で出る", {
+            let input = sjis("運行NO,乗務員名\r\n2601,山田 太郎\r\n2602,鈴木\r\n2601,田中\r\n");
+            assert_eq!(
+                split_map("0a0a", "data/kudguri.csv", &input),
+                expect(&[
+                    (
+                        "0a0a/unko/2601/KUDGURI.csv",
+                        "運行NO,乗務員名\n2601,山田 太郎\n2601,田中\n".as_bytes(),
+                        false,
+                        "2601"
+                    ),
+                    (
+                        "0a0a/unko/2602/KUDGURI.csv",
+                        "運行NO,乗務員名\n2602,鈴木\n".as_bytes(),
+                        false,
+                        "2602"
+                    ),
+                ])
+            );
+        });
+    }
+
+    #[test]
+    fn test_cap_sorted() {
+        test_group!("CSV分割");
+        let list = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<String>>();
+        test_case!("limit 未満はソートだけ", {
+            assert_eq!(cap_sorted(list(&["b", "a"]), 3), (list(&["a", "b"]), 2));
+            assert_eq!(cap_sorted(list(&[]), 3), (list(&[]), 0));
+        });
+        test_case!("ちょうど limit", {
+            assert_eq!(
+                cap_sorted(list(&["c", "a", "b"]), 3),
+                (list(&["a", "b", "c"]), 3)
+            );
+        });
+        test_case!(
+            "limit を超えるぶんは切り、切る前の総数を返す",
+            {
+                assert_eq!(
+                    cap_sorted(list(&["d", "c", "a", "b"]), 3),
+                    (list(&["a", "b", "c"]), 4)
+                );
+                assert_eq!(cap_sorted(list(&["b", "a"]), 0), (list(&[]), 2));
+            }
+        );
+        test_case!("重複は残す", {
+            assert_eq!(
+                cap_sorted(list(&["b", "a", "b", "a"]), 3),
+                (list(&["a", "a", "b"]), 4)
+            );
         });
     }
 }

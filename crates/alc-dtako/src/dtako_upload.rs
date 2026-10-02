@@ -72,15 +72,6 @@ pub struct UploadResponse {
 /// パターン、Refs ohishi-exp/rust-ichibanboshi#205 の 51)。
 const SPLIT_UNKO_NOS_DISPLAY_LIMIT: usize = 500;
 
-/// 運行NO 一覧をソートして `SPLIT_UNKO_NOS_DISPLAY_LIMIT` 件に切り、
-/// (切った一覧, 実総数) を返す。
-fn cap_unko_nos(mut list: Vec<String>) -> (Vec<String>, usize) {
-    list.sort();
-    let total = list.len();
-    list.truncate(SPLIT_UNKO_NOS_DISPLAY_LIMIT);
-    (list, total)
-}
-
 async fn upload_zip(
     State(state): State<DtakoState>,
     tenant: axum::Extension<TenantId>,
@@ -111,10 +102,14 @@ async fn upload_zip(
 
             // CSV split (non-blocking): 失敗件数を split_failed として応答に載せる
             let split_outcome = try_split_csv(&state, upload_id).await;
-            let (split_unko_nos, split_unko_nos_total) =
-                cap_unko_nos(split_outcome.succeeded_unko_nos);
-            let (split_failed_unko_nos, split_failed_unko_nos_total) =
-                cap_unko_nos(split_outcome.failed_unko_nos);
+            let (split_unko_nos, split_unko_nos_total) = alc_csv_parser::cap_sorted(
+                split_outcome.succeeded_unko_nos,
+                SPLIT_UNKO_NOS_DISPLAY_LIMIT,
+            );
+            let (split_failed_unko_nos, split_failed_unko_nos_total) = alc_csv_parser::cap_sorted(
+                split_outcome.failed_unko_nos,
+                SPLIT_UNKO_NOS_DISPLAY_LIMIT,
+            );
 
             Ok(Json(UploadResponse {
                 upload_id,
@@ -1054,33 +1049,10 @@ pub(crate) async fn split_csv_from_r2(
     // アップロード対象を事前に全て準備 (key, content, is_kudgivt, unko_no)
     // unko_no は PUT 成功後にしか kudgivt_unko_nos へ積まない (下記参照)。
     let mut upload_items: Vec<(String, Vec<u8>, bool, String)> = Vec::new();
+    // 1 エントリを運行NO ごとに分ける本体は alc-csv-parser (分割 worker と共有)
     for (name, bytes) in &files {
-        if !name.to_lowercase().ends_with(".csv") {
-            continue;
-        }
-        let utf8_text = alc_csv_parser::decode_shift_jis(bytes);
-        let header = alc_csv_parser::csv_header(&utf8_text);
-        let grouped = alc_csv_parser::group_csv_by_unko_no(&utf8_text);
-        let is_kudgivt = name.to_uppercase().contains("KUDGIVT");
-
-        for (unko_no, lines) in &grouped {
-            let csv_name = name
-                .rsplit('/')
-                .next()
-                .unwrap_or(name)
-                .to_uppercase()
-                .replace(".CSV", ".csv");
-            let key = format!("{}/unko/{}/{}", tenant_id, unko_no, csv_name);
-            let mut content = String::new();
-            if let Some(h) = header {
-                content.push_str(h);
-                content.push('\n');
-            }
-            for line in lines {
-                content.push_str(line);
-                content.push('\n');
-            }
-            upload_items.push((key, content.into_bytes(), is_kudgivt, unko_no.clone()));
+        for f in alc_csv_parser::split_csv_entry(&tenant_id.to_string(), name, bytes) {
+            upload_items.push((f.key, f.content, f.is_kudgivt, f.unko_no));
         }
     }
 
@@ -1293,10 +1265,14 @@ async fn internal_rerun(
 
             // CSV split (non-blocking): 失敗件数を split_failed として応答に載せる
             let split_outcome = try_split_csv(&state, upload_id).await;
-            let (split_unko_nos, split_unko_nos_total) =
-                cap_unko_nos(split_outcome.succeeded_unko_nos);
-            let (split_failed_unko_nos, split_failed_unko_nos_total) =
-                cap_unko_nos(split_outcome.failed_unko_nos);
+            let (split_unko_nos, split_unko_nos_total) = alc_csv_parser::cap_sorted(
+                split_outcome.succeeded_unko_nos,
+                SPLIT_UNKO_NOS_DISPLAY_LIMIT,
+            );
+            let (split_failed_unko_nos, split_failed_unko_nos_total) = alc_csv_parser::cap_sorted(
+                split_outcome.failed_unko_nos,
+                SPLIT_UNKO_NOS_DISPLAY_LIMIT,
+            );
 
             Ok(Json(UploadResponse {
                 upload_id,
@@ -1820,9 +1796,10 @@ async fn split_csv_handler(
         .await
         .map_err(internal_err)?;
     // POST /api/upload と同じキー名・同じ意味にする (Refs ohishi-exp/rust-ichibanboshi#205 の 51)。
-    let (split_unko_nos, split_unko_nos_total) = cap_unko_nos(outcome.succeeded_unko_nos);
+    let (split_unko_nos, split_unko_nos_total) =
+        alc_csv_parser::cap_sorted(outcome.succeeded_unko_nos, SPLIT_UNKO_NOS_DISPLAY_LIMIT);
     let (split_failed_unko_nos, split_failed_unko_nos_total) =
-        cap_unko_nos(outcome.failed_unko_nos);
+        alc_csv_parser::cap_sorted(outcome.failed_unko_nos, SPLIT_UNKO_NOS_DISPLAY_LIMIT);
 
     Ok(Json(serde_json::json!({
         "status": "ok",

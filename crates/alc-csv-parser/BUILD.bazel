@@ -5,6 +5,8 @@ rust_library(
     name = "alc-csv-parser",
     srcs = glob(["src/**/*.rs"]),
     crate_name = "alc_csv_parser",
+    # Cargo の既定の features (Cargo.toml の `default`) を Bazel は自動では読まない
+    crate_features = ["zip-extract"],
     deps = all_crate_deps(normal = True),
     proc_macro_deps = all_crate_deps(proc_macro = True),
     visibility = ["//visibility:public"],
