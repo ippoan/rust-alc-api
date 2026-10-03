@@ -2092,10 +2092,10 @@ fn aggregate_events_by_day<'a>(
             }
         }
         for &(date, st) in day_late_night.keys() {
-            // day_late_night のキーは find_event_workday 経由で day_map から取得するため常に存在
-            let agg = day_map
-                .get_mut(&(driver_cd.clone(), date, st))
-                .expect("day_late_night key must exist in day_map");
+            // 付け先の行が無いキーは、上の 4 ループと同じく飛ばす
+            let Some(agg) = day_map.get_mut(&(driver_cd.clone(), date, st)) else {
+                continue;
+            };
             let ot_night = day_work_events
                 .get(&(driver_cd.clone(), date, st))
                 .map(|events| {
@@ -5779,6 +5779,90 @@ U001,x,x,x,x,x,x,x,x,x,2026/02/01 10:00:00,2026/02/01 11:30:00\n";
             let result = find_work_date_for_segment(&ds, &workdays, &segments);
             assert_eq!(result, NaiveDate::from_ymd_opt(2026, 2, 3).unwrap());
         });
+    }
+
+    #[test]
+    fn test_drive_inside_rest_attributed_to_zero_minute_workday_does_not_panic() {
+        use crate::upload_daily::{compute_daily_hours, DailyHours, DailySegment};
+        test_case!(
+            "休息の中の運転が 0 分の区間に帰属しても panic しない",
+            {
+                // 1 運行・1 乗務員: 運転 600 分 → 休息 840 分 (その中に深夜の運転 30 分) → 休息明けと同じ分に 0 分のイベント。
+                // 休息明けの 0 分の区間は日別の行にならず、休息の中の運転はその区間に帰属する (付け先の行が無いキーは飛ばす)
+                let d = |day, h, mi, s| dt(2026, 3, day, h, mi, s);
+                let op = make_kudguri("T1", "1001", d(2, 8, 0, 0), d(3, 9, 0, 0));
+                let events = vec![
+                    make_kudgivt("T1", d(2, 8, 0, 0), "201", 600),
+                    make_kudgivt("T1", d(2, 18, 0, 10), "302", 840),
+                    make_kudgivt("T1", d(2, 23, 0, 0), "201", 30),
+                    make_kudgivt("T1", d(3, 8, 0, 40), "999", 0),
+                ];
+                let classifications: HashMap<String, EventClass> = HashMap::from([
+                    ("201".to_string(), EventClass::Drive),
+                    ("302".to_string(), EventClass::RestSplit),
+                    ("999".to_string(), EventClass::Ignore),
+                ]);
+                let ferry = HashMap::new();
+                let got = compute_daily_hours(
+                    std::slice::from_ref(&op),
+                    &events,
+                    &classifications,
+                    &ferry,
+                );
+                // (D, 08:00) の 1 行だけ。休息の中の 30 分は数えない
+                let segment = DailySegment {
+                    unko_no: "T1".into(),
+                    segment_index: 0,
+                    start_at: d(2, 8, 0, 0),
+                    end_at: d(2, 18, 0, 10),
+                    work_minutes: 600,
+                    labor_minutes: 600,
+                    late_night_minutes: 0,
+                    drive_minutes: 600,
+                    cargo_minutes: 0,
+                };
+                let hours = DailyHours {
+                    total_work_minutes: 600,
+                    total_labor_minutes: 600,
+                    late_night_minutes: 0,
+                    drive_minutes: 600,
+                    cargo_minutes: 0,
+                    total_distance: 0.0,
+                    operation_count: 1,
+                    unko_nos: vec!["T1".into()],
+                    segments: vec![segment],
+                    rest_event_minutes: 840,
+                    overlap_drive_minutes: 0,
+                    overlap_cargo_minutes: 0,
+                    overlap_break_minutes: 0,
+                    overlap_restraint_minutes: 0,
+                    ot_late_night_minutes: 0,
+                };
+                let key = (
+                    "1001".to_string(),
+                    d(2, 8, 0, 0).date(),
+                    d(2, 8, 0, 0).time(),
+                );
+                assert_eq!(got, HashMap::from([(key, hours)]));
+
+                // 同じ入力に別の乗務員の運行を足しても、その乗務員の値は単独で計算したときと同じ
+                let other = make_kudguri("T2", "1002", d(2, 9, 0, 0), d(2, 15, 0, 0));
+                let mut other_event = make_kudgivt("T2", d(2, 9, 0, 0), "201", 360);
+                other_event.driver_cd = "1002".into();
+                let mut all_events = events.clone();
+                all_events.push(other_event.clone());
+                let both = compute_daily_hours(
+                    &[op, other.clone()],
+                    &all_events,
+                    &classifications,
+                    &ferry,
+                );
+                let alone = compute_daily_hours(&[other], &[other_event], &classifications, &ferry);
+                let mut want = got.clone();
+                want.extend(alone);
+                assert_eq!(both, want);
+            }
+        );
     }
 
     #[test]
