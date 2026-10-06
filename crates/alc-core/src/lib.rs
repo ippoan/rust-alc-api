@@ -34,13 +34,12 @@ use repository::{
     DtakoCsvProxyRepository, DtakoDailyHoursRepository, DtakoDriversRepository,
     DtakoEventClassificationsRepository, DtakoLogsRepository, DtakoOperationsRepository,
     DtakoRestraintReportPdfRepository, DtakoRestraintReportRepository, DtakoScraperRepository,
-    DtakoTicketsRepository, DtakoUploadRepository, DtakoVehiclesRepository,
-    DtakoWorkTimesRepository, DtakoYTimeExportRepository, EmployeeRepository,
-    GuidanceRecordsRepository, HubMeasurementsRepository, ItemFilesRepository, ItemsRepository,
-    LineworksChannelsRepository, MeasurementsRepository, NfcTagRepository,
-    NotifyDeliveryRepository, NotifyDocumentRepository, NotifyGroupRepository,
-    NotifyLineConfigRepository, NotifyRecipientRepository, SsoAdminRepository,
-    TenantUsersRepository, TimecardRepository, VehicleSettingsDumpsRepository,
+    DtakoTicketsRepository, DtakoVehiclesRepository, DtakoWorkTimesRepository,
+    DtakoYTimeExportRepository, EmployeeRepository, GuidanceRecordsRepository,
+    HubMeasurementsRepository, ItemFilesRepository, ItemsRepository, LineworksChannelsRepository,
+    MeasurementsRepository, NfcTagRepository, NotifyDeliveryRepository, NotifyDocumentRepository,
+    NotifyGroupRepository, NotifyLineConfigRepository, NotifyRecipientRepository,
+    SsoAdminRepository, TenantUsersRepository, TimecardRepository, VehicleSettingsDumpsRepository,
 };
 use storage::StorageBackend;
 
@@ -65,7 +64,6 @@ pub struct AppState {
     pub dtako_restraint_report_pdf: Arc<dyn DtakoRestraintReportPdfRepository>,
     pub dtako_scraper: Arc<dyn DtakoScraperRepository>,
     pub dtako_tickets: Arc<dyn DtakoTicketsRepository>,
-    pub dtako_upload: Arc<dyn DtakoUploadRepository>,
     pub dtako_vehicles: Arc<dyn DtakoVehiclesRepository>,
     pub dtako_work_times: Arc<dyn DtakoWorkTimesRepository>,
     pub dtako_y_time_export: Arc<dyn DtakoYTimeExportRepository>,

@@ -18,7 +18,6 @@ pub use alc_dtako::dtako_restraint_report;
 pub use alc_dtako::dtako_restraint_report_pdf;
 pub use alc_dtako::dtako_scraper;
 pub use alc_dtako::dtako_tickets;
-pub use alc_dtako::dtako_upload;
 pub use alc_dtako::dtako_vehicles;
 pub use alc_dtako::dtako_work_times;
 pub use alc_dtako::dtako_y_time_export;
@@ -171,7 +170,6 @@ pub fn router(
         .merge(dtako_tickets::tenant_router())
         .merge(dtako_work_times::tenant_router())
         .merge(dtako_daily_hours::tenant_router())
-        .merge(dtako_upload::tenant_router())
         .merge(dtako_vehicles::tenant_router())
         .merge(vehicle_settings_dumps::tenant_router())
         .merge(dtako_event_classifications::tenant_router())

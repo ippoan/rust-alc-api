@@ -1,5 +1,5 @@
 //! `dtako_operation_changes` (運行の変更記録、migration 152) を読み書きする SQL。
-//! 上げ直し (`PgDtakoUploadRepository::replace_operation`) と手動削除
+//! 上げ直し (ippoan/alc-dtako-worker が持つ) と手動削除
 //! (`PgDtakoOperationsRepository::delete_by_unko_no`) が同じトランザクションの中から呼ぶ。
 
 use sqlx::PgConnection;

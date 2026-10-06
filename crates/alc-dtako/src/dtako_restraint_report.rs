@@ -436,7 +436,7 @@ fn push_weekly_if_needed(
     }
 }
 
-fn internal_err(e: impl std::fmt::Display) -> (StatusCode, String) {
+pub(crate) fn internal_err(e: impl std::fmt::Display) -> (StatusCode, String) {
     tracing::error!("restraint report error: {e}");
     (
         StatusCode::INTERNAL_SERVER_ERROR,

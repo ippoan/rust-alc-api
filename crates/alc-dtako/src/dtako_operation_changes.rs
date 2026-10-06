@@ -4,7 +4,7 @@
 //! 同じ運行を上げ直すと dtako_operations の行は DELETE → INSERT されるので、前の値が
 //! どこにも残らない。上げ直し (`process_zip`) と手動削除 (`DELETE /operations/{unko_no}`)
 //! の 2 つの口で、消す直前の値を `dtako_operation_changes` に残す。
-//! ここには読み口と、R2 の旧 KUDGIVT の読み込みを置く。SQL は repo 層 (`repo::dtako_operation_changes`)、
+//! ここには読み口を置く (上げ直しの記録と R2 の旧 KUDGIVT の読み込みは ippoan/alc-dtako-worker が持つ)。SQL は repo 層 (`repo::dtako_operation_changes`)、
 //! 分数の計算・snapshot の組み立て・比較 (純粋な部分) は `alc_csv_parser::operation_changes` (分割 worker と共有)。
 //!
 //! 休憩などの分数は dtako_operations の列に無い (`op_*` 列は一度も書かれていない) ので、
@@ -19,15 +19,10 @@ use axum::{
 };
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
-use crate::dtako_y_time_export::csv_aggregator::fetch_and_parse_kudgivt;
 use crate::DtakoState;
 use alc_core::auth_middleware::TenantId;
 use alc_core::repository::dtako_operations::OperationChangeRow;
-use alc_core::repository::dtako_upload::OperationMinutes;
-use alc_core::storage::StorageBackend;
-use alc_csv_parser::operation_changes::minutes_from_events;
 
 pub fn tenant_router<S>() -> Router<S>
 where
@@ -35,24 +30,6 @@ where
     S: Clone + Send + Sync + 'static,
 {
     Router::new().route("/dtako/operation-changes", get(list_operation_changes))
-}
-
-/// split 済みの R2 旧 KUDGIVT から 1 運行・1 crew_role ぶんの分数を出す。
-/// 上げ直しの split は `process_zip` の後に走るので、この時点の R2 は前回の値のまま。
-/// 取れなければ `None` (前回の split 失敗など) — 分数は比較から外す。
-pub async fn load_before_minutes(
-    storage: &dyn StorageBackend,
-    tenant_id: Uuid,
-    unko_no: &str,
-    crew_role: i32,
-) -> Option<OperationMinutes> {
-    match fetch_and_parse_kudgivt(storage, tenant_id, unko_no, None, crew_role).await {
-        Ok(rows) => Some(minutes_from_events(&rows)),
-        Err(e) => {
-            tracing::warn!("operation change: old KUDGIVT unavailable {unko_no}: {e}");
-            None
-        }
-    }
 }
 
 /// 運行の日付。unko_no の先頭 6 桁 (YYMMDD) を正とし、読めなければ

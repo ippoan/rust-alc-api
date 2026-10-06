@@ -28,7 +28,7 @@
 //! (`migrations/054_dtako_tables.sql`) で、KUDGURI の `運行日` 列が無い/空の取り込みでは
 //! 埋まらない。片方だけにすると別の取りこぼしが出るので、置き換えではなく **OR で追加**する。
 //!
-//! 同じ形は `repo/dtako_upload.rs` の `fetch_operations_for_recalc` /
+//! 同じ形は ippoan/alc-dtako-worker の `fetch_operations_for_recalc` /
 //! `load_driver_operations` が既に採っている。上下 1 日の広げ方 (暦日をまたぐ運行の
 //! 取りこぼし防止) は両方の列に同じく効かせる。
 //!

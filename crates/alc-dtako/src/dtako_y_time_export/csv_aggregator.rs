@@ -51,7 +51,7 @@ pub fn build_kudgivt_key(tenant_id: uuid::Uuid, unko_no: &str, r2_prefix: Option
 
 /// 1 運行の KUDGIVT.csv を取得して該当 crew_role の events を返す。
 ///
-/// `split_csv_from_r2` (dtako_upload.rs) で per-unko CSV は **UTF-8 で保存**される
+/// `split_csv_from_r2` (ippoan/alc-dtako-worker が持つ) で per-unko CSV は **UTF-8 で保存**される
 /// (元 ZIP 内が Shift-JIS でも、split 時に decode_shift_jis を通して UTF-8 化済み)。
 /// なので UTF-8 として読む。後方互換のため Shift-JIS もフォールバックで試す
 /// (元 R2 に Shift-JIS のまま置かれた古いデータ用)。

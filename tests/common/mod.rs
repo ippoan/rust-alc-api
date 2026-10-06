@@ -19,17 +19,16 @@ use rust_alc_api::db::repository::{
     PgDtakoDailyHoursRepository, PgDtakoDriversRepository, PgDtakoEventClassificationsRepository,
     PgDtakoLogsRepository, PgDtakoOperationsRepository, PgDtakoRestraintReportPdfRepository,
     PgDtakoRestraintReportRepository, PgDtakoScraperRepository, PgDtakoTicketsRepository,
-    PgDtakoUploadRepository, PgDtakoVehiclesRepository, PgDtakoWorkTimesRepository,
-    PgDtakoYTimeExportRepository, PgEmployeeRepository, PgEquipmentFailuresRepository,
-    PgGuidanceRecordsRepository, PgHealthBaselinesRepository, PgHubMeasurementsRepository,
-    PgItemFilesRepository, PgItemsRepository, PgLineworksChannelsRepository,
-    PgMeasurementsRepository, PgNfcTagRepository, PgNotifyDeliveryRepository,
-    PgNotifyDocumentRepository, PgNotifyGroupRepository, PgNotifyLineConfigRepository,
-    PgNotifyRecipientRepository, PgSsoAdminRepository, PgTenantUsersRepository,
-    PgTenkoCallRepository, PgTenkoRecordsRepository, PgTenkoSchedulesRepository,
-    PgTenkoSessionRepository, PgTenkoWebhooksRepository, PgTimecardRepository,
-    PgTroubleCategoriesRepository, PgTroubleFieldLayoutsRepository, PgTroubleFilesRepository,
-    PgTroubleNotificationPrefsRepository, PgTroubleOfficesRepository,
+    PgDtakoVehiclesRepository, PgDtakoWorkTimesRepository, PgDtakoYTimeExportRepository,
+    PgEmployeeRepository, PgEquipmentFailuresRepository, PgGuidanceRecordsRepository,
+    PgHealthBaselinesRepository, PgHubMeasurementsRepository, PgItemFilesRepository,
+    PgItemsRepository, PgLineworksChannelsRepository, PgMeasurementsRepository, PgNfcTagRepository,
+    PgNotifyDeliveryRepository, PgNotifyDocumentRepository, PgNotifyGroupRepository,
+    PgNotifyLineConfigRepository, PgNotifyRecipientRepository, PgSsoAdminRepository,
+    PgTenantUsersRepository, PgTenkoCallRepository, PgTenkoRecordsRepository,
+    PgTenkoSchedulesRepository, PgTenkoSessionRepository, PgTenkoWebhooksRepository,
+    PgTimecardRepository, PgTroubleCategoriesRepository, PgTroubleFieldLayoutsRepository,
+    PgTroubleFilesRepository, PgTroubleNotificationPrefsRepository, PgTroubleOfficesRepository,
     PgTroubleProgressStatusesRepository, PgTroubleSchedulesRepository,
     PgTroubleTaskStatusesRepository, PgTroubleTaskTypesRepository, PgTroubleTasksRepository,
     PgTroubleTicketsRepository, PgTroubleWorkflowRepository, PgVehicleSettingsDumpsRepository,
@@ -264,7 +263,6 @@ fn build_app_state(
         Arc::new(PgDtakoRestraintReportPdfRepository::new(pool.clone()));
     let dtako_scraper = Arc::new(PgDtakoScraperRepository::new(pool.clone()));
     let dtako_tickets = Arc::new(PgDtakoTicketsRepository::new(pool.clone()));
-    let dtako_upload = Arc::new(PgDtakoUploadRepository::new(pool.clone()));
     let dtako_vehicles = Arc::new(PgDtakoVehiclesRepository::new(pool.clone()));
     let dtako_work_times = Arc::new(PgDtakoWorkTimesRepository::new(pool.clone()));
     let dtako_y_time_export = Arc::new(PgDtakoYTimeExportRepository::new(pool.clone()));
@@ -306,7 +304,6 @@ fn build_app_state(
         dtako_restraint_report_pdf,
         dtako_scraper,
         dtako_tickets,
-        dtako_upload,
         dtako_vehicles,
         dtako_work_times,
         dtako_y_time_export,

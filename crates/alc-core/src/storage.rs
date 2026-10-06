@@ -11,7 +11,7 @@ pub enum StorageError {
 ///
 /// 単一パート PUT の ETag はオブジェクトの content MD5 と一致する
 /// (Refs ohishi-exp/rust-ichibanboshi#205 実装計画 13)。この repo の dtako CSV
-/// upload 経路 (`crates/alc-dtako/src/dtako_upload.rs` → `StorageBackend::upload`
+/// upload 経路 (ippoan/alc-dtako-worker が持つ。元は `StorageBackend::upload`
 /// → `put_object_with_content_type`) は常に `multipart: None` の単発 PUT なので、
 /// この前提が成り立ち、ETag を「内容が変わったか」の安価な指紋として使える。
 /// マルチパート PUT の ETag は MD5 ではなくパートハッシュの連結ハッシュになるため、

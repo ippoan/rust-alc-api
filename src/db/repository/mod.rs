@@ -5,13 +5,13 @@ pub use alc_core::repository::{
     DtakoCsvProxyRepository, DtakoDailyHoursRepository, DtakoDriversRepository,
     DtakoEventClassificationsRepository, DtakoLogsRepository, DtakoOperationsRepository,
     DtakoRestraintReportPdfRepository, DtakoRestraintReportRepository, DtakoScraperRepository,
-    DtakoTicketsRepository, DtakoUploadRepository, DtakoVehiclesRepository,
-    DtakoWorkTimesRepository, DtakoYTimeExportRepository, EmployeeRepository,
-    GuidanceRecordsRepository, HubMeasurementsRepository, ItemFilesRepository, ItemsRepository,
-    LineworksChannelsRepository, MeasurementsRepository, NfcTagRepository,
-    NotifyDeliveryRepository, NotifyDocumentRepository, NotifyGroupRepository,
-    NotifyLineConfigRepository, NotifyRecipientRepository, SsoAdminRepository,
-    TenantUsersRepository, TimecardRepository, VehicleSettingsDumpsRepository, WebhookRepository,
+    DtakoTicketsRepository, DtakoVehiclesRepository, DtakoWorkTimesRepository,
+    DtakoYTimeExportRepository, EmployeeRepository, GuidanceRecordsRepository,
+    HubMeasurementsRepository, ItemFilesRepository, ItemsRepository, LineworksChannelsRepository,
+    MeasurementsRepository, NfcTagRepository, NotifyDeliveryRepository, NotifyDocumentRepository,
+    NotifyGroupRepository, NotifyLineConfigRepository, NotifyRecipientRepository,
+    SsoAdminRepository, TenantUsersRepository, TimecardRepository, VehicleSettingsDumpsRepository,
+    WebhookRepository,
 };
 
 // Re-export trouble traits from alc-trouble (Refs #513 Phase B)
@@ -42,8 +42,7 @@ pub use alc_devices::repo::devices;
 pub use alc_dtako::repo::{
     dtako_csv_proxy, dtako_daily_hours, dtako_drivers, dtako_event_classifications, dtako_logs,
     dtako_operations, dtako_restraint_report, dtako_restraint_report_pdf, dtako_scraper,
-    dtako_tickets, dtako_upload, dtako_vehicles, dtako_work_times, dtako_y_time_export,
-    vehicle_settings_dumps,
+    dtako_tickets, dtako_vehicles, dtako_work_times, dtako_y_time_export, vehicle_settings_dumps,
 };
 pub use alc_misc::repo::{
     bot_admin, carrying_items, communication_items, employees, guidance_records, items,
@@ -75,9 +74,8 @@ pub use alc_dtako::repo::{
     PgDtakoCsvProxyRepository, PgDtakoDailyHoursRepository, PgDtakoDriversRepository,
     PgDtakoEventClassificationsRepository, PgDtakoLogsRepository, PgDtakoOperationsRepository,
     PgDtakoRestraintReportPdfRepository, PgDtakoRestraintReportRepository,
-    PgDtakoScraperRepository, PgDtakoTicketsRepository, PgDtakoUploadRepository,
-    PgDtakoVehiclesRepository, PgDtakoWorkTimesRepository, PgDtakoYTimeExportRepository,
-    PgVehicleSettingsDumpsRepository,
+    PgDtakoScraperRepository, PgDtakoTicketsRepository, PgDtakoVehiclesRepository,
+    PgDtakoWorkTimesRepository, PgDtakoYTimeExportRepository, PgVehicleSettingsDumpsRepository,
 };
 pub use alc_misc::repo::{
     PgApiTokensRepository, PgBotAdminRepository, PgCarryingItemsRepository,
