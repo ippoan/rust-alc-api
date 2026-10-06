@@ -21,25 +21,24 @@ build --jobs=auto
 #   lcov max-merge union で 100% になる)
 coverage --combined_report=lcov
 # cargo-llvm-cov は --cfg=coverage を自動注入する。これに合わせないと
-# `#[cfg_attr(not(coverage), ignore)]` の里帰りテスト (alc-compare の 21 本) が
+# `#[cfg_attr(not(coverage), ignore)]` の里帰りテスト (各 crate の test_macros.rs) が
 # bazel coverage では ignore されたまま走らず、対応する deep branch 行が
-# DA=0 になる (2026-07-05 実測: compare/lib.rs 313 行 miss の根本原因)。
+# DA=0 になる (2026-07-05 実測。当時は alc-compare の 21 本。alc-compare は
+# ippoan/alc-dtako-worker へ移った、Refs #736)。
 coverage --@rules_rust//rust/settings:extra_rustc_flag=--cfg=coverage
 coverage:cov-monolith --instrumentation_filter=^//:
 coverage:cov-mock-carins --instrumentation_filter=//crates/alc-carins,//crates/alc-core
 coverage:cov-mock-devices --instrumentation_filter=//crates/alc-devices,//crates/alc-core
-coverage:cov-mock-dtako --instrumentation_filter=//crates/alc-dtako,//crates/alc-compare,//crates/alc-pdf,//crates/alc-core
+coverage:cov-mock-dtako --instrumentation_filter=//crates/alc-dtako,//crates/alc-pdf,//crates/alc-core
 coverage:cov-mock-misc --instrumentation_filter=//crates/alc-misc,//crates/alc-core,//crates/alc-tenko,^//:
 coverage:cov-mock-tenko --instrumentation_filter=//crates/alc-tenko,//crates/alc-core
 coverage:cov-mock-trouble --instrumentation_filter=//crates/alc-trouble,//crates/alc-core
 coverage:cov-auth-jwt --instrumentation_filter=//crates/alc-auth-jwt
 coverage:cov-carins --instrumentation_filter=//crates/alc-carins
-coverage:cov-compare --instrumentation_filter=//crates/alc-compare
 coverage:cov-core --instrumentation_filter=//crates/alc-core
 coverage:cov-core-wasm --instrumentation_filter=//crates/alc-core-wasm
-coverage:cov-csv-parser --instrumentation_filter=//crates/alc-csv-parser
 coverage:cov-devices --instrumentation_filter=//crates/alc-devices
-coverage:cov-dtako --instrumentation_filter=//crates/alc-dtako,//crates/alc-compare
+coverage:cov-dtako --instrumentation_filter=//crates/alc-dtako
 coverage:cov-misc --instrumentation_filter=//crates/alc-misc
 coverage:cov-notify --instrumentation_filter=//crates/alc-notify
 coverage:cov-pdf --instrumentation_filter=//crates/alc-pdf

@@ -7,28 +7,6 @@
 # 新しいファイルが 100% に到達したら追加する。
 # カバレッジ確認: bash scripts/check_coverage_100.sh
 
-# --- alc-csv-parser ---
-
-[[files]]
-path = "crates/alc-csv-parser/src/lib.rs"
-type = "unit"
-
-[[files]]
-path = "crates/alc-csv-parser/src/kudgivt.rs"
-type = "unit"
-
-[[files]]
-path = "crates/alc-csv-parser/src/kudguri.rs"
-type = "unit"
-
-[[files]]
-path = "crates/alc-csv-parser/src/operation_changes.rs"
-type = "unit"
-
-[[files]]
-path = "crates/alc-csv-parser/src/work_segments.rs"
-type = "unit"
-
 # --- alc-auth-jwt (leaf crate, Refs #410) ---
 
 [[files]]
@@ -249,16 +227,6 @@ type = "mock"
 # [[files]]
 # path = "crates/alc-misc/src/auth.rs"
 # type = "combined"
-
-# --- alc-compare ---
-
-[[files]]
-path = "crates/alc-compare/src/lib.rs"
-type = "combined"
-
-[[files]]
-path = "crates/alc-compare/src/upload_daily.rs"
-type = "unit"
 
 # --- alc-pdf ---
 

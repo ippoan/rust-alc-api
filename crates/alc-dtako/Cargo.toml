@@ -7,11 +7,11 @@ edition = "2021"
 unexpected_cfgs = { level = "allow", check-cfg = ['cfg(coverage)'] }
 
 [dependencies]
-alc-compare = { path = "../alc-compare" }
+alc-compare = { git = "https://github.com/ippoan/alc-dtako-worker", rev = "eec0231cb584e456ae56b2b766f450d7b6ecaeaf" }
 alc-core = { path = "../alc-core" }
 async-trait = "0.1"
 sqlx = { version = "0.8", features = ["postgres", "chrono", "uuid"] }
-alc-csv-parser = { path = "../alc-csv-parser" }
+alc-csv-parser = { git = "https://github.com/ippoan/alc-dtako-worker", rev = "eec0231cb584e456ae56b2b766f450d7b6ecaeaf" }
 alc-pdf = { path = "../alc-pdf" }
 anyhow = "1"
 axum = { version = "0.8", features = ["multipart"] }

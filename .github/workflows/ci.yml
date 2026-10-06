@@ -105,10 +105,6 @@ jobs:
           shared-key: wasm-build
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo build -p alc-core-wasm --target wasm32-unknown-unknown
-      # 分割 worker (ippoan/alc-dtako-worker) が引く形 (zip なし) で alc-csv-parser が wasm でビルドできること (Refs #725)
-      - run: cargo build -p alc-csv-parser --no-default-features --target wasm32-unknown-unknown
-      # alc-compare も分割 worker が引く (zip の展開を使わない)
-      - run: cargo build -p alc-compare --target wasm32-unknown-unknown
 
   # 依存グラフ監視: cargo-deny (重複バージョン warn、設定 SoT は deny.toml) +
   # cargo-machete (未使用依存 warn)。経緯と削減方針は docs/ci-speed-tracking.md の
@@ -299,14 +295,14 @@ jobs:
   # (result cache / lcov gate / run 跨ぎ hit / sandbox 環境差) は PR #517-#525 で
   # 全て突破済み。
   # 独立 job (deploy chain の needs 外) = critical path に乗らず、merge gate でも
-  # ない。coverage gate (coverage_100.toml) の SoT は引き続き cargo llvm-cov 側で、
-  # ここの lcov gate は alc-csv-parser 限定の並走検証 (csv-parser shard のみ)。
+  # ない。coverage gate (coverage_100.toml) の判定は下の bazel-coverage-gate が全 shard の
+  # lcov を merge して行う (shard 単位の lcov gate は無い)。
   # run 跨ぎの test result cache は cache-warm-bazel-test-poc (main push warm) 経由
   # でのみ hit する — PR run 自身の save は refs/pull/N/merge scope に隔離され、
   # 別 PR から読めない (2026-07-05 実測、詳細は #515 のコメント)。
   # shard 分割の狙い: wall time を最重 shard で bounded にする (alc-core 変更時の
   # 単一 job 4-5 分 → 並列 ~2-3 分)。matrix / flags は warm 側と 1:1 同期必須
-  # (check_bazel_test_matrix.sh が csv-parser shard で検証)。
+  # (check_bazel_test_matrix.sh が auth-jwt shard で検証)。
   bazel-test-poc:
     name: "Bazel test (${{ matrix.name }})"
     needs: [pr-limit]
@@ -336,9 +332,7 @@ jobs:
           - { name: core-wasm, target: "//crates/alc-core-wasm:alc-core-wasm_test", coverage: "cov-core-wasm" }
           - { name: camera, target: "//crates/alc-camera:alc-camera_test" }
           - { name: carins, target: "//crates/alc-carins:alc-carins_test", coverage: "cov-carins" }
-          - { name: compare, target: "//crates/alc-compare:alc-compare_test", coverage: "cov-compare" }
           - { name: core, target: "//crates/alc-core:alc-core_test", coverage: "cov-core" }
-          - { name: csv-parser, target: "//crates/alc-csv-parser:alc-csv-parser_test", coverage: "cov-csv-parser" }
           - { name: devices, target: "//crates/alc-devices:alc-devices_test", coverage: "cov-devices" }
           - { name: dtako, target: "//crates/alc-dtako:alc-dtako_test", coverage: "cov-dtako" }
           - { name: maintenance, target: "//crates/alc-maintenance:alc-maintenance_test", coverage: "cov-maintenance" }
@@ -381,8 +375,9 @@ jobs:
             echo "::notice::${{ matrix.target }} は (cached) — main warm から restore"
           fi
 
+      # alc-csv-parser が ippoan/alc-dtako-worker へ移ったので、小さい auth-jwt shard で回す (Refs #736)
       - name: matrix 網羅性チェック (rust_test target の追加漏れ検出)
-        if: matrix.name == 'csv-parser'
+        if: matrix.name == 'auth-jwt'
         run: bash scripts/check_bazel_test_matrix.sh
 
       # PR3b (Refs #515): coverage field を持つ shard は lcov を生成して artifact 化。
@@ -408,11 +403,6 @@ jobs:
           name: lcov-${{ matrix.name }}
           path: /tmp/lcov.dat
           retention-days: 3
-
-      # csv-parser は PoC で意味論一致を実証済みのため strict gate を維持 (fail する)
-      - name: coverage 100% gate の lcov 再現 (coverage_100.toml 突合)
-        if: matrix.name == 'csv-parser'
-        run: bash scripts/check_coverage_100_lcov.sh /tmp/lcov.dat crates/alc-csv-parser
 
   # DB integration テストの bazel shard (Refs #515 PR2)。postgres service +
   # TEST_DATABASE_URL + init_local_db.sql を持つ点以外は bazel-test-poc と同じ。
