@@ -390,7 +390,7 @@ async fn collect_all_drivers(
 //
 // ETag が「内容が変わったか」の指紋として使える前提 (単一パート PUT の ETag = content MD5)
 // については `alc_core::storage::ListedObject` の doc コメント参照。dtako CSV の upload 経路
-// (`dtako_upload.rs`) はこの前提を満たす (`multipart: None` の単発 PUT のみ)。
+// (ippoan/alc-dtako-worker が持つ) はこの前提を満たす (`multipart: None` の単発 PUT のみ)。
 
 /// 全乗務員版 `list_drivers_with_operations` を 1 ページで使い切るための limit。
 /// この endpoint にページングの概念は無い (呼び出し側は月まるごとの指紋が欲しい) — 実際の

@@ -700,21 +700,6 @@ pub struct DtakoOperationsResponse {
     pub per_page: i64,
 }
 
-// --- Dtako: Upload History ---
-
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct DtakoUploadHistory {
-    pub id: Uuid,
-    pub tenant_id: Uuid,
-    pub uploaded_by: Option<Uuid>,
-    pub filename: String,
-    pub operations_count: i32,
-    pub r2_zip_key: Option<String>,
-    pub status: String,
-    pub error_message: Option<String>,
-    pub created_at: DateTime<Utc>,
-}
-
 // --- Dtako: Daily Work Hours ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]

@@ -60,7 +60,7 @@ async fn update_classification(
         .dtako_event_classifications
         .update(tenant_id, id, &body.classification)
         .await
-        .map_err(crate::dtako_upload::internal_err)?;
+        .map_err(crate::dtako_restraint_report::internal_err)?;
 
     match row {
         Some(r) => Ok(Json(r)),

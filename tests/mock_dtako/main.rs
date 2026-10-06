@@ -25,8 +25,6 @@ mod mock_dtako_restraint_report_pdf_test;
 mod mock_dtako_restraint_report_test;
 #[path = "../mock_tests/mock_dtako_scraper_test.rs"]
 mod mock_dtako_scraper_test;
-#[path = "../mock_tests/mock_dtako_upload_test.rs"]
-mod mock_dtako_upload_test;
 #[path = "../mock_tests/mock_dtako_vehicles_test.rs"]
 mod mock_dtako_vehicles_test;
 #[path = "../mock_tests/mock_dtako_work_times_test.rs"]

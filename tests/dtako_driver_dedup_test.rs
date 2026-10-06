@@ -1,6 +1,8 @@
 //! dtako 取り込みの乗務員解決 (`code` 優先、Refs ippoan/rust-alc-api#669)、復活時の
 //! `driver_cd` 衝突ガード、および migration 150 の部分一意 index
 //! (Refs ippoan/rust-alc-api#673) を実 DB で固定する。
+//! dtako 取り込み側 (`upsert_driver` / `get_employee_id_by_driver_cd`) の解決は
+//! ippoan/alc-dtako-worker が持ち、そちらの実 DB テストが縛る (Refs ippoan/rust-alc-api#725)。
 //!
 //! employees への書き込み経路は 2 つあり、キーが噛み合っていなかった:
 //!
@@ -22,9 +24,8 @@ use sqlx::postgres::PgPoolOptions;
 use uuid::Uuid;
 
 use alc_core::models::EmployeeUpsertItem;
-use alc_core::repository::dtako_upload::DtakoUploadRepository;
 use alc_core::repository::employees::EmployeeRepository;
-use rust_alc_api::db::repository::{PgDtakoUploadRepository, PgEmployeeRepository};
+use rust_alc_api::db::repository::PgEmployeeRepository;
 
 /// migration 150 が張る部分一意 index の名前
 /// (`UNIQUE (tenant_id, driver_cd) WHERE driver_cd IS NOT NULL AND deleted_at IS NULL`)。
@@ -103,219 +104,6 @@ async fn live_employee_count(pool: &sqlx::PgPool, tenant_id: Uuid) -> i64 {
     .fetch_one(pool)
     .await
     .expect("Failed to count employees")
-}
-
-// ---------------------------------------------------------------------------
-// B. upsert_driver / get_employee_id_by_driver_cd の解決ラダー
-// ---------------------------------------------------------------------------
-
-#[tokio::test]
-async fn upsert_driver_reuses_code_row_and_backfills_driver_cd() {
-    let pool = setup_pool().await;
-    let tenant_id = common::create_test_tenant(&pool, "dedup code row").await;
-    // theearth 同期が入れた正本 (code だけ・driver_cd は NULL)
-    let canonical = insert_employee(
-        &pool,
-        tenant_id,
-        Some("7001"),
-        None,
-        "正本 7001",
-        "2026-01-01T00:00:00Z",
-        false,
-    )
-    .await;
-    let repo = PgDtakoUploadRepository::new(pool.clone());
-
-    let got = repo
-        .upsert_driver(tenant_id, "7001", "デジタコ 7001")
-        .await
-        .expect("upsert_driver failed");
-
-    assert_eq!(got, Some(canonical), "正本を再利用する (新規行を作らない)");
-    assert_eq!(
-        driver_cd_of(&pool, canonical).await,
-        Some("7001".to_string()),
-        "以後 driver_cd 検索で直接引けるようバックフィルする"
-    );
-    assert_eq!(
-        live_employee_count(&pool, tenant_id).await,
-        1,
-        "行は増えない"
-    );
-}
-
-#[tokio::test]
-async fn upsert_driver_falls_back_to_driver_cd_row() {
-    let pool = setup_pool().await;
-    let tenant_id = common::create_test_tenant(&pool, "dedup driver_cd row").await;
-    let existing = insert_employee(
-        &pool,
-        tenant_id,
-        None,
-        Some("7002"),
-        "dtako 7002",
-        "2026-01-01T00:00:00Z",
-        false,
-    )
-    .await;
-    let repo = PgDtakoUploadRepository::new(pool.clone());
-
-    let got = repo
-        .upsert_driver(tenant_id, "7002", "デジタコ 7002")
-        .await
-        .expect("upsert_driver failed");
-
-    assert_eq!(
-        got,
-        Some(existing),
-        "code 一致が無ければ従来どおり driver_cd で引く"
-    );
-    assert_eq!(live_employee_count(&pool, tenant_id).await, 1);
-}
-
-#[tokio::test]
-async fn upsert_driver_inserts_when_neither_key_matches() {
-    let pool = setup_pool().await;
-    let tenant_id = common::create_test_tenant(&pool, "dedup new row").await;
-    let repo = PgDtakoUploadRepository::new(pool.clone());
-
-    let got = repo
-        .upsert_driver(tenant_id, "7003", "デジタコ 7003")
-        .await
-        .expect("upsert_driver failed")
-        .expect("new employee expected");
-
-    assert_eq!(live_employee_count(&pool, tenant_id).await, 1);
-    let code: Option<String> =
-        sqlx::query_scalar("SELECT code FROM alc_api.employees WHERE id = $1")
-            .bind(got)
-            .fetch_one(&pool)
-            .await
-            .expect("Failed to read code");
-    assert_eq!(
-        code, None,
-        "dtako 側は社員番号を知らないので code は入れない"
-    );
-    assert_eq!(driver_cd_of(&pool, got).await, Some("7003".to_string()));
-}
-
-#[tokio::test]
-async fn upsert_driver_skips_backfill_when_another_live_row_holds_driver_cd() {
-    let pool = setup_pool().await;
-    let tenant_id = common::create_test_tenant(&pool, "dedup backfill conflict").await;
-    // 正本 (code だけ) と、既に driver_cd を持つ dtako 由来の行が同居している状態。
-    // ここでバックフィルすると同じ driver_cd の生存行が 2 つになるので埋めない。
-    let canonical = insert_employee(
-        &pool,
-        tenant_id,
-        Some("7004"),
-        None,
-        "正本 7004",
-        "2026-01-01T00:00:00Z",
-        false,
-    )
-    .await;
-    let dtako_row = insert_employee(
-        &pool,
-        tenant_id,
-        None,
-        Some("7004"),
-        "dtako 7004",
-        "2026-02-01T00:00:00Z",
-        false,
-    )
-    .await;
-    let repo = PgDtakoUploadRepository::new(pool.clone());
-
-    let got = repo
-        .upsert_driver(tenant_id, "7004", "デジタコ 7004")
-        .await
-        .expect("upsert_driver failed");
-
-    assert_eq!(
-        got,
-        Some(dtako_row),
-        "バックフィルせず driver_cd 経路へ落ちる"
-    );
-    assert_eq!(
-        driver_cd_of(&pool, canonical).await,
-        None,
-        "重複を増やさないため正本は NULL のまま"
-    );
-    assert_eq!(
-        live_employee_count(&pool, tenant_id).await,
-        2,
-        "行は増えない"
-    );
-}
-
-#[tokio::test]
-async fn upsert_driver_ignores_soft_deleted_rows() {
-    let pool = setup_pool().await;
-    let tenant_id = common::create_test_tenant(&pool, "dedup soft deleted").await;
-    insert_employee(
-        &pool,
-        tenant_id,
-        Some("7005"),
-        None,
-        "退職 7005 (code)",
-        "2026-01-01T00:00:00Z",
-        true,
-    )
-    .await;
-    insert_employee(
-        &pool,
-        tenant_id,
-        None,
-        Some("7005"),
-        "退職 7005 (driver_cd)",
-        "2026-01-02T00:00:00Z",
-        true,
-    )
-    .await;
-    let repo = PgDtakoUploadRepository::new(pool.clone());
-
-    let got = repo
-        .upsert_driver(tenant_id, "7005", "デジタコ 7005")
-        .await
-        .expect("upsert_driver failed")
-        .expect("new employee expected");
-
-    assert_eq!(
-        live_employee_count(&pool, tenant_id).await,
-        1,
-        "soft-delete 済みは解決対象にならず、新規行が 1 つできる"
-    );
-    assert_eq!(driver_cd_of(&pool, got).await, Some("7005".to_string()));
-}
-
-#[tokio::test]
-async fn get_employee_id_by_driver_cd_resolves_by_code_without_writing() {
-    let pool = setup_pool().await;
-    let tenant_id = common::create_test_tenant(&pool, "dedup lookup by code").await;
-    let canonical = insert_employee(
-        &pool,
-        tenant_id,
-        Some("7006"),
-        None,
-        "正本 7006",
-        "2026-01-01T00:00:00Z",
-        false,
-    )
-    .await;
-    let repo = PgDtakoUploadRepository::new(pool.clone());
-
-    let got = repo
-        .get_employee_id_by_driver_cd(tenant_id, "7006")
-        .await
-        .expect("get_employee_id_by_driver_cd failed");
-
-    assert_eq!(got, Some(canonical), "code 一致でも解決できる");
-    assert_eq!(
-        driver_cd_of(&pool, canonical).await,
-        None,
-        "読み取り関数なので書き込まない (バックフィルは upsert_driver だけ)"
-    );
 }
 
 // ---------------------------------------------------------------------------
@@ -533,55 +321,6 @@ async fn upsert_by_code_reports_nfc_id_and_driver_cd_conflicts_separately() {
     let reasons: Vec<&str> = summary.skipped.iter().map(|s| s.reason.as_str()).collect();
     assert_eq!(reasons, vec!["nfc_id_conflict", "driver_cd_conflict"]);
     assert!(summary.skipped.iter().all(|s| s.code == "7203"));
-}
-
-#[tokio::test]
-async fn upsert_driver_does_not_error_when_insert_hits_a_unique_index() {
-    let pool = setup_pool().await;
-    let tenant_id = common::create_test_tenant(&pool, "dtako insert on conflict").await;
-    // 論理削除済みの行が driver_cd を握っている。生存行を見る 2 つの SELECT は
-    // これを拾わないので、解決は INSERT まで進む。
-    insert_employee(
-        &pool,
-        tenant_id,
-        None,
-        Some("7204"),
-        "退職 7204",
-        "2026-01-01T00:00:00Z",
-        true,
-    )
-    .await;
-    // INSERT を確実に衝突させるための **この tenant 限定の代用 index**
-    // (後続 PR が張る本物の index ではない。本物は述語に deleted_at IS NULL を持つ)。
-    // 他のテストと同じ DB を共有するので、tenant_id で閉じて巻き込まないようにする。
-    let index_name = format!("idx_test_driver_cd_{}", Uuid::new_v4().simple());
-    sqlx::query(&format!(
-        "CREATE UNIQUE INDEX {index_name} ON alc_api.employees (tenant_id, driver_cd) \
-         WHERE driver_cd IS NOT NULL AND tenant_id = '{tenant_id}'::UUID"
-    ))
-    .execute(&pool)
-    .await
-    .expect("Failed to create test index");
-
-    let repo = PgDtakoUploadRepository::new(pool.clone());
-    let got = repo.upsert_driver(tenant_id, "7204", "デジタコ 7204").await;
-
-    sqlx::query(&format!("DROP INDEX alc_api.{index_name}"))
-        .execute(&pool)
-        .await
-        .expect("Failed to drop test index");
-
-    // 素の INSERT なら unique 違反で Err になり、取り込み 1 件が 500 になっていた。
-    let got = got.expect("ON CONFLICT DO NOTHING なので Err にならない");
-    assert_eq!(
-        got, None,
-        "衝突して 1 行も入らず、引き直しても生存行が無いので乗務員解決は None"
-    );
-    assert_eq!(
-        live_employee_count(&pool, tenant_id).await,
-        0,
-        "行は増えない"
-    );
 }
 
 // ---------------------------------------------------------------------------

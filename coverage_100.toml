@@ -123,10 +123,6 @@ type = "combined"
 path = "crates/alc-dtako/src/dtako_scraper.rs"
 type = "combined"
 
-[[files]]
-path = "crates/alc-dtako/src/dtako_upload.rs"
-type = "combined"
-
 # --- alc-tenko ---
 
 [[files]]

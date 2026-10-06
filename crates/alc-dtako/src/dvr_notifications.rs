@@ -167,8 +167,8 @@ fn validate(item: &DvrNotificationCreate) -> bool {
             .unwrap_or(true)
 }
 
-/// R2 key。既存 dtako の prefix 規約 (`{tenant_id}/uploads/...` /
-/// `{tenant_id}/unko/...`) に揃える。
+/// R2 key。既存 dtako の prefix 規約 (先頭が `{tenant_id}` で、続けて種別 (`unko` など)) に
+/// 揃える。
 fn r2_key(tenant_id: Uuid, serial_no: &str, file_name: &str) -> String {
     format!("{tenant_id}/dvr/{serial_no}/{file_name}")
 }
