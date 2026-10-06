@@ -93,12 +93,12 @@ dependencies = [
 [[package]]
 name = "alc-compare"
 version = "0.1.0"
+source = "git+https://github.com/ippoan/alc-dtako-worker?rev=eec0231cb584e456ae56b2b766f450d7b6ecaeaf#eec0231cb584e456ae56b2b766f450d7b6ecaeaf"
 dependencies = [
  "alc-csv-parser",
  "chrono",
  "encoding_rs",
  "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -151,6 +151,7 @@ dependencies = [
 [[package]]
 name = "alc-csv-parser"
 version = "0.1.0"
+source = "git+https://github.com/ippoan/alc-dtako-worker?rev=eec0231cb584e456ae56b2b766f450d7b6ecaeaf#eec0231cb584e456ae56b2b766f450d7b6ecaeaf"
 dependencies = [
  "anyhow",
  "chrono",

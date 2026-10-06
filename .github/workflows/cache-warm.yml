@@ -87,7 +87,7 @@ jobs:
   # alc-core 変更時の単一 job 4-5 分を shard 並列 ~2-3 分に抑える。shard ごとに
   # 専用 disk cache key (同一 key 共有は save reserve 競合で全滅する、#506 実測)。
   # 注意 (1): matrix は bazel-test-poc job と 1:1 で同期させること — 同期漏れは
-  # scripts/check_bazel_test_matrix.sh (csv-parser shard 内) が loud fail させる。
+  # scripts/check_bazel_test_matrix.sh (auth-jwt shard 内) が loud fail させる。
   # 注意 (2): invocation の flags は bazel-test-poc job と完全一致させること
   # (configuration が違うと action key が変わり、PR 側で '(cached)' にならない)。
   cache-warm-bazel-test-poc:
@@ -114,9 +114,7 @@ jobs:
           - { name: core-wasm, target: "//crates/alc-core-wasm:alc-core-wasm_test", coverage: "cov-core-wasm" }
           - { name: camera, target: "//crates/alc-camera:alc-camera_test" }
           - { name: carins, target: "//crates/alc-carins:alc-carins_test", coverage: "cov-carins" }
-          - { name: compare, target: "//crates/alc-compare:alc-compare_test", coverage: "cov-compare" }
           - { name: core, target: "//crates/alc-core:alc-core_test", coverage: "cov-core" }
-          - { name: csv-parser, target: "//crates/alc-csv-parser:alc-csv-parser_test", coverage: "cov-csv-parser" }
           - { name: devices, target: "//crates/alc-devices:alc-devices_test", coverage: "cov-devices" }
           - { name: dtako, target: "//crates/alc-dtako:alc-dtako_test", coverage: "cov-dtako" }
           - { name: maintenance, target: "//crates/alc-maintenance:alc-maintenance_test", coverage: "cov-maintenance" }
