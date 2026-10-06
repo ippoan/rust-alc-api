@@ -173,7 +173,7 @@ async fn main() -> anyhow::Result<()> {
             ) as Arc<dyn StorageBackend>
         });
 
-    // dtako (digitacho) 用 R2 (ohishi-dtako バケット、別 API トークン)。
+    // dtako (digitacho) 用 R2 (ohishi-dtako-apac バケット、別 API トークン)。
     //
     // dev サンドボックス (Incus) では `DTAKO_STORAGE_HTTP_PROXY` を設定すると、ホスト側の
     // `wrangler dev --local --port 8788` (R2 binding 付き) 経由で R2 にアクセスする。

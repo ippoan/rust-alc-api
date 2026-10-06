@@ -81,7 +81,8 @@ async fn main() -> anyhow::Result<()> {
 }
 
 fn init_r2_storage() -> anyhow::Result<Arc<dyn StorageBackend>> {
-    let bucket = std::env::var("DTAKO_R2_BUCKET").unwrap_or_else(|_| "ohishi-dtako".to_string());
+    let bucket =
+        std::env::var("DTAKO_R2_BUCKET").unwrap_or_else(|_| "ohishi-dtako-apac".to_string());
     let account_id = std::env::var("R2_ACCOUNT_ID")?;
     let access_key = std::env::var("DTAKO_R2_ACCESS_KEY")?;
     let secret_key = std::env::var("DTAKO_R2_SECRET_KEY")?;

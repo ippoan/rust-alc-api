@@ -36,7 +36,7 @@ else
     --project $PROJECT_ID \
     --image $IMAGE:latest \
     --set-secrets "DATABASE_URL=alc-app-database-url:latest,DTAKO_R2_ACCESS_KEY=dtako-r2-access-key:latest,DTAKO_R2_SECRET_KEY=dtako-r2-secret-key:latest" \
-    --set-env-vars "R2_ACCOUNT_ID=24b45709d060d957340180e995f0d373,DTAKO_R2_BUCKET=ohishi-dtako" \
+    --set-env-vars "R2_ACCOUNT_ID=24b45709d060d957340180e995f0d373,DTAKO_R2_BUCKET=ohishi-dtako-apac" \
     --command "archive" \
     --args "$GCLOUD_ARGS" \
     --memory 1Gi \

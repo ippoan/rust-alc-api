@@ -106,7 +106,7 @@ emit_env_backend() {
             - name: CARINS_R2_BUCKET
               value: "${ENV_CARINS_R2_BUCKET:-carins-files}"
             - name: DTAKO_R2_BUCKET
-              value: "${ENV_DTAKO_R2_BUCKET:-ohishi-dtako}"
+              value: "${ENV_DTAKO_R2_BUCKET:-ohishi-dtako-apac}"
             - name: NOTIFY_R2_BUCKET
               value: "$( [[ "$ENV" == "staging" ]] && echo "notify-files-staging" || echo "notify-files" )"
             - name: NOTIFY_FRONTEND_URL
@@ -300,7 +300,7 @@ if [[ "$ENV" == "staging" ]]; then
 else
   ENV_R2_BUCKET="alc-face-photos"
   ENV_CARINS_R2_BUCKET="carins-files"
-  ENV_DTAKO_R2_BUCKET="ohishi-dtako"
+  ENV_DTAKO_R2_BUCKET="ohishi-dtako-apac"
   ENV_TROUBLE_R2_BUCKET="trouble-files"
   ENV_CARINS_R2_ACCOUNT_ID="8556e484b273a868db8ec6800b074834"
   ENV_DTAKO_R2_ACCOUNT_ID="8556e484b273a868db8ec6800b074834"
