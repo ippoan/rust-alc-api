@@ -1,6 +1,6 @@
 ---
 name: rust-alc-api-map
-generated-from: rust-alc-api:d28944eefa27fb90e1eb61628c4baac15b2d09c0
+generated-from: rust-alc-api:da894d9ef9527377657aa943ae10c32e207c59f9
 paths: [crates/, src/, migrations/, tests/]
 description: rust-alc-api (アルコールチェッカー基盤の Rust/Axum Cargo workspace — domain crate 群 + monolith 単一バイナリ、PostgreSQL+RLS、Cloud Run) の構造ナビゲーション。どの crate に何のルートがあるか / monolith (rust-alc-api) 一本化 (gateway + per-domain は #556 で廃止) / RLS・migration・deploy/release 分離の gotcha を 1 枚にまとめる。トリガー:「rust-alc-api」「alc-api」「alc-notify」「alc-tenko」「alc-trouble」「alc-carins」「alc-dtako」「gateway」「tenko-api」「carins-api」「dtako-api」「trouble-api」「RLS テナント」「sqlx migration」「ts-rs」「Release Wave」「Bazel」等。
 ---
@@ -19,7 +19,7 @@ Google OAuth + LINE WORKS。Cloud Run にデプロイ。
 | 系統 | バイナリ | 役割 |
 |---|---|---|
 | **monolith** | `rust-alc-api` (`src/main.rs`) | 全 domain crate の router を `/api` 下に一括 nest。全 domain (tenko/carins/dtako/trouble/camera/notify/misc/auth) を 1 プロセスで提供 |
-| **CLI** | `migrate` (`src/bin/migrate.rs`) / `archive` (`src/bin/archive.rs`) | sqlx migration 実行 / アーカイブ Job |
+| **CLI** | `migrate` (`src/bin/migrate.rs`) / `archive` (`src/bin/archive.rs`) | sqlx migration 実行 / アーカイブ Job (dtako の R2 は `DTAKO_R2_BUCKET`、本番既定は `ohishi-dtako-apac`) |
 
 **gateway (`crates/gateway`) + per-domain API (`tenko-api` / `carins-api` / `dtako-api` /
 `trouble-api` / `alc-camera-api`) は #556 で廃止** (本番・staging とも休眠していたため、
