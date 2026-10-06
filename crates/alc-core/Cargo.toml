@@ -8,7 +8,8 @@ unexpected_cfgs = { level = "allow", check-cfg = ['cfg(coverage)'] }
 
 [dependencies]
 alc-auth-jwt = { path = "../alc-auth-jwt" }
-alc-core-wasm = { path = "../alc-core-wasm", features = ["sqlx"] }
+# 型・エラー・X-Tenant-ID の layer の正本は ippoan/alc-worker-kit (Refs #736)。直すときは kit の PR → ここの rev を上げる
+alc-core-wasm = { git = "https://github.com/ippoan/alc-worker-kit", rev = "5a3b749e891a68f026b53b4402e8861d3aeb3639", features = ["sqlx"] }
 # `OperationMinutes` (変更記録の分数の型) の定義元。zip の展開は引かない
 alc-csv-parser = { git = "https://github.com/ippoan/alc-dtako-worker", rev = "eec0231cb584e456ae56b2b766f450d7b6ecaeaf", default-features = false }
 anyhow = "1"

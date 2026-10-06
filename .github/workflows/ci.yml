@@ -90,22 +90,6 @@ jobs:
       # (coverage 計装は出力内容に影響しない、diff 検証済み)。check job で
       # test profile のビルドを重複させない。
 
-  # wasm32 (Cloudflare Workers) 移行の土台 (Refs #681): alc-core-wasm が wasm でビルドできること
-  wasm-build:
-    name: Build (wasm32)
-    needs: [pr-limit]
-    if: "always() && !(github.ref == 'refs/heads/main' && github.event_name == 'push') && (needs.pr-limit.result == 'success' || needs.pr-limit.result == 'skipped')"
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.92.0
-      - run: rustup target add wasm32-unknown-unknown
-      - uses: swatinem/rust-cache@v2
-        with:
-          shared-key: wasm-build
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: cargo build -p alc-core-wasm --target wasm32-unknown-unknown
-
   # 依存グラフ監視: cargo-deny (重複バージョン warn、設定 SoT は deny.toml) +
   # cargo-machete (未使用依存 warn)。経緯と削減方針は docs/ci-speed-tracking.md の
   # 「依存グラフ削減」参照 (rust-s3 の旧 hyper スタック二重等)。
@@ -329,7 +313,6 @@ jobs:
           - { name: mock-maintenance, target: "//:mock_maintenance" }
           - { name: auth, target: "//crates/alc-auth:alc-auth_test" }
           - { name: auth-jwt, target: "//crates/alc-auth-jwt:alc-auth-jwt_test", coverage: "cov-auth-jwt" }
-          - { name: core-wasm, target: "//crates/alc-core-wasm:alc-core-wasm_test", coverage: "cov-core-wasm" }
           - { name: camera, target: "//crates/alc-camera:alc-camera_test" }
           - { name: carins, target: "//crates/alc-carins:alc-carins_test", coverage: "cov-carins" }
           - { name: core, target: "//crates/alc-core:alc-core_test", coverage: "cov-core" }

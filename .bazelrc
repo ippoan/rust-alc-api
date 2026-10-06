@@ -36,7 +36,6 @@ coverage:cov-mock-trouble --instrumentation_filter=//crates/alc-trouble,//crates
 coverage:cov-auth-jwt --instrumentation_filter=//crates/alc-auth-jwt
 coverage:cov-carins --instrumentation_filter=//crates/alc-carins
 coverage:cov-core --instrumentation_filter=//crates/alc-core
-coverage:cov-core-wasm --instrumentation_filter=//crates/alc-core-wasm
 coverage:cov-devices --instrumentation_filter=//crates/alc-devices
 coverage:cov-dtako --instrumentation_filter=//crates/alc-dtako
 coverage:cov-misc --instrumentation_filter=//crates/alc-misc

@@ -136,14 +136,13 @@ dependencies = [
 [[package]]
 name = "alc-core-wasm"
 version = "0.1.0"
+source = "git+https://github.com/ippoan/alc-worker-kit?rev=5a3b749e891a68f026b53b4402e8861d3aeb3639#5a3b749e891a68f026b53b4402e8861d3aeb3639"
 dependencies = [
  "axum",
  "serde",
  "serde_json",
  "sqlx",
  "thiserror 2.0.18",
- "tokio",
- "tower",
  "tracing",
  "uuid",
 ]
