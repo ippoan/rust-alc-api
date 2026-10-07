@@ -863,7 +863,7 @@ async fn rls_check_passes_for_runtime_role() {
     assert_eq!(body["invariants"]["violation_count"], 0, "{body}");
     assert_eq!(body["invariants"]["violations"], json!([]));
 
-    // 違反が無くても、流した検査が全部 (crate の一覧の番号の順 = 0〜8) 0 件で並ぶ
+    // 違反が無くても、流した検査が全部 (crate の一覧の番号の順 = 0〜9) 0 件で並ぶ
     let checks = body["invariants"]["checks"].as_array().unwrap();
     let numbers: Vec<i64> = checks
         .iter()
@@ -875,11 +875,7 @@ async fn rls_check_passes_for_runtime_role() {
         .collect();
     assert_eq!(numbers, listed, "{body}");
     assert_eq!(numbers.first(), Some(&0));
-    assert_eq!(
-        numbers.last(),
-        Some(&8),
-        "検査 6・7・8 が並んでいない: {body}"
-    );
+    assert_eq!(numbers.last(), Some(&9), "検査 6〜9 が並んでいない: {body}");
     for check in checks {
         assert_eq!(sorted_keys(check), ["check_no", "title", "violations"]);
         assert!(!check["title"].as_str().unwrap().is_empty());
