@@ -14,6 +14,9 @@ on:
         required: true
       NOTIFY_WORKER_SECRET_STAGING:
         required: false
+      # 本番 DB への接続 (migrations-applied の alc-migrate --check 専用。tag のときだけ使う)
+      ALC_MIGRATE_DATABASE_URL:
+        required: false
 
 # Environment is derived from github context:
 #   pull_request → staging
@@ -35,43 +38,45 @@ jobs:
   # gateway + per-domain は #556 で廃止し、deploy は monolith (backend) 1 本のみ。
   # ---------------------------------------------------------------------------
   # ---------------------------------------------------------------------------
-  # Production: run migrations
+  # Production: migrations-applied guard (Refs ippoan/alc-migrations#16)
+  #
+  # 本番の migration は ippoan/alc-migrations の migrate.yml (手動) が流す。
+  # ここでは流さず、Cargo.toml で固定した rev の alc-migrate --check を本番 DB に
+  # 対して実行するだけ (読むだけ)。その rev の migration が 1 件でも未適用なら
+  # exit 1 で落ち、deploy-services / update-archive は動かない。
   # ---------------------------------------------------------------------------
-  migrate:
-    name: "Run DB migrations"
+  migrations-applied:
+    name: "Migrations applied"
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
-      - name: Authenticate to GCP
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - uses: dtolnay/rust-toolchain@1.92.0
 
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
-
-      - name: Run migrations
+      - name: Check pinned rev has no pending migrations
+        env:
+          DATABASE_URL: ${{ secrets.ALC_MIGRATE_DATABASE_URL }}
         run: |
-          AR_IMAGE="${{ env.AR_PREFIX }}/${{ env.REPO }}:${{ inputs.image_sha }}"
-          JOB_NAME="rust-alc-api-migrate"
+          set -euo pipefail
 
-          if gcloud run jobs describe $JOB_NAME --region ${{ env.REGION }} --project ${{ env.PROJECT }} &>/dev/null; then
-            gcloud run jobs update $JOB_NAME \
-              --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
-              --image "$AR_IMAGE"
-          else
-            gcloud run jobs create $JOB_NAME \
-              --region ${{ env.REGION }} --project ${{ env.PROJECT }} \
-              --image "$AR_IMAGE" \
-              --set-secrets "DATABASE_URL=alc-app-database-url:latest" \
-              --command "migrate" \
-              --memory 512Mi --task-timeout 120s --max-retries 0
+          REV=$(grep -E '^alc-migrations[[:space:]]*=' Cargo.toml | grep -oE 'rev[[:space:]]*=[[:space:]]*"[0-9a-f]{40}"' | grep -oE '[0-9a-f]{40}' | head -n1 || true)
+          if ! [[ "$REV" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Cargo.toml の alc-migrations の rev (40 桁 hex) を取れない"
+            exit 1
           fi
 
-          gcloud run jobs execute $JOB_NAME \
-            --region ${{ env.REGION }} --project ${{ env.PROJECT }} --wait
+          cargo install --locked --quiet \
+            --git https://github.com/ippoan/alc-migrations --rev "$REV" \
+            --features cli --bin alc-migrate \
+            --root "$RUNNER_TEMP/alc-migrate"
+
+          if ! "$RUNNER_TEMP/alc-migrate/bin/alc-migrate" --check; then
+            echo "::error::alc-migrations の ${REV} の migration がまだ本番に流されていない。alc-migrations の migrate.yml を main で手動実行してから再実行"
+            exit 1
+          fi
 
   # ---------------------------------------------------------------------------
   # Deploy services (shared by staging and production via render.sh)
@@ -80,11 +85,11 @@ jobs:
     name: "Deploy ${{ matrix.service }}"
     # PR (staging): staging image 群は ci.yml (build-image / staging-db) で
     # push 済みなので待つものが無く、即 deploy に入る (Refs #482)。
-    needs: [migrate]
+    needs: [migrations-applied]
     if: >-
       always() && (
         github.event_name == 'pull_request' ||
-        (startsWith(github.ref, 'refs/tags/v') && needs.migrate.result == 'success')
+        (startsWith(github.ref, 'refs/tags/v') && needs.migrations-applied.result == 'success')
       )
     runs-on: ubuntu-latest
     strategy:
@@ -336,7 +341,7 @@ jobs:
   update-archive:
     name: "Update Archive Job"
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [migrate]
+    needs: [migrations-applied]
     runs-on: ubuntu-latest
     steps:
       - name: Authenticate to GCP
