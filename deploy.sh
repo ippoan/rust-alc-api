@@ -6,36 +6,12 @@ REGION="asia-northeast1"
 SERVICE_NAME="rust-alc-api"
 REPOSITORY="alc-app"
 IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPOSITORY/$SERVICE_NAME"
-MIGRATION_JOB_NAME="rust-alc-api-migrate"
 
 echo "=== Building Docker image ==="
 docker build -t $IMAGE:latest .
 
 echo "=== Pushing to Artifact Registry ==="
 docker push $IMAGE:latest
-
-echo "=== Running migrations via Cloud Run Jobs ==="
-if gcloud run jobs describe $MIGRATION_JOB_NAME --region $REGION --project $PROJECT_ID &>/dev/null; then
-  gcloud run jobs update $MIGRATION_JOB_NAME \
-    --region $REGION \
-    --project $PROJECT_ID \
-    --image $IMAGE:latest
-else
-  gcloud run jobs create $MIGRATION_JOB_NAME \
-    --region $REGION \
-    --project $PROJECT_ID \
-    --image $IMAGE:latest \
-    --set-secrets "DATABASE_URL=alc-app-database-url:latest" \
-    --command "migrate" \
-    --memory 512Mi \
-    --task-timeout 120s \
-    --max-retries 0
-fi
-
-gcloud run jobs execute $MIGRATION_JOB_NAME \
-  --region $REGION \
-  --project $PROJECT_ID \
-  --wait
 
 echo "=== Deploying to Cloud Run ==="
 gcloud run deploy $SERVICE_NAME \

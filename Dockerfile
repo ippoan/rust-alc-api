@@ -13,7 +13,6 @@ RUN curl -fsSL "https://github.com/bblanchon/pdfium-binaries/releases/download/$
     && rm -rf /tmp/lib /tmp/include /tmp/LICENSE /tmp/PDFiumConfig.cmake /tmp/VERSION 2>/dev/null || true
 
 COPY rust-alc-api /usr/local/bin/
-COPY migrate /usr/local/bin/
 COPY archive /usr/local/bin/
 COPY migrations /app/migrations
 
