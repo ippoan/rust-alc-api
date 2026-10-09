@@ -373,7 +373,7 @@ router 実装として存続。旧 per-domain は同じ domain crate を単独 m
   **production の tag release は新 revision を 0% (no-traffic) で deploy するだけ**で traffic は旧 revision に残す。
   実際の切替は **Release Wave flip** が行う。`verify-no-traffic` job がこの不変条件を検証 (latest revision が
   0% traffic でなければ FAIL)。
-- **単一 Dockerfile**: `Dockerfile` (monolith + archive + PDFium 同梱。本番 image に migrate は入れない) のみ。monolith が
+- **単一 Dockerfile**: `Dockerfile` (monolith + migrate + archive + PDFium 同梱。migrate は他 repo の結合テスト用で、本番では起動しない) のみ。monolith が
   単一 Cloud Run service (`rust-alc-api` / staging `rust-alc-api-staging`) として deploy される。
   `cloudrun/render.sh` が YAML 生成 (service は `backend` のみ受理)。gateway + per-domain の
   `Dockerfile.*` / per-service deploy は #556 で廃止。
@@ -712,7 +712,7 @@ splinter / RLS 検証フルセットは CI に集約する。
 - マイグレーションファイルは `migrations/` ディレクトリに連番で配置 (`001_`, `002_`, ...)
 - 本番の migration は **ippoan/alc-migrations の migrate.yml (手動)** が、Actions の runner から org secret `ALC_MIGRATE_DATABASE_URL` で直接 DB に繋いで流す (GCP / Cloud Run job は使わない)。rust-alc-api からは流さない
 - tag release (`deploy.yml`) の `migrations-applied` job が deploy の前に確かめる: `Cargo.toml` の `alc-migrations` の固定 rev で `alc-migrate` を `cargo install` し、同じ secret で `alc-migrate --check` (読むだけ。その rev の migration が 1 件でも未適用なら exit 1)。rev を上げた PR は、先に alc-migrations 側で本番に流してからでないと tag release が止まる。落ちたら alc-migrations の migrate.yml を main で手動実行してから再実行。`ALC_MIGRATE_DATABASE_URL` は `ci.yml` の deploy job から `deploy.yml` へ渡す
-- `src/bin/migrate.rs` は staging の起動時 migrate (`staging/entrypoint.sh`、使い捨て DB) 用に残る。本番 `Dockerfile` には COPY しない
+- `src/bin/migrate.rs` は staging の起動時 migrate (`staging/entrypoint.sh`、使い捨て DB) 用に残る。本番 `Dockerfile` も、他 repo の結合テスト (docker-compose が backend image 内の migrate を起動する) のために COPY する。本番では起動しない
 - `deploy.sh` の流れ: Docker ビルド → プッシュ → Cloud Run Service デプロイ (migrate は含まない)
 - 未適用 migration が在るとき tag release は止まり、アプリは前バージョンで動き続ける
 - `main.rs` からは `sqlx::migrate!()` を削除済み（起動時の自動適用はしない）
