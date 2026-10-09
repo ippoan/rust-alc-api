@@ -318,9 +318,8 @@ router 実装として存続。旧 per-domain は同じ domain crate を単独 m
     `find_user_by_line_user_id(TEXT) RETURNS SETOF users` を SECURITY DEFINER 化して repo を
     関数経由に変更、recipient と対称化した。
 - **migration 不変条件**: 適用済み `migrations/*.sql` を絶対に変更しない (sqlx が SHA-384 検証、不一致で起動不能)。
-  修正は新ファイル追加。本番の migration は ippoan/alc-migrations の migrate.yml (手動) が Cloud Run job
-  `alc-migrations-migrate` で流す。rust-alc-api の tag release は `deploy.yml` の `migrations-applied` で
-  確かめるだけ (`main.rs` から `sqlx::migrate!()` は削除済み = 起動時自動適用なし)。
+  修正は新ファイル追加。本番の migration は ippoan/alc-migrations の migrate.yml (手動、Actions の runner から直接 DB へ) が流す。
+  rust-alc-api の tag release は `deploy.yml` の `migrations-applied` で確かめるだけ (`main.rs` から `sqlx::migrate!()` は削除済み = 起動時自動適用なし)。
 - **snapshot hook (plan 整合性)**: `if_flag!(...)` 追加時は先に `ippoan/ippoan-dev-plans` の
   `scope:rust-alc-api` plan Issue を作り `npm run snapshot` で `manifests/production.snapshot.json` 更新。
   pre-commit (`.githooks`) + CI `snapshot-check` job が drift/stale-sha を検出。`SKIP_CLIPPY=1` で commit 時 clippy skip 可。
@@ -711,8 +710,8 @@ splinter / RLS 検証フルセットは CI に集約する。
 
 - **migration の正本は ippoan/alc-migrations に移行済み (rust-alc-api#697)**。`src/bin/migrate.rs` (本番) と `tests/common` (テスト) は `alc_migrations::MIGRATOR` / `LOCAL_APP_GRANTS` を読む (git 依存、`Cargo.toml` の rev 固定。新しい migration は rev を上げて取り込む)。rust-alc-api の `migrations/` と `scripts/init_local_db.sql`・`scripts/local_app_grants.sql` は 152 番で止めた写しで正本ではなく、追加・変更禁止 (CI `pr-limit` の Freeze step が止める。`removed` は通す)
 - マイグレーションファイルは `migrations/` ディレクトリに連番で配置 (`001_`, `002_`, ...)
-- 本番の migration は **ippoan/alc-migrations の migrate.yml (手動)** が Cloud Run job `alc-migrations-migrate` (image tag = alc-migrations の git SHA) で流す。rust-alc-api からは流さない
-- tag release (`deploy.yml`) の `migrations-applied` job が deploy の前に確かめる: `Cargo.toml` の `alc-migrations` rev が job の image SHA 以前 (GitHub compare が `identical`/`ahead`) であること + `alc-migrate --check` (読むだけ。未適用が 1 件でも在れば失敗)。落ちたら alc-migrations の migrate.yml を main で手動実行してから再実行
+- 本番の migration は **ippoan/alc-migrations の migrate.yml (手動)** が、Actions の runner から org secret `ALC_MIGRATE_DATABASE_URL` で直接 DB に繋いで流す (GCP / Cloud Run job は使わない)。rust-alc-api からは流さない
+- tag release (`deploy.yml`) の `migrations-applied` job が deploy の前に確かめる: `Cargo.toml` の `alc-migrations` の固定 rev で `alc-migrate` を `cargo install` し、同じ secret で `alc-migrate --check` (読むだけ。その rev の migration が 1 件でも未適用なら exit 1)。rev を上げた PR は、先に alc-migrations 側で本番に流してからでないと tag release が止まる。落ちたら alc-migrations の migrate.yml を main で手動実行してから再実行。`ALC_MIGRATE_DATABASE_URL` は `ci.yml` の deploy job から `deploy.yml` へ渡す
 - `src/bin/migrate.rs` は staging の起動時 migrate (`staging/entrypoint.sh`、使い捨て DB) 用に残る。本番 `Dockerfile` には COPY しない
 - `deploy.sh` の流れ: Docker ビルド → プッシュ → Cloud Run Service デプロイ (migrate は含まない)
 - 未適用 migration が在るとき tag release は止まり、アプリは前バージョンで動き続ける

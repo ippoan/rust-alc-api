@@ -652,6 +652,7 @@ jobs:
     secrets:
       GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
       NOTIFY_WORKER_SECRET_STAGING: ${{ secrets.NOTIFY_WORKER_SECRET_STAGING }}
+      ALC_MIGRATE_DATABASE_URL: ${{ secrets.ALC_MIGRATE_DATABASE_URL }}
 
   # staging への deploy(cutover)が成功した時に、staging の現 backend image を
   # ci-dashboard の compatibility matrix に記録する。これは "build を記録" では

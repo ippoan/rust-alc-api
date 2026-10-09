@@ -14,6 +14,9 @@ on:
         required: true
       NOTIFY_WORKER_SECRET_STAGING:
         required: false
+      # 本番 DB への接続 (migrations-applied の alc-migrate --check 専用。tag のときだけ使う)
+      ALC_MIGRATE_DATABASE_URL:
+        required: false
 
 # Environment is derived from github context:
 #   pull_request → staging
@@ -38,10 +41,9 @@ jobs:
   # Production: migrations-applied guard (Refs ippoan/alc-migrations#16)
   #
   # 本番の migration は ippoan/alc-migrations の migrate.yml (手動) が流す。
-  # ここでは流さず、次の 2 点を確かめるだけ:
-  #   1. Cargo.toml で固定した alc-migrations の rev が、本番に流した SHA
-  #      (Cloud Run job alc-migrations-migrate の image tag) 以前であること
-  #   2. DB の実物に未適用の migration が無いこと (alc-migrate --check、読むだけ)
+  # ここでは流さず、Cargo.toml で固定した rev の alc-migrate --check を本番 DB に
+  # 対して実行するだけ (読むだけ)。その rev の migration が 1 件でも未適用なら
+  # exit 1 で落ち、deploy-services / update-archive は動かない。
   # ---------------------------------------------------------------------------
   migrations-applied:
     name: "Migrations applied"
@@ -52,20 +54,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Authenticate to GCP
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - uses: dtolnay/rust-toolchain@1.92.0
 
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
-
-      - name: Check pinned rev is deployed and nothing is pending
+      - name: Check pinned rev has no pending migrations
         env:
-          GH_TOKEN: ${{ github.token }}
+          DATABASE_URL: ${{ secrets.ALC_MIGRATE_DATABASE_URL }}
         run: |
           set -euo pipefail
-          JOB_NAME="alc-migrations-migrate"
 
           REV=$(grep -E '^alc-migrations[[:space:]]*=' Cargo.toml | grep -oE 'rev[[:space:]]*=[[:space:]]*"[0-9a-f]{40}"' | grep -oE '[0-9a-f]{40}' | head -n1 || true)
           if ! [[ "$REV" =~ ^[0-9a-f]{40}$ ]]; then
@@ -73,33 +68,15 @@ jobs:
             exit 1
           fi
 
-          IMAGE=$(gcloud run jobs describe "$JOB_NAME" --quiet \
-            --region "${{ env.REGION }}" --project "${{ env.PROJECT }}" \
-            --format='value(spec.template.spec.template.spec.containers[0].image)' 2>/dev/null) || {
-            echo "::error::Cloud Run job ${JOB_NAME} を取れない (無い、または権限なし)。alc-migrations の migrate.yml を main で手動実行してから再実行"
-            exit 1
-          }
-          DEPLOYED="${IMAGE##*:}"
-          if ! [[ "$DEPLOYED" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "::error::job ${JOB_NAME} の image tag が 40 桁 hex (alc-migrations の git SHA) でない"
+          cargo install --locked --quiet \
+            --git https://github.com/ippoan/alc-migrations --rev "$REV" \
+            --features cli --bin alc-migrate \
+            --root "$RUNNER_TEMP/alc-migrate"
+
+          if ! "$RUNNER_TEMP/alc-migrate/bin/alc-migrate" --check; then
+            echo "::error::alc-migrations の ${REV} の migration がまだ本番に流されていない。alc-migrations の migrate.yml を main で手動実行してから再実行"
             exit 1
           fi
-
-          STATUS=$(gh api "repos/ippoan/alc-migrations/compare/${REV}...${DEPLOYED}" --jq .status) || STATUS="error"
-          case "$STATUS" in
-            identical|ahead)
-              echo "::notice::alc-migrations ${REV} は本番に流した ${DEPLOYED} 以前 (${STATUS})"
-              ;;
-            *)
-              echo "::error::alc-migrations の ${REV} はまだ本番に流されていない (compare: ${STATUS})。alc-migrations の migrate.yml を main で手動実行してから再実行"
-              exit 1
-              ;;
-          esac
-
-          # 未適用が 1 件でも在れば job は exit 1 で失敗する (読むだけ)
-          gcloud run jobs execute "$JOB_NAME" --quiet --args=--check \
-            --region "${{ env.REGION }}" --project "${{ env.PROJECT }}" \
-            --wait --format=none
 
   # ---------------------------------------------------------------------------
   # Deploy services (shared by staging and production via render.sh)

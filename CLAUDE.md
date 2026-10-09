@@ -14,7 +14,7 @@ Axum + PostgreSQL RLS の ALC (アルコールチェック) API。Cloud Run に�
 - migration: `SECURITY DEFINER` に `SET search_path = alc_api` 必須 / `WITH CHECK (true)` は避ける / 既存データへの INSERT/UPDATE ハードコード禁止 (`WHERE EXISTS`)
 - migration PR はローカルで流さず CI + staging に任せる
 - migration の正本は ippoan/alc-migrations。migrate とテストは alc-migrations (git 依存、rev 固定) を読む。`migrations/` と `scripts/*.sql` は 152 番で止めた写しで正本ではなく、追加・変更禁止 (CI の `pr-limit` で止まる)。新しい migration を取り込むには `Cargo.toml` の rev を上げる
-- 本番の migration は ippoan/alc-migrations の migrate.yml (手動) が流す。rust-alc-api の tag release は `migrations-applied` job で「固定 rev ≦ 本番に流した SHA」と未適用 0 (`alc-migrate --check`) を確かめるだけで、流さない。staging の起動時 migrate (`staging/entrypoint.sh`) は残る
+- 本番の migration は ippoan/alc-migrations の migrate.yml (手動) が流す。rust-alc-api の tag release は `migrations-applied` job で、`Cargo.toml` の固定 rev の `alc-migrate --check` を runner から本番 DB (org secret `ALC_MIGRATE_DATABASE_URL`) に打ち、その rev の migration が全部入っている (未適用 0) ことを確かめるだけで、流さない。staging の起動時 migrate (`staging/entrypoint.sh`) は残る
 - main 直接 merge/push・`git checkout main`・メイン worktree のソース編集は禁止 — コード変更は必ず origin/main ベースの worktree で (hooks 強制)。削除前に必ず repo root へ cd
 - 確認なしの `deploy.sh` 実行禁止 (AskUserQuestion 2 択で確認)。本番デプロイは `/tag-release patch` のみ
 - Cloud Run handler 内 `tokio::spawn` fire-and-forget 禁止 (CPU throttle で完走しない)
