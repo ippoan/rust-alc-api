@@ -53,7 +53,7 @@ alc-storage = { path = "crates/alc-storage" }
 alc-csv-parser = { git = "https://github.com/ippoan/alc-dtako-worker", rev = "eec0231cb584e456ae56b2b766f450d7b6ecaeaf" }
 alc-compare = { git = "https://github.com/ippoan/alc-dtako-worker", rev = "eec0231cb584e456ae56b2b766f450d7b6ecaeaf" }
 # migration の正本 (ippoan/alc-migrations、public)。版は rev で固定する (tag は無い)。上げるときは Cargo.lock も一緒に更新する。
-alc-migrations = { git = "https://github.com/ippoan/alc-migrations", rev = "b46eb77116a88d0d1ad292e78aad3ae06642c981" }
+alc-migrations = { git = "https://github.com/ippoan/alc-migrations", rev = "4f36c846a58a67e1019fc30728b6d2cae725f7b5" }
 anyhow = "1"
 async-trait = "0.1"
 axum = { version = "0.8", features = ["multipart"] }
