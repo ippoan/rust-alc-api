@@ -18,7 +18,7 @@ use alc_camera::repo::PgCamerasRepository;
 use alc_camera::{CameraDownTicket, CameraState, DownTicketSink, DEFAULT_DOWN_THRESHOLD};
 use alc_notify::repo::{
     PgLineworksChannelsRepository, PgNotifyDeliveryRepository, PgNotifyDocumentRepository,
-    PgNotifyGroupRepository, PgNotifyLineConfigRepository, PgNotifyRecipientRepository,
+    PgNotifyRecipientRepository,
 };
 use alc_trouble::models::CreateTroubleTicket;
 use alc_trouble::repo::{
@@ -262,10 +262,8 @@ async fn main() -> anyhow::Result<()> {
     let tenko_webhooks = Arc::new(PgTenkoWebhooksRepository::new(pool.clone()));
     let timecard = Arc::new(PgTimecardRepository::new(pool.clone()));
     let notify_recipients = Arc::new(PgNotifyRecipientRepository::new(pool.clone()));
-    let notify_groups = Arc::new(PgNotifyGroupRepository::new(pool.clone()));
     let notify_documents = Arc::new(PgNotifyDocumentRepository::new(pool.clone()));
     let notify_deliveries = Arc::new(PgNotifyDeliveryRepository::new(pool.clone()));
-    let notify_line_config = Arc::new(PgNotifyLineConfigRepository::new(pool.clone()));
     let lineworks_channels = Arc::new(PgLineworksChannelsRepository::new(pool.clone()));
     let trouble_tickets = Arc::new(PgTroubleTicketsRepository::new(pool.clone()));
     let trouble_files = Arc::new(PgTroubleFilesRepository::new(pool.clone()));
@@ -455,10 +453,8 @@ async fn main() -> anyhow::Result<()> {
         dtako_storage,
         fcm,
         notify_recipients,
-        notify_groups,
         notify_documents,
         notify_deliveries,
-        notify_line_config,
         lineworks_channels,
         notify_storage,
         redact_broadcaster: alc_core::redact_broadcast::RedactBroadcaster::from_env().map(Arc::new),

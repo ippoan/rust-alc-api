@@ -38,8 +38,8 @@ use repository::{
     DtakoYTimeExportRepository, EmployeeRepository, GuidanceRecordsRepository,
     HubMeasurementsRepository, ItemFilesRepository, ItemsRepository, LineworksChannelsRepository,
     MeasurementsRepository, NfcTagRepository, NotifyDeliveryRepository, NotifyDocumentRepository,
-    NotifyGroupRepository, NotifyLineConfigRepository, NotifyRecipientRepository,
-    SsoAdminRepository, TenantUsersRepository, TimecardRepository, VehicleSettingsDumpsRepository,
+    NotifyRecipientRepository, SsoAdminRepository, TenantUsersRepository, TimecardRepository,
+    VehicleSettingsDumpsRepository,
 };
 use storage::StorageBackend;
 
@@ -84,10 +84,8 @@ pub struct AppState {
     pub fcm: Option<Arc<dyn fcm::FcmSenderTrait>>,
     pub webhook: Option<Arc<dyn webhook::WebhookService>>,
     pub notify_recipients: Arc<dyn NotifyRecipientRepository>,
-    pub notify_groups: Arc<dyn NotifyGroupRepository>,
     pub notify_documents: Arc<dyn NotifyDocumentRepository>,
     pub notify_deliveries: Arc<dyn NotifyDeliveryRepository>,
-    pub notify_line_config: Arc<dyn NotifyLineConfigRepository>,
     pub lineworks_channels: Arc<dyn LineworksChannelsRepository>,
     pub notify_storage: Option<Arc<dyn StorageBackend>>,
     /// `RedactBroadcaster::from_env()` で env vars (`NOTIFY_REDACT_BROADCAST_URL` /
