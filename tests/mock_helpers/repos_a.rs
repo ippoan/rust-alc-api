@@ -7,7 +7,7 @@ use rust_alc_api::db::models::DtakologRow;
 use rust_alc_api::db::models::*;
 use rust_alc_api::db::repository::auth::{AuthRepository, SsoConfigRow};
 use rust_alc_api::db::repository::bot_admin::{
-    BotAdminRepository, BotConfigExportRow, BotConfigRow, BotConfigWithSecrets, TenantInfoForExport,
+    BotAdminRepository, BotConfigExportRow, BotConfigRow, TenantInfoForExport,
 };
 use rust_alc_api::db::repository::car_inspections::{
     CarInspectionFile, CarInspectionRepository, VehicleCategories,
@@ -385,7 +385,6 @@ impl AuthRepository for MockAuthRepository {
 
 pub struct MockBotAdminRepository {
     pub fail_next: AtomicBool,
-    pub return_config_with_secrets: std::sync::Mutex<Option<BotConfigWithSecrets>>,
     pub return_tenant_for_export: std::sync::Mutex<Option<TenantInfoForExport>>,
     pub return_configs_for_export: std::sync::Mutex<Vec<BotConfigExportRow>>,
     pub fail_tenant_for_export: AtomicBool,
@@ -398,7 +397,6 @@ impl Default for MockBotAdminRepository {
     fn default() -> Self {
         Self {
             fail_next: AtomicBool::new(false),
-            return_config_with_secrets: std::sync::Mutex::new(None),
             return_tenant_for_export: std::sync::Mutex::new(None),
             return_configs_for_export: std::sync::Mutex::new(Vec::new()),
             fail_tenant_for_export: AtomicBool::new(false),
@@ -416,16 +414,6 @@ impl BotAdminRepository for MockBotAdminRepository {
     }
 
     async fn update_client_secret(
-        &self,
-        _tenant_id: Uuid,
-        _id: Uuid,
-        _encrypted: &str,
-    ) -> Result<(), sqlx::Error> {
-        check_fail!(self);
-        Ok(())
-    }
-
-    async fn update_private_key(
         &self,
         _tenant_id: Uuid,
         _id: Uuid,
@@ -500,15 +488,6 @@ impl BotAdminRepository for MockBotAdminRepository {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         })
-    }
-
-    async fn get_config_with_secrets(
-        &self,
-        _tenant_id: Uuid,
-        _id: Uuid,
-    ) -> Result<Option<BotConfigWithSecrets>, sqlx::Error> {
-        check_fail!(self);
-        Ok(self.return_config_with_secrets.lock().unwrap().take())
     }
 
     async fn delete_config(&self, _tenant_id: Uuid, _id: Uuid) -> Result<(), sqlx::Error> {

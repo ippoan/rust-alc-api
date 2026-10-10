@@ -26,11 +26,7 @@ use rust_alc_api::db::repository::{
     PgNotifyDeliveryRepository, PgNotifyDocumentRepository, PgNotifyRecipientRepository,
     PgSsoAdminRepository, PgTenantUsersRepository, PgTenkoCallRepository, PgTenkoRecordsRepository,
     PgTenkoSchedulesRepository, PgTenkoSessionRepository, PgTenkoWebhooksRepository,
-    PgTimecardRepository, PgTroubleCategoriesRepository, PgTroubleFieldLayoutsRepository,
-    PgTroubleFilesRepository, PgTroubleNotificationPrefsRepository, PgTroubleOfficesRepository,
-    PgTroubleProgressStatusesRepository, PgTroubleSchedulesRepository,
-    PgTroubleTaskStatusesRepository, PgTroubleTaskTypesRepository, PgTroubleTasksRepository,
-    PgTroubleTicketsRepository, PgTroubleWorkflowRepository, PgVehicleSettingsDumpsRepository,
+    PgTimecardRepository, PgVehicleSettingsDumpsRepository,
 };
 use rust_alc_api::AppState;
 
@@ -678,37 +674,8 @@ pub fn pg_tenko_state(state: &AppState) -> alc_tenko::TenkoState {
     }
 }
 
-/// pool から trouble ドメインの Pg TroubleState を合成する (Refs #513 Phase B)。
-pub fn pg_trouble_state(state: &AppState) -> alc_trouble::TroubleState {
-    let pool = state
-        .pool
-        .clone()
-        .expect("spawn_test_server: state.pool is None — mock state は spawn_test_server_with_states を使うこと");
-    alc_trouble::TroubleState {
-        trouble_tickets: Arc::new(PgTroubleTicketsRepository::new(pool.clone())),
-        trouble_files: Arc::new(PgTroubleFilesRepository::new(pool.clone())),
-        trouble_workflow: Arc::new(PgTroubleWorkflowRepository::new(pool.clone())),
-        trouble_categories: Arc::new(PgTroubleCategoriesRepository::new(pool.clone())),
-        trouble_offices: Arc::new(PgTroubleOfficesRepository::new(pool.clone())),
-        trouble_progress_statuses: Arc::new(PgTroubleProgressStatusesRepository::new(pool.clone())),
-        trouble_notification_prefs: Arc::new(PgTroubleNotificationPrefsRepository::new(
-            pool.clone(),
-        )),
-        trouble_schedules: Arc::new(PgTroubleSchedulesRepository::new(pool.clone())),
-        trouble_tasks: Arc::new(PgTroubleTasksRepository::new(pool.clone())),
-        trouble_task_types: Arc::new(PgTroubleTaskTypesRepository::new(pool.clone())),
-        trouble_task_statuses: Arc::new(PgTroubleTaskStatusesRepository::new(pool.clone())),
-        trouble_field_layouts: Arc::new(PgTroubleFieldLayoutsRepository::new(pool)),
-        trouble_storage: Some(Arc::new(MockStorage::new("trouble-bucket"))),
-        webhook: state.webhook.clone(),
-        cloud_tasks: None,
-        notifier: None,
-        employees: Some(state.employees.clone()),
-    }
-}
-
-/// camera ドメインの起票 port テスト実装 (Refs #556)。実 trouble への配線は
-/// binary 側の `TroubleDownTicketSink` が持つが、テストの camera route 検証は
+/// camera ドメインの起票 port テスト実装 (Refs #556)。本番の起票は binary 側が
+/// `HttpDownTicketSink` (trouble-worker の内部口) で持つが、テストの camera route 検証は
 /// CRUD/status が主で down 起票経路は fire しないため、ここでは no-op で発番のみ返す。
 pub struct TestDownTicketSink;
 
@@ -718,7 +685,7 @@ impl alc_camera::DownTicketSink for TestDownTicketSink {
         &self,
         _tenant_id: Uuid,
         _ticket: alc_camera::CameraDownTicket,
-    ) -> Result<Uuid, sqlx::Error> {
+    ) -> Result<Uuid, alc_camera::DownTicketError> {
         Ok(Uuid::new_v4())
     }
 }
@@ -764,23 +731,14 @@ pub fn pg_maintenance_state(state: &AppState) -> alc_maintenance::MaintenanceSta
 
 pub async fn spawn_test_server(state: AppState) -> String {
     let tenko_state = pg_tenko_state(&state);
-    let trouble_state = pg_trouble_state(&state);
     let camera_state = pg_camera_state(&state);
     let maintenance_state = pg_maintenance_state(&state);
-    spawn_test_server_with_states(
-        state,
-        tenko_state,
-        trouble_state,
-        camera_state,
-        maintenance_state,
-    )
-    .await
+    spawn_test_server_with_states(state, tenko_state, camera_state, maintenance_state).await
 }
 
 pub async fn spawn_test_server_with_states(
     state: AppState,
     tenko_state: alc_tenko::TenkoState,
-    trouble_state: alc_trouble::TroubleState,
     camera_state: alc_camera::CameraState,
     maintenance_state: alc_maintenance::MaintenanceState,
 ) -> String {
@@ -813,7 +771,6 @@ pub async fn spawn_test_server_with_states(
             rust_alc_api::routes::router(
                 internal_oidc_trust_for_tests(),
                 tenko_state,
-                trouble_state,
                 camera_state,
                 maintenance_state,
             )

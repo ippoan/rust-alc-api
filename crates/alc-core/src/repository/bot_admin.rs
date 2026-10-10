@@ -1,23 +1,6 @@
 use async_trait::async_trait;
 use uuid::Uuid;
 
-/// bot_configs 行 (暗号化フィールド付き、メッセージ送信用)
-#[derive(Debug, sqlx::FromRow)]
-pub struct BotConfigWithSecrets {
-    pub id: Uuid,
-    pub provider: String,
-    pub name: String,
-    pub client_id: String,
-    pub client_secret_encrypted: String,
-    pub service_account: String,
-    pub private_key_encrypted: String,
-    pub bot_id: String,
-    pub enabled: bool,
-    /// LINE WORKS Bot webhook 署名検証用 (X-WORKS-Signature HMAC key)。
-    /// migration 102 で追加。未設定時は webhook が常に 401 を返す。
-    pub bot_secret_encrypted: Option<String>,
-}
-
 /// テナント情報 (Bot Config export 用、staging import と互換のシェイプ)
 #[derive(Debug, Clone, sqlx::FromRow, serde::Serialize)]
 pub struct TenantInfoForExport {
@@ -38,7 +21,6 @@ pub struct BotConfigExportRow {
     pub client_id: String,
     pub client_secret_encrypted: String,
     pub service_account: String,
-    pub private_key_encrypted: String,
     pub bot_id: String,
     pub enabled: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -67,23 +49,8 @@ pub trait BotAdminRepository: Send + Sync {
     /// bot_configs 一覧取得
     async fn list_configs(&self, tenant_id: Uuid) -> Result<Vec<BotConfigRow>, sqlx::Error>;
 
-    /// bot_config を暗号化フィールド付きで取得 (メッセージ送信用)
-    async fn get_config_with_secrets(
-        &self,
-        tenant_id: Uuid,
-        id: Uuid,
-    ) -> Result<Option<BotConfigWithSecrets>, sqlx::Error>;
-
     /// client_secret_encrypted 更新
     async fn update_client_secret(
-        &self,
-        tenant_id: Uuid,
-        id: Uuid,
-        encrypted: &str,
-    ) -> Result<(), sqlx::Error>;
-
-    /// private_key_encrypted 更新
-    async fn update_private_key(
         &self,
         tenant_id: Uuid,
         id: Uuid,
@@ -120,6 +87,7 @@ pub trait BotAdminRepository: Send + Sync {
         client_id: &str,
         client_secret_encrypted: &str,
         service_account: &str,
+        // 列は NOT NULL のまま (DROP は別 PR、Refs #747)。呼び手は空文字の暗号文を渡す
         private_key_encrypted: &str,
         bot_id: &str,
         enabled: bool,

@@ -309,11 +309,10 @@ jobs:
           - { name: mock-dtako, target: "//:mock_dtako", coverage: "cov-mock-dtako" }
           - { name: mock-misc, target: "//:mock_misc", coverage: "cov-mock-misc" }
           - { name: mock-tenko, target: "//:mock_tenko", coverage: "cov-mock-tenko" }
-          - { name: mock-trouble, target: "//:mock_trouble", coverage: "cov-mock-trouble" }
           - { name: mock-maintenance, target: "//:mock_maintenance" }
           - { name: auth, target: "//crates/alc-auth:alc-auth_test" }
           - { name: auth-jwt, target: "//crates/alc-auth-jwt:alc-auth-jwt_test", coverage: "cov-auth-jwt" }
-          - { name: camera, target: "//crates/alc-camera:alc-camera_test" }
+          - { name: camera, target: "//crates/alc-camera:alc-camera_test", coverage: "cov-camera" }
           - { name: carins, target: "//crates/alc-carins:alc-carins_test", coverage: "cov-carins" }
           - { name: core, target: "//crates/alc-core:alc-core_test", coverage: "cov-core" }
           - { name: devices, target: "//crates/alc-devices:alc-devices_test", coverage: "cov-devices" }
@@ -324,7 +323,6 @@ jobs:
           - { name: pdf, target: "//crates/alc-pdf:alc-pdf_test", coverage: "cov-pdf" }
           - { name: storage, target: "//crates/alc-storage:alc-storage_test" }
           - { name: tenko, target: "//crates/alc-tenko:alc-tenko_test", coverage: "cov-tenko" }
-          - { name: trouble, target: "//crates/alc-trouble:alc-trouble_test", coverage: "cov-trouble" }
     steps:
       - uses: actions/checkout@v4
       - uses: ippoan/setup-bazel@main
@@ -402,7 +400,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: db-trouble, target: "//:trouble_test", coverage: "cov-db-trouble" }
           # 車両整備記録 (maintenance) の土台: 車両マスタ CRUD + carins 紐づけ/解除/候補提示
           # (Refs ippoan/rust-alc-api#651)。partial unique (tenant_id, car_id) の 409 と
           # RLS のテナント分離を実 DB で固定する。ci.yml の bazel-test-db と cache-warm.yml

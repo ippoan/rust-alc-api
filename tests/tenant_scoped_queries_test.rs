@@ -15,12 +15,10 @@ use sqlx::postgres::PgPoolOptions;
 use uuid::Uuid;
 
 use alc_tenko::overdue::TenkoOverdueRepository;
-use alc_trouble::models::{CreateTroubleSchedule, CreateTroubleTicket};
 use rust_alc_api::db::repository::{
     AuthRepository, DeviceRepository, PgAuthRepository, PgDeviceRepository,
     PgTenantUsersRepository, PgTenkoCallRepository, PgTenkoOverdueRepository,
-    PgTroubleSchedulesRepository, PgTroubleTicketsRepository, TenantUsersRepository,
-    TenkoCallRepository, TroubleSchedulesRepository, TroubleTicketsRepository,
+    TenantUsersRepository, TenkoCallRepository,
 };
 
 async fn setup() -> sqlx::PgPool {
@@ -441,95 +439,6 @@ async fn tenko_repos_are_tenant_scoped() {
             .await
             .unwrap();
     assert_eq!(left, 0);
-}
-
-/// 通知予約の fire 後の印 (`mark_sent` / `mark_failed`) は、予約のテナントを渡したときだけ効く。
-#[tokio::test]
-async fn trouble_schedule_marks_are_tenant_scoped() {
-    let pool = setup().await;
-    let tickets = PgTroubleTicketsRepository::new(pool.clone());
-    let schedules = PgTroubleSchedulesRepository::new(pool.clone());
-    let tenant_a = common::create_test_tenant(&pool, "Scoped Trouble A").await;
-    let tenant_b = common::create_test_tenant(&pool, "Scoped Trouble B").await;
-
-    let ticket = tickets
-        .create(
-            tenant_a,
-            &CreateTroubleTicket {
-                category: "事故".to_string(),
-                ..Default::default()
-            },
-            None,
-            None,
-        )
-        .await
-        .expect("ticket create failed");
-
-    let mut ids = Vec::new();
-    for message in ["to be sent", "to be failed"] {
-        let schedule = schedules
-            .create(
-                tenant_a,
-                &CreateTroubleSchedule {
-                    ticket_id: ticket.id,
-                    scheduled_at: Utc::now(),
-                    message: message.to_string(),
-                    lineworks_user_ids: vec![],
-                },
-                None,
-            )
-            .await
-            .expect("schedule create failed");
-        ids.push(schedule.id);
-    }
-    let (sent_id, failed_id) = (ids[0], ids[1]);
-
-    assert!(
-        !schedules
-            .mark_sent(tenant_b, sent_id)
-            .await
-            .expect("mark_sent (other tenant) failed"),
-        "別テナントからは送信済みにできないこと"
-    );
-    assert!(
-        !schedules
-            .mark_failed(tenant_b, failed_id)
-            .await
-            .expect("mark_failed (other tenant) failed"),
-        "別テナントからは失敗にできないこと"
-    );
-    for id in [sent_id, failed_id] {
-        let status: String =
-            sqlx::query_scalar("SELECT status FROM alc_api.trouble_schedules WHERE id = $1")
-                .bind(id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(status, "pending");
-    }
-
-    assert!(schedules
-        .mark_sent(tenant_a, sent_id)
-        .await
-        .expect("mark_sent failed"));
-    assert!(schedules
-        .mark_failed(tenant_a, failed_id)
-        .await
-        .expect("mark_failed failed"));
-    let status: String =
-        sqlx::query_scalar("SELECT status FROM alc_api.trouble_schedules WHERE id = $1")
-            .bind(sent_id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-    assert_eq!(status, "sent");
-    let status: String =
-        sqlx::query_scalar("SELECT status FROM alc_api.trouble_schedules WHERE id = $1")
-            .bind(failed_id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-    assert_eq!(status, "failed");
 }
 
 /// 参加申請の一覧・承認・却下は、管理者のテナントの申請にしか届かない (HTTP 経由)。

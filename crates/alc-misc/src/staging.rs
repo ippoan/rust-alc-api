@@ -320,7 +320,6 @@ pub struct StagingBotConfig {
     pub client_id: String,
     pub client_secret_encrypted: String,
     pub service_account: String,
-    pub private_key_encrypted: String,
     pub bot_id: String,
     pub enabled: bool,
     pub created_at: DateTime<Utc>,
@@ -545,7 +544,6 @@ staging_export!(
         client_id,
         client_secret_encrypted,
         service_account,
-        private_key_encrypted,
         bot_id,
         enabled,
         created_at,
@@ -728,11 +726,40 @@ staging_import!(import_tenko_call_drivers, StagingTenkoCallDriver, "tenko_call_d
     insert: [id, phone_number, driver_name, call_number, tenant_id, employee_code, created_at],
     update: [phone_number, driver_name, call_number, employee_code]);
 
-staging_import!(import_bot_configs, StagingBotConfig, "bot_configs",
-    insert: [id, tenant_id, provider, name, client_id, client_secret_encrypted,
-             service_account, private_key_encrypted, bot_id, enabled, created_at, updated_at],
-    update: [provider, name, client_id, client_secret_encrypted,
-             service_account, private_key_encrypted, bot_id, enabled, updated_at]);
+// LINE WORKS Bot の Private Key は export も import もしない (Refs #747)。列は
+// NOT NULL のまま (DROP は別 PR) なので、新規行には空文字を入れる (bot_admin の create
+// と同じ)。既存行の値は update で上書きしない。macro は struct の field しか bind
+// できないため手書き。
+async fn import_bot_configs(
+    tx: &mut Tx<'_>,
+    items: &[StagingBotConfig],
+) -> Result<usize, StatusCode> {
+    const SQL: &str = "INSERT INTO bot_configs (id, tenant_id, provider, name, client_id, \
+        client_secret_encrypted, service_account, private_key_encrypted, bot_id, enabled, \
+        created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, '', $8, $9, $10, $11) \
+        ON CONFLICT (id) DO UPDATE SET provider = EXCLUDED.provider, name = EXCLUDED.name, \
+        client_id = EXCLUDED.client_id, client_secret_encrypted = EXCLUDED.client_secret_encrypted, \
+        service_account = EXCLUDED.service_account, bot_id = EXCLUDED.bot_id, \
+        enabled = EXCLUDED.enabled, updated_at = EXCLUDED.updated_at";
+    for item in items {
+        sqlx::query(SQL)
+            .bind(item.id)
+            .bind(item.tenant_id)
+            .bind(&item.provider)
+            .bind(&item.name)
+            .bind(&item.client_id)
+            .bind(&item.client_secret_encrypted)
+            .bind(&item.service_account)
+            .bind(&item.bot_id)
+            .bind(item.enabled)
+            .bind(item.created_at)
+            .bind(item.updated_at)
+            .execute(&mut **tx)
+            .await
+            .map_err(db_err)?;
+    }
+    Ok(items.len())
+}
 
 staging_import!(import_notify_line_configs, StagingNotifyLineConfig, "notify_line_configs",
     insert: [id, tenant_id, name, channel_id, channel_secret_encrypted,

@@ -58,7 +58,6 @@ struct UpsertRequest {
     client_id: String,
     client_secret: Option<String>,
     service_account: String,
-    private_key: Option<String>,
     bot_id: String,
     enabled: Option<bool>,
     /// LINE WORKS Bot webhook 署名検証用 (X-WORKS-Signature HMAC key)
@@ -288,16 +287,6 @@ async fn upsert_config(
                     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
             }
         }
-        if let Some(ref pk) = body.private_key {
-            if !pk.is_empty() {
-                let encrypted = encrypt_secret(pk, &key).expect("AES-256-GCM encrypt infallible");
-                state
-                    .bot_admin
-                    .update_private_key(tenant_id, id, &encrypted)
-                    .await
-                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-            }
-        }
         if let Some(bs) = body.bot_secret.as_deref().filter(|s| !s.is_empty()) {
             let encrypted = encrypt_secret(bs, &key).expect("AES-256-GCM encrypt infallible");
             state
@@ -324,8 +313,9 @@ async fn upsert_config(
         // 新規作成
         let encrypted_secret = encrypt_secret(body.client_secret.as_deref().unwrap_or(""), &key)
             .expect("AES-256-GCM encrypt infallible");
-        let encrypted_pk = encrypt_secret(body.private_key.as_deref().unwrap_or(""), &key)
-            .expect("AES-256-GCM encrypt infallible");
+        // Private Key はもう受け取らない (Refs #747)。列は NOT NULL のまま (DROP は別 PR)
+        // なので空文字の暗号文を入れる。
+        let encrypted_pk = encrypt_secret("", &key).expect("AES-256-GCM encrypt infallible");
 
         let created = state
             .bot_admin

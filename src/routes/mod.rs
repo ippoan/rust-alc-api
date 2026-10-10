@@ -60,19 +60,6 @@ pub use alc_tenko::tenko_records;
 pub use alc_tenko::tenko_schedules;
 pub use alc_tenko::tenko_sessions;
 pub use alc_tenko::tenko_webhooks;
-pub use alc_trouble::categories as trouble_categories;
-pub use alc_trouble::field_layouts as trouble_field_layouts;
-pub use alc_trouble::files as trouble_files;
-pub use alc_trouble::lineworks_members as trouble_lineworks_members;
-pub use alc_trouble::notifications as trouble_notifications;
-pub use alc_trouble::offices as trouble_offices;
-pub use alc_trouble::progress_statuses as trouble_progress_statuses;
-pub use alc_trouble::schedules as trouble_schedules;
-pub use alc_trouble::task_statuses as trouble_task_statuses;
-pub use alc_trouble::task_types as trouble_task_types;
-pub use alc_trouble::tasks as trouble_tasks;
-pub use alc_trouble::tickets as trouble_tickets;
-pub use alc_trouble::workflow as trouble_workflow;
 
 pub mod rls_check;
 
@@ -97,7 +84,6 @@ pub fn internal_oidc_trust() -> InternalOidcTrust {
 pub fn router(
     internal_oidc: InternalOidcTrust,
     tenko_state: alc_tenko::TenkoState,
-    trouble_state: alc_trouble::TroubleState,
     camera_state: alc_camera::CameraState,
     maintenance_state: alc_maintenance::MaintenanceState,
 ) -> Router<AppState> {
@@ -119,7 +105,6 @@ pub fn router(
         .merge(notify_lineworks_channels::internal_router())
         .merge(notify_viewer::internal_router())
         .merge(notify_line_webhook::internal_router())
-        .merge(trouble_schedules::internal_fire_router().with_state(trouble_state.clone()))
         .merge(auth::internal_router())
         // device_id から有効な端末の tenant を返す内部口。auth-worker の
         // pair-internal が tenant 決定に使う (Refs ippoan/auth-worker#544)。
@@ -188,8 +173,6 @@ pub fn router(
         .merge(notify_viewer::public_router())
         .merge(access_requests::public_router())
         .merge(dtako_tickets::public_close_router());
-    // #434 lockdown: trouble schedule fire は internal_protected へ移動
-    // (`/api/internal/trouble/schedules/{id}/fire`)。bare public 経路は廃止。
 
     // tenko ドメイン (Refs #513) — AppState から分離した TenkoState でマウントする。
     // tenant 系ルートには monolith 本体と同じ require_tenant_header を張る。
@@ -206,25 +189,6 @@ pub fn router(
         .layer(axum_middleware::from_fn(require_tenant_header))
         .with_state(tenko_state.clone());
     let tenko_public: Router<AppState> = tenko_call::public_router().with_state(tenko_state);
-
-    // trouble ドメイン (Refs #513 Phase B) — AppState から分離した TroubleState で
-    // マウントする。tenant 系ルートには monolith 本体と同じ require_tenant_header を張る。
-    let trouble_tenant: Router<AppState> = Router::new()
-        .merge(trouble_tickets::tenant_router())
-        .merge(trouble_files::tenant_router())
-        .merge(trouble_workflow::tenant_router())
-        .merge(trouble_categories::tenant_router())
-        .merge(trouble_offices::tenant_router())
-        .merge(trouble_progress_statuses::tenant_router())
-        .merge(trouble_notifications::tenant_router())
-        .merge(trouble_schedules::tenant_router())
-        .merge(trouble_tasks::tenant_router())
-        .merge(trouble_task_types::tenant_router())
-        .merge(trouble_task_statuses::tenant_router())
-        .merge(trouble_field_layouts::tenant_router())
-        .merge(trouble_lineworks_members::tenant_router())
-        .layer(axum_middleware::from_fn(require_tenant_header))
-        .with_state(trouble_state);
 
     // camera ドメイン (Refs #556) — per-domain の alc-camera-api を廃止し monolith へ
     // 移植。AppState から分離した CameraState でマウントする。tenant 系ルートには
@@ -251,7 +215,6 @@ pub fn router(
         .merge(internal_protected)
         .merge(tenant_protected)
         .merge(tenko_tenant)
-        .merge(trouble_tenant)
         .merge(camera_tenant)
         .merge(maintenance_tenant)
 }
