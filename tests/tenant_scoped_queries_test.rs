@@ -17,11 +17,10 @@ use uuid::Uuid;
 use alc_tenko::overdue::TenkoOverdueRepository;
 use alc_trouble::models::{CreateTroubleSchedule, CreateTroubleTicket};
 use rust_alc_api::db::repository::{
-    AuthRepository, DeviceRepository, NotifyLineConfigRepository, PgAuthRepository,
-    PgDeviceRepository, PgNotifyLineConfigRepository, PgTenantUsersRepository,
-    PgTenkoCallRepository, PgTenkoOverdueRepository, PgTroubleSchedulesRepository,
-    PgTroubleTicketsRepository, TenantUsersRepository, TenkoCallRepository,
-    TroubleSchedulesRepository, TroubleTicketsRepository,
+    AuthRepository, DeviceRepository, PgAuthRepository, PgDeviceRepository,
+    PgTenantUsersRepository, PgTenkoCallRepository, PgTenkoOverdueRepository,
+    PgTroubleSchedulesRepository, PgTroubleTicketsRepository, TenantUsersRepository,
+    TenkoCallRepository, TroubleSchedulesRepository, TroubleTicketsRepository,
 };
 
 async fn setup() -> sqlx::PgPool {
@@ -269,56 +268,6 @@ async fn tenant_users_repo_is_tenant_scoped() {
         .await
         .unwrap();
     assert_eq!(users_left, 0);
-}
-
-/// LINE の設定の取得・削除は自テナントの 1 行だけに届く
-/// (以前の DELETE は WHERE 無しで、所有者接続では全テナントの設定を消していた)。
-#[tokio::test]
-async fn notify_line_config_is_tenant_scoped() {
-    let pool = setup().await;
-    let repo = PgNotifyLineConfigRepository::new(pool.clone());
-    let tenant_a = common::create_test_tenant(&pool, "Scoped Line A").await;
-    let tenant_b = common::create_test_tenant(&pool, "Scoped Line B").await;
-
-    let channel_a = unique("chan-a");
-    let channel_b = unique("chan-b");
-    repo.upsert(
-        tenant_a, "Line A", &channel_a, "secret-a", "kid-a", "key-a", None, None,
-    )
-    .await
-    .expect("upsert A failed");
-    repo.upsert(
-        tenant_b, "Line B", &channel_b, "secret-b", "kid-b", "key-b", None, None,
-    )
-    .await
-    .expect("upsert B failed");
-
-    let got = repo.get(tenant_a).await.expect("get failed").unwrap();
-    assert_eq!(got.tenant_id, tenant_a);
-    assert_eq!(got.channel_id, channel_a);
-    let full = repo
-        .get_full(tenant_b)
-        .await
-        .expect("get_full failed")
-        .unwrap();
-    assert_eq!(full.tenant_id, tenant_b);
-    assert_eq!(full.channel_id, channel_b);
-
-    repo.delete(tenant_a).await.expect("delete failed");
-    let left_a: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM alc_api.notify_line_configs WHERE tenant_id = $1")
-            .bind(tenant_a)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-    let left_b: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM alc_api.notify_line_configs WHERE tenant_id = $1")
-            .bind(tenant_b)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-    assert_eq!(left_a, 0, "自テナントの設定は消えること");
-    assert_eq!(left_b, 1, "別テナントの設定が消えないこと");
 }
 
 /// 端末のクレーム (QR 永久) と dismiss 用の FCM トークン一覧は、渡したテナントの行だけ。

@@ -9,9 +9,8 @@ pub use alc_core::repository::{
     DtakoYTimeExportRepository, EmployeeRepository, GuidanceRecordsRepository,
     HubMeasurementsRepository, ItemFilesRepository, ItemsRepository, LineworksChannelsRepository,
     MeasurementsRepository, NfcTagRepository, NotifyDeliveryRepository, NotifyDocumentRepository,
-    NotifyGroupRepository, NotifyLineConfigRepository, NotifyRecipientRepository,
-    SsoAdminRepository, TenantUsersRepository, TimecardRepository, VehicleSettingsDumpsRepository,
-    WebhookRepository,
+    NotifyRecipientRepository, SsoAdminRepository, TenantUsersRepository, TimecardRepository,
+    VehicleSettingsDumpsRepository, WebhookRepository,
 };
 
 // Re-export trouble traits from alc-trouble (Refs #513 Phase B)
@@ -55,12 +54,11 @@ pub use alc_tenko::repo::{
 
 // Re-export notify submodules and Pg implementations
 pub use alc_core::repository::{
-    lineworks_channels, notify_deliveries, notify_documents, notify_groups, notify_line_config,
-    notify_recipients,
+    lineworks_channels, notify_deliveries, notify_documents, notify_recipients,
 };
 pub use alc_notify::repo::{
     PgLineworksChannelsRepository, PgNotifyDeliveryRepository, PgNotifyDocumentRepository,
-    PgNotifyGroupRepository, PgNotifyLineConfigRepository, PgNotifyRecipientRepository,
+    PgNotifyRecipientRepository,
 };
 
 // Re-export Pg implementations

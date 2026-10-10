@@ -23,9 +23,8 @@ use rust_alc_api::db::repository::{
     PgEmployeeRepository, PgEquipmentFailuresRepository, PgGuidanceRecordsRepository,
     PgHealthBaselinesRepository, PgHubMeasurementsRepository, PgItemFilesRepository,
     PgItemsRepository, PgLineworksChannelsRepository, PgMeasurementsRepository, PgNfcTagRepository,
-    PgNotifyDeliveryRepository, PgNotifyDocumentRepository, PgNotifyGroupRepository,
-    PgNotifyLineConfigRepository, PgNotifyRecipientRepository, PgSsoAdminRepository,
-    PgTenantUsersRepository, PgTenkoCallRepository, PgTenkoRecordsRepository,
+    PgNotifyDeliveryRepository, PgNotifyDocumentRepository, PgNotifyRecipientRepository,
+    PgSsoAdminRepository, PgTenantUsersRepository, PgTenkoCallRepository, PgTenkoRecordsRepository,
     PgTenkoSchedulesRepository, PgTenkoSessionRepository, PgTenkoWebhooksRepository,
     PgTimecardRepository, PgTroubleCategoriesRepository, PgTroubleFieldLayoutsRepository,
     PgTroubleFilesRepository, PgTroubleNotificationPrefsRepository, PgTroubleOfficesRepository,
@@ -278,10 +277,8 @@ fn build_app_state(
     let tenant_users = Arc::new(PgTenantUsersRepository::new(pool.clone()));
     let timecard = Arc::new(PgTimecardRepository::new(pool.clone()));
     let notify_recipients = Arc::new(PgNotifyRecipientRepository::new(pool.clone()));
-    let notify_groups = Arc::new(PgNotifyGroupRepository::new(pool.clone()));
     let notify_documents = Arc::new(PgNotifyDocumentRepository::new(pool.clone()));
     let notify_deliveries = Arc::new(PgNotifyDeliveryRepository::new(pool.clone()));
-    let notify_line_config = Arc::new(PgNotifyLineConfigRepository::new(pool.clone()));
     let lineworks_channels = Arc::new(PgLineworksChannelsRepository::new(pool.clone()));
 
     AppState {
@@ -323,10 +320,8 @@ fn build_app_state(
         dtako_storage,
         fcm,
         notify_recipients,
-        notify_groups,
         notify_documents,
         notify_deliveries,
-        notify_line_config,
         lineworks_channels,
         notify_storage: None,
         redact_broadcaster: None,

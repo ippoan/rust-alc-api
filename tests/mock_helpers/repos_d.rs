@@ -8,8 +8,6 @@ use rust_alc_api::db::repository::items::{ItemFilesRepository, ItemsRepository};
 use rust_alc_api::db::repository::lineworks_channels::*;
 use rust_alc_api::db::repository::notify_deliveries::*;
 use rust_alc_api::db::repository::notify_documents::*;
-use rust_alc_api::db::repository::notify_groups::*;
-use rust_alc_api::db::repository::notify_line_config::*;
 use rust_alc_api::db::repository::notify_recipients::*;
 
 macro_rules! check_fail {
@@ -33,9 +31,6 @@ pub struct MockLineworksChannelsRepository {
     pub upsert_joined_calls: std::sync::atomic::AtomicUsize,
     /// `mark_left` の呼び出し回数 (テスト assertion 用)
     pub mark_left_calls: std::sync::atomic::AtomicUsize,
-    /// `get_for_send` (internal 送信経路の RLS バイパス取得) の戻り値。
-    /// `None` にすると channel_not_found 相当になる。
-    pub send_channel: Mutex<Option<LineworksChannel>>,
 }
 
 impl Default for MockLineworksChannelsRepository {
@@ -45,7 +40,6 @@ impl Default for MockLineworksChannelsRepository {
             bot_config: Mutex::new(None),
             upsert_joined_calls: std::sync::atomic::AtomicUsize::new(0),
             mark_left_calls: std::sync::atomic::AtomicUsize::new(0),
-            send_channel: Mutex::new(Some(mock_lineworks_channel(Uuid::new_v4()))),
         }
     }
 }
@@ -67,22 +61,6 @@ fn mock_lineworks_channel(tenant_id: Uuid) -> LineworksChannel {
 
 #[async_trait::async_trait]
 impl LineworksChannelsRepository for MockLineworksChannelsRepository {
-    async fn list_active(&self, tenant_id: Uuid) -> Result<Vec<LineworksChannel>, sqlx::Error> {
-        check_fail!(self);
-        Ok(vec![mock_lineworks_channel(tenant_id)])
-    }
-    async fn get(
-        &self,
-        tenant_id: Uuid,
-        _id: Uuid,
-    ) -> Result<Option<LineworksChannel>, sqlx::Error> {
-        check_fail!(self);
-        Ok(Some(mock_lineworks_channel(tenant_id)))
-    }
-    async fn get_for_send(&self, _id: Uuid) -> Result<Option<LineworksChannel>, sqlx::Error> {
-        check_fail!(self);
-        Ok(self.send_channel.lock().unwrap().clone())
-    }
     async fn upsert_joined(
         &self,
         tenant_id: Uuid,
@@ -107,10 +85,6 @@ impl LineworksChannelsRepository for MockLineworksChannelsRepository {
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Ok(())
     }
-    async fn delete(&self, _tenant_id: Uuid, _id: Uuid) -> Result<(), sqlx::Error> {
-        check_fail!(self);
-        Ok(())
-    }
     async fn lookup_bot_config_for_webhook(
         &self,
         _bot_id: &str,
@@ -126,28 +100,13 @@ impl LineworksChannelsRepository for MockLineworksChannelsRepository {
 
 pub struct MockNotifyRecipientRepository {
     pub fail_next: AtomicBool,
-    /// `get_for_send` (internal 送信経路の RLS バイパス取得) の戻り値。
-    /// `None` にすると recipient_not_found 相当になる。
-    pub send_recipient: Mutex<Option<NotifyRecipient>>,
 }
 
 impl Default for MockNotifyRecipientRepository {
     fn default() -> Self {
         Self {
             fail_next: AtomicBool::new(false),
-            send_recipient: Mutex::new(Some(mock_lineworks_recipient(Uuid::new_v4()))),
         }
-    }
-}
-
-/// LINE WORKS 個人宛の recipient (internal 送信経路のデフォルト)。
-/// `mock_recipient` は provider = "line" なので送信テストには使えない。
-pub fn mock_lineworks_recipient(tenant_id: Uuid) -> NotifyRecipient {
-    NotifyRecipient {
-        provider: "lineworks".into(),
-        lineworks_user_id: Some("lw-user-1".into()),
-        line_user_id: None,
-        ..mock_recipient(tenant_id)
     }
 }
 
@@ -169,47 +128,6 @@ fn mock_recipient(tenant_id: Uuid) -> NotifyRecipient {
 
 #[async_trait::async_trait]
 impl NotifyRecipientRepository for MockNotifyRecipientRepository {
-    async fn list(&self, tenant_id: Uuid) -> Result<Vec<NotifyRecipient>, sqlx::Error> {
-        check_fail!(self);
-        Ok(vec![mock_recipient(tenant_id)])
-    }
-    async fn get(
-        &self,
-        tenant_id: Uuid,
-        _id: Uuid,
-    ) -> Result<Option<NotifyRecipient>, sqlx::Error> {
-        check_fail!(self);
-        Ok(Some(mock_recipient(tenant_id)))
-    }
-    async fn get_for_send(&self, _id: Uuid) -> Result<Option<NotifyRecipient>, sqlx::Error> {
-        check_fail!(self);
-        Ok(self.send_recipient.lock().unwrap().clone())
-    }
-    async fn create(
-        &self,
-        tenant_id: Uuid,
-        _input: &CreateNotifyRecipient,
-    ) -> Result<NotifyRecipient, sqlx::Error> {
-        check_fail!(self);
-        Ok(mock_recipient(tenant_id))
-    }
-    async fn update(
-        &self,
-        tenant_id: Uuid,
-        _id: Uuid,
-        _input: &UpdateNotifyRecipient,
-    ) -> Result<NotifyRecipient, sqlx::Error> {
-        check_fail!(self);
-        Ok(mock_recipient(tenant_id))
-    }
-    async fn delete(&self, _tenant_id: Uuid, _id: Uuid) -> Result<(), sqlx::Error> {
-        check_fail!(self);
-        Ok(())
-    }
-    async fn list_enabled(&self, tenant_id: Uuid) -> Result<Vec<NotifyRecipient>, sqlx::Error> {
-        check_fail!(self);
-        Ok(vec![mock_recipient(tenant_id)])
-    }
     async fn upsert_by_line_user_id(
         &self,
         tenant_id: Uuid,
@@ -218,100 +136,6 @@ impl NotifyRecipientRepository for MockNotifyRecipientRepository {
     ) -> Result<NotifyRecipient, sqlx::Error> {
         check_fail!(self);
         Ok(mock_recipient(tenant_id))
-    }
-}
-
-// ============================================================
-// MockNotifyGroupRepository
-// ============================================================
-
-pub struct MockNotifyGroupRepository {
-    pub fail_next: AtomicBool,
-}
-
-impl Default for MockNotifyGroupRepository {
-    fn default() -> Self {
-        Self {
-            fail_next: AtomicBool::new(false),
-        }
-    }
-}
-
-fn mock_group(tenant_id: Uuid) -> NotifyGroup {
-    NotifyGroup {
-        id: Uuid::new_v4(),
-        tenant_id,
-        name: "Test Group".into(),
-        description: None,
-        created_at: chrono::Utc::now(),
-        updated_at: chrono::Utc::now(),
-    }
-}
-
-#[async_trait::async_trait]
-impl NotifyGroupRepository for MockNotifyGroupRepository {
-    async fn list(&self, tenant_id: Uuid) -> Result<Vec<NotifyGroup>, sqlx::Error> {
-        check_fail!(self);
-        Ok(vec![mock_group(tenant_id)])
-    }
-    async fn get(&self, tenant_id: Uuid, _id: Uuid) -> Result<Option<NotifyGroup>, sqlx::Error> {
-        check_fail!(self);
-        Ok(Some(mock_group(tenant_id)))
-    }
-    async fn create(
-        &self,
-        tenant_id: Uuid,
-        _input: &CreateNotifyGroup,
-    ) -> Result<NotifyGroup, sqlx::Error> {
-        check_fail!(self);
-        Ok(mock_group(tenant_id))
-    }
-    async fn update(
-        &self,
-        tenant_id: Uuid,
-        _id: Uuid,
-        _input: &UpdateNotifyGroup,
-    ) -> Result<NotifyGroup, sqlx::Error> {
-        check_fail!(self);
-        Ok(mock_group(tenant_id))
-    }
-    async fn delete(&self, _tenant_id: Uuid, _id: Uuid) -> Result<(), sqlx::Error> {
-        check_fail!(self);
-        Ok(())
-    }
-    async fn add_members(
-        &self,
-        _tenant_id: Uuid,
-        _group_id: Uuid,
-        _recipient_ids: &[Uuid],
-    ) -> Result<(), sqlx::Error> {
-        check_fail!(self);
-        Ok(())
-    }
-    async fn remove_member(
-        &self,
-        _tenant_id: Uuid,
-        _group_id: Uuid,
-        _recipient_id: Uuid,
-    ) -> Result<(), sqlx::Error> {
-        check_fail!(self);
-        Ok(())
-    }
-    async fn list_members(
-        &self,
-        tenant_id: Uuid,
-        _group_id: Uuid,
-    ) -> Result<Vec<NotifyRecipient>, sqlx::Error> {
-        check_fail!(self);
-        Ok(vec![mock_recipient(tenant_id)])
-    }
-    async fn list_enabled_members(
-        &self,
-        tenant_id: Uuid,
-        _group_id: Uuid,
-    ) -> Result<Vec<NotifyRecipient>, sqlx::Error> {
-        check_fail!(self);
-        Ok(vec![mock_recipient(tenant_id)])
     }
 }
 
@@ -586,72 +410,6 @@ impl NotifyDeliveryRepository for MockNotifyDeliveryRepository {
     ) -> Result<Vec<NotifyDelivery>, sqlx::Error> {
         check_fail!(self);
         Ok(vec![mock_delivery(tenant_id, document_id, Uuid::new_v4())])
-    }
-}
-
-// ============================================================
-// MockNotifyLineConfigRepository
-// ============================================================
-
-pub struct MockNotifyLineConfigRepository {
-    pub fail_next: AtomicBool,
-}
-
-impl Default for MockNotifyLineConfigRepository {
-    fn default() -> Self {
-        Self {
-            fail_next: AtomicBool::new(false),
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl NotifyLineConfigRepository for MockNotifyLineConfigRepository {
-    async fn get(&self, _tenant_id: Uuid) -> Result<Option<NotifyLineConfig>, sqlx::Error> {
-        check_fail!(self);
-        Ok(None)
-    }
-    async fn get_full(
-        &self,
-        _tenant_id: Uuid,
-    ) -> Result<Option<NotifyLineConfigFull>, sqlx::Error> {
-        check_fail!(self);
-        Ok(None)
-    }
-    async fn upsert(
-        &self,
-        tenant_id: Uuid,
-        name: &str,
-        channel_id: &str,
-        _secret: &str,
-        _key_id: &str,
-        _private_key: &str,
-        _bot_basic_id: Option<&str>,
-        _public_key_jwk: Option<&str>,
-    ) -> Result<NotifyLineConfig, sqlx::Error> {
-        check_fail!(self);
-        Ok(NotifyLineConfig {
-            id: Uuid::new_v4(),
-            tenant_id,
-            name: name.into(),
-            channel_id: channel_id.into(),
-            bot_basic_id: None,
-            public_key_jwk: None,
-            enabled: true,
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
-        })
-    }
-    async fn delete(&self, _tenant_id: Uuid) -> Result<(), sqlx::Error> {
-        check_fail!(self);
-        Ok(())
-    }
-    async fn lookup_by_channel(
-        &self,
-        _channel_id: &str,
-    ) -> Result<Option<NotifyLineConfigFull>, sqlx::Error> {
-        check_fail!(self);
-        Ok(None)
     }
 }
 

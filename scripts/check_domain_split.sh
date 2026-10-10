@@ -68,10 +68,18 @@ guard_model_structs trouble "crates/alc-trouble/src/models.rs" \
 guard_appstate_fields trouble "alc_trouble::TroubleState" \
   'trouble_tickets|trouble_files|trouble_workflow|trouble_categories|trouble_offices|trouble_progress_statuses|trouble_notification_prefs|trouble_schedules|trouble_tasks|trouble_task_types|trouble_task_statuses|trouble_field_layouts|trouble_storage'
 
-# --- (Phase C 以降はここに追記: dtako / notify / carins) ---
+# --- notify (Worker へ移した口。Refs #747) ---
+# 宛先・グループ・LINE の設定の口は ippoan/alc-notify-worker に移った。
+# Cloud Run に残る notify の口 (文書・ingest・viewer・LINE の webhook 等) は使わない。
+guard_repository_modules notify "ippoan/alc-notify-worker" \
+  notify_groups notify_line_config
+guard_appstate_fields notify "ippoan/alc-notify-worker" \
+  'notify_groups|notify_line_config'
+
+# --- (Phase C 以降はここに追記: dtako / carins) ---
 
 if [ "$fail" != 0 ]; then
   echo "::error::domain split guard failed — ドメインコードは alc-core ではなく各ドメイン crate に追加してください (設計: issue #513)"
   exit 1
 fi
-echo "domain split guard OK (tenko, trouble)"
+echo "domain split guard OK (tenko, trouble, notify)"

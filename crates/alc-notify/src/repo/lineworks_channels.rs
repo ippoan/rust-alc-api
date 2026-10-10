@@ -17,38 +17,6 @@ impl PgLineworksChannelsRepository {
 
 #[async_trait]
 impl LineworksChannelsRepository for PgLineworksChannelsRepository {
-    async fn list_active(&self, tenant_id: Uuid) -> Result<Vec<LineworksChannel>, sqlx::Error> {
-        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
-        sqlx::query_as::<_, LineworksChannel>(
-            "SELECT * FROM lineworks_channels WHERE active = TRUE ORDER BY joined_at DESC",
-        )
-        .fetch_all(&mut *tc.conn)
-        .await
-    }
-
-    async fn get(
-        &self,
-        tenant_id: Uuid,
-        id: Uuid,
-    ) -> Result<Option<LineworksChannel>, sqlx::Error> {
-        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
-        sqlx::query_as::<_, LineworksChannel>("SELECT * FROM lineworks_channels WHERE id = $1")
-            .bind(id)
-            .fetch_optional(&mut *tc.conn)
-            .await
-    }
-
-    async fn get_for_send(&self, id: Uuid) -> Result<Option<LineworksChannel>, sqlx::Error> {
-        // SECURITY DEFINER 関数経由で RLS バイパス (migration 129)。
-        // internal 経路は X-Tenant-ID を honor しないため、tenant は行から解決する。
-        sqlx::query_as::<_, LineworksChannel>(
-            "SELECT * FROM alc_api.lookup_lineworks_channel_for_send($1)",
-        )
-        .bind(id)
-        .fetch_optional(&self.pool)
-        .await
-    }
-
     async fn upsert_joined(
         &self,
         tenant_id: Uuid,
@@ -100,15 +68,6 @@ impl LineworksChannelsRepository for PgLineworksChannelsRepository {
         .bind(channel_id)
         .execute(&mut *tc.conn)
         .await?;
-        Ok(())
-    }
-
-    async fn delete(&self, tenant_id: Uuid, id: Uuid) -> Result<(), sqlx::Error> {
-        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
-        sqlx::query("DELETE FROM lineworks_channels WHERE id = $1")
-            .bind(id)
-            .execute(&mut *tc.conn)
-            .await?;
         Ok(())
     }
 

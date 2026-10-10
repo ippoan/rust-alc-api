@@ -43,18 +43,12 @@ pub use alc_misc::staging;
 pub use alc_misc::tenant_users;
 pub use alc_misc::timecard;
 pub use alc_misc::upload;
-pub use alc_notify::distribute as notify_distribute;
 pub use alc_notify::documents as notify_documents;
 pub use alc_notify::email_documents as notify_email_documents;
-pub use alc_notify::groups as notify_groups;
 pub use alc_notify::ingest as notify_ingest;
-pub use alc_notify::line_config as notify_line_config;
 pub use alc_notify::line_webhook as notify_line_webhook;
 pub use alc_notify::lineworks_channels as notify_lineworks_channels;
-pub use alc_notify::lineworks_directory as notify_lineworks_directory;
-pub use alc_notify::lineworks_login_activity as notify_lineworks_login_activity;
 pub use alc_notify::read_tracker as notify_read_tracker;
-pub use alc_notify::recipients as notify_recipients;
 pub use alc_notify::test_endpoints as notify_test_endpoints;
 pub use alc_notify::viewer as notify_viewer;
 pub use alc_tenko::daily_health;
@@ -176,16 +170,9 @@ pub fn router(
         .merge(dtako_y_time_export::tenant_router())
         .merge(dtako_events::tenant_router())
         .nest("/dtako-logs", dtako_logs::tenant_router())
-        .merge(notify_recipients::tenant_router())
-        .merge(notify_groups::tenant_router())
-        .merge(notify_lineworks_directory::tenant_router())
-        .merge(notify_lineworks_login_activity::tenant_router())
-        .merge(notify_lineworks_channels::tenant_router())
         .merge(notify_documents::tenant_router())
-        .merge(notify_distribute::tenant_router())
         .merge(notify_email_documents::tenant_router())
         .merge(notify_test_endpoints::tenant_router())
-        .merge(notify_line_config::tenant_router())
         .layer(axum_middleware::from_fn(require_tenant_header));
 
     // 公開ルート (認証不要)。旧ログイン経路 (auth::public_router = Google /
