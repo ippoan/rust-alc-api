@@ -1,6 +1,6 @@
 /// Bot Config 管理 REST API
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Query, State},
     http::StatusCode,
     routing::{delete, get, post},
     Extension, Json, Router,
@@ -11,7 +11,6 @@ use serde_json::json;
 use ts_rs::TS;
 use uuid::Uuid;
 
-use alc_core::auth_lineworks::normalize_pem_newlines;
 use alc_core::auth_middleware::AuthUser;
 use alc_core::repository::bot_admin::BotConfigRow;
 use alc_core::AppState;
@@ -77,7 +76,6 @@ pub fn router() -> Router<AppState> {
         .route("/admin/bot/configs", post(upsert_config))
         .route("/admin/bot/configs", delete(delete_config))
         .route("/admin/bot/configs/export", get(export_configs))
-        .route("/admin/bot/configs/{id}/secrets", get(get_config_secrets))
 }
 
 // ---------------------------------------------------------------------------
@@ -384,100 +382,6 @@ async fn delete_config(
         })?;
 
     Ok(StatusCode::NO_CONTENT)
-}
-
-#[derive(Debug, Serialize, TS)]
-#[ts(export)]
-struct BotConfigSecretsResponse {
-    client_id: String,
-    client_secret: String,
-    service_account: String,
-    private_key: String,
-    bot_id: String,
-    /// LINE WORKS Bot webhook 署名検証用 (未設定なら空文字)
-    bot_secret: String,
-}
-
-async fn get_config_secrets(
-    State(state): State<AppState>,
-    Extension(auth_user): Extension<AuthUser>,
-    Path(id): Path<Uuid>,
-) -> Result<Json<BotConfigSecretsResponse>, StatusCode> {
-    if auth_user.role != "admin" {
-        return Err(StatusCode::FORBIDDEN);
-    }
-
-    let key = std::env::var("SSO_ENCRYPTION_KEY").map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let row = state
-        .bot_admin
-        .get_config_with_secrets(auth_user.tenant_id, id)
-        .await
-        .map_err(|e| {
-            tracing::error!("Failed to get bot config secrets: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?
-        .ok_or(StatusCode::NOT_FOUND)?;
-
-    let client_secret = decrypt_secret(&row.client_secret_encrypted, &key).map_err(|e| {
-        tracing::error!("Failed to decrypt client_secret: {e}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-    let private_key = decrypt_secret(&row.private_key_encrypted, &key)
-        .map(normalize_pem_newlines)
-        .map_err(|e| {
-            tracing::error!("Failed to decrypt private_key: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-
-    let bot_secret = match row.bot_secret_encrypted {
-        Some(ref enc) => decrypt_secret(enc, &key).map_err(|e| {
-            tracing::error!("Failed to decrypt bot_secret: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?,
-        None => String::new(),
-    };
-
-    Ok(Json(BotConfigSecretsResponse {
-        client_id: row.client_id,
-        client_secret,
-        service_account: row.service_account,
-        private_key,
-        bot_id: row.bot_id,
-        bot_secret,
-    }))
-}
-
-fn decrypt_secret(ciphertext_b64: &str, key_material: &str) -> Result<String, String> {
-    use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-    use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
-    use sha2::{Digest, Sha256};
-
-    let data = BASE64
-        .decode(ciphertext_b64)
-        .map_err(|e| format!("Base64 decode error: {e}"))?;
-    if data.len() < 12 {
-        return Err("Ciphertext too short".to_string());
-    }
-
-    let mut key_bytes = [0u8; 32];
-    let hash = Sha256::digest(key_material.as_bytes());
-    key_bytes.copy_from_slice(&hash);
-
-    let unbound_key =
-        UnboundKey::new(&AES_256_GCM, &key_bytes).map_err(|e| format!("Key error: {e}"))?;
-    let key = LessSafeKey::new(unbound_key);
-
-    let (nonce_bytes, ciphertext) = data.split_at(12);
-    let nonce =
-        Nonce::try_assume_unique_for_key(nonce_bytes).map_err(|e| format!("Nonce error: {e}"))?;
-
-    let mut in_out = ciphertext.to_vec();
-    let plaintext = key
-        .open_in_place(nonce, Aad::empty(), &mut in_out)
-        .map_err(|e| format!("Decryption error: {e}"))?;
-
-    String::from_utf8(plaintext.to_vec()).map_err(|e| format!("UTF-8 error: {e}"))
 }
 
 fn encrypt_secret(plaintext: &str, key_material: &str) -> Result<String, String> {
