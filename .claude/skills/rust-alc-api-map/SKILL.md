@@ -58,7 +58,7 @@ router 実装として存続。旧 per-domain は同じ domain crate を単独 m
   (tenko 系 9 repo) / `CameraState` / `MaintenanceState` を組み立て、
   `.nest("/api", rust_alc_api::routes::router(internal_oidc_trust(), tenko_state, camera_state, maintenance_state))`。
   各 domain の route 群は router 内で `.with_state(...)` マウント (FromRef 変換は廃止)。trouble の `TroubleState`・
-  `TROUBLE_R2_BUCKET`・`SCHEDULE_ALARM_URL` は #747 で消した。背景 task: 60s ごと
+  `TROUBLE_R2_BUCKET`・`SCHEDULE_ALARM_URL` は #747 で消した (`cloudrun/render.sh` の env と trouble の R2 キーの secretKeyRef も)。背景 task: 60s ごと
   `alc_tenko::overdue::check_overdue_schedules` (WebhookRepository + TenkoOverdueRepository + http の 3 引数)。
 - **router 本体**: `src/routes/mod.rs` — 各 domain crate のルートを re-export し `router()` で結線。
   middleware: `require_tenant_header` (tenant/admin 共通、注入 identity 信頼) / `require_internal_jwt`

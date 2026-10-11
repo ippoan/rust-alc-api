@@ -111,10 +111,6 @@ emit_env_backend() {
               value: "$( [[ "$ENV" == "staging" ]] && echo "notify-files-staging" || echo "notify-files" )"
             - name: NOTIFY_FRONTEND_URL
               value: "$( [[ "$ENV" == "staging" ]] && echo "https://notify-staging.ippoan.org" || echo "https://notify.ippoan.org" )"
-            # 通知予約の発火基盤 schedule-alarm DO worker (ippoan/nuxt-notify、Refs #550/#551)。
-            # 認証は既存 INTERNAL_SHARED_SECRET を再利用 (下の secretKeyRef、新規 secret なし)。
-            - name: SCHEDULE_ALARM_URL
-              value: "$( [[ "$ENV" == "staging" ]] && echo "https://alarm.notify-staging.ippoan.org" || echo "https://alarm.notify.ippoan.org" )"
             - name: NOTIFY_REDACT_BROADCAST_URL
               value: "$(notify_redact_broadcast_url)"
             - name: NOTIFY_REDACT_2STAGE
@@ -212,18 +208,6 @@ YAML
                 secretKeyRef:
                   key: latest
                   name: carins-r2-secret-key
-            - name: TROUBLE_R2_BUCKET
-              value: "${ENV_TROUBLE_R2_BUCKET:-trouble-files}"
-            - name: TROUBLE_R2_ACCESS_KEY
-              valueFrom:
-                secretKeyRef:
-                  key: latest
-                  name: trouble-r2-access-key
-            - name: TROUBLE_R2_SECRET_KEY
-              valueFrom:
-                secretKeyRef:
-                  key: latest
-                  name: trouble-r2-secret-key
             - name: LINE_LOGIN_CHANNEL_ID
               valueFrom:
                 secretKeyRef:
@@ -291,7 +275,6 @@ if [[ "$ENV" == "staging" ]]; then
   ENV_R2_BUCKET="alc-face-photos-staging"
   ENV_CARINS_R2_BUCKET="carins-files-staging"
   ENV_DTAKO_R2_BUCKET="ohishi-dtako-staging"
-  ENV_TROUBLE_R2_BUCKET="trouble-files-staging"
   ENV_CARINS_R2_ACCOUNT_ID="24b45709d060d957340180e995f0d373"
   ENV_DTAKO_R2_ACCOUNT_ID="24b45709d060d957340180e995f0d373"
   INGRESS="all"
@@ -301,7 +284,6 @@ else
   ENV_R2_BUCKET="alc-face-photos"
   ENV_CARINS_R2_BUCKET="carins-files"
   ENV_DTAKO_R2_BUCKET="ohishi-dtako-apac"
-  ENV_TROUBLE_R2_BUCKET="trouble-files"
   ENV_CARINS_R2_ACCOUNT_ID="8556e484b273a868db8ec6800b074834"
   ENV_DTAKO_R2_ACCOUNT_ID="8556e484b273a868db8ec6800b074834"
   INGRESS="internal"
