@@ -313,9 +313,6 @@ async fn upsert_config(
         // 新規作成
         let encrypted_secret = encrypt_secret(body.client_secret.as_deref().unwrap_or(""), &key)
             .expect("AES-256-GCM encrypt infallible");
-        // Private Key はもう受け取らない (Refs #747)。列は NOT NULL のまま (DROP は別 PR)
-        // なので空文字の暗号文を入れる。
-        let encrypted_pk = encrypt_secret("", &key).expect("AES-256-GCM encrypt infallible");
 
         let created = state
             .bot_admin
@@ -326,7 +323,6 @@ async fn upsert_config(
                 &body.client_id,
                 &encrypted_secret,
                 &body.service_account,
-                &encrypted_pk,
                 &body.bot_id,
                 enabled,
             )

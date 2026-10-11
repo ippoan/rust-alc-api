@@ -726,17 +726,16 @@ staging_import!(import_tenko_call_drivers, StagingTenkoCallDriver, "tenko_call_d
     insert: [id, phone_number, driver_name, call_number, tenant_id, employee_code, created_at],
     update: [phone_number, driver_name, call_number, employee_code]);
 
-// LINE WORKS Bot の Private Key は export も import もしない (Refs #747)。列は
-// NOT NULL のまま (DROP は別 PR) なので、新規行には空文字を入れる (bot_admin の create
-// と同じ)。既存行の値は update で上書きしない。macro は struct の field しか bind
-// できないため手書き。
+// LINE WORKS Bot の Private Key は export も import もしない (Refs #747)。列名を
+// 書かないので、列が残っている DB でも新規行は NULL になる (bot_admin の create と
+// 同じ)。macro は struct の field しか bind できないため手書き。
 async fn import_bot_configs(
     tx: &mut Tx<'_>,
     items: &[StagingBotConfig],
 ) -> Result<usize, StatusCode> {
     const SQL: &str = "INSERT INTO bot_configs (id, tenant_id, provider, name, client_id, \
-        client_secret_encrypted, service_account, private_key_encrypted, bot_id, enabled, \
-        created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, '', $8, $9, $10, $11) \
+        client_secret_encrypted, service_account, bot_id, enabled, created_at, updated_at) \
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) \
         ON CONFLICT (id) DO UPDATE SET provider = EXCLUDED.provider, name = EXCLUDED.name, \
         client_id = EXCLUDED.client_id, client_secret_encrypted = EXCLUDED.client_secret_encrypted, \
         service_account = EXCLUDED.service_account, bot_id = EXCLUDED.bot_id, \

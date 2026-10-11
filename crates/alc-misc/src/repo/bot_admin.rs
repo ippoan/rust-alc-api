@@ -101,15 +101,14 @@ impl BotAdminRepository for PgBotAdminRepository {
         client_id: &str,
         client_secret_encrypted: &str,
         service_account: &str,
-        private_key_encrypted: &str,
         bot_id: &str,
         enabled: bool,
     ) -> Result<BotConfigRow, sqlx::Error> {
         let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
         sqlx::query_as::<_, BotConfigRow>(
             r#"
-            INSERT INTO bot_configs (tenant_id, provider, name, client_id, client_secret_encrypted, service_account, private_key_encrypted, bot_id, enabled)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            INSERT INTO bot_configs (tenant_id, provider, name, client_id, client_secret_encrypted, service_account, bot_id, enabled)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING id, provider, name, client_id, service_account, bot_id, enabled, created_at, updated_at
             "#,
         )
@@ -119,7 +118,6 @@ impl BotAdminRepository for PgBotAdminRepository {
         .bind(client_id)
         .bind(client_secret_encrypted)
         .bind(service_account)
-        .bind(private_key_encrypted)
         .bind(bot_id)
         .bind(enabled)
         .fetch_one(&mut *tc.conn)
