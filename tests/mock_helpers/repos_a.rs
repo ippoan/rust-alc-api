@@ -472,7 +472,6 @@ impl BotAdminRepository for MockBotAdminRepository {
         _client_id: &str,
         _client_secret_encrypted: &str,
         _service_account: &str,
-        _private_key_encrypted: &str,
         _bot_id: &str,
         _enabled: bool,
     ) -> Result<BotConfigRow, sqlx::Error> {

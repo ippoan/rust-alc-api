@@ -87,8 +87,6 @@ pub trait BotAdminRepository: Send + Sync {
         client_id: &str,
         client_secret_encrypted: &str,
         service_account: &str,
-        // 列は NOT NULL のまま (DROP は別 PR、Refs #747)。呼び手は空文字の暗号文を渡す
-        private_key_encrypted: &str,
         bot_id: &str,
         enabled: bool,
     ) -> Result<BotConfigRow, sqlx::Error>;
