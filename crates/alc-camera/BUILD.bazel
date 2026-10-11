@@ -15,4 +15,7 @@ rust_library(
 rust_test(
     name = "alc-camera_test",
     crate = ":alc-camera",
+    # down_ticket_client のテストが wiremock / tokio (dev-dependencies) を使う
+    deps = all_crate_deps(normal_dev = True),
+    proc_macro_deps = all_crate_deps(proc_macro_dev = True),
 )

@@ -13,7 +13,6 @@ _WORKSPACE_CRATES = [
     "//crates/alc-notify",
     "//crates/alc-storage",
     "//crates/alc-tenko",
-    "//crates/alc-trouble",
 ]
 
 rust_library(
@@ -72,7 +71,7 @@ rust_test(
 #
 # tests/mock_<domain>/main.rs が #[path] で tests/common + tests/mock_helpers +
 # tests/mock_tests を束ねる dir-style integration test。mock repository で
-# AppState/TenkoState/TroubleState を組み、実 HTTP サーバーを spawn する。
+# AppState/TenkoState を組み、実 HTTP サーバーを spawn する。
 # postgres には接続しない (pool: None) ので bazel sandbox でそのまま走る。
 # 新しい mock shard を足したら ci.yml の bazel test matrix (warm/poc) にも
 # 追記すること (check_bazel_test_matrix.sh が同期漏れを loud fail する)。
@@ -89,21 +88,6 @@ _MOCK_TEST_SRCS = glob([
 # sqlx::migrate! は compile 時に migrations/ を埋め込む (runtime 再読込なし) ので
 # compile_data だけで足りる。新 target を足したら ci.yml の db matrix にも追記
 # (check_bazel_test_matrix.sh が poc/db の union で同期を検証する)。
-
-rust_test(
-    name = "trouble_test",
-    srcs = ["tests/trouble_test.rs"] + glob(["tests/common/**/*.rs"]),
-    crate_root = "tests/trouble_test.rs",
-    compile_data = glob(["migrations/**"]) + ["scripts/local_app_grants.sql"],
-    deps = [":rust_alc_api_lib"] + all_crate_deps(
-        normal = True,
-        normal_dev = True,
-    ) + _WORKSPACE_CRATES,
-    proc_macro_deps = all_crate_deps(
-        proc_macro = True,
-        proc_macro_dev = True,
-    ),
-)
 
 rust_test(
     name = "maintenance_test",
@@ -490,22 +474,6 @@ rust_test(
     name = "mock_tenko",
     srcs = ["tests/mock_tenko/main.rs"] + _MOCK_TEST_SRCS,
     crate_root = "tests/mock_tenko/main.rs",
-    # tests/common/mod.rs の sqlx::migrate! が compile 時に migrations/ を読む
-    compile_data = glob(["migrations/**"]) + ["scripts/local_app_grants.sql"],
-    deps = [":rust_alc_api_lib"] + all_crate_deps(
-        normal = True,
-        normal_dev = True,
-    ) + _WORKSPACE_CRATES,
-    proc_macro_deps = all_crate_deps(
-        proc_macro = True,
-        proc_macro_dev = True,
-    ),
-)
-
-rust_test(
-    name = "mock_trouble",
-    srcs = ["tests/mock_trouble/main.rs"] + _MOCK_TEST_SRCS,
-    crate_root = "tests/mock_trouble/main.rs",
     # tests/common/mod.rs の sqlx::migrate! が compile 時に migrations/ を読む
     compile_data = glob(["migrations/**"]) + ["scripts/local_app_grants.sql"],
     deps = [":rust_alc_api_lib"] + all_crate_deps(

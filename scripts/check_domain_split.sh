@@ -5,7 +5,7 @@
 # webhook generic / 共有 models) に限定する。ドメイン専用の repository trait /
 # models / AppState field が alc-core に「再流入」したら CI を loud fail させる。
 #
-# 分割が進むたび (Phase B: trouble, Phase C: dtako/notify/carins) に
+# 分割が進むたび (Phase B: trouble (後に Worker へ移設), Phase C: dtako/notify/carins) に
 # 下のドメイン節を追記すること。誤検知した場合はパターンを絞って直す
 # (ガードを丸ごと外さない)。
 set -u
@@ -58,14 +58,20 @@ guard_model_structs tenko "crates/alc-tenko/src/models.rs" \
 guard_appstate_fields tenko "alc_tenko::TenkoState" \
   'tenko_call|tenko_records|tenko_schedules|tenko_sessions|tenko_webhooks|daily_health|health_baselines|equipment_failures|driver_info'
 
-# --- trouble (Phase B) ---
-guard_repository_modules trouble "crates/alc-trouble/src/repository/" \
+# --- trouble (Worker へ移した。Refs #747) ---
+# trouble は全部 ippoan/alc-trouble-worker に移り、alc-trouble crate は消した。
+# crate の再作成と、alc-core への trouble の repository / model / AppState field の
+# 再流入を落とす。
+if [ -e crates/alc-trouble ]; then
+  err "domain-split: crates/alc-trouble が再作成されています。trouble は ippoan/alc-trouble-worker に置いてください (Refs #747)"
+fi
+guard_repository_modules trouble "ippoan/alc-trouble-worker" \
   trouble_tickets trouble_files trouble_workflow trouble_categories trouble_offices \
   trouble_progress_statuses trouble_notification_prefs trouble_schedules trouble_tasks \
   trouble_task_types trouble_task_statuses trouble_field_layouts
-guard_model_structs trouble "crates/alc-trouble/src/models.rs" \
+guard_model_structs trouble "ippoan/alc-trouble-worker" \
   'Trouble|CreateTrouble|UpdateTrouble|CreateWorkflowState|CreateWorkflowTransition|TransitionRequest|CreateCustomFieldDef|UpsertNotificationPref'
-guard_appstate_fields trouble "alc_trouble::TroubleState" \
+guard_appstate_fields trouble "ippoan/alc-trouble-worker" \
   'trouble_tickets|trouble_files|trouble_workflow|trouble_categories|trouble_offices|trouble_progress_statuses|trouble_notification_prefs|trouble_schedules|trouble_tasks|trouble_task_types|trouble_task_statuses|trouble_field_layouts|trouble_storage'
 
 # --- notify (Worker へ移した口。Refs #747) ---

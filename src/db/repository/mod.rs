@@ -13,15 +13,6 @@ pub use alc_core::repository::{
     VehicleSettingsDumpsRepository, WebhookRepository,
 };
 
-// Re-export trouble traits from alc-trouble (Refs #513 Phase B)
-pub use alc_trouble::repository::{
-    TroubleCategoriesRepository, TroubleFieldLayoutsRepository, TroubleFilesRepository,
-    TroubleNotificationPrefsRepository, TroubleOfficesRepository,
-    TroubleProgressStatusesRepository, TroubleSchedulesRepository, TroubleTaskStatusesRepository,
-    TroubleTaskTypesRepository, TroubleTasksFilter, TroubleTasksRepository, TroubleTasksSortBy,
-    TroubleTicketsRepository, TroubleWorkflowRepository,
-};
-
 // Re-export tenko traits from alc-tenko (Refs #513)
 pub use alc_tenko::repository::{
     DailyHealthRepository, DriverInfoRepository, EquipmentFailuresRepository,
@@ -86,16 +77,4 @@ pub use alc_tenko::repo::{
     PgHealthBaselinesRepository, PgTenkoCallRepository, PgTenkoOverdueRepository,
     PgTenkoRecordsRepository, PgTenkoSchedulesRepository, PgTenkoSessionRepository,
     PgTenkoWebhooksRepository,
-};
-pub use alc_trouble::repo::{
-    trouble_categories::PgTroubleCategoriesRepository,
-    trouble_field_layouts::PgTroubleFieldLayoutsRepository,
-    trouble_files::PgTroubleFilesRepository,
-    trouble_notification_prefs::PgTroubleNotificationPrefsRepository,
-    trouble_offices::PgTroubleOfficesRepository,
-    trouble_progress_statuses::PgTroubleProgressStatusesRepository,
-    trouble_schedules::PgTroubleSchedulesRepository,
-    trouble_task_statuses::PgTroubleTaskStatusesRepository,
-    trouble_task_types::PgTroubleTaskTypesRepository, trouble_tasks::PgTroubleTasksRepository,
-    trouble_tickets::PgTroubleTicketsRepository, trouble_workflow::PgTroubleWorkflowRepository,
 };

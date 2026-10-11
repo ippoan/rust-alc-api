@@ -250,38 +250,11 @@ type = "unit"
 
 # src/archive/repo.rs — temporarily excluded: PgArchiveDb Phase B methods need integration tests
 
-# --- alc-trouble ---
-
-# tickets.rs — LINE WORKS notifier paths (notifier=None in FromRef<AppState>)
-# [[files]]
-# path = "crates/alc-trouble/src/tickets.rs"
-# type = "combined"
+# --- alc-camera ---
 
 [[files]]
-path = "crates/alc-trouble/src/files.rs"
-type = "combined"
-
-[[files]]
-path = "crates/alc-trouble/src/workflow.rs"
-type = "combined"
-
-# comments.rs — LINE WORKS notifier paths (notifier=None in FromRef<AppState>)
-# [[files]]
-# path = "crates/alc-trouble/src/comments.rs"
-# type = "combined"
-
-[[files]]
-path = "crates/alc-trouble/src/repo/trouble_tickets.rs"
-type = "combined"
-
-[[files]]
-path = "crates/alc-trouble/src/repo/trouble_files.rs"
-type = "combined"
-
-[[files]]
-path = "crates/alc-trouble/src/repo/trouble_workflow.rs"
-type = "combined"
-
+path = "crates/alc-camera/src/down_ticket_client.rs"
+type = "unit"
 
 # --- alc-notify ---
 

@@ -3,9 +3,10 @@
 //! Cloud Run の CPU throttling 対策として `tokio::spawn` の background 化はせず、
 //! health-log POST のリクエスト内で同期的に判定・起票する (1 query 数件で軽量)。
 //!
-//! 起票先は camera 所有の port [`DownTicketSink`] に抽象化しており、alc-trouble の
-//! 型には一切依存しない (Refs #513 Phase B)。trouble への配線 (adapter) は binary
-//! (alc-camera-api) 側が持つ。
+//! 起票先は camera 所有の port [`DownTicketSink`] に抽象化しており、trouble の
+//! 型には一切依存しない (Refs #513 Phase B)。trouble は ippoan/alc-trouble-worker に
+//! 移ったので、実装は auth-worker 経由で内部口を叩く
+//! [`crate::down_ticket_client::HttpDownTicketSink`] (Refs #747)。
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -28,7 +29,33 @@ pub struct CameraDownTicket {
     pub camera_id: Uuid,
 }
 
-/// camera 所有の起票 port。実装 (adapter) は binary 側で trouble に配線する。
+/// 起票の失敗 (camera 所有)。Display は固定の語だけで、識別子・URL・secret を含めない。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DownTicketError {
+    /// 起票先が未設定 (env が揃っていない)。
+    NotConfigured,
+    /// 送信できなかった (接続失敗・timeout)。
+    Request,
+    /// 201 以外の応答。
+    Status(u16),
+    /// 応答の本文が想定の形でない。
+    InvalidResponse,
+}
+
+impl std::fmt::Display for DownTicketError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotConfigured => f.write_str("down ticket sink not configured"),
+            Self::Request => f.write_str("down ticket request failed"),
+            Self::Status(code) => write!(f, "down ticket unexpected status {code}"),
+            Self::InvalidResponse => f.write_str("down ticket invalid response"),
+        }
+    }
+}
+
+impl std::error::Error for DownTicketError {}
+
+/// camera 所有の起票 port。実装 (adapter) は binary 側で注入する。
 #[async_trait]
 pub trait DownTicketSink: Send + Sync {
     /// 起票して発行された ticket id を返す。
@@ -36,7 +63,7 @@ pub trait DownTicketSink: Send + Sync {
         &self,
         tenant_id: Uuid,
         ticket: CameraDownTicket,
-    ) -> Result<Uuid, sqlx::Error>;
+    ) -> Result<Uuid, DownTicketError>;
 }
 
 /// ヘルスログを 1 件記録し、必要なら障害の自動起票 / 復旧リンク解除を行う。

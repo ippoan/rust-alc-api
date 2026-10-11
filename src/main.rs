@@ -5,35 +5,21 @@ use axum::http::header::{
     X_FRAME_OPTIONS,
 };
 use axum::http::Method;
-use axum::{Extension, Router};
+use axum::Router;
 use sqlx::postgres::PgPoolOptions;
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use tower_http::set_header::SetResponseHeaderLayer;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
-use sqlx::types::Uuid;
-
 use alc_camera::repo::PgCamerasRepository;
-use alc_camera::{CameraDownTicket, CameraState, DownTicketSink, DEFAULT_DOWN_THRESHOLD};
+use alc_camera::{
+    CameraState, DisabledDownTicketSink, DownTicketSink, HttpDownTicketSink, DEFAULT_DOWN_THRESHOLD,
+};
 use alc_notify::repo::{
     PgLineworksChannelsRepository, PgNotifyDeliveryRepository, PgNotifyDocumentRepository,
     PgNotifyRecipientRepository,
 };
-use alc_trouble::models::CreateTroubleTicket;
-use alc_trouble::repo::{
-    trouble_categories::PgTroubleCategoriesRepository,
-    trouble_field_layouts::PgTroubleFieldLayoutsRepository,
-    trouble_files::PgTroubleFilesRepository,
-    trouble_notification_prefs::PgTroubleNotificationPrefsRepository,
-    trouble_offices::PgTroubleOfficesRepository,
-    trouble_progress_statuses::PgTroubleProgressStatusesRepository,
-    trouble_schedules::PgTroubleSchedulesRepository,
-    trouble_task_statuses::PgTroubleTaskStatusesRepository,
-    trouble_task_types::PgTroubleTaskTypesRepository, trouble_tasks::PgTroubleTasksRepository,
-    trouble_tickets::PgTroubleTicketsRepository, trouble_workflow::PgTroubleWorkflowRepository,
-};
-use alc_trouble::repository::TroubleTicketsRepository;
 use rust_alc_api::db::repository::{
     PgApiTokensRepository, PgAuthRepository, PgBotAdminRepository, PgCarInspectionRepository,
     PgCarinsFilesRepository, PgCarryingItemsRepository, PgCommunicationItemsRepository,
@@ -51,36 +37,6 @@ use rust_alc_api::db::repository::{
 };
 use rust_alc_api::storage::StorageBackend;
 use rust_alc_api::AppState;
-
-/// camera 所有 port [`DownTicketSink`] → alc-trouble への adapter (Refs #556、旧
-/// `crates/alc-camera-api/src/main.rs` から移設)。category / custom_fields マーカー
-/// 等の trouble 語彙への写像はここが持ち、alc-camera crate は trouble に依存しない。
-struct TroubleDownTicketSink(Arc<dyn TroubleTicketsRepository>);
-
-#[async_trait::async_trait]
-impl DownTicketSink for TroubleDownTicketSink {
-    async fn open_down_ticket(
-        &self,
-        tenant_id: Uuid,
-        t: CameraDownTicket,
-    ) -> Result<Uuid, sqlx::Error> {
-        let input = CreateTroubleTicket {
-            category: "その他".to_string(),
-            title: Some(t.title),
-            occurred_at: Some(t.occurred_at),
-            location: Some(t.location),
-            description: Some(t.description),
-            // 自動起票である事を識別するマーカー (UI の出所表示 / 集計用)。
-            custom_fields: Some(serde_json::json!({
-                "source": "camera_auto",
-                "camera_id": t.camera_id,
-            })),
-            ..Default::default()
-        };
-        let ticket = self.0.create(tenant_id, &input, None, None).await?;
-        Ok(ticket.id)
-    }
-}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -218,9 +174,6 @@ async fn main() -> anyhow::Result<()> {
     let api_tokens = Arc::new(PgApiTokensRepository::new(pool.clone()));
     let auth = Arc::new(PgAuthRepository::new(pool.clone()));
     let bot_admin = Arc::new(PgBotAdminRepository::new(pool.clone()));
-    let lw_client = Arc::new(alc_notify::clients::lineworks::LineworksBotClient::new());
-    let bot_admin_ext: Arc<dyn alc_core::repository::bot_admin::BotAdminRepository> =
-        bot_admin.clone();
     let car_inspections = Arc::new(PgCarInspectionRepository::new(pool.clone()));
     let carins_files = Arc::new(PgCarinsFilesRepository::new(pool.clone()));
     let carrying_items = Arc::new(PgCarryingItemsRepository::new(pool.clone()));
@@ -265,20 +218,6 @@ async fn main() -> anyhow::Result<()> {
     let notify_documents = Arc::new(PgNotifyDocumentRepository::new(pool.clone()));
     let notify_deliveries = Arc::new(PgNotifyDeliveryRepository::new(pool.clone()));
     let lineworks_channels = Arc::new(PgLineworksChannelsRepository::new(pool.clone()));
-    let trouble_tickets = Arc::new(PgTroubleTicketsRepository::new(pool.clone()));
-    let trouble_files = Arc::new(PgTroubleFilesRepository::new(pool.clone()));
-    let trouble_workflow = Arc::new(PgTroubleWorkflowRepository::new(pool.clone()));
-    let trouble_categories = Arc::new(PgTroubleCategoriesRepository::new(pool.clone()));
-    let trouble_offices = Arc::new(PgTroubleOfficesRepository::new(pool.clone()));
-    let trouble_progress_statuses =
-        Arc::new(PgTroubleProgressStatusesRepository::new(pool.clone()));
-    let trouble_notification_prefs =
-        Arc::new(PgTroubleNotificationPrefsRepository::new(pool.clone()));
-    let trouble_schedules = Arc::new(PgTroubleSchedulesRepository::new(pool.clone()));
-    let trouble_tasks = Arc::new(PgTroubleTasksRepository::new(pool.clone()));
-    let trouble_task_types = Arc::new(PgTroubleTaskTypesRepository::new(pool.clone()));
-    let trouble_task_statuses = Arc::new(PgTroubleTaskStatusesRepository::new(pool.clone()));
-    let trouble_field_layouts = Arc::new(PgTroubleFieldLayoutsRepository::new(pool.clone()));
 
     // notify 用 R2 (optional)
     let notify_storage: Option<Arc<dyn StorageBackend>> =
@@ -295,24 +234,6 @@ async fn main() -> anyhow::Result<()> {
                     bucket, account_id, access_key, secret_key, None,
                 )
                 .expect("Failed to init notify R2 backend"),
-            ) as Arc<dyn StorageBackend>
-        });
-
-    // trouble 用 R2 (optional)
-    let trouble_storage: Option<Arc<dyn StorageBackend>> =
-        std::env::var("TROUBLE_R2_BUCKET").ok().map(|bucket| {
-            let account_id = std::env::var("R2_ACCOUNT_ID")
-                .expect("R2_ACCOUNT_ID required for TROUBLE_R2_BUCKET");
-            let access_key =
-                std::env::var("TROUBLE_R2_ACCESS_KEY").expect("TROUBLE_R2_ACCESS_KEY required");
-            let secret_key =
-                std::env::var("TROUBLE_R2_SECRET_KEY").expect("TROUBLE_R2_SECRET_KEY required");
-            tracing::info!("Trouble storage: R2 (bucket={})", bucket);
-            Arc::new(
-                rust_alc_api::storage::R2Backend::new(
-                    bucket, account_id, access_key, secret_key, None,
-                )
-                .expect("Failed to init trouble R2 backend"),
             ) as Arc<dyn StorageBackend>
         });
 
@@ -340,44 +261,10 @@ async fn main() -> anyhow::Result<()> {
         webhook: webhook_service.clone(),
     };
 
-    // trouble ドメイン (Refs #513 Phase B) — AppState から分離した TroubleState。
-    // 通知予約の発火は schedule-alarm DO worker (ippoan/nuxt-notify) に登録する
-    // (Refs #550/#551)。SCHEDULE_ALARM_URL 未設定なら従来どおり登録なし (warn)。
-    let trouble_alarm = alc_trouble::worker_alarm::WorkerAlarmClient::from_env();
-    if trouble_alarm.is_none() {
-        tracing::warn!(
-            "SCHEDULE_ALARM_URL not set; trouble schedule alarms are disabled (Refs #551)"
-        );
-    }
-    let trouble_state = alc_trouble::TroubleState {
-        trouble_tickets,
-        trouble_files,
-        trouble_workflow,
-        trouble_categories,
-        trouble_offices,
-        trouble_progress_statuses,
-        trouble_notification_prefs,
-        trouble_schedules,
-        trouble_tasks,
-        trouble_task_types,
-        trouble_task_statuses,
-        trouble_field_layouts,
-        trouble_storage,
-        webhook: webhook_service.clone(),
-        cloud_tasks: trouble_alarm
-            .map(|c| Arc::new(c) as Arc<dyn alc_trouble::cloud_tasks::CloudTasksClient>),
-        notifier: Some(Arc::new(
-            alc_trouble::notifier::LineworksTroubleNotifier::new(
-                bot_admin_ext.clone(),
-                lw_client.clone(),
-            ),
-        )),
-        employees: Some(employees.clone()),
-    };
-
     // camera ドメイン (Refs #556) — per-domain の alc-camera-api を廃止し monolith へ
-    // 移植。障害の自動起票は TroubleDownTicketSink 経由で既存 trouble_tickets repo に
-    // 配線する。CAMERA_DOWN_THRESHOLD 未設定なら DEFAULT_DOWN_THRESHOLD を使う。
+    // 移植。障害の自動起票は trouble-worker の内部口を auth-worker 経由で叩く
+    // (Refs #747)。AUTH_WORKER_URL / INTERNAL_SHARED_SECRET が無ければ起票しない。
+    // CAMERA_DOWN_THRESHOLD 未設定なら DEFAULT_DOWN_THRESHOLD を使う。
     let camera_down_threshold: usize = std::env::var("CAMERA_DOWN_THRESHOLD")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -385,14 +272,15 @@ async fn main() -> anyhow::Result<()> {
         .unwrap_or(DEFAULT_DOWN_THRESHOLD);
     let camera_state = CameraState {
         cameras: Arc::new(PgCamerasRepository::new(pool.clone())),
-        down_ticket_sink: Arc::new(TroubleDownTicketSink(Arc::new(
-            PgTroubleTicketsRepository::new(pool.clone()),
-        ))),
+        down_ticket_sink: match HttpDownTicketSink::from_env() {
+            Some(sink) => Arc::new(sink) as Arc<dyn DownTicketSink>,
+            None => Arc::new(DisabledDownTicketSink::default()),
+        },
         down_threshold: camera_down_threshold,
     };
 
     // maintenance ドメイン (Refs #651) — AppState から分離した MaintenanceState で
-    // マウントする (alc-trouble / alc-tenko / alc-camera と同じ形)。carins 照合は
+    // マウントする (alc-tenko / alc-camera と同じ形)。carins 照合は
     // 既存の car_inspections repo (alc-carins の PgCarInspectionRepository) を
     // in-process で呼ぶ (HTTP で自分自身を叩かない)。
     let maintenance_state = alc_maintenance::MaintenanceState {
@@ -550,7 +438,6 @@ async fn main() -> anyhow::Result<()> {
     let api_router = rust_alc_api::routes::router(
         rust_alc_api::routes::internal_oidc_trust(),
         tenko_state,
-        trouble_state,
         camera_state,
         maintenance_state,
     )
@@ -560,8 +447,6 @@ async fn main() -> anyhow::Result<()> {
 
     let app = Router::new()
         .nest("/api", api_router)
-        .layer(Extension(bot_admin_ext))
-        .layer(Extension(lw_client))
         .layer(axum::extract::DefaultBodyLimit::max(20 * 1024 * 1024)) // 20MB
         .layer(cors)
         // セキュリティレスポンスヘッダ (Refs #394 L-2)。JSON API のため XSS 面は

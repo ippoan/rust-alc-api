@@ -121,7 +121,6 @@ async fn test_create_config_success() {
                 "client_id": "test-client-id",
                 "client_secret": "test-secret",
                 "service_account": "sa@test.com",
-                "private_key": "test-pk",
                 "bot_id": "bot-123",
             }))
             .send()
@@ -286,38 +285,41 @@ async fn test_update_config_success() {
 
 #[tokio::test]
 async fn test_update_config_with_secrets() {
-    test_group!("Bot Admin: update_config with client_secret/private_key");
-    test_case!("client_secret と private_key を同時に更新", {
-        let _guard = crate::common::ENV_LOCK.lock().unwrap();
-        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+    test_group!("Bot Admin: update_config with client_secret");
+    test_case!(
+        "client_secret を更新し、送られてきた private_key は無視する (Refs #747)",
+        {
+            let _guard = crate::common::ENV_LOCK.lock().unwrap();
+            std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
 
-        let mock = Arc::new(MockBotAdminRepository::default());
-        let mut state = setup_mock_app_state();
-        state.bot_admin = mock;
-        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+            let mock = Arc::new(MockBotAdminRepository::default());
+            let mut state = setup_mock_app_state();
+            state.bot_admin = mock;
+            let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
-        let tenant_id = Uuid::new_v4();
-        let admin_jwt = crate::common::create_test_jwt(tenant_id, "admin");
-        let client = reqwest::Client::new();
+            let tenant_id = Uuid::new_v4();
+            let admin_jwt = crate::common::create_test_jwt(tenant_id, "admin");
+            let client = reqwest::Client::new();
 
-        let existing_id = Uuid::new_v4();
-        let res = client
-            .post(format!("{base_url}/api/admin/bot/configs"))
-            .header("Authorization", format!("Bearer {admin_jwt}"))
-            .json(&serde_json::json!({
-                "id": existing_id.to_string(),
-                "name": "Bot With Secrets",
-                "client_id": "cid",
-                "client_secret": "new-secret",
-                "service_account": "sa",
-                "private_key": "new-pk",
-                "bot_id": "bid",
-            }))
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(res.status(), 200);
-    });
+            let existing_id = Uuid::new_v4();
+            let res = client
+                .post(format!("{base_url}/api/admin/bot/configs"))
+                .header("Authorization", format!("Bearer {admin_jwt}"))
+                .json(&serde_json::json!({
+                    "id": existing_id.to_string(),
+                    "name": "Bot With Secrets",
+                    "client_id": "cid",
+                    "client_secret": "new-secret",
+                    "service_account": "sa",
+                    "private_key": "new-pk",
+                    "bot_id": "bid",
+                }))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 200);
+        }
+    );
 }
 
 #[tokio::test]
@@ -508,41 +510,37 @@ async fn test_update_bot_secret_db_error() {
 
 #[tokio::test]
 async fn test_update_config_with_empty_secrets() {
-    test_group!("Bot Admin: update_config empty client_secret/private_key");
-    test_case!(
-        "空の client_secret/private_key は更新をスキップする",
-        {
-            let _guard = crate::common::ENV_LOCK.lock().unwrap();
-            std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
+    test_group!("Bot Admin: update_config empty client_secret");
+    test_case!("空の client_secret は更新をスキップする", {
+        let _guard = crate::common::ENV_LOCK.lock().unwrap();
+        std::env::set_var("SSO_ENCRYPTION_KEY", crate::common::TEST_ENCRYPTION_KEY);
 
-            let mock = Arc::new(MockBotAdminRepository::default());
-            let mut state = setup_mock_app_state();
-            state.bot_admin = mock;
-            let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
+        let mock = Arc::new(MockBotAdminRepository::default());
+        let mut state = setup_mock_app_state();
+        state.bot_admin = mock;
+        let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
 
-            let tenant_id = Uuid::new_v4();
-            let admin_jwt = crate::common::create_test_jwt(tenant_id, "admin");
-            let client = reqwest::Client::new();
+        let tenant_id = Uuid::new_v4();
+        let admin_jwt = crate::common::create_test_jwt(tenant_id, "admin");
+        let client = reqwest::Client::new();
 
-            let existing_id = Uuid::new_v4();
-            let res = client
-                .post(format!("{base_url}/api/admin/bot/configs"))
-                .header("Authorization", format!("Bearer {admin_jwt}"))
-                .json(&serde_json::json!({
-                    "id": existing_id.to_string(),
-                    "name": "Bot",
-                    "client_id": "cid",
-                    "client_secret": "",
-                    "service_account": "sa",
-                    "private_key": "",
-                    "bot_id": "bid",
-                }))
-                .send()
-                .await
-                .unwrap();
-            assert_eq!(res.status(), 200);
-        }
-    );
+        let existing_id = Uuid::new_v4();
+        let res = client
+            .post(format!("{base_url}/api/admin/bot/configs"))
+            .header("Authorization", format!("Bearer {admin_jwt}"))
+            .json(&serde_json::json!({
+                "id": existing_id.to_string(),
+                "name": "Bot",
+                "client_id": "cid",
+                "client_secret": "",
+                "service_account": "sa",
+                "bot_id": "bid",
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200);
+    });
 }
 
 #[tokio::test]
@@ -853,7 +851,6 @@ async fn test_export_configs_success() {
                 client_id: "cid".to_string(),
                 client_secret_encrypted: "enc-secret".to_string(),
                 service_account: "sa@example".to_string(),
-                private_key_encrypted: "enc-pk".to_string(),
                 bot_id: "8977068".to_string(),
                 enabled: true,
                 bot_secret_encrypted: None,
@@ -893,6 +890,10 @@ async fn test_export_configs_success() {
             body["data"]["bot_configs"][0]["client_secret_encrypted"],
             "enc-secret"
         );
+        // LINE WORKS Bot の Private Key は export しない (Refs #747)
+        assert!(body["data"]["bot_configs"][0]
+            .get("private_key_encrypted")
+            .is_none());
         assert_eq!(body["data"]["users"].as_array().unwrap().len(), 0);
 
         restore_dev_emails(prev);

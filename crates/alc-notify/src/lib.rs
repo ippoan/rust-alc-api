@@ -13,4 +13,3 @@ pub mod redact;
 pub mod repo;
 pub mod test_endpoints;
 pub mod viewer;
-pub mod viewer_register;
