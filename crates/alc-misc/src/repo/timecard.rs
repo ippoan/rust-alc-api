@@ -112,7 +112,12 @@ WITH p AS (
         -- **社員の解決 (照合) には使わないこと** — 使った瞬間ブラウザ版と挙動が割れる
         COALESCE(hm.payload->>'card_kind', CASE WHEN hm.kind = 'license' THEN 'license' END) AS card_kind,
         COALESCE(hm.recorded_at, hm.created_at) AS punched_at,
-        hm.created_at
+        hm.created_at,
+        hm.is_dev,
+        -- 画面が打刻の直前に始めた測定の id (Refs ippoan/alc-app#436)。テキストのまま
+        -- 外へ出し、uuid への変換と測定の JOIN は CTE の外 (PUNCH_MEASUREMENT_JOIN) で
+        -- する — 社員の一致を見るのに、上の COALESCE で決まった employee_id が要るため
+        hm.payload->>'measurement_id' AS payload_measurement_id
     FROM hub_measurements hm
     LEFT JOIN timecard_cards tc
            ON tc.tenant_id = hm.tenant_id
@@ -141,6 +146,36 @@ WITH p AS (
                     AND COALESCE(hm.recorded_at, hm.created_at)
       )
 )
+"#;
+
+/// 打刻に結ばれた測定 (Refs ippoan/alc-app#436)。`PUNCHES_CTE` の `p` に続けて使う。
+///
+/// 画面は打刻の payload に、その時点で始まっている測定の id を `measurement_id` として
+/// 載せる。結ぶのは **tenant・is_dev・社員・id が全部そろったときだけ** で、どれかが
+/// 違えば測定の欄は全部 NULL (別テナント・dev端末・別の社員の測定を拾わない)。
+/// tenant_id と is_dev は CTE と同じく RLS に頼らずここにも書く。
+/// id は形を見てから uuid にする — 形の違う値をそのまま `::uuid` にすると一覧ごと落ちる。
+/// bind にしない (4 か所の bind の順がずれる)
+const PUNCH_MEASUREMENT_JOIN: &str = r#"
+LEFT JOIN measurements m
+       ON m.tenant_id = p.tenant_id
+      AND m.is_dev = p.is_dev
+      AND m.employee_id = p.employee_id
+      AND m.id = CASE WHEN p.payload_measurement_id
+                           ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+                      THEN p.payload_measurement_id::uuid END
+"#;
+
+/// `PUNCH_MEASUREMENT_JOIN` の `m` から出す欄。結ばれていない打刻では全部 NULL。
+/// `tenko_recorded` はその測定が点呼として記録されたか (`tenko_sessions.measurement_id`)
+const PUNCH_MEASUREMENT_COLUMNS: &str = r#"
+m.id AS measurement_id, m.alcohol_level, m.result,
+CASE WHEN m.id IS NOT NULL THEN EXISTS (
+    SELECT 1 FROM tenko_sessions ts
+    WHERE ts.tenant_id = m.tenant_id
+      AND ts.is_dev = m.is_dev
+      AND ts.measurement_id = m.id
+) END AS tenko_recorded
 "#;
 
 #[async_trait]
@@ -611,9 +646,11 @@ impl TimecardRepository for PgTimecardRepository {
             r#"{PUNCHES_CTE}
                SELECT p.id, p.tenant_id, p.employee_id, NULL::uuid AS device_id,
                       p.hub_device_id AS device_name, p.card_id, p.kind, p.card_kind,
-                      e.name AS employee_name, p.punched_at, p.created_at
+                      e.name AS employee_name, p.punched_at, p.created_at,
+                      {PUNCH_MEASUREMENT_COLUMNS}
                FROM p
                LEFT JOIN employees e ON e.id = p.employee_id
+               {PUNCH_MEASUREMENT_JOIN}
                WHERE {where_clause}
                ORDER BY p.punched_at DESC LIMIT ${param_idx} OFFSET ${}"#,
             param_idx + 1
@@ -649,9 +686,11 @@ impl TimecardRepository for PgTimecardRepository {
         let sql = format!(
             r#"{PUNCHES_CTE}
             SELECT p.id, p.punched_at, e.name AS employee_name, e.code AS employee_code,
-                   p.hub_device_id AS device_name, p.kind, p.card_kind
+                   p.hub_device_id AS device_name, p.kind, p.card_kind,
+                   {PUNCH_MEASUREMENT_COLUMNS}
             FROM p
             LEFT JOIN employees e ON e.id = p.employee_id
+            {PUNCH_MEASUREMENT_JOIN}
             WHERE {where_clause}
             ORDER BY p.punched_at DESC
             "#

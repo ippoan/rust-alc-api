@@ -40,6 +40,12 @@ pub struct TimePunchCsvRow {
     /// 「カード」列になる。ブラウザ打刻と旧行は None (空欄)。
     /// **`kind` とは別の軸** — あちらは「打刻か点呼か」
     pub card_kind: Option<String>,
+    /// 打刻の payload で結ばれた測定 (Refs ippoan/alc-app#436)。結ばれていない打刻では
+    /// 下の 3 欄も含めて全部 None (CSV では空欄)。意味は `TimePunchWithDevice` の同名の欄
+    pub measurement_id: Option<Uuid>,
+    pub alcohol_level: Option<f64>,
+    pub result: Option<String>,
+    pub tenko_recorded: Option<bool>,
 }
 
 #[async_trait]
