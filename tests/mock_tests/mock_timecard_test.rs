@@ -1698,6 +1698,10 @@ async fn test_export_csv_with_data_jst_timezone() {
         device_name: Some("Kiosk-A".to_string()),
         kind: "timecard".to_string(),
         card_kind: None,
+        measurement_id: None,
+        alcohol_level: None,
+        result: None,
+        tenko_recorded: None,
     }];
 
     let (base_url, jwt) = spawn_with_mock(mock).await;
@@ -1733,6 +1737,10 @@ async fn test_export_csv_with_null_fields() {
         device_name: None,
         kind: "timecard".to_string(),
         card_kind: None,
+        measurement_id: None,
+        alcohol_level: None,
+        result: None,
+        tenko_recorded: None,
     }];
 
     let (base_url, jwt) = spawn_with_mock(mock).await;
@@ -1923,6 +1931,10 @@ async fn test_export_csv_keeps_unresolved_tap_with_blank_employee() {
         device_name: Some("timecard-dev-1".to_string()),
         kind: "timecard".to_string(),
         card_kind: None,
+        measurement_id: None,
+        alcohol_level: None,
+        result: None,
+        tenko_recorded: None,
     }];
 
     let (base_url, jwt) = spawn_with_mock(mock).await;
@@ -1957,6 +1969,10 @@ async fn test_export_csv_unknown_kind_is_shown_verbatim() {
         device_name: Some("hub-1".to_string()),
         kind: "some_future_kind".to_string(),
         card_kind: None,
+        measurement_id: None,
+        alcohol_level: None,
+        result: None,
+        tenko_recorded: None,
     }];
 
     let (base_url, jwt) = spawn_with_mock(mock).await;
@@ -1985,6 +2001,10 @@ async fn test_export_csv_license_kind_is_labelled_tenko() {
         device_name: None,
         kind: "license".to_string(),
         card_kind: None,
+        measurement_id: None,
+        alcohol_level: None,
+        result: None,
+        tenko_recorded: None,
     }];
 
     let (base_url, jwt) = spawn_with_mock(mock).await;
@@ -2045,6 +2065,54 @@ async fn test_export_csv_card_kind_none_is_blank() {
     assert!(csv.contains(",打刻,,"), "{csv}");
 }
 
+/// 打刻に結ばれた測定 (Refs ippoan/alc-app#436) は末尾の 4 列に出る。
+/// 「点呼記録」は 済 / 未 / 空欄 (結ばれていない) の 3 通り — 空欄は上の 5 本が踏む
+#[tokio::test]
+async fn test_export_csv_measurement_columns() {
+    let mock = Arc::new(crate::mock_helpers::MockTimecardRepository::default());
+    let recorded = Uuid::new_v4();
+    let not_recorded = Uuid::new_v4();
+    let row =
+        |measurement_id: Uuid, alcohol_level: f64, result: &str, tenko: bool| TimePunchCsvRow {
+            id: Uuid::new_v4(),
+            punched_at: Utc.with_ymd_and_hms(2026, 1, 15, 0, 30, 0).unwrap(),
+            employee_name: Some("Taro Test".to_string()),
+            employee_code: Some("EMP001".to_string()),
+            device_name: Some("hub-1".to_string()),
+            kind: "timecard".to_string(),
+            card_kind: None,
+            measurement_id: Some(measurement_id),
+            alcohol_level: Some(alcohol_level),
+            result: Some(result.to_string()),
+            tenko_recorded: Some(tenko),
+        };
+    *mock.csv_rows.lock().unwrap() = vec![
+        row(recorded, 0.15, "fail", true),
+        row(not_recorded, 0.0, "pass", false),
+    ];
+
+    let (base_url, jwt) = spawn_with_mock(mock).await;
+    let res = reqwest::Client::new()
+        .get(format!("{base_url}/api/timecard/punches/csv"))
+        .header("Authorization", auth(&jwt))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let bytes = res.bytes().await.unwrap();
+    let csv = std::str::from_utf8(&bytes[3..]).unwrap().to_string();
+
+    assert!(csv.contains("測定ID,アルコール値,判定,点呼記録"), "{csv}");
+    assert!(
+        csv.contains(&format!(",hub-1,{recorded},0.15,fail,済")),
+        "{csv}"
+    );
+    assert!(
+        csv.contains(&format!(",hub-1,{not_recorded},0,pass,未")),
+        "{csv}"
+    );
+}
+
 /// 上の 5 本の共通部分。`card_kind` だけ差し替えて CSV 本文を返す
 async fn export_csv_with_card_kind(card_kind: Option<&str>) -> String {
     let mock = Arc::new(crate::mock_helpers::MockTimecardRepository::default());
@@ -2056,6 +2124,10 @@ async fn export_csv_with_card_kind(card_kind: Option<&str>) -> String {
         device_name: Some("hub-1".to_string()),
         kind: "timecard".to_string(),
         card_kind: card_kind.map(|s| s.to_string()),
+        measurement_id: None,
+        alcohol_level: None,
+        result: None,
+        tenko_recorded: None,
     }];
 
     let (base_url, jwt) = spawn_with_mock(mock).await;

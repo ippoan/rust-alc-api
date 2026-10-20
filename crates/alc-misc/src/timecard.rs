@@ -416,6 +416,15 @@ fn csv_card_kind_label(card_kind: Option<&str>) -> String {
     }
 }
 
+/// CSV の「点呼記録」列。結ばれた測定が無い打刻は空欄 (Refs ippoan/alc-app#436)
+fn csv_tenko_recorded_label(tenko_recorded: Option<bool>) -> &'static str {
+    match tenko_recorded {
+        Some(true) => "済",
+        Some(false) => "未",
+        None => "",
+    }
+}
+
 async fn export_csv(
     State(state): State<AppState>,
     tenant: axum::Extension<TenantId>,
@@ -445,6 +454,10 @@ async fn export_csv(
         "社員名",
         "打刻日時",
         "デバイス",
+        "測定ID",
+        "アルコール値",
+        "判定",
+        "点呼記録",
     ])
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -460,6 +473,12 @@ async fn export_csv(
                 .format("%Y-%m-%d %H:%M:%S")
                 .to_string(),
             r.device_name.clone().unwrap_or_default(),
+            r.measurement_id
+                .map(|id| id.to_string())
+                .unwrap_or_default(),
+            r.alcohol_level.map(|v| v.to_string()).unwrap_or_default(),
+            r.result.clone().unwrap_or_default(),
+            csv_tenko_recorded_label(r.tenko_recorded).to_string(),
         ])
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     }

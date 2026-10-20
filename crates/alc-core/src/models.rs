@@ -567,6 +567,16 @@ pub struct TimePunchWithDevice {
     pub employee_name: Option<String>,
     pub punched_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
+    /// 打刻の payload の `measurement_id` で結ばれた測定 (Refs ippoan/alc-app#436)。
+    /// 結ぶのは tenant・is_dev・社員・id が全部そろったときだけ。**結ばれていない打刻では
+    /// この欄から `tenko_recorded` まで全部 None** (payload に無い・形が違う・別の社員等)
+    pub measurement_id: Option<Uuid>,
+    /// 結ばれた測定のアルコール値 (`measurements.alcohol_level`)。測定中で未確定なら None
+    pub alcohol_level: Option<f64>,
+    /// 結ばれた測定の判定 (`measurements.result`)
+    pub result: Option<String>,
+    /// 結ばれた測定が点呼として記録されたか (`tenko_sessions.measurement_id` が在るか)
+    pub tenko_recorded: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]

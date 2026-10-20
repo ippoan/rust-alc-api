@@ -1118,3 +1118,200 @@ async fn test_license_row_fold_as_app_role() {
         }
     );
 }
+
+// ============================================================
+// 打刻に結ばれた測定 (Refs ippoan/alc-app#436)
+//
+// 画面は打刻の payload に、その時点で始まっている測定の id を `measurement_id` として
+// 載せる。一覧と CSV はそれを測定に結び、値・判定・点呼として記録されたかを返す。
+// 結ぶのは tenant・is_dev・社員・id が全部そろったときだけ。
+// ============================================================
+
+/// 測定を直接入れて id を返す (`pool` は RLS を素通りする側。is_dev を行ごとに決めるため)
+async fn insert_measurement(
+    pool: &sqlx::PgPool,
+    tenant: Uuid,
+    employee: Uuid,
+    alcohol_level: f64,
+    result: &str,
+    is_dev: bool,
+) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO measurements (tenant_id, employee_id, alcohol_level, result, is_dev)
+           VALUES ($1, $2, $3, $4, $5)
+           RETURNING id"#,
+    )
+    .bind(tenant)
+    .bind(employee)
+    .bind(alcohol_level)
+    .bind(result)
+    .bind(is_dev)
+    .fetch_one(pool)
+    .await
+    .unwrap_or_else(|e| panic!("measurements に行を入れられない: {e}"))
+}
+
+/// 打刻の行を payload ごと直接入れて id を返す。`at` は `FOLD_BASE_EPOCH` からの秒差
+async fn insert_punch_with_payload(
+    pool: &sqlx::PgPool,
+    tenant: Uuid,
+    seq: i64,
+    at: i64,
+    payload: Value,
+) -> String {
+    let id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO hub_measurements
+               (tenant_id, device_id, kind, payload, seq, recorded_at, is_dev)
+           VALUES ($1, 'cores3-m', 'timecard', $2, $3, to_timestamp($4), false)
+           RETURNING id"#,
+    )
+    .bind(tenant)
+    .bind(payload)
+    .bind(seq)
+    .bind((FOLD_BASE_EPOCH + at) as f64)
+    .fetch_one(pool)
+    .await
+    .unwrap_or_else(|e| panic!("hub_measurements に行を入れられない: {e}"));
+    id.to_string()
+}
+
+#[tokio::test]
+async fn test_punches_join_the_measurement_in_payload() {
+    test_group!("timecard punches (payload の measurement_id で測定を結ぶ)");
+
+    let state = common::setup_app_state().await;
+    let pool = state.pool().clone();
+    let base_url = common::spawn_test_server(state).await;
+    let tenant = common::create_test_tenant(&pool, "Punch Measurement A").await;
+    let other_tenant = common::create_test_tenant(&pool, "Punch Measurement B").await;
+    let auth = format!("Bearer {}", common::create_test_jwt(tenant, "admin"));
+    let other_auth = format!("Bearer {}", common::create_test_jwt(other_tenant, "admin"));
+    let client = reqwest::Client::new();
+
+    let emp_id = |v: &Value| Uuid::parse_str(v["id"].as_str().unwrap()).unwrap();
+    let emp =
+        emp_id(&common::create_test_employee(&client, &base_url, &auth, "測定 太郎", "M001").await);
+    let other_emp =
+        emp_id(&common::create_test_employee(&client, &base_url, &auth, "測定 次郎", "M002").await);
+    let other_tenant_emp = emp_id(
+        &common::create_test_employee(&client, &base_url, &other_auth, "別 三郎", "M003").await,
+    );
+
+    let m_fail = insert_measurement(&pool, tenant, emp, 0.15, "fail", false).await;
+    let m_pass = insert_measurement(&pool, tenant, emp, 0.0, "pass", false).await;
+    let m_dev = insert_measurement(&pool, tenant, emp, 0.2, "fail", true).await;
+    let m_other_emp = insert_measurement(&pool, tenant, other_emp, 0.1, "fail", false).await;
+    let m_other_tenant =
+        insert_measurement(&pool, other_tenant, other_tenant_emp, 0.1, "fail", false).await;
+
+    // m_fail だけ点呼として記録された
+    sqlx::query(
+        "INSERT INTO tenko_sessions (tenant_id, employee_id, tenko_type, status, measurement_id, is_dev)
+         VALUES ($1, $2, 'normal', 'completed', $3, false)",
+    )
+    .bind(tenant)
+    .bind(emp)
+    .bind(m_fail)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // 打刻の社員は payload の employee_id で決まる (CTE の COALESCE の 1 段目)
+    let payload = |measurement_id: Option<String>| {
+        let mut p = json!({ "employee_id": emp.to_string(), "card_kind": "license" });
+        if let Some(m) = measurement_id {
+            p["measurement_id"] = json!(m);
+        }
+        p
+    };
+    let cases: Vec<(&str, Option<String>)> = vec![
+        ("結ばれる (点呼記録あり)", Some(m_fail.to_string())),
+        (
+            "結ばれる (大文字の UUID)",
+            Some(m_pass.to_string().to_uppercase()),
+        ),
+        ("payload に measurement_id が無い", None),
+        ("形の違う値", Some("abc".to_string())),
+        ("別テナントの測定", Some(m_other_tenant.to_string())),
+        ("is_dev が違う測定", Some(m_dev.to_string())),
+        ("別の社員の測定", Some(m_other_emp.to_string())),
+    ];
+    let mut ids = Vec::new();
+    for (i, (_, m)) in cases.iter().enumerate() {
+        ids.push(
+            insert_punch_with_payload(&pool, tenant, i as i64, i as i64, payload(m.clone())).await,
+        );
+    }
+
+    let body = list_punches(&client, &base_url, &auth).await;
+    let punches = body["punches"].as_array().unwrap();
+    assert_eq!(punches.len(), cases.len(), "{body}");
+    let by_id = |id: &str| -> &Value {
+        punches
+            .iter()
+            .find(|p| p["id"].as_str() == Some(id))
+            .unwrap_or_else(|| panic!("打刻 {id} が一覧に無い: {body}"))
+    };
+
+    test_case!(
+        "同じ tenant・is_dev・社員の測定 → 値・判定・点呼記録が出る",
+        {
+            let p = by_id(&ids[0]);
+            assert_eq!(p["measurement_id"], json!(m_fail.to_string()), "{p}");
+            assert_eq!(p["alcohol_level"], json!(0.15), "{p}");
+            assert_eq!(p["result"], json!("fail"), "{p}");
+            assert_eq!(p["tenko_recorded"], json!(true), "{p}");
+        }
+    );
+
+    test_case!(
+        "大文字の UUID でも結ばれる・点呼に記録されていなければ false",
+        {
+            let p = by_id(&ids[1]);
+            assert_eq!(p["measurement_id"], json!(m_pass.to_string()), "{p}");
+            assert_eq!(p["alcohol_level"], json!(0.0), "{p}");
+            assert_eq!(p["result"], json!("pass"), "{p}");
+            assert_eq!(p["tenko_recorded"], json!(false), "{p}");
+        }
+    );
+
+    for (i, (label, _)) in cases.iter().enumerate().skip(2) {
+        test_case!(format!("{label} → 4 欄とも null"), {
+            let p = by_id(&ids[i]);
+            for key in [
+                "measurement_id",
+                "alcohol_level",
+                "result",
+                "tenko_recorded",
+            ] {
+                assert!(p[key].is_null(), "{label}: {key} が null でない: {p}");
+            }
+        });
+    }
+
+    test_case!("CSV にも同じ 4 列が出る", {
+        let res = client
+            .get(format!("{base_url}/api/timecard/punches/csv"))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200);
+        let bytes = res.bytes().await.unwrap();
+        let csv = std::str::from_utf8(&bytes[3..]).unwrap();
+        let line = |id: &str| -> &str {
+            csv.lines()
+                .find(|l| l.starts_with(id))
+                .unwrap_or_else(|| panic!("CSV に {id} が無い: {csv}"))
+        };
+        assert!(
+            line(&ids[0]).ends_with(&format!(",{m_fail},0.15,fail,済")),
+            "{csv}"
+        );
+        assert!(
+            line(&ids[1]).ends_with(&format!(",{m_pass},0,pass,未")),
+            "{csv}"
+        );
+        assert!(line(&ids[3]).ends_with(",,,,"), "{csv}");
+    });
+}
