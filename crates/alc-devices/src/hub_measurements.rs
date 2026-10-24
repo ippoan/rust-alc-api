@@ -45,6 +45,11 @@ async fn ensure_tenant_for_staging(state: &AppState, tenant_id: Uuid) -> Result<
 /// 打刻の kind (Refs ippoan/alc-app-s3#134)。文字列の直書きを避ける。
 pub const KIND_TIMECARD: &str = "timecard";
 
+/// 開発用の試験記録の kind (MCP `create_test_record` が機体に作らせる、Refs ippoan/alc-cam#2)。
+/// **開発の軸 (dev端末の印) のときだけ受ける** ([`kind_allowed_in_axis`])。本番の画面はどれも
+/// kind で絞って読むので、開発の軸に入っても記録簿・点呼・打刻・CSV には出ない。
+pub const KIND_TEST: &str = "test";
+
 /// 打刻 payload のカード生値のキー。
 const FIELD_CARD_ID: &str = "card_id";
 
@@ -61,6 +66,7 @@ const FIELD_EMPLOYEE_ID: &str = "employee_id";
 /// - fc1200_raw … パース失敗時の hex パススルー fallback
 /// - license … CoreS3 が点呼開始時に読み取る免許証 IC (Refs ippoan/alc-app-s3#125)。
 ///   同じ session_id で測定と束ねて送られる。
+/// - test … 開発用の試験記録 ([`KIND_TEST`])。開発の軸のときだけ受ける。
 /// - timecard … NFC タイムカード端末の打刻イベント (Refs ippoan/alc-app-s3#134)。
 ///   payload は `{"card_id": "...", "card_kind": "felica_idm"|"license"}`。
 ///   `card_id` は端末が読んだ**生値** (接頭辞を付けない — punch のカード照合が
@@ -80,6 +86,7 @@ pub const HUB_MEASUREMENT_KINDS: &[&str] = &[
     "fc1200_raw",
     "license",
     KIND_TIMECARD,
+    KIND_TEST,
 ];
 
 /// 1 リクエストで受けるバッチの上限 (再送スパイクからの防御)。
@@ -168,6 +175,10 @@ async fn ingest(
     if !items.iter().all(validate) {
         return Err(StatusCode::BAD_REQUEST);
     }
+    let dev = alc_core::device_dev::is_device_dev();
+    if !items.iter().all(|item| kind_allowed_in_axis(item, dev)) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
     ensure_tenant_for_staging(&state, tenant.0 .0).await?;
 
     // **insert の前に**社員を解決して payload に凍結する (Refs ippoan/alc-app-s3#134)。
@@ -187,6 +198,13 @@ async fn ingest(
         })?;
 
     Ok((StatusCode::CREATED, Json(res)))
+}
+
+/// 試験記録 ([`KIND_TEST`]) は開発の軸のときだけ受ける。recorder は kind が test なら
+/// 必ず `X-Device-Dev: 1` を付けるので、本番の軸で届くのは recorder の取りこぼし — 本番の行に
+/// しないで 400 で止める。
+fn kind_allowed_in_axis(item: &HubMeasurementCreate, dev: bool) -> bool {
+    dev || item.kind != KIND_TEST
 }
 
 /// 端末が名乗った `employee_id` を payload から落とす。
@@ -380,6 +398,23 @@ mod tests {
         assert!(!validate(&item("alcohol", 0, "  ")));
         assert!(!validate(&item("alcohol", -1, "dev-1")));
         assert!(!validate(&item("alcohol", 0, &"x".repeat(129))));
+    }
+
+    #[test]
+    fn test_kind_is_only_allowed_in_the_dev_axis() {
+        assert!(validate(&item(KIND_TEST, 0, "alarm:0123456789abcdef")));
+        assert!(kind_allowed_in_axis(&item(KIND_TEST, 0, "d"), true));
+        assert!(!kind_allowed_in_axis(&item(KIND_TEST, 0, "d"), false));
+        for kind in HUB_MEASUREMENT_KINDS.iter().filter(|k| **k != KIND_TEST) {
+            assert!(
+                kind_allowed_in_axis(&item(kind, 0, "d"), false),
+                "kind={kind}"
+            );
+            assert!(
+                kind_allowed_in_axis(&item(kind, 0, "d"), true),
+                "kind={kind}"
+            );
+        }
     }
 
     #[test]
