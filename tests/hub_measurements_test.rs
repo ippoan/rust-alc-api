@@ -520,3 +520,128 @@ async fn test_hub_measurements_session_id_roundtrip_and_filter() {
         assert_eq!(count_rows(state.pool(), tenant).await, 5);
     });
 }
+
+/// 機体の鍵の ID (`alarm:<fingerprint>`) で入った行と、結び付き (`via_device_id`) による畳み込み
+/// (Refs ippoan/alc-cam#2)。
+/// - ingest は `via_device_id` を保存する
+/// - 一覧の `machine_id` は、hub の ID の行を結び付いた鍵の ID に畳む (結び付きが無ければ device_id のまま)
+/// - 鍵の ID で絞ると、結び付いた hub の ID の行も返る
+#[tokio::test]
+async fn test_hub_measurements_via_device_id_folds_hub_rows_into_key() {
+    test_group!("hub measurements key id");
+    test_case!(
+        "via_device_id の保存と machine_id・絞り込みの畳み込み",
+        {
+            let state = common::setup_app_state().await;
+            let base_url = common::spawn_test_server(state.clone()).await;
+            let tenant = common::create_test_tenant(state.pool(), "Hub Key Id").await;
+            let client = reqwest::Client::new();
+            let key = "alarm:0123456789abcdef";
+
+            // 古いファーム: hub の ID で入った行 (結び付きの元が無い)
+            let res = post_measurements(
+                &client,
+                &base_url,
+                tenant,
+                &json!([
+                    measurement("hub-old", 1, "alcohol"),
+                    measurement("hub-other", 1, "alcohol"),
+                ]),
+            )
+            .await;
+            assert_eq!(res.status(), 201);
+            let body: Value = get_measurements(&client, &base_url, tenant, "")
+                .await
+                .json()
+                .await
+                .unwrap();
+            for item in body["items"].as_array().unwrap() {
+                assert_eq!(
+                    item["machine_id"], item["device_id"],
+                    "結び付きが無ければ device_id のまま"
+                );
+                assert!(item["via_device_id"].is_null());
+            }
+
+            // 新しいファーム: 鍵の ID で記録し、接続の hub の ID を via_device_id に添える
+            let mut keyed = measurement(key, 2, "alcohol");
+            keyed["via_device_id"] = json!("hub-old");
+            let res = post_measurements(&client, &base_url, tenant, &json!([keyed])).await;
+            assert_eq!(res.status(), 201);
+            let stored: Option<String> = sqlx::query_scalar(
+            "SELECT via_device_id FROM hub_measurements WHERE tenant_id = $1 AND device_id = $2",
+        )
+        .bind(tenant)
+        .bind(key)
+        .fetch_one(state.pool())
+        .await
+        .unwrap();
+            assert_eq!(stored.as_deref(), Some("hub-old"));
+
+            let body: Value = get_measurements(&client, &base_url, tenant, "")
+                .await
+                .json()
+                .await
+                .unwrap();
+            let machine_of = |device: &str| -> Value {
+                body["items"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|i| i["device_id"] == device)
+                    .unwrap()["machine_id"]
+                    .clone()
+            };
+            assert_eq!(
+                machine_of("hub-old"),
+                json!(key),
+                "hub の行は結び付いた鍵の ID に畳む"
+            );
+            assert_eq!(machine_of(key), json!(key));
+            assert_eq!(
+                machine_of("hub-other"),
+                json!("hub-other"),
+                "結び付いていない hub はそのまま"
+            );
+
+            // 鍵の ID で絞ると、結び付いた hub の行も返る (結び付いていない hub は返らない)
+            let body: Value = get_measurements(
+                &client,
+                &base_url,
+                tenant,
+                &format!("device_id={}", urlencoding_key(key)),
+            )
+            .await
+            .json()
+            .await
+            .unwrap();
+            let mut devices: Vec<String> = body["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|i| i["device_id"].as_str().unwrap().to_string())
+                .collect();
+            devices.sort();
+            assert_eq!(devices, vec![key.to_string(), "hub-old".to_string()]);
+
+            // hub の ID で絞ったときは今までどおりその ID の行だけ
+            let body: Value = get_measurements(&client, &base_url, tenant, "device_id=hub-old")
+                .await
+                .json()
+                .await
+                .unwrap();
+            assert_eq!(body["items"].as_array().unwrap().len(), 1);
+
+            // 空白だけの via_device_id は 400
+            let mut bad = measurement(key, 3, "alcohol");
+            bad["via_device_id"] = json!("  ");
+            let res = post_measurements(&client, &base_url, tenant, &json!([bad])).await;
+            assert_eq!(res.status(), 400);
+        }
+    );
+}
+
+/// `alarm:` の `:` をクエリに載せる (reqwest の素の文字列なので自前で符号化する)。
+fn urlencoding_key(id: &str) -> String {
+    id.replace(':', "%3A")
+}

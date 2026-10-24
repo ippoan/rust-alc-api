@@ -1570,6 +1570,8 @@ impl HubMeasurementsRepository for MockHubMeasurementsRepository {
                     payload: item.payload.clone(),
                     seq: item.seq,
                     session_id: item.session_id.clone(),
+                    via_device_id: item.via_device_id.clone(),
+                    machine_id: item.device_id.clone(),
                     recorded_at: item
                         .recorded_at_ms
                         .and_then(DateTime::from_timestamp_millis),

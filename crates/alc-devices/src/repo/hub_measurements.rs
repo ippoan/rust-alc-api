@@ -40,9 +40,9 @@ impl HubMeasurementsRepository for PgHubMeasurementsRepository {
             let res = sqlx::query(
                 r#"
                 INSERT INTO hub_measurements (
-                    tenant_id, device_id, kind, payload, seq, recorded_at, session_id
+                    tenant_id, device_id, kind, payload, seq, recorded_at, session_id, via_device_id
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                 ON CONFLICT (tenant_id, device_id, seq, is_dev) DO NOTHING
                 "#,
             )
@@ -53,6 +53,7 @@ impl HubMeasurementsRepository for PgHubMeasurementsRepository {
             .bind(item.seq)
             .bind(recorded_at)
             .bind(&item.session_id)
+            .bind(&item.via_device_id)
             .execute(&mut *tc.conn)
             .await?;
             // ON CONFLICT DO NOTHING なので rows_affected() は 0 か 1。
@@ -78,37 +79,53 @@ impl HubMeasurementsRepository for PgHubMeasurementsRepository {
         // `tenant_id = $1` を明示して index hub_measurements_tenant_device
         // (tenant_id, device_id, created_at DESC) の先頭列に乗せる。
         // 二重防御でもある — RLS だけに依存しない (テストで固定、Refs #592)。
-        let mut conditions = vec!["tenant_id = $1".to_string()];
+        let mut conditions = vec!["h.tenant_id = $1".to_string()];
         let mut idx = 2u32;
         if filter.device_id.is_some() {
-            conditions.push(format!("device_id = ${idx}"));
+            // 機体の鍵の ID で絞ったときは、その鍵に結び付いた hub の ID の行も含める
+            // (結び付き = 鍵の ID で入った行の via_device_id。is_dev の軸は跨がない)
+            conditions.push(format!(
+                "(h.device_id = ${idx} OR h.device_id IN (
+                    SELECT l.via_device_id FROM hub_measurements l
+                     WHERE l.tenant_id = h.tenant_id AND l.is_dev = h.is_dev
+                       AND l.device_id = ${idx} AND l.via_device_id IS NOT NULL))"
+            ));
             idx += 1;
         }
         if filter.kind.is_some() {
-            conditions.push(format!("kind = ${idx}"));
+            conditions.push(format!("h.kind = ${idx}"));
             idx += 1;
         }
         if filter.session_id.is_some() {
-            conditions.push(format!("session_id = ${idx}"));
+            conditions.push(format!("h.session_id = ${idx}"));
             idx += 1;
         }
         if filter.from.is_some() {
-            conditions.push(format!("created_at >= ${idx}"));
+            conditions.push(format!("h.created_at >= ${idx}"));
             idx += 1;
         }
         if filter.to.is_some() {
-            conditions.push(format!("created_at <= ${idx}"));
+            conditions.push(format!("h.created_at <= ${idx}"));
             idx += 1;
         }
         let where_clause = conditions.join(" AND ");
 
         // has_more 判定のため 1 件多く引く (COUNT(*) は張らない、models の
         // HubMeasurementsListResponse の doc コメント参照)。
+        // machine_id: hub の ID の行は、結び付いた機体の鍵の ID (最後に見えたもの) に畳む
         let sql = format!(
-            "SELECT id, tenant_id, device_id, kind, payload, seq, session_id, recorded_at, created_at
-               FROM hub_measurements
+            "SELECT h.id, h.tenant_id, h.device_id, h.kind, h.payload, h.seq, h.session_id,
+                    h.via_device_id, COALESCE(link.key_id, h.device_id) AS machine_id,
+                    h.recorded_at, h.created_at
+               FROM hub_measurements h
+               LEFT JOIN LATERAL (
+                    SELECT l.device_id AS key_id FROM hub_measurements l
+                     WHERE l.tenant_id = h.tenant_id AND l.is_dev = h.is_dev
+                       AND l.via_device_id = h.device_id
+                     ORDER BY l.created_at DESC LIMIT 1
+               ) link ON true
               WHERE {where_clause}
-              ORDER BY created_at DESC, id DESC
+              ORDER BY h.created_at DESC, h.id DESC
               LIMIT ${idx} OFFSET ${}",
             idx + 1
         );
