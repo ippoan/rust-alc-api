@@ -17,7 +17,6 @@ RUN curl -fsSL "https://github.com/bblanchon/pdfium-binaries/releases/download/$
 
 COPY ${BINARY_NAME} /usr/local/bin/
 COPY migrate /usr/local/bin/
-COPY migrations /app/migrations
 COPY staging/entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 

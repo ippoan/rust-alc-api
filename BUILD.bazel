@@ -40,7 +40,6 @@ rust_binary(
 rust_binary(
     name = "migrate",
     srcs = ["src/bin/migrate.rs"],
-    compile_data = glob(["migrations/**"]) + ["scripts/local_app_grants.sql"],
     # migrate.rs は alc-migrations/sqlx/tokio/anyhow しか使わない。all_crate_deps(normal) だと
     # root package の全 external deps を要求し、staging image 用に //:migrate を
     # 全 build-image matrix job (per-service bazel cache) で build する際に
@@ -85,15 +84,14 @@ _MOCK_TEST_SRCS = glob([
 # --- DB integration テスト (postgres 必須、Refs #515 bazel gate 移行 PR2) ---
 #
 # ci.yml の bazel-test-db job (postgres service + TEST_DATABASE_URL) で走らせる。
-# sqlx::migrate! は compile 時に migrations/ を埋め込む (runtime 再読込なし) ので
-# compile_data だけで足りる。新 target を足したら ci.yml の db matrix にも追記
+# migration・初期化・GRANT の SQL は ippoan/alc-migrations の crate に埋め込み済み (tests/common の
+# migrate_and_grant が空の DB を初期化する) なので compile_data は要らない。新 target を足したら ci.yml の db matrix にも追記
 # (check_bazel_test_matrix.sh が poc/db の union で同期を検証する)。
 
 rust_test(
     name = "maintenance_test",
     srcs = ["tests/maintenance_test.rs"] + glob(["tests/common/**/*.rs"]),
     crate_root = "tests/maintenance_test.rs",
-    compile_data = glob(["migrations/**"]) + ["scripts/local_app_grants.sql"],
     deps = [":rust_alc_api_lib"] + all_crate_deps(
         normal = True,
         normal_dev = True,
@@ -113,7 +111,6 @@ rust_test(
     name = "driver_info_maintenance_test",
     srcs = ["tests/driver_info_maintenance_test.rs"] + glob(["tests/common/**/*.rs"]),
     crate_root = "tests/driver_info_maintenance_test.rs",
-    compile_data = glob(["migrations/**"]) + ["scripts/local_app_grants.sql"],
     deps = [":rust_alc_api_lib"] + all_crate_deps(
         normal = True,
         normal_dev = True,
@@ -131,7 +128,6 @@ rust_test(
     name = "app_role_grants_test",
     srcs = ["tests/app_role_grants_test.rs"] + glob(["tests/common/**/*.rs"]),
     crate_root = "tests/app_role_grants_test.rs",
-    compile_data = glob(["migrations/**"]) + ["scripts/local_app_grants.sql"],
     deps = [":rust_alc_api_lib"] + all_crate_deps(
         normal = True,
         normal_dev = True,
@@ -146,7 +142,6 @@ rust_test(
     name = "archive_repo_test",
     srcs = ["tests/archive_repo_test.rs"] + glob(["tests/common/**/*.rs"]),
     crate_root = "tests/archive_repo_test.rs",
-    compile_data = glob(["migrations/**"]) + ["scripts/local_app_grants.sql"],
     deps = [":rust_alc_api_lib"] + all_crate_deps(
         normal = True,
         normal_dev = True,
@@ -163,7 +158,6 @@ rust_test(
     name = "timecard_punches_test",
     srcs = ["tests/timecard_punches_test.rs"] + glob(["tests/common/**/*.rs"]),
     crate_root = "tests/timecard_punches_test.rs",
-    compile_data = glob(["migrations/**"]) + ["scripts/local_app_grants.sql"],
     deps = [":rust_alc_api_lib"] + all_crate_deps(
         normal = True,
         normal_dev = True,
@@ -181,7 +175,6 @@ rust_test(
     name = "timecard_cards_bulk_test",
     srcs = ["tests/timecard_cards_bulk_test.rs"] + glob(["tests/common/**/*.rs"]),
     crate_root = "tests/timecard_cards_bulk_test.rs",
-    compile_data = glob(["migrations/**"]) + ["scripts/local_app_grants.sql"],
     deps = [":rust_alc_api_lib"] + all_crate_deps(
         normal = True,
         normal_dev = True,
@@ -196,7 +189,6 @@ rust_test(
     name = "hub_measurements_test",
     srcs = ["tests/hub_measurements_test.rs"] + glob(["tests/common/**/*.rs"]),
     crate_root = "tests/hub_measurements_test.rs",
-    compile_data = glob(["migrations/**"]) + ["scripts/local_app_grants.sql"],
     deps = [":rust_alc_api_lib"] + all_crate_deps(
         normal = True,
         normal_dev = True,
@@ -215,7 +207,6 @@ rust_test(
     name = "normal_tenko_record_test",
     srcs = ["tests/normal_tenko_record_test.rs"] + glob(["tests/common/**/*.rs"]),
     crate_root = "tests/normal_tenko_record_test.rs",
-    compile_data = glob(["migrations/**"]) + ["scripts/local_app_grants.sql"],
     deps = [":rust_alc_api_lib"] + all_crate_deps(
         normal = True,
         normal_dev = True,
@@ -233,7 +224,6 @@ rust_test(
     name = "device_dev_axis_test",
     srcs = ["tests/device_dev_axis_test.rs"] + glob(["tests/common/**/*.rs"]),
     crate_root = "tests/device_dev_axis_test.rs",
-    compile_data = glob(["migrations/**"]) + ["scripts/local_app_grants.sql"],
     deps = [":rust_alc_api_lib"] + all_crate_deps(
         normal = True,
         normal_dev = True,
@@ -251,7 +241,6 @@ rust_test(
     name = "car_inspections_expiry_test",
     srcs = ["tests/car_inspections_expiry_test.rs"] + glob(["tests/common/**/*.rs"]),
     crate_root = "tests/car_inspections_expiry_test.rs",
-    compile_data = glob(["migrations/**"]) + ["scripts/local_app_grants.sql"],
     deps = [":rust_alc_api_lib"] + all_crate_deps(
         normal = True,
         normal_dev = True,
@@ -271,7 +260,6 @@ rust_test(
     name = "device_bp_enabled_test",
     srcs = ["tests/device_bp_enabled_test.rs"] + glob(["tests/common/**/*.rs"]),
     crate_root = "tests/device_bp_enabled_test.rs",
-    compile_data = glob(["migrations/**"]) + ["scripts/local_app_grants.sql"],
     deps = [":rust_alc_api_lib"] + all_crate_deps(
         normal = True,
         normal_dev = True,
@@ -290,7 +278,6 @@ rust_test(
     name = "tenko_bp_required_escalate_test",
     srcs = ["tests/tenko_bp_required_escalate_test.rs"] + glob(["tests/common/**/*.rs"]),
     crate_root = "tests/tenko_bp_required_escalate_test.rs",
-    compile_data = glob(["migrations/**"]) + ["scripts/local_app_grants.sql"],
     deps = [":rust_alc_api_lib"] + all_crate_deps(
         normal = True,
         normal_dev = True,
@@ -305,7 +292,6 @@ rust_test(
     name = "dvr_notifications_test",
     srcs = ["tests/dvr_notifications_test.rs"] + glob(["tests/common/**/*.rs"]),
     crate_root = "tests/dvr_notifications_test.rs",
-    compile_data = glob(["migrations/**"]) + ["scripts/local_app_grants.sql"],
     deps = [":rust_alc_api_lib"] + all_crate_deps(
         normal = True,
         normal_dev = True,
@@ -320,7 +306,6 @@ rust_test(
     name = "dtako_operation_window_test",
     srcs = ["tests/dtako_operation_window_test.rs"] + glob(["tests/common/**/*.rs"]),
     crate_root = "tests/dtako_operation_window_test.rs",
-    compile_data = glob(["migrations/**"]) + ["scripts/local_app_grants.sql"],
     deps = [":rust_alc_api_lib"] + all_crate_deps(
         normal = True,
         normal_dev = True,
@@ -335,7 +320,6 @@ rust_test(
     name = "dtako_operation_changes_test",
     srcs = ["tests/dtako_operation_changes_test.rs"] + glob(["tests/common/**/*.rs"]),
     crate_root = "tests/dtako_operation_changes_test.rs",
-    compile_data = glob(["migrations/**"]) + ["scripts/local_app_grants.sql"],
     deps = [":rust_alc_api_lib"] + all_crate_deps(
         normal = True,
         normal_dev = True,
@@ -350,7 +334,6 @@ rust_test(
     name = "dtako_driver_dedup_test",
     srcs = ["tests/dtako_driver_dedup_test.rs"] + glob(["tests/common/**/*.rs"]),
     crate_root = "tests/dtako_driver_dedup_test.rs",
-    compile_data = glob(["migrations/**"]) + ["scripts/local_app_grants.sql"],
     deps = [":rust_alc_api_lib"] + all_crate_deps(
         normal = True,
         normal_dev = True,
@@ -365,7 +348,6 @@ rust_test(
     name = "auth_user_role_test",
     srcs = ["tests/auth_user_role_test.rs"] + glob(["tests/common/**/*.rs"]),
     crate_root = "tests/auth_user_role_test.rs",
-    compile_data = glob(["migrations/**"]) + ["scripts/local_app_grants.sql"],
     deps = [":rust_alc_api_lib"] + all_crate_deps(
         normal = True,
         normal_dev = True,
@@ -380,7 +362,6 @@ rust_test(
     name = "tenant_scoped_queries_test",
     srcs = ["tests/tenant_scoped_queries_test.rs"] + glob(["tests/common/**/*.rs"]),
     crate_root = "tests/tenant_scoped_queries_test.rs",
-    compile_data = glob(["migrations/**"]) + ["scripts/local_app_grants.sql"],
     deps = [":rust_alc_api_lib"] + all_crate_deps(
         normal = True,
         normal_dev = True,
@@ -395,7 +376,6 @@ rust_test(
     name = "runtime_role_test",
     srcs = ["tests/runtime_role_test.rs"] + glob(["tests/common/**/*.rs"]),
     crate_root = "tests/runtime_role_test.rs",
-    compile_data = glob(["migrations/**"]) + ["scripts/local_app_grants.sql"],
     deps = [":rust_alc_api_lib"] + all_crate_deps(
         normal = True,
         normal_dev = True,
@@ -410,8 +390,6 @@ rust_test(
     name = "mock_carins",
     srcs = ["tests/mock_carins/main.rs"] + _MOCK_TEST_SRCS,
     crate_root = "tests/mock_carins/main.rs",
-    # tests/common/mod.rs の sqlx::migrate! が compile 時に migrations/ を読む
-    compile_data = glob(["migrations/**"]) + ["scripts/local_app_grants.sql"],
     deps = [":rust_alc_api_lib"] + all_crate_deps(
         normal = True,
         normal_dev = True,
@@ -426,8 +404,6 @@ rust_test(
     name = "mock_devices",
     srcs = ["tests/mock_devices/main.rs"] + _MOCK_TEST_SRCS,
     crate_root = "tests/mock_devices/main.rs",
-    # tests/common/mod.rs の sqlx::migrate! が compile 時に migrations/ を読む
-    compile_data = glob(["migrations/**"]) + ["scripts/local_app_grants.sql"],
     deps = [":rust_alc_api_lib"] + all_crate_deps(
         normal = True,
         normal_dev = True,
@@ -442,8 +418,6 @@ rust_test(
     name = "mock_dtako",
     srcs = ["tests/mock_dtako/main.rs"] + _MOCK_TEST_SRCS,
     crate_root = "tests/mock_dtako/main.rs",
-    # tests/common/mod.rs の sqlx::migrate! が compile 時に migrations/ を読む
-    compile_data = glob(["migrations/**"]) + ["scripts/local_app_grants.sql"],
     deps = [":rust_alc_api_lib"] + all_crate_deps(
         normal = True,
         normal_dev = True,
@@ -458,8 +432,6 @@ rust_test(
     name = "mock_misc",
     srcs = ["tests/mock_misc/main.rs"] + _MOCK_TEST_SRCS,
     crate_root = "tests/mock_misc/main.rs",
-    # tests/common/mod.rs の sqlx::migrate! が compile 時に migrations/ を読む
-    compile_data = glob(["migrations/**"]) + ["scripts/local_app_grants.sql"],
     deps = [":rust_alc_api_lib"] + all_crate_deps(
         normal = True,
         normal_dev = True,
@@ -474,8 +446,6 @@ rust_test(
     name = "mock_tenko",
     srcs = ["tests/mock_tenko/main.rs"] + _MOCK_TEST_SRCS,
     crate_root = "tests/mock_tenko/main.rs",
-    # tests/common/mod.rs の sqlx::migrate! が compile 時に migrations/ を読む
-    compile_data = glob(["migrations/**"]) + ["scripts/local_app_grants.sql"],
     deps = [":rust_alc_api_lib"] + all_crate_deps(
         normal = True,
         normal_dev = True,
@@ -490,8 +460,6 @@ rust_test(
     name = "mock_maintenance",
     srcs = ["tests/mock_maintenance/main.rs"] + _MOCK_TEST_SRCS,
     crate_root = "tests/mock_maintenance/main.rs",
-    # tests/common/mod.rs の sqlx::migrate! が compile 時に migrations/ を読む
-    compile_data = glob(["migrations/**"]) + ["scripts/local_app_grants.sql"],
     deps = [":rust_alc_api_lib"] + all_crate_deps(
         normal = True,
         normal_dev = True,

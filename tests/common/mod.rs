@@ -180,13 +180,32 @@ pub fn test_database_url() -> String {
     })
 }
 
-/// migration を流し、続けて本番の `alc_api_app` の GRANT を再現する (Refs #685)。
+/// 空の DB を初期化し (schema・ロール)、migration を流し、続けて本番の `alc_api_app` の GRANT を再現する (Refs #685)。
 ///
+/// 初期化の SQL は `alc_migrations::INIT_LOCAL_DB` (migration と同じ rev)。冪等でない (`CREATE ROLE`) ので、
+/// `alc_api` schema が無いときだけ流す。CI もローカルも空の postgres に繋ぐだけでよい (`psql -f` の段は要らない)。
 /// 本番の初期の表の GRANT は migration の外 (Supabase 上で手動) で付いたので、
 /// migration だけではテスト DB の `alc_api_app` の権限が本番とずれる。
-/// 並列に走るテストが同じ表へ同時に GRANT すると `tuple concurrently updated` に
+/// 並列に走るテストが同じ表へ同時に初期化・GRANT すると `tuple concurrently updated` に
 /// なるので、advisory lock で直列化する (GRANT 自体は冪等)。
 pub async fn migrate_and_grant(pool: &sqlx::PgPool) {
+    let mut tx = pool.begin().await.expect("Failed to begin init tx");
+    sqlx::query("SELECT pg_advisory_xact_lock(685685)")
+        .execute(&mut *tx)
+        .await
+        .expect("Failed to take init lock");
+    let initialized: bool = sqlx::query_scalar("SELECT to_regnamespace('alc_api') IS NOT NULL")
+        .fetch_one(&mut *tx)
+        .await
+        .expect("Failed to check alc_api schema");
+    if !initialized {
+        sqlx::raw_sql(alc_migrations::INIT_LOCAL_DB)
+            .execute(&mut *tx)
+            .await
+            .expect("Failed to apply alc_migrations::INIT_LOCAL_DB");
+    }
+    tx.commit().await.expect("Failed to commit init");
+
     alc_migrations::MIGRATOR
         .run(pool)
         .await

@@ -15,7 +15,6 @@ RUN curl -fsSL "https://github.com/bblanchon/pdfium-binaries/releases/download/$
 COPY rust-alc-api /usr/local/bin/
 COPY migrate /usr/local/bin/
 COPY archive /usr/local/bin/
-COPY migrations /app/migrations
 
 WORKDIR /app
 ENV PORT=8080

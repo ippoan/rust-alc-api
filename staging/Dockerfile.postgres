@@ -1,4 +1,5 @@
+# staging の postgres sidecar。中身は空の postgres だけ (schema・ロール・migration は app の起動時に
+# migrate バイナリが alc_migrations::INIT_LOCAL_DB と MIGRATOR で流す。staging/entrypoint.sh)
 FROM postgres:16
-COPY scripts/init_local_db.sql /docker-entrypoint-initdb.d/01-init.sql
 ENV POSTGRES_PASSWORD=staging
 ENV POSTGRES_HOST_AUTH_METHOD=trust

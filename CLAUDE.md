@@ -10,10 +10,7 @@ Axum + PostgreSQL RLS の ALC (アルコールチェック) API。Cloud Run に�
 ## 規範 (must / never)
 
 - DB は `alc_api_app` ユーザーで。monolith (session スコープの `set_current_tenant`) は必ず直接接続 port 5432 (6543 は set_config リセットで RLS が壊れる)。分割 worker (別 repo。最初は ippoan/alc-vein-worker) は `in_tenant_tx` でトランザクション単位の RLS (`set_config(..., true)`) にする場合に限り、プーラーの 6543 を使う
-- 適用済み migration は絶対に変更しない (checksum で起動不能) — 修正は新規ファイル追加
-- migration: `SECURITY DEFINER` に `SET search_path = alc_api` 必須 / `WITH CHECK (true)` は避ける / 既存データへの INSERT/UPDATE ハードコード禁止 (`WHERE EXISTS`)
-- migration PR はローカルで流さず CI + staging に任せる
-- migration の正本は ippoan/alc-migrations (本番は migrate.yml 手動。tag 時の `migrations-applied` は固定 rev の `--check` だけ)。テストは rev 固定の git 依存。`migrations/` と `scripts/*.sql` は 152 番止まりの写し、追加・変更禁止 (`pr-limit`)。取り込みは `Cargo.toml` の rev を上げる
+- migration は ippoan/alc-migrations に書く (規範もそちら)。この repo に `migrations/` は無い (足し直し禁止 = `pr-limit`)。取り込みは `Cargo.toml` の rev を上げる。テスト・staging は同じ rev の `INIT_LOCAL_DB`・`MIGRATOR` で空の DB から作る。本番は alc-migrations の migrate.yml、tag 時の `migrations-applied` は rev の `--check` だけ
 - main 直接 merge/push・`git checkout main`・メイン worktree のソース編集は禁止 — コード変更は必ず origin/main ベースの worktree で (hooks 強制)。削除前に必ず repo root へ cd
 - 確認なしの `deploy.sh` 実行禁止 (AskUserQuestion 2 択で確認)。本番デプロイは `/tag-release patch` のみ
 - Cloud Run handler 内 `tokio::spawn` fire-and-forget 禁止 (CPU throttle で完走しない)

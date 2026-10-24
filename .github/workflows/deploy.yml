@@ -34,7 +34,7 @@ jobs:
   #   - staging app image → ci.yml build-image job (bazel-bin から直接 build)
   #   - staging-db image  → ci.yml staging-db job
   # 本 workflow が呼ばれる時点 (ci.yml deploy job の needs 充足後) で
-  # ${REPO}-staging:${sha} / ${REPO}-staging-db:latest は push 済み。
+  # ${REPO}-staging:${sha} / ${REPO}-staging-db:${sha} は push 済み。
   # gateway + per-domain は #556 で廃止し、deploy は monolith (backend) 1 本のみ。
   # ---------------------------------------------------------------------------
   # ---------------------------------------------------------------------------
@@ -162,7 +162,7 @@ jobs:
 
           if [ "${DEPLOY_ENV}" = "staging" ]; then
             STAGING_URL="${{ vars.STAGING_API_URL }}"
-            DB_IMAGE="${{ env.AR_PREFIX }}/${{ env.REPO }}-staging-db:latest"
+            DB_IMAGE="${{ env.AR_PREFIX }}/${{ env.REPO }}-staging-db:${{ inputs.image_sha }}"
             RENDER_ARGS="${RENDER_ARGS} --staging-url ${STAGING_URL} --db-image ${DB_IMAGE}"
           else
             # production: 新 revision を 0% (no-traffic) で deploy し、traffic は現

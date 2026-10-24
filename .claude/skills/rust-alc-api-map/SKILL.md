@@ -1,7 +1,7 @@
 ---
 name: rust-alc-api-map
-generated-from: rust-alc-api:29e9b6ef5042aae4b16468560c77d394b503c96e
-paths: [crates/, src/, migrations/, tests/]
+generated-from: rust-alc-api:5db1ba6c70747f8ca34e1250afe250f94b16f341
+paths: [crates/, src/, tests/]
 description: rust-alc-api (アルコールチェッカー基盤の Rust/Axum Cargo workspace — domain crate 群 + monolith 単一バイナリ、PostgreSQL+RLS、Cloud Run) の構造ナビゲーション。どの crate に何のルートがあるか / monolith (rust-alc-api) 一本化 (gateway + per-domain は #556 で廃止) / RLS・migration・deploy/release 分離の gotcha を 1 枚にまとめる。トリガー:「rust-alc-api」「alc-api」「alc-notify」「alc-tenko」「alc-camera」「alc-carins」「alc-dtako」「gateway」「tenko-api」「carins-api」「dtako-api」「trouble-api」(trouble は ippoan/alc-trouble-worker へ移設済み)「RLS テナント」「sqlx migration」「ts-rs」「Release Wave」「Bazel」等。
 ---
 
@@ -377,8 +377,7 @@ router 実装として存続。旧 per-domain は同じ domain crate を単独 m
 - **手動 `deploy.sh`** もあり (monolith のみ、AR `cloudsql-sv/alc-app` へ)。通常は CI 経由。
 - **coverage 100% ガード**: `coverage_100.toml` 登録ファイルは CI でリグレッション検出。mock テストは
   domain 別 (`tests/mock_tenko` `mock_dtako` `mock_carins` `mock_devices` `mock_misc` `mock_maintenance`)。
-- **その他 workflow**: `migration-safety-check.yml` (適用済み migration の破壊的変更検査) /
-  `release-wave.yml` (Release Wave caller、`repository_dispatch` で cloudrun flip を受ける)。
+- **その他 workflow**: `release-wave.yml` (Release Wave caller、`repository_dispatch` で cloudrun flip を受ける)。
 - **CI 速度の tracking**: [`docs/ci-speed-tracking.md`](../../../docs/ci-speed-tracking.md) が SoT
   (Refs #482)。PR CI は同一ソースに対し「coverage 計装 (test-matrix)」と「Bazel fastbuild
   (build-image)」の 2 profile ビルドが走る (プロファイル統合は原理的に不可)。check job の
@@ -677,8 +676,8 @@ TEST_DATABASE_URL="..." cargo llvm-cov --html --open
 ### テスト用インフラ
 
 - `docker-compose.yml` — テスト用 PostgreSQL 16 (ポート 54322、tmpfs)
-- `scripts/init_local_db.sql` — `alc_api` スキーマ + `alc_api_app` ロール + Supabase 互換ロール
-- `scripts/local_app_grants.sql` — 本番 (Supabase) の `alc_api_app` の GRANT (表・sequence・function) の写し。表は migration が作るので `init_local_db.sql` には書けず、migration の後に `tests/common` の `migrate_and_grant` が流す (2026-09-28 取得、表 85 / 関数 20 / sequence 12。**本番の実態は migration の GRANT より広い** — 全表 ALL 相当で、`dtako_operation_changes`・`_sqlx_migrations` も。本番側を絞るかは別件。冪等の DO ブロックで、ローカルに無い対象は存在確認して飛ばし NOTICE に出す。関数は型だけで引く。`ON ALL TABLES` では書かず本番の一覧をそのまま写す)。新しい表の GRANT はここでなく migration に書く。BUILD.bazel の DB テストは `compile_data` にこのファイルを含める
+- **テスト DB の初期化・GRANT はテスト自身が行う** — `tests/common` の `migrate_and_grant` が、空の DB なら (`alc_api` schema が無ければ) `alc_migrations::INIT_LOCAL_DB` (schema + `alc_api_app` + Supabase 互換ロール。冪等でないので存在確認してから) → `MIGRATOR` → `LOCAL_APP_GRANTS` を advisory lock の下で流す。CI もローカルも空の postgres に繋ぐだけ (`psql -f` の段は無い)。SQL の正本は ippoan/alc-migrations の `scripts/init_local_db.sql`・`scripts/local_app_grants.sql` (この repo の写しは消した)
+- `LOCAL_APP_GRANTS` — 本番 (Supabase) の `alc_api_app` の GRANT (表・sequence・function) の写し。表は migration が作るので init には書けず、migration の後に流す (2026-09-28 取得、表 85 / 関数 20 / sequence 12。**本番の実態は migration の GRANT より広い** — 全表 ALL 相当で、`dtako_operation_changes`・`_sqlx_migrations` も。本番側を絞るかは別件。冪等の DO ブロックで、ローカルに無い対象は存在確認して飛ばし NOTICE に出す。関数は型だけで引く。`ON ALL TABLES` では書かず本番の一覧をそのまま写す)。新しい表の GRANT はここでなく migration に書く
 - `.test-config` — `test_and_deploy.sh` 共通スクリプトの設定
 
 ### マイグレーション作成時の注意
@@ -705,11 +704,10 @@ splinter / RLS 検証フルセットは CI に集約する。
 
 ## マイグレーションとデプロイ
 
-- **migration の正本は ippoan/alc-migrations に移行済み (rust-alc-api#697)**。`src/bin/migrate.rs` (本番) と `tests/common` (テスト) は `alc_migrations::MIGRATOR` / `LOCAL_APP_GRANTS` を読む (git 依存、`Cargo.toml` の rev 固定。新しい migration は rev を上げて取り込む)。rust-alc-api の `migrations/` と `scripts/init_local_db.sql`・`scripts/local_app_grants.sql` は 152 番で止めた写しで正本ではなく、追加・変更禁止 (CI `pr-limit` の Freeze step が止める。`removed` は通す)
-- マイグレーションファイルは `migrations/` ディレクトリに連番で配置 (`001_`, `002_`, ...)
+- **migration の正本は ippoan/alc-migrations に移行済み (rust-alc-api#697)**。`src/bin/migrate.rs` (本番) と `tests/common` (テスト) は `alc_migrations::MIGRATOR` / `LOCAL_APP_GRANTS` を読む (git 依存、`Cargo.toml` の rev 固定。新しい migration は rev を上げて取り込む)。この repo の `migrations/`・`scripts/init_local_db.sql`・`scripts/local_app_grants.sql`・`build.rs`・`migration-safety-check.yml` は消した (152 番で止めた写しが CI と staging の init に残っていて、rev を 174 以上に上げると migration 174 と衝突していた)。足し直しは CI `pr-limit` の Freeze step が止める
 - 本番の migration は **ippoan/alc-migrations の migrate.yml (手動)** が、Actions の runner から org secret `ALC_MIGRATE_DATABASE_URL` で直接 DB に繋いで流す (GCP / Cloud Run job は使わない)。rust-alc-api からは流さない
 - tag release (`deploy.yml`) の `migrations-applied` job が deploy の前に確かめる: `Cargo.toml` の `alc-migrations` の固定 rev で `alc-migrate` を `cargo install` し、同じ secret で `alc-migrate --check` (読むだけ。その rev の migration が 1 件でも未適用なら exit 1)。rev を上げた PR は、先に alc-migrations 側で本番に流してからでないと tag release が止まる。落ちたら alc-migrations の migrate.yml を main で手動実行してから再実行。`ALC_MIGRATE_DATABASE_URL` は `ci.yml` の deploy job から `deploy.yml` へ渡す
-- `src/bin/migrate.rs` は staging の起動時 migrate (`staging/entrypoint.sh`、使い捨て DB) 用に残る。本番 `Dockerfile` も、他 repo の結合テスト (docker-compose が backend image 内の migrate を起動する) のために COPY する。本番では起動しない
+- `src/bin/migrate.rs` は staging の起動時 migrate (`staging/entrypoint.sh`、使い捨て DB) 用に残る。空の DB (`alc_api` schema が無い) なら先に `alc_migrations::INIT_LOCAL_DB` を流す — staging の postgres sidecar (`staging/Dockerfile.postgres`) は空の postgres だけで、SQL を焼き込まない。その image は commit の SHA のタグで push し (`ci.yml` の staging-db job)、`deploy.yml` が `inputs.image_sha` で引く (可変の `latest` は Artifact Registry の remote のキャッシュが古い digest を返し続けたため)。本番 `Dockerfile` も、他 repo の結合テスト (docker-compose が backend image 内の migrate を起動する) のために COPY する。本番では起動しない
 - `deploy.sh` の流れ: Docker ビルド → プッシュ → Cloud Run Service デプロイ (migrate は含まない)
 - 未適用 migration が在るとき tag release は止まり、アプリは前バージョンで動き続ける
 - `main.rs` からは `sqlx::migrate!()` を削除済み（起動時の自動適用はしない）

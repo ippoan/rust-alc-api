@@ -5,7 +5,5 @@ services:
       POSTGRES_PASSWORD: test
     ports:
       - "54322:5432"
-    volumes:
-      - ./scripts/init_local_db.sql:/docker-entrypoint-initdb.d/01-init.sql
     tmpfs:
       - /var/lib/postgresql/data
