@@ -353,6 +353,48 @@ async fn test_internal_route_hub_ingest_follows_the_header() {
 }
 
 #[tokio::test]
+async fn test_hub_test_kind_is_only_accepted_in_the_dev_axis() {
+    test_group!("試験記録 (kind = test) は開発の軸だけ");
+    let ctx = setup("Dev Axis Hub Test Kind", 5, true).await;
+
+    let post = |dev: Option<&'static str>, seq: i64| {
+        let rb = ctx
+            .client
+            .post(format!("{}/api/hub/measurements", ctx.base_url))
+            .header(
+                "X-Internal-Shared-Secret",
+                common::TEST_INTERNAL_SHARED_SECRET,
+            )
+            .header("X-Tenant-ID", ctx.tenant.to_string());
+        let rb = match dev {
+            Some(v) => rb.header("X-Device-Dev", v),
+            None => rb,
+        };
+        rb.json(&json!({
+            "device_id": "alarm:0123456789abcdef",
+            "via_device_id": "hub-1",
+            "kind": "test",
+            "seq": seq,
+            "payload": { "type": "test", "command_id": "c1" }
+        }))
+        .send()
+    };
+
+    test_case!("X-Device-Dev: 1 → 201、is_dev = true", {
+        assert_eq!(post(Some("1"), 1).await.unwrap().status(), 201);
+        assert_eq!(ctx.is_dev_all("hub_measurements", "").await, vec![true]);
+    });
+
+    test_case!(
+        "本番の軸 (ヘッダなし) → 400、行は増えない",
+        {
+            assert_eq!(post(None, 2).await.unwrap().status(), 400);
+            assert_eq!(ctx.is_dev_all("hub_measurements", "").await, vec![true]);
+        }
+    );
+}
+
+#[tokio::test]
 async fn test_hub_same_device_and_seq_goes_into_both_axes() {
     test_group!("hub の測定: 同じ端末・同じ連番を両方の軸に取り込む (alc-migrations 156)");
     let ctx = setup("Dev Axis Hub Same Seq", 5, true).await;
