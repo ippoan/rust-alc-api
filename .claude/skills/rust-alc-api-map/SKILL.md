@@ -1,6 +1,6 @@
 ---
 name: rust-alc-api-map
-generated-from: rust-alc-api:5db1ba6c70747f8ca34e1250afe250f94b16f341
+generated-from: rust-alc-api:c5f01b7dbd89397a1edc1f3f0203cc24a31037d0
 paths: [crates/, src/, tests/]
 description: rust-alc-api (アルコールチェッカー基盤の Rust/Axum Cargo workspace — domain crate 群 + monolith 単一バイナリ、PostgreSQL+RLS、Cloud Run) の構造ナビゲーション。どの crate に何のルートがあるか / monolith (rust-alc-api) 一本化 (gateway + per-domain は #556 で廃止) / RLS・migration・deploy/release 分離の gotcha を 1 枚にまとめる。トリガー:「rust-alc-api」「alc-api」「alc-notify」「alc-tenko」「alc-camera」「alc-carins」「alc-dtako」「gateway」「tenko-api」「carins-api」「dtako-api」「trouble-api」(trouble は ippoan/alc-trouble-worker へ移設済み)「RLS テナント」「sqlx migration」「ts-rs」「Release Wave」「Bazel」等。
 ---
