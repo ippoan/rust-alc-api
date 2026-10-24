@@ -1315,3 +1315,81 @@ async fn test_punches_join_the_measurement_in_payload() {
         assert!(line(&ids[3]).ends_with(",,,,"), "{csv}");
     });
 }
+
+/// 打刻の「端末」列 (device_name) は、hub の ID の行を結び付いた機体の鍵の ID に畳む
+/// (Refs ippoan/alc-cam#2)。結び付き = 鍵の ID で入った行の via_device_id。
+/// 結び付きの無い hub の ID はそのまま出る。
+#[tokio::test]
+async fn test_punch_device_name_folds_hub_id_into_key_id() {
+    test_group!("timecard punches (machine key id)");
+
+    test_case!(
+        "hub の ID の打刻は結び付いた鍵の ID で出る",
+        {
+            let state = common::setup_app_state().await;
+            let base_url = common::spawn_test_server(state.clone()).await;
+            let tenant = common::create_test_tenant(state.pool(), "Punch Key Id").await;
+            let auth = format!("Bearer {}", common::create_test_jwt(tenant, "admin"));
+            let client = reqwest::Client::new();
+            let key = "alarm:0123456789abcdef";
+
+            // 古いファームの打刻 (hub の ID = timecard-dev-1) と、結び付きの無い別の hub の打刻
+            assert_eq!(
+                post_timecard(&client, &base_url, tenant, 1, "AAAA0000AAAA0000", None)
+                    .await
+                    .status(),
+                201
+            );
+            let other = json!([{
+                "device_id": "timecard-dev-9",
+                "kind": "timecard",
+                "seq": 1,
+                "payload": { "card_id": "BBBB0000BBBB0000", "card_kind": "felica_idm" }
+            }]);
+            let post = |body: Value| {
+                client
+                    .post(format!("{base_url}/api/hub/measurements"))
+                    .header(
+                        "X-Internal-Shared-Secret",
+                        common::TEST_INTERNAL_SHARED_SECRET,
+                    )
+                    .header("X-Tenant-ID", tenant.to_string())
+                    .json(&body)
+                    .send()
+            };
+            assert_eq!(post(other).await.unwrap().status(), 201);
+
+            // 新しいファームの打刻: 鍵の ID で記録し、接続の hub の ID を via_device_id に添える
+            let keyed = json!([{
+                "device_id": key,
+                "via_device_id": "timecard-dev-1",
+                "kind": "timecard",
+                "seq": 2,
+                "payload": { "card_id": "CCCC0000CCCC0000", "card_kind": "felica_idm" }
+            }]);
+            assert_eq!(post(keyed).await.unwrap().status(), 201);
+
+            let body = list_punches(&client, &base_url, &auth).await;
+            let name_of = |card: &str| -> Value {
+                body["punches"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|p| p["card_id"] == card)
+                    .unwrap_or_else(|| panic!("{card} の打刻が無い: {body}"))["device_name"]
+                    .clone()
+            };
+            assert_eq!(
+                name_of("AAAA0000AAAA0000"),
+                json!(key),
+                "hub の打刻は鍵の ID に畳む"
+            );
+            assert_eq!(name_of("CCCC0000CCCC0000"), json!(key));
+            assert_eq!(
+                name_of("BBBB0000BBBB0000"),
+                json!("timecard-dev-9"),
+                "結び付きの無い hub はそのまま"
+            );
+        }
+    );
+}

@@ -142,10 +142,15 @@ fn valid_session_id(session_id: Option<&String>) -> bool {
     }
 }
 
+/// 端末の ID の形 (空白だけでない・長さの上限)。`device_id` と `via_device_id` で共有する。
+fn valid_device_id(device_id: &str) -> bool {
+    !device_id.trim().is_empty() && device_id.len() <= MAX_DEVICE_ID_LEN
+}
+
 /// item 単位の検証。エラーは詳細を返さず 400 に丸める (呼び出し元は内部 Worker のみ)。
 fn validate(item: &HubMeasurementCreate) -> bool {
-    !item.device_id.trim().is_empty()
-        && item.device_id.len() <= MAX_DEVICE_ID_LEN
+    valid_device_id(&item.device_id)
+        && item.via_device_id.as_deref().is_none_or(valid_device_id)
         && HUB_MEASUREMENT_KINDS.contains(&item.kind.as_str())
         && item.seq >= 0
         && valid_session_id(item.session_id.as_ref())
@@ -338,6 +343,7 @@ mod tests {
             seq,
             recorded_at_ms: None,
             session_id: None,
+            via_device_id: None,
             payload: serde_json::json!({}),
         }
     }
@@ -387,6 +393,20 @@ mod tests {
         assert!(!validate(&item_with_session(Some(&"x".repeat(65)))));
         assert!(!validate(&item_with_session(Some("s 42"))));
         assert!(!validate(&item_with_session(Some("s/42"))));
+    }
+
+    #[test]
+    fn validate_accepts_via_device_id_and_rejects_blank_or_long() {
+        let with_via = |via: Option<&str>| HubMeasurementCreate {
+            via_device_id: via.map(str::to_string),
+            ..item("alcohol", 1, "alarm:0123456789abcdef")
+        };
+        // None (古い recorder・ブラウザ打刻) と hub の ID は通す
+        assert!(validate(&with_via(None)));
+        assert!(validate(&with_via(Some("fxPqzwAbCd"))));
+        // 空白だけ・長すぎは device_id と同じく弾く
+        assert!(!validate(&with_via(Some("  "))));
+        assert!(!validate(&with_via(Some(&"x".repeat(129)))));
     }
 
     fn filter(limit: Option<i64>, offset: Option<i64>) -> HubMeasurementFilter {

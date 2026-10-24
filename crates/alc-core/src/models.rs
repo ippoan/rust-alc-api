@@ -1436,6 +1436,12 @@ pub struct HubMeasurementCreate {
     /// 点呼外の単発計測と旧ファームでは null (= セッション不明、欠損ではない)。
     #[serde(default)]
     pub session_id: Option<String>,
+    /// CoreS3 が接続に使った hub の credential の device_id (Refs ippoan/alc-cam#2)。
+    /// cf-alc-recorder が、hub の JWT と機体の鍵の証明が 1 回の接続で揃ったときだけ入れる
+    /// (そのとき `device_id` は鍵の sub `alarm:<fingerprint>`)。鍵 ⇔ hub の結び付きはこの列から導く。
+    /// 古い recorder・ブラウザ打刻では null。
+    #[serde(default)]
+    pub via_device_id: Option<String>,
     /// ble-medical-gateway 互換 JSON をそのまま格納。
     pub payload: serde_json::Value,
 }
@@ -1464,6 +1470,11 @@ pub struct HubMeasurement {
     pub seq: i64,
     /// 1 回の点呼を束ねる端末発番の識別子。点呼外の単発計測と旧データでは null。
     pub session_id: Option<String>,
+    /// 接続に使った hub の device_id (`HubMeasurementCreate::via_device_id`)。無ければ null。
+    pub via_device_id: Option<String>,
+    /// 端末を人に見せるときの ID (Refs ippoan/alc-cam#2)。hub の ID の行は、結び付いた機体の鍵の ID
+    /// (`alarm:<fingerprint>`) に畳む。結び付きが無ければ `device_id` のまま。
+    pub machine_id: String,
     /// 端末計時。時計未同期端末では null。
     pub recorded_at: Option<DateTime<Utc>>,
     /// サーバ受信時刻。一覧の並び順・期間絞り込みはこの列が基準。
@@ -1478,6 +1489,8 @@ pub struct HubMeasurement {
 #[derive(Debug, Clone, Default, Deserialize, TS)]
 #[ts(export)]
 pub struct HubMeasurementFilter {
+    /// 端末で絞る。機体の鍵の ID (`alarm:<fingerprint>`) を渡すと、その鍵に結び付いた hub の ID の
+    /// 行も返す (Refs ippoan/alc-cam#2)。
     pub device_id: Option<String>,
     pub kind: Option<String>,
     /// 1 回の点呼で束ねて引くための識別子 (Refs ippoan/alc-app-s3#112)。
