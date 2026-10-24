@@ -48,7 +48,7 @@ jobs:
           tool: cargo-llvm-cov@0.8.4
 
       - name: Initialize test database
-        run: psql -f scripts/init_local_db.sql
+        run: bash scripts/init_test_db.sh
         env:
           PGHOST: localhost
           PGPORT: "5432"

@@ -265,7 +265,7 @@ jobs:
           r2-access-key-id: ${{ secrets.BAZEL_R2_ACCESS_KEY_ID }}
           r2-secret-access-key: ${{ secrets.BAZEL_R2_SECRET_ACCESS_KEY }}
       - name: Init test DB (alc_api schema + roles)
-        run: psql "postgresql://postgres:test@localhost:5432/postgres" -f scripts/init_local_db.sql
+        run: bash scripts/init_test_db.sh "postgresql://postgres:test@localhost:5432/postgres"
       # coverage 付き shard は plain test warm を skip — PR 側 (bazel-test-db) が
       # plain `bazel test` を走らせなくなったため (cache-warm-bazel-test-poc と同じ
       # 理由、Refs #568)
