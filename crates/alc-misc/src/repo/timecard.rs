@@ -100,7 +100,15 @@ WITH p AS (
             tc.employee_id,
             e_nfc.id
         ) AS employee_id,
-        hm.device_id AS hub_device_id,
+        -- 端末の列は、hub の ID の行を結び付いた機体の鍵の ID に畳んで出す (Refs ippoan/alc-cam#2)。
+        -- 結び付き = 鍵の ID で入った行の via_device_id。下の免許証の対判定は生の device_id のまま
+        COALESCE(
+            (SELECT l.device_id FROM hub_measurements l
+              WHERE l.tenant_id = hm.tenant_id AND l.is_dev = hm.is_dev
+                AND l.via_device_id = hm.device_id
+              ORDER BY l.created_at DESC LIMIT 1),
+            hm.device_id
+        ) AS hub_device_id,
         -- 未解決のタップで「どのカードか」を出すため。employees の JOIN 条件と
         -- 同じ式なので、片方だけ変えると表示と照合がずれる
         COALESCE(hm.payload->>'card_id', hm.payload->>'nfc_id') AS card_id,
