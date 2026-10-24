@@ -24,3 +24,4 @@ MODULE.bazel.lock
 backup/
 setup-bazel
 incus-sandbox
+staging/init.generated.sql

@@ -599,6 +599,8 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and push staging-db
         run: |
+          # init は migration と同じ rev の alc-migrations から取る (scripts/init_test_db.sh の冒頭)
+          bash scripts/init_test_db.sh --print > staging/init.generated.sql
           docker build -f staging/Dockerfile.postgres \
             -t ghcr.io/${{ github.repository }}-staging-db:latest .
           docker push ghcr.io/${{ github.repository }}-staging-db:latest

@@ -1,4 +1,7 @@
 FROM postgres:16
-COPY scripts/init_local_db.sql /docker-entrypoint-initdb.d/01-init.sql
+# init の SQL は ci.yml の staging-db job が scripts/init_test_db.sh --print で生成する
+# (Cargo.toml の rev の ippoan/alc-migrations の init。scripts/init_local_db.sql は 152 番止まりの写しで、
+# migration 174 と衝突するため使わない)
+COPY staging/init.generated.sql /docker-entrypoint-initdb.d/01-init.sql
 ENV POSTGRES_PASSWORD=staging
 ENV POSTGRES_HOST_AUTH_METHOD=trust

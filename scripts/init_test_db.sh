@@ -7,6 +7,7 @@
 # 全部の DB テストが migration の段で落ちる (42P13)。migration と init は同じ rev から取る。
 #
 # Usage: scripts/init_test_db.sh [<psql の接続先>]   (省略時は PG* の環境変数)
+#        scripts/init_test_db.sh --print           (SQL を標準出力に出すだけ。staging の DB image を作るとき)
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -16,4 +17,8 @@ if [[ -z "$rev" ]]; then
   exit 1
 fi
 sql=$(curl -fsSL --retry 3 "https://raw.githubusercontent.com/ippoan/alc-migrations/${rev}/scripts/init_local_db.sql")
+if [[ "${1:-}" == "--print" ]]; then
+  printf '%s\n' "$sql"
+  exit 0
+fi
 psql -v ON_ERROR_STOP=1 "$@" <<<"$sql"
