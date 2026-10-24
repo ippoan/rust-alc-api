@@ -32,6 +32,7 @@ jobs:
             exit 1
           fi
 
+      # 写しは消した。足し直し (added) を止める歯止めとして残す
       - name: Freeze migrations (moved to ippoan/alc-migrations)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -42,7 +43,7 @@ jobs:
           }
           HITS=$(gh api --paginate "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" --jq '.[] | "\(.status) \(.filename)"' | frozen_hits)
           if [ -n "$HITS" ]; then
-            echo "::error::migration は ippoan/alc-migrations に移しました。新しい migration はそちらに PR を出してください (rust-alc-api#697)。rust-alc-api 側の migrations/ とテスト DB 用 SQL は、切り替えまで追加・変更禁止です"
+            echo "::error::migration は ippoan/alc-migrations に移しました。新しい migration はそちらに PR を出してください (rust-alc-api#697)。rust-alc-api 側の migrations/ とテスト DB 用 SQL は消しました (alc_migrations::MIGRATOR / INIT_LOCAL_DB / LOCAL_APP_GRANTS を使う)。足し直さないでください"
             echo "$HITS" | awk '{ print "  " $0 }'
             exit 1
           fi
@@ -181,7 +182,6 @@ jobs:
             bin-paths: "bazel-bin/rust-alc-api bazel-bin/migrate bazel-bin/archive"
             dockerfile: Dockerfile
             tag-suffix: ""
-            extra-copy: "migrations"
             staging-bin: "rust-alc-api"
     steps:
       - uses: actions/checkout@v4
@@ -259,7 +259,6 @@ jobs:
           cp bazel-bin/migrate ctx-staging/
           chmod u+w ctx-staging/migrate
           strip ctx-staging/migrate
-          cp -r migrations ctx-staging/
           cp staging/Dockerfile.app ctx-staging/Dockerfile
           cp staging/entrypoint.sh ctx-staging/staging/
 
@@ -504,8 +503,7 @@ jobs:
           r2-bucket: ${{ vars.BAZEL_R2_BUCKET }}
           r2-access-key-id: ${{ secrets.BAZEL_R2_ACCESS_KEY_ID }}
           r2-secret-access-key: ${{ secrets.BAZEL_R2_SECRET_ACCESS_KEY }}
-      - name: Init test DB (alc_api schema + roles)
-        run: psql "postgresql://postgres:test@localhost:5432/postgres" -f scripts/init_local_db.sql
+      # テスト DB の初期化 (schema・ロール) はテスト自身が alc_migrations::INIT_LOCAL_DB で行う (tests/common の migrate_and_grant)
       # coverage 付き shard では skip する (bazel-test-poc 側と同じ理由、Refs #568)
       - name: bazel test (result cache は main warm から)
         if: ${{ !matrix.coverage }}
@@ -599,9 +597,11 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and push staging-db
         run: |
+          # タグは commit の SHA で固定する (deploy.yml が inputs.image_sha で引く)。可変の latest だと
+          # Artifact Registry の remote のキャッシュが古い digest を返し続けて、別の image で起動していた
           docker build -f staging/Dockerfile.postgres \
-            -t ghcr.io/${{ github.repository }}-staging-db:latest .
-          docker push ghcr.io/${{ github.repository }}-staging-db:latest
+            -t ghcr.io/${{ github.repository }}-staging-db:${{ github.sha }} .
+          docker push ghcr.io/${{ github.repository }}-staging-db:${{ github.sha }}
 
   docker-dev:
     name: Tag dev

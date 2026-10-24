@@ -264,8 +264,7 @@ jobs:
           r2-bucket: ${{ vars.BAZEL_R2_BUCKET }}
           r2-access-key-id: ${{ secrets.BAZEL_R2_ACCESS_KEY_ID }}
           r2-secret-access-key: ${{ secrets.BAZEL_R2_SECRET_ACCESS_KEY }}
-      - name: Init test DB (alc_api schema + roles)
-        run: psql "postgresql://postgres:test@localhost:5432/postgres" -f scripts/init_local_db.sql
+      # テスト DB の初期化はテスト自身が行う (tests/common の migrate_and_grant)
       # coverage 付き shard は plain test warm を skip — PR 側 (bazel-test-db) が
       # plain `bazel test` を走らせなくなったため (cache-warm-bazel-test-poc と同じ
       # 理由、Refs #568)

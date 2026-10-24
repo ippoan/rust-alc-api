@@ -52,8 +52,7 @@ jobs:
         with:
           tool: cargo-llvm-cov@0.8.4
 
-      - name: Initialize test database
-        run: psql -f scripts/init_local_db.sql
+      # テスト DB の初期化はテスト自身が行う (tests/common の migrate_and_grant)
         env:
           PGHOST: localhost
           PGPORT: "5432"
