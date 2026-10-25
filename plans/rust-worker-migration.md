@@ -31,7 +31,6 @@ worker の Tag Release (手動 = 本番 / merge = staging)。
 | alc-dtako | 9.9k | operations・restraint-report (+PDF・CSV 比較)・tickets・events・work-times・daily-hours・vehicles・settings dumps・event-classifications・dvr・y-time・csv proxy | `alc-pdf` (printpdf、lab で unknown 上で動作確認済み)、email-receiver からの internal ingest |
 | alc-notify | 8.4k | documents (一覧・upload・search)・emails・ingest・viewer (`/notify/v/{token}`)・LINE webhook・`internal/lineworks/event` | **pdfium (FFI、wasm 不可)** の redact / rasterize、Gemini |
 | alc-carins + alc-maintenance | 4.5k | car-inspections・files・nfc-tags・maintenance | R2/GCS (alc-storage) |
-| alc-camera | 0.9k | `cameras`・`cameras/status` | — |
 | alc-auth | 0.5k | `auth/me`・`logout`・`my-orgs`・`internal/auth/*` | — |
 | alc-core | 8.8k | `/i` `/public` `/t` `/u` (短縮・公開口)、共通基盤 | `realtime_bus`、session RLS |
 | src/bin/archive | — | アーカイブ Job | Cloud Run Job |
@@ -59,7 +58,7 @@ worker の Tag Release (手動 = 本番 / merge = staging)。
 | # | 対象 | 移行先 | 規模 | 前提・論点 |
 |---|---|---|---|---|
 | W0 | **掃除**: 死蔵の measurements 3 口・`hub/measurements` の置き場決め・#747 の残り (`internal/lineworks/event`・`bot_admin` の private key 保存) | 既存 worker | S | 先にやると以降の差分が小さくなる |
-| W1 | `cameras*` | alc-trouble-worker に合流 (最終形の trouble+camera) | S | 4 口・依存なし。合流のやり方の練習台 |
+| W1 | `cameras*` (監視カメラの死活監視、#345) | **移さず削除** | S | 60 日間 health-logs の書き込み 0 件 (書き手の ippoan/alc-app#27 が未実装)。台帳は alc-cam-sd-ingest の `/api/cam-clips/cameras` が持つ |
 | W2 | `auth/me`・`logout`・`my-orgs`・`internal/auth/*`、misc の admin 系 (users・sso・members・api-tokens・access-requests・tenants/by-slug) | alc-auth-worker | M | 認証まわりを 1 か所に。`api-tokens` の発行は鍵の扱いを確認 |
 | W3 | carins + maintenance | 新 `alc-carins-worker` | M | ストレージは R2 binding に寄せる (GCS が残っていれば先に R2 へ) |
 | W4 | misc の残り: items / item-files / carrying / communication / guidance / employees (+face/nfc) / timecard / upload 3 口 | 新 `alc-misc-worker` (upload 3 口は measurements へ) | L | employees は多くの worker が読む共有表 → 所有者をここに決める。`staging/export・import` と `health/secret-fingerprint` は移さず廃止を検討 |
@@ -86,5 +85,7 @@ W4 を W5〜W7 より前に置くのは、employees / timecard を他の wave �
 
 ## 4. 次の一歩
 
-W0 (掃除) を 1 PR で: 死蔵の measurements 3 口を monolith から消す + `hub/measurements` の移行先を決める。
+- W0: 測定の口 7 本を削除 (#757、本番で読み書きとも確認済み)。#747 の rust 側は済み (残る `internal/lineworks/event` は W8)。`hub/measurements` の置き場は未決
+- W1: camera を削除 (この PR)
+- 次は W2 (auth・admin 系 → alc-auth-worker)
 rust-alc-api は open PR 1 本までなので、W1 以降の worker 側の PR (別 repo) と並行して進める。

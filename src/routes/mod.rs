@@ -83,7 +83,6 @@ pub fn internal_oidc_trust() -> InternalOidcTrust {
 pub fn router(
     internal_oidc: InternalOidcTrust,
     tenko_state: alc_tenko::TenkoState,
-    camera_state: alc_camera::CameraState,
     maintenance_state: alc_maintenance::MaintenanceState,
 ) -> Router<AppState> {
     // 管理者ルート — 注入 identity (X-User-*) を信頼 (Refs #434)。
@@ -187,14 +186,6 @@ pub fn router(
         .with_state(tenko_state.clone());
     let tenko_public: Router<AppState> = tenko_call::public_router().with_state(tenko_state);
 
-    // camera ドメイン (Refs #556) — per-domain の alc-camera-api を廃止し monolith へ
-    // 移植。AppState から分離した CameraState でマウントする。tenant 系ルートには
-    // monolith 本体と同じ require_tenant_header を張る。
-    let camera_tenant: Router<AppState> = Router::new()
-        .merge(alc_camera::handlers::tenant_router())
-        .layer(axum_middleware::from_fn(require_tenant_header))
-        .with_state(camera_state);
-
     // maintenance ドメイン (Refs #651) — AppState から分離した MaintenanceState で
     // マウントする。tenant 系ルートには monolith 本体と同じ require_tenant_header を張る。
     let maintenance_tenant: Router<AppState> = Router::new()
@@ -212,7 +203,6 @@ pub fn router(
         .merge(internal_protected)
         .merge(tenant_protected)
         .merge(tenko_tenant)
-        .merge(camera_tenant)
         .merge(maintenance_tenant)
 }
 

@@ -727,35 +727,6 @@ pub fn pg_tenko_state(state: &AppState) -> alc_tenko::TenkoState {
     }
 }
 
-/// camera ドメインの起票 port テスト実装 (Refs #556)。本番の起票は binary 側が
-/// `HttpDownTicketSink` (trouble-worker の内部口) で持つが、テストの camera route 検証は
-/// CRUD/status が主で down 起票経路は fire しないため、ここでは no-op で発番のみ返す。
-pub struct TestDownTicketSink;
-
-#[async_trait::async_trait]
-impl alc_camera::DownTicketSink for TestDownTicketSink {
-    async fn open_down_ticket(
-        &self,
-        _tenant_id: Uuid,
-        _ticket: alc_camera::CameraDownTicket,
-    ) -> Result<Uuid, alc_camera::DownTicketError> {
-        Ok(Uuid::new_v4())
-    }
-}
-
-/// pool から camera ドメインの Pg CameraState を合成する (Refs #556)。
-pub fn pg_camera_state(state: &AppState) -> alc_camera::CameraState {
-    let pool = state
-        .pool
-        .clone()
-        .expect("spawn_test_server: state.pool is None — mock state は spawn_test_server_with_states を使うこと");
-    alc_camera::CameraState {
-        cameras: Arc::new(alc_camera::repo::PgCamerasRepository::new(pool)),
-        down_ticket_sink: Arc::new(TestDownTicketSink),
-        down_threshold: alc_camera::DEFAULT_DOWN_THRESHOLD,
-    }
-}
-
 /// pool から maintenance ドメインの MaintenanceState を合成する (Refs #651)。
 /// carins 照合 (`lookup_expiry`) は既存の `state.car_inspections` (alc-carins の
 /// `PgCarInspectionRepository`) をそのまま使う — mock を挟まない。
@@ -784,15 +755,13 @@ pub fn pg_maintenance_state(state: &AppState) -> alc_maintenance::MaintenanceSta
 
 pub async fn spawn_test_server(state: AppState) -> String {
     let tenko_state = pg_tenko_state(&state);
-    let camera_state = pg_camera_state(&state);
     let maintenance_state = pg_maintenance_state(&state);
-    spawn_test_server_with_states(state, tenko_state, camera_state, maintenance_state).await
+    spawn_test_server_with_states(state, tenko_state, maintenance_state).await
 }
 
 pub async fn spawn_test_server_with_states(
     state: AppState,
     tenko_state: alc_tenko::TenkoState,
-    camera_state: alc_camera::CameraState,
     maintenance_state: alc_maintenance::MaintenanceState,
 ) -> String {
     use axum::{Extension, Router};
@@ -824,7 +793,6 @@ pub async fn spawn_test_server_with_states(
             rust_alc_api::routes::router(
                 internal_oidc_trust_for_tests(),
                 tenko_state,
-                camera_state,
                 maintenance_state,
             )
             // main.rs と同じ配線 (internal_shared_secret_router を /api 直下にマージ)。

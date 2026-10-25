@@ -12,10 +12,6 @@ use tower_http::set_header::SetResponseHeaderLayer;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
-use alc_camera::repo::PgCamerasRepository;
-use alc_camera::{
-    CameraState, DisabledDownTicketSink, DownTicketSink, HttpDownTicketSink, DEFAULT_DOWN_THRESHOLD,
-};
 use alc_notify::repo::{
     PgLineworksChannelsRepository, PgNotifyDeliveryRepository, PgNotifyDocumentRepository,
     PgNotifyRecipientRepository,
@@ -260,26 +256,8 @@ async fn main() -> anyhow::Result<()> {
         webhook: webhook_service.clone(),
     };
 
-    // camera ドメイン (Refs #556) — per-domain の alc-camera-api を廃止し monolith へ
-    // 移植。障害の自動起票は trouble-worker の内部口を auth-worker 経由で叩く
-    // (Refs #747)。AUTH_WORKER_URL / INTERNAL_SHARED_SECRET が無ければ起票しない。
-    // CAMERA_DOWN_THRESHOLD 未設定なら DEFAULT_DOWN_THRESHOLD を使う。
-    let camera_down_threshold: usize = std::env::var("CAMERA_DOWN_THRESHOLD")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .filter(|n| *n >= 1)
-        .unwrap_or(DEFAULT_DOWN_THRESHOLD);
-    let camera_state = CameraState {
-        cameras: Arc::new(PgCamerasRepository::new(pool.clone())),
-        down_ticket_sink: match HttpDownTicketSink::from_env() {
-            Some(sink) => Arc::new(sink) as Arc<dyn DownTicketSink>,
-            None => Arc::new(DisabledDownTicketSink::default()),
-        },
-        down_threshold: camera_down_threshold,
-    };
-
     // maintenance ドメイン (Refs #651) — AppState から分離した MaintenanceState で
-    // マウントする (alc-tenko / alc-camera と同じ形)。carins 照合は
+    // マウントする (alc-tenko と同じ形)。carins 照合は
     // 既存の car_inspections repo (alc-carins の PgCarInspectionRepository) を
     // in-process で呼ぶ (HTTP で自分自身を叩かない)。
     let maintenance_state = alc_maintenance::MaintenanceState {
@@ -436,7 +414,6 @@ async fn main() -> anyhow::Result<()> {
     let api_router = rust_alc_api::routes::router(
         rust_alc_api::routes::internal_oidc_trust(),
         tenko_state,
-        camera_state,
         maintenance_state,
     )
     .merge(rust_alc_api::routes::internal_shared_secret_router(
