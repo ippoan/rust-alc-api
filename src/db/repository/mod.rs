@@ -1,7 +1,7 @@
 // Re-export traits from alc-core
 pub use alc_core::repository::{
-    ApiTokensRepository, AuthRepository, BotAdminRepository, CarInspectionRepository,
-    CarinsFilesRepository, CarryingItemsRepository, CommunicationItemsRepository, DeviceRepository,
+    AuthRepository, BotAdminRepository, CarInspectionRepository, CarinsFilesRepository,
+    CarryingItemsRepository, CommunicationItemsRepository, DeviceRepository,
     DtakoCsvProxyRepository, DtakoDailyHoursRepository, DtakoDriversRepository,
     DtakoEventClassificationsRepository, DtakoLogsRepository, DtakoOperationsRepository,
     DtakoRestraintReportPdfRepository, DtakoRestraintReportRepository, DtakoScraperRepository,
@@ -26,7 +26,6 @@ pub use alc_core::tenant::TenantConn;
 // Re-export submodules for backward compatibility (tests use repository::xxx::TypeName)
 pub use alc_carins::repo::{car_inspections, carins_files, nfc_tags};
 pub use alc_core::repo::auth;
-pub use alc_core::repository::api_tokens;
 pub use alc_core::repository::hub_measurements;
 pub use alc_devices::repo::devices;
 pub use alc_dtako::repo::{
@@ -67,10 +66,9 @@ pub use alc_dtako::repo::{
     PgDtakoWorkTimesRepository, PgDtakoYTimeExportRepository, PgVehicleSettingsDumpsRepository,
 };
 pub use alc_misc::repo::{
-    PgApiTokensRepository, PgBotAdminRepository, PgCarryingItemsRepository,
-    PgCommunicationItemsRepository, PgEmployeeRepository, PgGuidanceRecordsRepository,
-    PgItemFilesRepository, PgItemsRepository, PgSsoAdminRepository, PgTenantUsersRepository,
-    PgTimecardRepository, PgWebhookRepository,
+    PgBotAdminRepository, PgCarryingItemsRepository, PgCommunicationItemsRepository,
+    PgEmployeeRepository, PgGuidanceRecordsRepository, PgItemFilesRepository, PgItemsRepository,
+    PgSsoAdminRepository, PgTenantUsersRepository, PgTimecardRepository, PgWebhookRepository,
 };
 pub use alc_tenko::repo::{
     PgDailyHealthRepository, PgDriverInfoRepository, PgEquipmentFailuresRepository,

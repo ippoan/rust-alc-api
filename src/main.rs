@@ -17,9 +17,9 @@ use alc_notify::repo::{
     PgNotifyRecipientRepository,
 };
 use rust_alc_api::db::repository::{
-    PgApiTokensRepository, PgAuthRepository, PgBotAdminRepository, PgCarInspectionRepository,
-    PgCarinsFilesRepository, PgCarryingItemsRepository, PgCommunicationItemsRepository,
-    PgDailyHealthRepository, PgDeviceRepository, PgDriverInfoRepository, PgDtakoCsvProxyRepository,
+    PgAuthRepository, PgBotAdminRepository, PgCarInspectionRepository, PgCarinsFilesRepository,
+    PgCarryingItemsRepository, PgCommunicationItemsRepository, PgDailyHealthRepository,
+    PgDeviceRepository, PgDriverInfoRepository, PgDtakoCsvProxyRepository,
     PgDtakoDailyHoursRepository, PgDtakoDriversRepository, PgDtakoEventClassificationsRepository,
     PgDtakoLogsRepository, PgDtakoOperationsRepository, PgDtakoRestraintReportPdfRepository,
     PgDtakoRestraintReportRepository, PgDtakoScraperRepository, PgDtakoTicketsRepository,
@@ -167,7 +167,6 @@ async fn main() -> anyhow::Result<()> {
             as Arc<dyn rust_alc_api::fcm::FcmSenderTrait>
     });
 
-    let api_tokens = Arc::new(PgApiTokensRepository::new(pool.clone()));
     let auth = Arc::new(PgAuthRepository::new(pool.clone()));
     let bot_admin = Arc::new(PgBotAdminRepository::new(pool.clone()));
     let car_inspections = Arc::new(PgCarInspectionRepository::new(pool.clone()));
@@ -281,7 +280,6 @@ async fn main() -> anyhow::Result<()> {
 
     let state = AppState {
         pool: Some(pool.clone()),
-        api_tokens,
         auth,
         bot_admin,
         car_inspections,

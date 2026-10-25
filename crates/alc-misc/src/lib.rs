@@ -1,5 +1,4 @@
 pub mod access_requests;
-pub mod api_tokens;
 pub mod bot_admin;
 pub mod carrying_items;
 pub mod communication_items;
@@ -7,7 +6,6 @@ pub mod employees;
 pub mod guidance_records;
 pub mod health;
 pub mod items;
-pub mod members;
 pub mod repo;
 pub mod sso_admin;
 pub mod staging;

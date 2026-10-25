@@ -1,4 +1,3 @@
-pub mod api_tokens;
 pub mod bot_admin;
 pub mod carrying_items;
 pub mod communication_items;
@@ -10,7 +9,6 @@ pub mod tenant_users;
 pub mod timecard;
 pub mod webhook;
 
-pub use api_tokens::PgApiTokensRepository;
 pub use bot_admin::PgBotAdminRepository;
 pub use carrying_items::PgCarryingItemsRepository;
 pub use communication_items::PgCommunicationItemsRepository;

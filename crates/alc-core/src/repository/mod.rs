@@ -1,4 +1,3 @@
-pub mod api_tokens;
 pub mod auth;
 pub mod bot_admin;
 pub mod car_inspections;
@@ -34,7 +33,6 @@ pub mod timecard;
 pub mod vehicle_settings_dumps;
 pub mod webhook;
 
-pub use api_tokens::{ApiTokenRow, ApiTokensRepository};
 pub use auth::AuthRepository;
 pub use bot_admin::BotAdminRepository;
 pub use car_inspections::CarInspectionRepository;

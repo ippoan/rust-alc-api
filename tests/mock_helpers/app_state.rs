@@ -397,7 +397,6 @@ pub fn setup_mock_app_state() -> AppState {
 
     AppState {
         pool: None,
-        api_tokens: Arc::new(MockApiTokensRepository::default()),
         auth: Arc::new(MockAuthRepository::default()),
         bot_admin: Arc::new(MockBotAdminRepository::default()),
         car_inspections: Arc::new(MockCarInspectionRepository::default()),

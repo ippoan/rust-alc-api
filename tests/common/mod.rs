@@ -13,9 +13,9 @@ use sqlx::postgres::PgPoolOptions;
 use uuid::Uuid;
 
 use rust_alc_api::db::repository::{
-    PgApiTokensRepository, PgAuthRepository, PgBotAdminRepository, PgCarInspectionRepository,
-    PgCarinsFilesRepository, PgCarryingItemsRepository, PgCommunicationItemsRepository,
-    PgDailyHealthRepository, PgDeviceRepository, PgDriverInfoRepository, PgDtakoCsvProxyRepository,
+    PgAuthRepository, PgBotAdminRepository, PgCarInspectionRepository, PgCarinsFilesRepository,
+    PgCarryingItemsRepository, PgCommunicationItemsRepository, PgDailyHealthRepository,
+    PgDeviceRepository, PgDriverInfoRepository, PgDtakoCsvProxyRepository,
     PgDtakoDailyHoursRepository, PgDtakoDriversRepository, PgDtakoEventClassificationsRepository,
     PgDtakoLogsRepository, PgDtakoOperationsRepository, PgDtakoRestraintReportPdfRepository,
     PgDtakoRestraintReportRepository, PgDtakoScraperRepository, PgDtakoTicketsRepository,
@@ -293,7 +293,6 @@ fn build_app_state(
     dtako_storage: Option<Arc<dyn rust_alc_api::storage::StorageBackend>>,
     fcm: Option<Arc<dyn rust_alc_api::fcm::FcmSenderTrait>>,
 ) -> AppState {
-    let api_tokens = Arc::new(PgApiTokensRepository::new(pool.clone()));
     let auth = Arc::new(PgAuthRepository::new(pool.clone()));
     let bot_admin = Arc::new(PgBotAdminRepository::new(pool.clone()));
     let car_inspections = Arc::new(PgCarInspectionRepository::new(pool.clone()));
@@ -333,7 +332,6 @@ fn build_app_state(
 
     AppState {
         pool: Some(pool),
-        api_tokens,
         auth,
         bot_admin,
         car_inspections,

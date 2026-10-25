@@ -29,8 +29,8 @@ pub mod webhook;
 use std::sync::Arc;
 
 use repository::{
-    ApiTokensRepository, AuthRepository, BotAdminRepository, CarInspectionRepository,
-    CarinsFilesRepository, CarryingItemsRepository, CommunicationItemsRepository, DeviceRepository,
+    AuthRepository, BotAdminRepository, CarInspectionRepository, CarinsFilesRepository,
+    CarryingItemsRepository, CommunicationItemsRepository, DeviceRepository,
     DtakoCsvProxyRepository, DtakoDailyHoursRepository, DtakoDriversRepository,
     DtakoEventClassificationsRepository, DtakoLogsRepository, DtakoOperationsRepository,
     DtakoRestraintReportPdfRepository, DtakoRestraintReportRepository, DtakoScraperRepository,
@@ -46,7 +46,6 @@ use storage::StorageBackend;
 #[derive(Clone)]
 pub struct AppState {
     pub pool: Option<sqlx::PgPool>,
-    pub api_tokens: Arc<dyn ApiTokensRepository>,
     pub auth: Arc<dyn AuthRepository>,
     pub bot_admin: Arc<dyn BotAdminRepository>,
     pub car_inspections: Arc<dyn CarInspectionRepository>,
