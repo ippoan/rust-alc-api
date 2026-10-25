@@ -87,5 +87,6 @@ W4 を W5〜W7 より前に置くのは、employees / timecard を他の wave �
 
 - W0: 測定の口 7 本を削除 (#757、本番で読み書きとも確認済み)。#747 の rust 側は済み (残る `internal/lineworks/event` は W8)。`hub/measurements` の置き場は未決
 - W1: camera を削除 (この PR)
-- 次は W2 (auth・admin 系 → alc-auth-worker)
+- W2a: ログインの内部口 `/internal/auth/*` 8 本を削除 (本番は 10/13 から alc-auth-worker が受けている)
+- 次は W2b (本番の me・logout・my-orgs を auth-worker の `ALC_AUTH_SESSION=1` で alc-auth-worker に切り替え、monolith の 3 本を削除) と W2c (admin 系)
 rust-alc-api は open PR 1 本までなので、W1 以降の worker 側の PR (別 repo) と並行して進める。

@@ -10,22 +10,11 @@ use uuid::Uuid;
 use alc_core::auth_middleware::AuthUser;
 use alc_core::AppState;
 
-mod internal;
-pub use internal::internal_router;
-
-/// `STAGING_MODE=true` かどうか (alc-misc::staging と同判定)。
-/// staging 限定の挙動 (新規ユーザーへの自動テナント作成、internal.rs 参照) の gate に使う。
-fn is_staging_mode() -> bool {
-    std::env::var("STAGING_MODE")
-        .map(|v| v == "true")
-        .unwrap_or(false)
-}
-
 // 認証 JWT の発行・検証と OAuth オーケストレーション (Google / LINE / LINE WORKS /
 // WOFF / password login / refresh / switch-org) は auth-worker に完全移管した
-// (Refs #479 PR-3、旧 public_router ごと撤去)。rust 側に残るのは:
-// - `internal.rs` — auth-worker が叩く DB プリミティブ (`require_internal_jwt` 配下)
-// - 下記 protected_router — 前段 proxy が注入した identity を返すだけの薄い endpoint
+// (Refs #479 PR-3、旧 public_router ごと撤去)。auth-worker が叩くログインの内部口
+// (`/internal/auth/*`) も alc-auth-worker へ移った (Refs #680)。rust 側に残るのは
+// 下記 protected_router — 前段 proxy が注入した identity を返すだけの薄い endpoint。
 
 /// 保護ルート (require_tenant_header の後ろに配置。前段 proxy が注入する identity を信頼)
 pub fn protected_router() -> Router<AppState> {

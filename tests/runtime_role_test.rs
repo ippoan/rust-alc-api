@@ -5,9 +5,9 @@
 //!
 //! 本番の backend は表の所有者で繋いでいるあいだ、`FORCE ROW LEVEL SECURITY` の無い表に RLS が
 //! 掛からない。所有者でないロールへ切り替えるとポリシーが掛かり始め、tenant context を立てずに
-//! 打つ query は落ちる (users は行に当たるとエラー、招待は 0 行)。ログイン・端末の登録・着信の通知・
+//! 打つ query は落ちる (users は行に当たるとエラー、招待は 0 行)。端末の登録・着信の通知・
 //! 超過検知・参加の申請は「テナントが決まる前」か「全テナント横断」が本来の動きなので、
-//! SECURITY DEFINER 関数 (158) 経由で打つ。
+//! SECURITY DEFINER 関数 (158) 経由で打つ。ログインの内部口は alc-auth-worker へ移った (Refs #680)。
 //!
 //! ほかの DB テストは superuser (`postgres`) で繋ぐので RLS を素通りする。ここは
 //! `common::setup_app_state_as_app_role` (接続ごとに `SET ROLE alc_api_rt`) で走らせる。
@@ -22,7 +22,6 @@ mod common;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use chrono::{Duration, Utc};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
@@ -94,20 +93,6 @@ impl Ctx {
         format!("{}{path}", self.base_url)
     }
 
-    /// auth-worker の内部口 (`require_internal_jwt` 配下) への POST
-    async fn internal_post(&self, path: &str, body: Value) -> reqwest::Response {
-        self.client
-            .post(self.url(path))
-            .header(
-                "Authorization",
-                format!("Bearer {}", common::create_test_internal_jwt()),
-            )
-            .json(&body)
-            .send()
-            .await
-            .unwrap()
-    }
-
     /// 内部用の口 `GET /api/internal/rls-check` を叩く (`query` は `?a=b` の形か空、`bearer` は無ければ付けない)
     async fn rls_check(&self, query: &str, bearer: Option<&str>) -> reqwest::Result<(u16, String)> {
         let mut req = self
@@ -129,42 +114,6 @@ impl Ctx {
             .unwrap();
         assert_eq!(status, 200, "GET /api/internal/rls-check{query}: {text}");
         serde_json::from_str(&text).unwrap()
-    }
-
-    /// 内部口で user を解決 / 作成し、応答の JSON を返す
-    async fn upsert_user(&self, path: &str, body: Value) -> Value {
-        let res = self.internal_post(path, body).await;
-        let status = res.status();
-        let text = res.text().await.unwrap();
-        assert_eq!(status, 200, "POST {path}: {text}");
-        serde_json::from_str(&text).unwrap()
-    }
-
-    /// ログインの最後の手 (refresh token のハッシュの保存) を打ち、DB に入った値を確かめる
-    async fn save_refresh_token(&self, user_id: &str) {
-        let hash = unique("hash");
-        let res = self
-            .internal_post(
-                "/api/internal/auth/refresh-token",
-                json!({
-                    "user_id": user_id,
-                    "refresh_hash": hash,
-                    "expires_at": Utc::now() + Duration::days(30),
-                }),
-            )
-            .await;
-        assert_eq!(res.status(), 204, "refresh-token (user {user_id})");
-
-        let (stored, in_future): (Option<String>, Option<bool>) = sqlx::query_as(
-            "SELECT refresh_token_hash, refresh_token_expires_at > NOW() \
-             FROM alc_api.users WHERE id = $1::uuid",
-        )
-        .bind(user_id)
-        .fetch_one(&self.admin)
-        .await
-        .unwrap();
-        assert_eq!(stored.as_deref(), Some(hash.as_str()));
-        assert_eq!(in_future, Some(true), "期限は引数の expires_at が入る");
     }
 
     /// 管理者の token を持つ user を 1 人作る (端末の承認者は users への FK)
@@ -261,154 +210,6 @@ async fn runtime_role_is_subject_to_rls() {
             .await
             .expect("tenant_allowed_emails は tenant 無しでもエラーにならない");
     assert_eq!(invisible, 0);
-}
-
-// ============================================================
-// 1. ログイン 3 経路 / 2. 招待
-// ============================================================
-
-/// Google: 招待された email の初回ログイン (招待の逆引き → user 作成 → 招待の消費) と、
-/// 2 回目 (google_sub の逆引き)。どちらも最後に refresh token を保存する。
-#[tokio::test]
-async fn google_login_new_user_via_invitation_then_existing() {
-    let ctx = setup().await;
-    let tenant = common::create_test_tenant(&ctx.admin, "RT Google").await;
-    let email = format!("{}@example.test", unique("google"));
-    let google_sub = unique("gsub");
-
-    // 招待は実行用ロールの接続で作る (tenant_users の管理画面と同じ repo)
-    let invitation = PgTenantUsersRepository::new(ctx.app.clone())
-        .invite_user(tenant, &email, "viewer")
-        .await
-        .expect("invite_user failed");
-    assert_eq!(invitation.tenant_id, tenant);
-
-    let body = json!({ "google_sub": google_sub, "email": email, "name": "Google User" });
-    let created = ctx
-        .upsert_user("/api/internal/auth/users/upsert-google", body.clone())
-        .await;
-    assert_eq!(created["tenant_id"], tenant.to_string());
-    assert_eq!(created["role"], "viewer", "招待の role で作られる");
-    assert_eq!(created["google_sub"], google_sub);
-    let user_id = created["id"].as_str().unwrap().to_string();
-
-    let remaining: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM alc_api.tenant_allowed_emails WHERE email = $1")
-            .bind(&email)
-            .fetch_one(&ctx.admin)
-            .await
-            .unwrap();
-    assert_eq!(remaining, 0, "招待は使い済みで消える");
-    ctx.save_refresh_token(&user_id).await;
-
-    // 2 回目: 既存の行がそのまま返る (行は増えない)
-    let found = ctx
-        .upsert_user("/api/internal/auth/users/upsert-google", body)
-        .await;
-    assert_eq!(found["id"], user_id);
-    let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM alc_api.users WHERE google_sub = $1")
-        .bind(&google_sub)
-        .fetch_one(&ctx.admin)
-        .await
-        .unwrap();
-    assert_eq!(rows, 1);
-    ctx.save_refresh_token(&user_id).await;
-}
-
-/// 招待もテナントの email_domain の一致も無い Google ログインは 403 (招待の逆引きが 0 行で返る)
-#[tokio::test]
-async fn google_login_without_invitation_is_rejected() {
-    let ctx = setup().await;
-    let res = ctx
-        .internal_post(
-            "/api/internal/auth/users/upsert-google",
-            json!({
-                "google_sub": unique("gsub"),
-                "email": format!("nobody@{}.example.test", unique("domain")),
-                "name": "Nobody",
-            }),
-        )
-        .await;
-    assert_eq!(res.status(), 403);
-}
-
-/// LINE WORKS: 新規 (逆引きが外れる → 作成) と既存 (逆引きが当たる)
-#[tokio::test]
-async fn lineworks_login_new_then_existing() {
-    let ctx = setup().await;
-    let tenant = common::create_test_tenant(&ctx.admin, "RT LINE WORKS").await;
-    let body = json!({
-        "tenant_id": tenant,
-        "lineworks_id": unique("lw"),
-        "email": format!("{}@example.test", unique("lw")),
-        "name": "LW User",
-    });
-
-    let created = ctx
-        .upsert_user("/api/internal/auth/users/upsert-lineworks", body.clone())
-        .await;
-    assert_eq!(created["tenant_id"], tenant.to_string());
-    assert_eq!(created["role"], "viewer");
-    let user_id = created["id"].as_str().unwrap().to_string();
-    ctx.save_refresh_token(&user_id).await;
-
-    let found = ctx
-        .upsert_user("/api/internal/auth/users/upsert-lineworks", body)
-        .await;
-    assert_eq!(found["id"], user_id);
-    ctx.save_refresh_token(&user_id).await;
-}
-
-/// LINE: 新規 (逆引きが外れる → 作成) と既存 (逆引きが当たる)
-#[tokio::test]
-async fn line_login_new_then_existing() {
-    let ctx = setup().await;
-    let tenant = common::create_test_tenant(&ctx.admin, "RT LINE").await;
-    let body = json!({
-        "tenant_id": tenant,
-        "line_user_id": unique("line"),
-        "name": "LINE User",
-    });
-
-    let created = ctx
-        .upsert_user("/api/internal/auth/users/upsert-line", body.clone())
-        .await;
-    assert_eq!(created["tenant_id"], tenant.to_string());
-    assert_eq!(created["role"], "viewer");
-    let user_id = created["id"].as_str().unwrap().to_string();
-    ctx.save_refresh_token(&user_id).await;
-
-    let found = ctx
-        .upsert_user("/api/internal/auth/users/upsert-line", body)
-        .await;
-    assert_eq!(found["id"], user_id);
-    ctx.save_refresh_token(&user_id).await;
-}
-
-/// refresh token の保存は、渡した user の行だけを書き換える (関数の引数の順の取り違えの検出)
-#[tokio::test]
-async fn save_refresh_token_touches_only_the_given_user() {
-    let ctx = setup().await;
-    let tenant = common::create_test_tenant(&ctx.admin, "RT Refresh").await;
-    let auth = PgAuthRepository::new(ctx.admin.clone());
-    let target = auth
-        .create_user_line(tenant, &unique("refresh-a"), "Target")
-        .await
-        .unwrap();
-    let other = auth
-        .create_user_line(tenant, &unique("refresh-b"), "Other")
-        .await
-        .unwrap();
-
-    ctx.save_refresh_token(&target.id.to_string()).await;
-
-    let untouched: Option<String> =
-        sqlx::query_scalar("SELECT refresh_token_hash FROM alc_api.users WHERE id = $1")
-            .bind(other.id)
-            .fetch_one(&ctx.admin)
-            .await
-            .unwrap();
-    assert_eq!(untouched, None);
 }
 
 // ============================================================
