@@ -560,7 +560,6 @@ pub fn setup_mock_app_state() -> AppState {
         guidance_records: Arc::new(MockGuidanceRecordsRepository::default()),
         items: Arc::new(MockItemsRepository::default()),
         item_files: Arc::new(MockItemFilesRepository::default()),
-        measurements: Arc::new(MockMeasurementsRepository::default()),
         nfc_tags: Arc::new(MockNfcTagRepository::default()),
         sso_admin: Arc::new(MockSsoAdminRepository::default()),
         tenant_users: Arc::new(MockTenantUsersRepository::default()),

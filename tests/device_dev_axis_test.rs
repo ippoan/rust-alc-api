@@ -114,26 +114,6 @@ impl Ctx {
         .await
     }
 
-    /// 測定を 1 件保存する (通常点呼の記録の印つき)
-    async fn measurement(&self, employee_id: &str, measured_at: &str, dev: Option<&str>) -> String {
-        self.create(
-            "/api/measurements",
-            dev,
-            json!({
-                "employee_id": employee_id,
-                "alcohol_value": 0.0,
-                "result_type": "normal",
-                "measured_at": measured_at,
-                "temperature": 36.5,
-                "systolic": 120,
-                "diastolic": 80,
-                "pulse": 64,
-                "record_as_tenko": true,
-            }),
-        )
-        .await
-    }
-
     async fn equipment_failure(&self, dev: Option<&str>) -> String {
         self.create(
             "/api/tenko/equipment-failures",
@@ -210,39 +190,15 @@ impl Ctx {
     }
 }
 
-/// 測定に紐づく通常点呼の session / record の is_dev
-async fn normal_tenko_is_dev(ctx: &Ctx, measurement_id: &str) -> (Vec<bool>, Vec<bool>) {
-    let mid = Uuid::parse_str(measurement_id).unwrap();
-    let sessions = sqlx::query_scalar(
-        "SELECT is_dev FROM alc_api.tenko_sessions WHERE tenant_id = $1 AND measurement_id = $2",
-    )
-    .bind(ctx.tenant)
-    .bind(mid)
-    .fetch_all(&ctx.admin)
-    .await
-    .unwrap();
-    let records = sqlx::query_scalar(
-        "SELECT r.is_dev FROM alc_api.tenko_records r
-         JOIN alc_api.tenko_sessions s ON s.id = r.session_id
-         WHERE r.tenant_id = $1 AND s.measurement_id = $2",
-    )
-    .bind(ctx.tenant)
-    .bind(mid)
-    .fetch_all(&ctx.admin)
-    .await
-    .unwrap();
-    (sessions, records)
-}
-
 #[tokio::test]
 async fn test_tenant_route_writes_follow_the_header() {
     test_group!("dev端末の印 → 書いた行の is_dev (tenant の経路)");
     let ctx = setup("Dev Axis Write", 5, true).await;
     let emp = ctx.employee("DA1").await;
 
-    for (label, dev, expected, measured_at) in [
-        ("X-Device-Dev: 1", Some("1"), true, "2026-09-20T01:00:00Z"),
-        ("ヘッダなし", None, false, "2026-09-20T02:00:00Z"),
+    for (label, dev, expected) in [
+        ("X-Device-Dev: 1", Some("1"), true),
+        ("ヘッダなし", None, false),
     ] {
         test_case!(&format!("{label} → is_dev = {expected}"), {
             let session = ctx.start_session(&emp, dev).await;
@@ -250,14 +206,6 @@ async fn test_tenant_route_writes_follow_the_header() {
                 ctx.is_dev("tenko_sessions", &session).await,
                 expected,
                 "点呼セッションの開始"
-            );
-
-            let m = ctx.measurement(&emp, measured_at, dev).await;
-            assert_eq!(ctx.is_dev("measurements", &m).await, expected, "測定の保存");
-            assert_eq!(
-                normal_tenko_is_dev(&ctx, &m).await,
-                (vec![expected], vec![expected]),
-                "通常点呼の session と record が 1 組、測定と同じ軸でできる"
             );
 
             let failure = ctx.equipment_failure(dev).await;
@@ -460,12 +408,6 @@ async fn test_reads_are_split_by_the_header() {
 
     let dev_session = ctx.start_session(&emp, Some("1")).await;
     let prod_session = ctx.start_session(&emp, None).await;
-    let dev_m = ctx
-        .measurement(&emp, "2026-09-21T01:00:00Z", Some("1"))
-        .await;
-    let prod_m = ctx.measurement(&emp, "2026-09-21T02:00:00Z", None).await;
-
-    // 測定の保存が通常点呼の session も 1 件ずつ作るので、軸ごとの session は 2 件
     let session_ids = |dev: bool| {
         let admin = ctx.admin.clone();
         let tenant = ctx.tenant;
@@ -487,7 +429,7 @@ async fn test_reads_are_split_by_the_header() {
     };
     let dev_sessions = session_ids(true).await;
     let prod_sessions = session_ids(false).await;
-    assert_eq!((dev_sessions.len(), prod_sessions.len()), (2, 2));
+    assert_eq!((dev_sessions.len(), prod_sessions.len()), (1, 1));
 
     test_case!(
         "一覧: dev の要求は dev の行だけ、ヘッダなしは dev の行を見ない",
@@ -500,16 +442,6 @@ async fn test_reads_are_split_by_the_header() {
             assert_eq!(
                 ctx.list_ids("/api/tenko/sessions", "sessions", None).await,
                 prod_sessions
-            );
-            assert_eq!(
-                ctx.list_ids("/api/measurements", "measurements", Some("1"))
-                    .await,
-                vec![dev_m.clone()]
-            );
-            assert_eq!(
-                ctx.list_ids("/api/measurements", "measurements", None)
-                    .await,
-                vec![prod_m.clone()]
             );
         }
     );
@@ -524,10 +456,6 @@ async fn test_reads_are_split_by_the_header() {
                 Some("1"),
                 404,
             ),
-            (format!("/api/measurements/{dev_m}"), Some("1"), 200),
-            (format!("/api/measurements/{dev_m}"), None, 404),
-            (format!("/api/measurements/{prod_m}"), None, 200),
-            (format!("/api/measurements/{prod_m}"), Some("1"), 404),
         ] {
             assert_eq!(
                 ctx.get(&path, dev).await.status(),
@@ -635,43 +563,27 @@ async fn test_dev_tenko_manager_key_judges_only_dev_sessions() {
     );
 }
 
-/// IT点呼 のセッションを 1 件作る (測定を開始 → 完了 PUT に `tenko_method`)。session の id を返す
+/// IT点呼 のセッションを 1 件入れる。session の id を返す
+///
+/// 行を作る測定の保存は alc-measurements-worker へ移ったので (Refs #680)、worker が書くのと同じ形の
+/// 行を直接入れる。`dev` が立っていれば開発用の軸の行にする (worker では要求の印から決まる)。
 async fn it_tenko_session(
     ctx: &Ctx,
     employee_id: &str,
     measured_at: &str,
     dev: Option<&str>,
 ) -> String {
-    let measurement = ctx
-        .create(
-            "/api/measurements/start",
-            dev,
-            json!({ "employee_id": employee_id }),
-        )
-        .await;
-    let res = ctx
-        .request(
-            reqwest::Method::PUT,
-            &format!("/api/measurements/{measurement}"),
-            dev,
-        )
-        .json(&json!({
-            "status": "completed",
-            "alcohol_value": 0.0,
-            "result_type": "normal",
-            "measured_at": measured_at,
-            "temperature": 36.5,
-            "record_as_tenko": true,
-            "tenko_method": "IT点呼",
-        }))
-        .send()
-        .await
-        .unwrap();
-    let status = res.status();
-    let text = res.text().await.unwrap();
-    assert_eq!(status, 200, "PUT measurement (dev={dev:?}): {text}");
-    let json: Value = serde_json::from_str(&text).unwrap();
-    json["tenko_session_id"].as_str().unwrap().to_string()
+    let (_, session_id) = common::insert_normal_flow_tenko(
+        &ctx.admin,
+        ctx.tenant,
+        Uuid::parse_str(employee_id).unwrap(),
+        measured_at,
+        "pre_operation",
+        "IT点呼",
+        dev == Some("1"),
+    )
+    .await;
+    session_id.to_string()
 }
 
 /// 未完了の IT点呼 の一覧の (total, id)

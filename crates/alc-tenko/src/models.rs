@@ -88,7 +88,7 @@ pub struct TenkoSession {
     pub schedule_id: Option<Uuid>,
     pub tenko_type: String,
     /// 自動点呼 / 通常点呼 / 遠隔点呼 (migration 141 で追加、144 で遠隔点呼を追加)。
-    /// 既定は '自動点呼'。通常点呼は normal_tenko 経路が明示的に立てる。
+    /// 既定は '自動点呼'。通常点呼は alc-measurements-worker が明示的に立てる。
     /// 遠隔点呼は escalate-remote (下記) でのみ立つ
     pub tenko_method: String,
     pub status: String,

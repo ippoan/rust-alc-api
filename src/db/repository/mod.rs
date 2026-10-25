@@ -8,7 +8,7 @@ pub use alc_core::repository::{
     DtakoTicketsRepository, DtakoVehiclesRepository, DtakoWorkTimesRepository,
     DtakoYTimeExportRepository, EmployeeRepository, GuidanceRecordsRepository,
     HubMeasurementsRepository, ItemFilesRepository, ItemsRepository, LineworksChannelsRepository,
-    MeasurementsRepository, NfcTagRepository, NotifyDeliveryRepository, NotifyDocumentRepository,
+    NfcTagRepository, NotifyDeliveryRepository, NotifyDocumentRepository,
     NotifyRecipientRepository, SsoAdminRepository, TenantUsersRepository, TimecardRepository,
     VehicleSettingsDumpsRepository, WebhookRepository,
 };
@@ -35,8 +35,8 @@ pub use alc_dtako::repo::{
     dtako_tickets, dtako_vehicles, dtako_work_times, dtako_y_time_export, vehicle_settings_dumps,
 };
 pub use alc_misc::repo::{
-    bot_admin, carrying_items, communication_items, employees, guidance_records, items,
-    measurements, sso_admin, tenant_users, timecard, webhook,
+    bot_admin, carrying_items, communication_items, employees, guidance_records, items, sso_admin,
+    tenant_users, timecard, webhook,
 };
 pub use alc_tenko::repo::{
     daily_health, driver_info, equipment_failures, health_baselines, overdue, tenko_call,
@@ -69,8 +69,8 @@ pub use alc_dtako::repo::{
 pub use alc_misc::repo::{
     PgApiTokensRepository, PgBotAdminRepository, PgCarryingItemsRepository,
     PgCommunicationItemsRepository, PgEmployeeRepository, PgGuidanceRecordsRepository,
-    PgItemFilesRepository, PgItemsRepository, PgMeasurementsRepository, PgSsoAdminRepository,
-    PgTenantUsersRepository, PgTimecardRepository, PgWebhookRepository,
+    PgItemFilesRepository, PgItemsRepository, PgSsoAdminRepository, PgTenantUsersRepository,
+    PgTimecardRepository, PgWebhookRepository,
 };
 pub use alc_tenko::repo::{
     PgDailyHealthRepository, PgDriverInfoRepository, PgEquipmentFailuresRepository,

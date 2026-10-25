@@ -37,7 +37,7 @@ use repository::{
     DtakoTicketsRepository, DtakoVehiclesRepository, DtakoWorkTimesRepository,
     DtakoYTimeExportRepository, EmployeeRepository, GuidanceRecordsRepository,
     HubMeasurementsRepository, ItemFilesRepository, ItemsRepository, LineworksChannelsRepository,
-    MeasurementsRepository, NfcTagRepository, NotifyDeliveryRepository, NotifyDocumentRepository,
+    NfcTagRepository, NotifyDeliveryRepository, NotifyDocumentRepository,
     NotifyRecipientRepository, SsoAdminRepository, TenantUsersRepository, TimecardRepository,
     VehicleSettingsDumpsRepository,
 };
@@ -73,7 +73,6 @@ pub struct AppState {
     pub hub_measurements: Arc<dyn HubMeasurementsRepository>,
     pub items: Arc<dyn ItemsRepository>,
     pub item_files: Arc<dyn ItemFilesRepository>,
-    pub measurements: Arc<dyn MeasurementsRepository>,
     pub nfc_tags: Arc<dyn NfcTagRepository>,
     pub sso_admin: Arc<dyn SsoAdminRepository>,
     pub tenant_users: Arc<dyn TenantUsersRepository>,
