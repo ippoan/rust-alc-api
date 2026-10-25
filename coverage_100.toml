@@ -246,12 +246,6 @@ type = "unit"
 
 # src/archive/repo.rs — temporarily excluded: PgArchiveDb Phase B methods need integration tests
 
-# --- alc-camera ---
-
-[[files]]
-path = "crates/alc-camera/src/down_ticket_client.rs"
-type = "unit"
-
 # --- alc-notify ---
 
 [[files]]

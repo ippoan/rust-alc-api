@@ -48,132 +48,6 @@ impl VehicleSettingsDumpsRepository for MockVehicleSettingsDumpsRepository {
     }
 }
 
-/// CamerasRepository の mock (Refs #556)。camera route が monolith で応答する
-/// ことの検証用。`fail_next` を立てると次の呼び出しで sqlx::Error を返す。
-#[derive(Default)]
-pub struct MockCamerasRepository {
-    pub fail_next: std::sync::atomic::AtomicBool,
-}
-
-impl MockCamerasRepository {
-    fn check_fail(&self) -> Result<(), sqlx::Error> {
-        if self
-            .fail_next
-            .swap(false, std::sync::atomic::Ordering::SeqCst)
-        {
-            return Err(sqlx::Error::RowNotFound);
-        }
-        Ok(())
-    }
-}
-
-fn mock_camera(tenant_id: Uuid, id: Uuid) -> alc_core::repository::cameras::Camera {
-    alc_core::repository::cameras::Camera {
-        id,
-        tenant_id,
-        office_id: None,
-        name: "test-cam".to_string(),
-        ip: "192.168.0.10".to_string(),
-        onvif_port: 2020,
-        model: "Tapo".to_string(),
-        active: true,
-        active_down_ticket_id: None,
-        created_at: chrono::Utc::now(),
-        updated_at: chrono::Utc::now(),
-    }
-}
-
-#[async_trait]
-impl alc_core::repository::CamerasRepository for MockCamerasRepository {
-    async fn list(
-        &self,
-        _tenant_id: Uuid,
-    ) -> Result<Vec<alc_core::repository::cameras::Camera>, sqlx::Error> {
-        self.check_fail()?;
-        Ok(vec![])
-    }
-
-    async fn get(
-        &self,
-        tenant_id: Uuid,
-        id: Uuid,
-    ) -> Result<Option<alc_core::repository::cameras::Camera>, sqlx::Error> {
-        self.check_fail()?;
-        Ok(Some(mock_camera(tenant_id, id)))
-    }
-
-    async fn create(
-        &self,
-        tenant_id: Uuid,
-        _input: &alc_core::repository::cameras::CreateCamera,
-    ) -> Result<alc_core::repository::cameras::Camera, sqlx::Error> {
-        self.check_fail()?;
-        Ok(mock_camera(tenant_id, Uuid::new_v4()))
-    }
-
-    async fn update(
-        &self,
-        tenant_id: Uuid,
-        id: Uuid,
-        _input: &alc_core::repository::cameras::UpdateCamera,
-    ) -> Result<Option<alc_core::repository::cameras::Camera>, sqlx::Error> {
-        self.check_fail()?;
-        Ok(Some(mock_camera(tenant_id, id)))
-    }
-
-    async fn delete(&self, _tenant_id: Uuid, _id: Uuid) -> Result<bool, sqlx::Error> {
-        self.check_fail()?;
-        Ok(true)
-    }
-
-    async fn insert_health_log(
-        &self,
-        tenant_id: Uuid,
-        camera_id: Uuid,
-        input: &alc_core::repository::cameras::CreateCameraHealthLog,
-    ) -> Result<alc_core::repository::cameras::CameraHealthLog, sqlx::Error> {
-        self.check_fail()?;
-        Ok(alc_core::repository::cameras::CameraHealthLog {
-            id: 1,
-            tenant_id,
-            camera_id,
-            alive: input.alive,
-            latency_ms: input.latency_ms,
-            error: input.error.clone(),
-            checked_at: chrono::Utc::now(),
-            source_device_id: input.source_device_id.clone(),
-        })
-    }
-
-    async fn recent_health_logs(
-        &self,
-        _tenant_id: Uuid,
-        _camera_id: Uuid,
-        _limit: i64,
-    ) -> Result<Vec<alc_core::repository::cameras::CameraHealthLog>, sqlx::Error> {
-        self.check_fail()?;
-        Ok(vec![])
-    }
-
-    async fn statuses(
-        &self,
-        _tenant_id: Uuid,
-    ) -> Result<Vec<alc_core::repository::cameras::CameraStatusRow>, sqlx::Error> {
-        self.check_fail()?;
-        Ok(vec![])
-    }
-
-    async fn set_active_down_ticket(
-        &self,
-        _tenant_id: Uuid,
-        _camera_id: Uuid,
-        _ticket_id: Option<Uuid>,
-    ) -> Result<(), sqlx::Error> {
-        self.check_fail()?;
-        Ok(())
-    }
-}
-
 /// VehiclesRepository のスタブ (Refs #651)。本タスク (#c651-2、車両マスタ土台) の
 /// 範囲では handler を mock test ではカバーしない (実 DB 統合テスト
 /// `tests/maintenance_test.rs` 側で検証する) ため、読み出しは空 / write はエラーを
@@ -505,16 +379,6 @@ pub fn setup_mock_maintenance_state() -> alc_maintenance::MaintenanceState {
     }
 }
 
-/// camera ドメインの mock CameraState (Refs #556)。差し替えたい field を上書き
-/// してから `spawn_mock_server_with_camera` に渡す。
-pub fn setup_mock_camera_state() -> alc_camera::CameraState {
-    alc_camera::CameraState {
-        cameras: Arc::new(MockCamerasRepository::default()),
-        down_ticket_sink: Arc::new(crate::common::TestDownTicketSink),
-        down_threshold: alc_camera::DEFAULT_DOWN_THRESHOLD,
-    }
-}
-
 /// DB 不要の mock AppState を構築。
 /// pool: None — mock repo が全ハンドラを処理するため DB 接続不要。
 /// テスト側で `state.xxx` の `fail_next` を設定して DB エラー注入可能。
@@ -602,50 +466,25 @@ pub async fn spawn_mock_server(state: AppState) -> String {
     crate::common::spawn_test_server_with_states(
         state,
         setup_mock_tenko_state(),
-        setup_mock_camera_state(),
         setup_mock_maintenance_state(),
     )
     .await
 }
 
-/// tenko_state を差し替えたい mock テスト用 (camera/maintenance はデフォルト mock)。
+/// tenko_state を差し替えたい mock テスト用 (maintenance はデフォルト mock)。
 pub async fn spawn_mock_server_with_tenko(
     state: AppState,
     tenko_state: alc_tenko::TenkoState,
 ) -> String {
-    crate::common::spawn_test_server_with_states(
-        state,
-        tenko_state,
-        setup_mock_camera_state(),
-        setup_mock_maintenance_state(),
-    )
-    .await
+    crate::common::spawn_test_server_with_states(state, tenko_state, setup_mock_maintenance_state())
+        .await
 }
 
-/// camera_state を差し替えたい mock テスト用 (tenko/maintenance はデフォルト mock、Refs #556)。
-pub async fn spawn_mock_server_with_camera(
-    state: AppState,
-    camera_state: alc_camera::CameraState,
-) -> String {
-    crate::common::spawn_test_server_with_states(
-        state,
-        setup_mock_tenko_state(),
-        camera_state,
-        setup_mock_maintenance_state(),
-    )
-    .await
-}
-
-/// maintenance_state を差し替えたい mock テスト用 (tenko/camera はデフォルト mock、Refs #651)。
+/// maintenance_state を差し替えたい mock テスト用 (tenko はデフォルト mock、Refs #651)。
 pub async fn spawn_mock_server_with_maintenance(
     state: AppState,
     maintenance_state: alc_maintenance::MaintenanceState,
 ) -> String {
-    crate::common::spawn_test_server_with_states(
-        state,
-        setup_mock_tenko_state(),
-        setup_mock_camera_state(),
-        maintenance_state,
-    )
-    .await
+    crate::common::spawn_test_server_with_states(state, setup_mock_tenko_state(), maintenance_state)
+        .await
 }
