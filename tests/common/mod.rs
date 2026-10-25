@@ -22,7 +22,7 @@ use rust_alc_api::db::repository::{
     PgDtakoVehiclesRepository, PgDtakoWorkTimesRepository, PgDtakoYTimeExportRepository,
     PgEmployeeRepository, PgEquipmentFailuresRepository, PgGuidanceRecordsRepository,
     PgHealthBaselinesRepository, PgHubMeasurementsRepository, PgItemFilesRepository,
-    PgItemsRepository, PgLineworksChannelsRepository, PgMeasurementsRepository, PgNfcTagRepository,
+    PgItemsRepository, PgLineworksChannelsRepository, PgNfcTagRepository,
     PgNotifyDeliveryRepository, PgNotifyDocumentRepository, PgNotifyRecipientRepository,
     PgSsoAdminRepository, PgTenantUsersRepository, PgTenkoCallRepository, PgTenkoRecordsRepository,
     PgTenkoSchedulesRepository, PgTenkoSessionRepository, PgTenkoWebhooksRepository,
@@ -99,26 +99,62 @@ pub async fn create_test_employee(
     res.json().await.unwrap()
 }
 
-/// テスト用測定を作成し、JSON レスポンスを返す
-pub async fn create_test_measurement(
-    client: &reqwest::Client,
-    base_url: &str,
-    auth_header: &str,
-    employee_id: &str,
-) -> serde_json::Value {
-    let res = client
-        .post(format!("{base_url}/api/measurements"))
-        .header("Authorization", auth_header)
-        .json(&serde_json::json!({
-            "employee_id": employee_id,
-            "alcohol_value": 0.0,
-            "result_type": "pass"
-        }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 201, "Failed to create test measurement");
-    res.json().await.unwrap()
+/// 通常の流れ (通常点呼 / IT点呼) の点呼 1 件 — 測定・セッション・点呼記録 — を
+/// alc-measurements-worker が書くのと同じ形で DB に直接入れ、(測定の id, セッションの id) を返す。
+///
+/// 測定の口 (`/api/measurements` 系) は worker へ移ったので (Refs #680)、rust に残る点呼の口
+/// (一覧・判定・CSV) のテストはこれで行を用意する。`is_dev` は列の既定値に任せず明示する。
+/// 点呼記録の `record_data` はセッションの行の JSON、`record_hash` はその md5 (中身は検証しない)。
+pub async fn insert_normal_flow_tenko(
+    pool: &sqlx::PgPool,
+    tenant_id: Uuid,
+    employee_id: Uuid,
+    measured_at: &str,
+    tenko_type: &str,
+    tenko_method: &str,
+    is_dev: bool,
+) -> (Uuid, Uuid) {
+    sqlx::query_as(
+        "WITH m AS (
+             INSERT INTO alc_api.measurements
+                 (tenant_id, employee_id, alcohol_level, result, measured_at, status,
+                  temperature, systolic, diastolic, pulse, is_dev)
+             VALUES ($1, $2, 0.0, 'normal', $3::timestamptz, 'completed', 36.5, 120, 80, 64, $6)
+             RETURNING id, measured_at
+         ), s AS (
+             INSERT INTO alc_api.tenko_sessions
+                 (tenant_id, employee_id, tenko_type, status, measurement_id,
+                  alcohol_result, alcohol_value, alcohol_tested_at,
+                  temperature, systolic, diastolic, pulse,
+                  started_at, completed_at, tenko_method, is_dev)
+             SELECT $1, $2, $4, 'completed', m.id, 'normal', 0.0, m.measured_at,
+                    36.5, 120, 80, 64, m.measured_at, NOW(), $5, $6
+             FROM m
+             RETURNING *
+         ), r AS (
+             INSERT INTO alc_api.tenko_records
+                 (tenant_id, session_id, employee_id, tenko_type, status, record_data,
+                  employee_name, alcohol_result, alcohol_value,
+                  temperature, systolic, diastolic, pulse,
+                  started_at, completed_at, record_hash, tenko_method, is_dev)
+             SELECT s.tenant_id, s.id, s.employee_id, s.tenko_type, s.status, to_jsonb(s),
+                    e.name, s.alcohol_result, s.alcohol_value,
+                    s.temperature, s.systolic, s.diastolic, s.pulse,
+                    s.started_at, s.completed_at, md5(to_jsonb(s)::text), s.tenko_method, s.is_dev
+             FROM s JOIN alc_api.employees e ON e.id = s.employee_id
+             RETURNING id
+         )
+         SELECT m.id, s.id FROM m, s, r",
+    )
+    .bind(tenant_id)
+    .bind(employee_id)
+    .bind(measured_at)
+    .bind(tenko_type)
+    .bind(tenko_method)
+    .bind(is_dev)
+    .fetch_one(pool)
+    .await
+    .expect("insert_normal_flow_tenko")
 }
 
 /// テスト用 opaque token を組み立てる (base64(JSON))。
@@ -286,7 +322,6 @@ fn build_app_state(
     let hub_measurements = Arc::new(PgHubMeasurementsRepository::new(pool.clone()));
     let items = Arc::new(PgItemsRepository::new(pool.clone()));
     let item_files = Arc::new(PgItemFilesRepository::new(pool.clone()));
-    let measurements = Arc::new(PgMeasurementsRepository::new(pool.clone()));
     let nfc_tags = Arc::new(PgNfcTagRepository::new(pool.clone()));
     let sso_admin = Arc::new(PgSsoAdminRepository::new(pool.clone()));
     let tenant_users = Arc::new(PgTenantUsersRepository::new(pool.clone()));
@@ -325,7 +360,6 @@ fn build_app_state(
         hub_measurements,
         items,
         item_files,
-        measurements,
         nfc_tags,
         sso_admin,
         tenant_users,

@@ -36,7 +36,6 @@ pub use alc_misc::employees;
 pub use alc_misc::guidance_records;
 pub use alc_misc::health;
 pub use alc_misc::items;
-pub use alc_misc::measurements;
 pub use alc_misc::members;
 pub use alc_misc::sso_admin;
 pub use alc_misc::staging;
@@ -123,8 +122,6 @@ pub fn router(
     // キオスク経路も含め前段 proxy が introspect 検証 → header 注入する。
     let tenant_protected = Router::new()
         .merge(employees::tenant_router())
-        .merge(measurements::router())
-        .merge(measurements::tenant_router())
         .merge(upload::tenant_router())
         .merge(timecard::tenant_router())
         .merge(devices::tenant_router())

@@ -25,8 +25,6 @@ mod mock_guidance_records_test;
 mod mock_health_test;
 #[path = "../mock_tests/mock_lineworks_internal_test.rs"]
 mod mock_lineworks_internal_test;
-#[path = "../mock_tests/mock_measurements_test.rs"]
-mod mock_measurements_test;
 #[path = "../mock_tests/mock_members_test.rs"]
 mod mock_members_test;
 #[path = "../mock_tests/mock_notify_view_internal_test.rs"]

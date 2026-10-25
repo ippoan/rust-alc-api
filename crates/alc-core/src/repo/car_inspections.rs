@@ -1,9 +1,8 @@
 //! 電子車検証の番号で car_inspection から車検期限を引く (Refs ippoan/alc-app-s3#110)。
 //!
-//! 呼び元は 2 つ: 通常点呼の保存 (`alc-tenko` の normal_tenko — 測定と同じ
-//! transaction に相乗り) と、kiosk の照合口 (`alc-carins` の repository —
-//! `TenantConn` を取って呼ぶ)。どちらも RLS の効いた接続を渡す。
-//! alc-tenko から alc-carins へ依存を張らないよう、ここ (alc-core) に置く。
+//! 呼び元は kiosk の照合口 (`alc-carins` の repository — `TenantConn` を取って呼ぶ)。
+//! RLS の効いた接続を渡す。通常点呼の保存 (測定と同じ transaction に相乗り) は
+//! alc-measurements-worker へ移った。
 //!
 //! 和暦フォールバックの実 DB テストは `tests/car_inspections_expiry_test.rs`
 //! (リポジトリ ルート) に置く — `lookup_expiry` は正規表現・LATERAL JOIN・

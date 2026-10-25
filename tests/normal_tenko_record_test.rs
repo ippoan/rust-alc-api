@@ -1,12 +1,15 @@
-//! 通常点呼 (運行者端末の測定) が点呼セッション・点呼記録として残ることを実 DB で固定する。
+//! 通常の流れ (通常点呼 / IT点呼) の点呼の行を、rust に残る点呼の口 (一覧・判定・CSV) が
+//! 正しく扱うことを実 DB で固定する。
 //!
-//! Refs ippoan/alc-app#238, ippoan/alc-app-s3#135
+//! Refs ippoan/alc-app#238, ippoan/alc-app-s3#135, ippoan/alc-app#387
 //!
-//! **実 DB でしか検証できない** — 冪等の担保は migration 141 の部分 unique
-//! (`tenko_type = 'normal' OR tenko_method = '通常点呼'` の measurement_id /
-//! (employee_id, started_at)) と
-//! `ON CONFLICT DO NOTHING` に任せているので、repository を差し替える mock テストでは
-//! 1 行も通らない。執行者 NULL の記録を一覧・CSV が壊れずに返せることも同じ理由で実 DB 用。
+//! 行を作る側 (測定の保存 → 点呼セッション・点呼記録) は alc-measurements-worker へ移った
+//! (Refs #680)。その冪等・車検証・本人確認の方法などは worker の `normal_tenko_db.rs` が持つ。
+//! ここでは worker が書くのと同じ形の行を `common::insert_normal_flow_tenko` で直接入れ、
+//! rust の口の振る舞いだけを見る。
+//!
+//! **実 DB でしか検証できない** — 部分 unique (migration 141) と、執行者 NULL の記録を
+//! 一覧・CSV が壊れずに返せることは、repository を差し替える mock テストでは通らない。
 //!
 //! 回し方は他の DB integration テストと同じ:
 //!   `make db-up && source .test-config && cargo test --test normal_tenko_record_test`
@@ -18,146 +21,23 @@ mod common;
 use serde_json::Value;
 use uuid::Uuid;
 
-/// 測定を 1 件保存する (`record_as_tenko` の有無と結果を指定できる)
-async fn post_measurement(
+/// 乗務員を作り、id を返す
+async fn employee(
     client: &reqwest::Client,
     base_url: &str,
     auth: &str,
-    employee_id: &str,
-    result_type: &str,
-    measured_at: &str,
-    record_as_tenko: bool,
-) -> Value {
-    let res = send_measurement(
-        client,
-        base_url,
-        auth,
-        employee_id,
-        result_type,
-        measured_at,
-        record_as_tenko,
-        None,
-    )
-    .await;
-    assert_eq!(res.status(), 201, "measurement POST failed");
-    res.json().await.unwrap()
-}
-
-/// 測定の POST を送り、応答をそのまま返す (`tenko_type` を付けられる)
-#[allow(clippy::too_many_arguments)]
-async fn send_measurement(
-    client: &reqwest::Client,
-    base_url: &str,
-    auth: &str,
-    employee_id: &str,
-    result_type: &str,
-    measured_at: &str,
-    record_as_tenko: bool,
-    tenko_type: Option<&str>,
-) -> reqwest::Response {
-    let mut body = serde_json::json!({
-        "employee_id": employee_id,
-        "alcohol_value": 0.0,
-        "result_type": result_type,
-        "measured_at": measured_at,
-        "temperature": 36.5,
-        "systolic": 120,
-        "diastolic": 80,
-        "pulse": 64,
-        "record_as_tenko": record_as_tenko,
-    });
-    if let Some(tt) = tenko_type {
-        body["tenko_type"] = Value::from(tt);
-    }
-    client
-        .post(format!("{base_url}/api/measurements"))
-        .header("Authorization", auth)
-        .json(&body)
-        .send()
-        .await
-        .unwrap()
-}
-
-/// 測定に紐づく session / record の (tenko_type, tenko_method) を引く
-async fn type_and_method(
-    pool: &sqlx::PgPool,
-    tenant_id: Uuid,
-    measurement_id: &str,
-) -> (Vec<(String, String)>, Vec<(String, String)>) {
-    let mid = Uuid::parse_str(measurement_id).unwrap();
-    let sessions = sqlx::query_as::<_, (String, String)>(
-        "SELECT tenko_type, tenko_method FROM alc_api.tenko_sessions
-         WHERE tenant_id = $1 AND measurement_id = $2",
-    )
-    .bind(tenant_id)
-    .bind(mid)
-    .fetch_all(pool)
-    .await
-    .unwrap();
-    let records = sqlx::query_as::<_, (String, String)>(
-        "SELECT r.tenko_type, r.tenko_method FROM alc_api.tenko_records r
-         JOIN alc_api.tenko_sessions s ON s.id = r.session_id
-         WHERE r.tenant_id = $1 AND s.measurement_id = $2",
-    )
-    .bind(tenant_id)
-    .bind(mid)
-    .fetch_all(pool)
-    .await
-    .unwrap();
-    (sessions, records)
-}
-
-/// テナント内の測定の件数
-async fn measurement_count(pool: &sqlx::PgPool, tenant_id: Uuid) -> i64 {
-    sqlx::query_scalar("SELECT count(*) FROM alc_api.measurements WHERE tenant_id = $1")
-        .bind(tenant_id)
-        .fetch_one(pool)
-        .await
-        .unwrap()
-}
-
-/// 通常点呼のセッションを測定 id で引く
-async fn sessions_for_measurement(
-    pool: &sqlx::PgPool,
-    tenant_id: Uuid,
-    measurement_id: &str,
-) -> Vec<(String, String, Option<String>)> {
-    let mid = Uuid::parse_str(measurement_id).unwrap();
-    sqlx::query_as::<_, (String, String, Option<String>)>(
-        "SELECT tenko_type, status, cancel_reason FROM alc_api.tenko_sessions
-         WHERE tenant_id = $1 AND measurement_id = $2",
-    )
-    .bind(tenant_id)
-    .bind(mid)
-    .fetch_all(pool)
-    .await
-    .unwrap()
-}
-
-/// テナント内の点呼セッション / 点呼記録の件数
-async fn counts(pool: &sqlx::PgPool, tenant_id: Uuid) -> (i64, i64) {
-    let sessions: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM alc_api.tenko_sessions WHERE tenant_id = $1 AND tenko_method = '通常点呼'",
-    )
-    .bind(tenant_id)
-    .fetch_one(pool)
-    .await
-    .unwrap();
-    let records: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM alc_api.tenko_records WHERE tenant_id = $1 AND tenko_method = '通常点呼'",
-    )
-    .bind(tenant_id)
-    .fetch_one(pool)
-    .await
-    .unwrap();
-    (sessions, records)
+    name: &str,
+    code: &str,
+) -> Uuid {
+    let emp = common::create_test_employee(client, base_url, auth, name, code).await;
+    Uuid::parse_str(emp["id"].as_str().unwrap()).unwrap()
 }
 
 #[tokio::test]
-async fn test_normal_measurement_creates_tenko_session_and_record() {
-    test_group!("通常点呼 → 点呼記録");
+async fn test_normal_tenko_record_is_listed_with_empty_manager() {
+    test_group!("通常点呼の記録 → 一覧・CSV");
     test_case!(
-        "印つきの測定で session と record が 1 件ずつできる",
+        "執行者が空欄の通常点呼の記録が、記録の一覧・CSV・セッションの一覧に出る",
         {
             let state = common::setup_app_state().await;
             let base_url = common::spawn_test_server(state.clone()).await;
@@ -166,54 +46,17 @@ async fn test_normal_measurement_creates_tenko_session_and_record() {
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
 
-            let emp =
-                common::create_test_employee(&client, &base_url, &auth, "運行者", "NT1").await;
-            let emp_id = emp["id"].as_str().unwrap();
-
-            let m = post_measurement(
-                &client,
-                &base_url,
-                &auth,
-                emp_id,
-                "normal",
+            let emp = employee(&client, &base_url, &auth, "運行者", "NT1").await;
+            common::insert_normal_flow_tenko(
+                state.pool(),
+                tenant,
+                emp,
                 "2026-09-12T01:00:00Z",
-                true,
+                "normal",
+                "通常点呼",
+                false,
             )
             .await;
-            let m_id = m["id"].as_str().unwrap();
-
-            // 測定は保存されている
-            assert_eq!(m["status"], "completed");
-
-            let sessions = sessions_for_measurement(state.pool(), tenant, m_id).await;
-            assert_eq!(sessions.len(), 1, "通常点呼のセッションが 1 件できる");
-            assert_eq!(sessions[0].0, "normal");
-            assert_eq!(sessions[0].1, "completed");
-            assert_eq!(sessions[0].2, None);
-            assert_eq!(
-                type_and_method(state.pool(), tenant, m_id).await,
-                (
-                    vec![("normal".to_string(), "通常点呼".to_string())],
-                    vec![("normal".to_string(), "通常点呼".to_string())],
-                ),
-                "tenko_type 無しは normal、session にも点呼方法 '通常点呼'"
-            );
-
-            // 点呼記録: 点呼方法 '通常点呼' / 執行者は空欄 / 体温・血圧が写っている
-            let rec: (String, Option<String>, Option<f64>, Option<i32>, String) =
-            sqlx::query_as(
-                "SELECT tenko_method, responsible_manager_name, temperature, systolic, employee_name
-                 FROM alc_api.tenko_records WHERE tenant_id = $1",
-            )
-            .bind(tenant)
-            .fetch_one(state.pool())
-            .await
-            .unwrap();
-            assert_eq!(rec.0, "通常点呼");
-            assert_eq!(rec.1, None, "点呼執行者は空欄");
-            assert_eq!(rec.2, Some(36.5));
-            assert_eq!(rec.3, Some(120));
-            assert_eq!(rec.4, "運行者");
 
             // 運行管理者の一覧に出る
             let res = client
@@ -258,551 +101,6 @@ async fn test_normal_measurement_creates_tenko_session_and_record() {
 }
 
 #[tokio::test]
-async fn test_normal_measurement_is_idempotent() {
-    test_group!("通常点呼 → 点呼記録");
-    test_case!(
-        "完了 PUT の 2 回目・同時刻の測定の 2 件目でも記録は 1 組",
-        {
-            let state = common::setup_app_state().await;
-            let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant = common::create_test_tenant(state.pool(), "Normal Tenko Idempotent").await;
-            let jwt = common::create_test_jwt(tenant, "admin");
-            let auth = format!("Bearer {jwt}");
-            let client = reqwest::Client::new();
-
-            let emp =
-                common::create_test_employee(&client, &base_url, &auth, "運行者", "NT2").await;
-            let emp_id = emp["id"].as_str().unwrap();
-            let measured_at = "2026-09-12T02:00:00Z";
-
-            let m = post_measurement(
-                &client,
-                &base_url,
-                &auth,
-                emp_id,
-                "normal",
-                measured_at,
-                true,
-            )
-            .await;
-            let m_id = m["id"].as_str().unwrap().to_string();
-            assert_eq!(counts(state.pool(), tenant).await, (1, 1));
-
-            // 同じ測定への完了 PUT を 2 回 (オンラインの再送)
-            for _ in 0..2 {
-                let res = client
-                    .put(format!("{base_url}/api/measurements/{m_id}"))
-                    .header("Authorization", &auth)
-                    .json(&serde_json::json!({
-                        "status": "completed",
-                        "record_as_tenko": true,
-                    }))
-                    .send()
-                    .await
-                    .unwrap();
-                assert_eq!(res.status(), 200);
-            }
-            assert_eq!(
-                counts(state.pool(), tenant).await,
-                (1, 1),
-                "同じ測定への再送で記録は増えない"
-            );
-
-            // オンラインの完了 PUT が落ちて offline 保存へ回り、同じ乗務員・同じ測定時刻の
-            // 測定がもう 1 件できる経路
-            let m2 = post_measurement(
-                &client,
-                &base_url,
-                &auth,
-                emp_id,
-                "normal",
-                measured_at,
-                true,
-            )
-            .await;
-            assert_ne!(
-                m2["id"].as_str().unwrap(),
-                m_id,
-                "測定自体は 2 件目ができる"
-            );
-            assert_eq!(
-                counts(state.pool(), tenant).await,
-                (1, 1),
-                "同じ乗務員・同じ測定時刻なら記録は 1 組のまま"
-            );
-        }
-    );
-}
-
-#[tokio::test]
-async fn test_normal_measurement_over_is_cancelled() {
-    test_group!("通常点呼 → 点呼記録");
-    test_case!(
-        "アルコール検知 (over) はセッションが中止になる",
-        {
-            let state = common::setup_app_state().await;
-            let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant = common::create_test_tenant(state.pool(), "Normal Tenko Over").await;
-            let jwt = common::create_test_jwt(tenant, "admin");
-            let auth = format!("Bearer {jwt}");
-            let client = reqwest::Client::new();
-
-            let emp =
-                common::create_test_employee(&client, &base_url, &auth, "運行者", "NT3").await;
-            let emp_id = emp["id"].as_str().unwrap();
-
-            let m = post_measurement(
-                &client,
-                &base_url,
-                &auth,
-                emp_id,
-                "over",
-                "2026-09-12T03:00:00Z",
-                true,
-            )
-            .await;
-            let sessions =
-                sessions_for_measurement(state.pool(), tenant, m["id"].as_str().unwrap()).await;
-            assert_eq!(sessions.len(), 1);
-            assert_eq!(sessions[0].1, "cancelled");
-            assert_eq!(sessions[0].2.as_deref(), Some("アルコール検知"));
-            assert_eq!(counts(state.pool(), tenant).await, (1, 1));
-        }
-    );
-}
-
-#[tokio::test]
-async fn test_normal_measurement_error_result_is_not_recorded() {
-    test_group!("通常点呼 → 点呼記録");
-    test_case!(
-        "結果が error の測定は保存だけされ、記録は作らない",
-        {
-            let state = common::setup_app_state().await;
-            let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant = common::create_test_tenant(state.pool(), "Normal Tenko Error").await;
-            let jwt = common::create_test_jwt(tenant, "admin");
-            let auth = format!("Bearer {jwt}");
-            let client = reqwest::Client::new();
-
-            let emp =
-                common::create_test_employee(&client, &base_url, &auth, "運行者", "NT4").await;
-            let emp_id = emp["id"].as_str().unwrap();
-
-            let m = post_measurement(
-                &client,
-                &base_url,
-                &auth,
-                emp_id,
-                "error",
-                "2026-09-12T04:00:00Z",
-                true,
-            )
-            .await;
-            // 測定は保存される (エラーにしない)
-            assert_eq!(m["status"], "completed");
-            assert_eq!(counts(state.pool(), tenant).await, (0, 0));
-        }
-    );
-}
-
-#[tokio::test]
-async fn test_measurement_without_mark_creates_nothing() {
-    test_group!("通常点呼 → 点呼記録");
-    test_case!(
-        "印なしの測定は今までどおり記録を作らない",
-        {
-            let state = common::setup_app_state().await;
-            let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant = common::create_test_tenant(state.pool(), "Normal Tenko Unmarked").await;
-            let jwt = common::create_test_jwt(tenant, "admin");
-            let auth = format!("Bearer {jwt}");
-            let client = reqwest::Client::new();
-
-            let emp =
-                common::create_test_employee(&client, &base_url, &auth, "運行者", "NT5").await;
-            let emp_id = emp["id"].as_str().unwrap();
-
-            post_measurement(
-                &client,
-                &base_url,
-                &auth,
-                emp_id,
-                "normal",
-                "2026-09-12T05:00:00Z",
-                false,
-            )
-            .await;
-            assert_eq!(counts(state.pool(), tenant).await, (0, 0));
-        }
-    );
-}
-
-#[tokio::test]
-async fn test_measurement_survives_failed_record_creation() {
-    test_group!("通常点呼 → 点呼記録");
-    test_case!(
-        "記録の作成が失敗しても測定は残る (内側だけ rollback)",
-        {
-            let state = common::setup_app_state().await;
-            let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant = common::create_test_tenant(state.pool(), "Normal Tenko Failure").await;
-            let jwt = common::create_test_jwt(tenant, "admin");
-            let auth = format!("Bearer {jwt}");
-            let client = reqwest::Client::new();
-
-            let emp =
-                common::create_test_employee(&client, &base_url, &auth, "運行者", "NT6").await;
-            let emp_id = emp["id"].as_str().unwrap();
-
-            // 点呼記録の INSERT を**このテナントの行に限って**失敗させる。
-            // 表の RENAME や DROP と違い、並行して走る他のテスト (別テナント) には当たらない。
-            sqlx::query(
-                r#"CREATE OR REPLACE FUNCTION alc_api.fail_tenko_record_insert_for_test()
-               RETURNS TRIGGER AS $$
-               BEGIN
-                   RAISE EXCEPTION 'injected failure for test';
-               END;
-               $$ LANGUAGE plpgsql"#,
-            )
-            .execute(state.pool())
-            .await
-            .unwrap();
-            sqlx::query(&format!(
-                "CREATE TRIGGER trg_fail_tenko_record_insert_{}
-             BEFORE INSERT ON alc_api.tenko_records
-             FOR EACH ROW WHEN (NEW.tenant_id = '{tenant}')
-             EXECUTE FUNCTION alc_api.fail_tenko_record_insert_for_test()",
-                tenant.simple()
-            ))
-            .execute(state.pool())
-            .await
-            .unwrap();
-
-            let m = post_measurement(
-                &client,
-                &base_url,
-                &auth,
-                emp_id,
-                "normal",
-                "2026-09-12T06:00:00Z",
-                true,
-            )
-            .await;
-
-            sqlx::query(&format!(
-                "DROP TRIGGER trg_fail_tenko_record_insert_{} ON alc_api.tenko_records",
-                tenant.simple()
-            ))
-            .execute(state.pool())
-            .await
-            .unwrap();
-
-            // 測定は commit されている
-            let res = client
-                .get(format!(
-                    "{base_url}/api/measurements/{}",
-                    m["id"].as_str().unwrap()
-                ))
-                .header("Authorization", &auth)
-                .send()
-                .await
-                .unwrap();
-            assert_eq!(res.status(), 200, "記録の作成が失敗しても測定は残る");
-
-            // 記録側は内側の rollback でセッションごと巻き戻る
-            assert_eq!(counts(state.pool(), tenant).await, (0, 0));
-        }
-    );
-}
-
-/// 始業 / 終業を選んだ測定が、その種別の点呼セッション・点呼記録になることを確かめる
-async fn assert_typed_record(tenko_type: &str, tenant_name: &str, code: &str, measured_at: &str) {
-    let state = common::setup_app_state().await;
-    let base_url = common::spawn_test_server(state.clone()).await;
-    let tenant = common::create_test_tenant(state.pool(), tenant_name).await;
-    let jwt = common::create_test_jwt(tenant, "admin");
-    let auth = format!("Bearer {jwt}");
-    let client = reqwest::Client::new();
-
-    let emp = common::create_test_employee(&client, &base_url, &auth, "運行者", code).await;
-    let emp_id = emp["id"].as_str().unwrap();
-
-    let res = send_measurement(
-        &client,
-        &base_url,
-        &auth,
-        emp_id,
-        "normal",
-        measured_at,
-        true,
-        Some(tenko_type),
-    )
-    .await;
-    assert_eq!(res.status(), 201);
-    let m: Value = res.json().await.unwrap();
-
-    let expected = vec![(tenko_type.to_string(), "通常点呼".to_string())];
-    assert_eq!(
-        type_and_method(state.pool(), tenant, m["id"].as_str().unwrap()).await,
-        (expected.clone(), expected),
-        "session・record とも tenko_type={tenko_type}、点呼方法は '通常点呼'"
-    );
-    assert_eq!(counts(state.pool(), tenant).await, (1, 1));
-}
-
-#[tokio::test]
-async fn test_normal_measurement_with_pre_operation() {
-    test_group!("通常点呼 → 点呼記録 (始業・終業)");
-    test_case!("始業を選ぶと pre_operation で記録される", {
-        assert_typed_record(
-            "pre_operation",
-            "Normal Tenko Pre",
-            "NT7",
-            "2026-09-12T07:00:00Z",
-        )
-        .await;
-    });
-}
-
-#[tokio::test]
-async fn test_normal_measurement_with_post_operation() {
-    test_group!("通常点呼 → 点呼記録 (始業・終業)");
-    test_case!("終業を選ぶと post_operation で記録される", {
-        assert_typed_record(
-            "post_operation",
-            "Normal Tenko Post",
-            "NT8",
-            "2026-09-12T08:00:00Z",
-        )
-        .await;
-    });
-}
-
-#[tokio::test]
-async fn test_invalid_tenko_type_is_rejected() {
-    test_group!("通常点呼 → 点呼記録 (始業・終業)");
-    test_case!(
-        "不正な種別は 400 で、測定も記録も作らない (POST / PUT)",
-        {
-            let state = common::setup_app_state().await;
-            let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant = common::create_test_tenant(state.pool(), "Normal Tenko Invalid").await;
-            let jwt = common::create_test_jwt(tenant, "admin");
-            let auth = format!("Bearer {jwt}");
-            let client = reqwest::Client::new();
-
-            let emp =
-                common::create_test_employee(&client, &base_url, &auth, "運行者", "NT9").await;
-            let emp_id = emp["id"].as_str().unwrap();
-
-            // POST
-            let res = send_measurement(
-                &client,
-                &base_url,
-                &auth,
-                emp_id,
-                "normal",
-                "2026-09-12T09:00:00Z",
-                true,
-                Some("mid_operation"),
-            )
-            .await;
-            assert_eq!(res.status(), 400);
-            assert_eq!(measurement_count(state.pool(), tenant).await, 0);
-            assert_eq!(counts(state.pool(), tenant).await, (0, 0));
-
-            // PUT (測定開始 → 完了 PUT に不正な種別)
-            let res = client
-                .post(format!("{base_url}/api/measurements/start"))
-                .header("Authorization", &auth)
-                .json(&serde_json::json!({ "employee_id": emp_id }))
-                .send()
-                .await
-                .unwrap();
-            assert_eq!(res.status(), 201);
-            let started: Value = res.json().await.unwrap();
-            let m_id = started["id"].as_str().unwrap();
-
-            let res = client
-                .put(format!("{base_url}/api/measurements/{m_id}"))
-                .header("Authorization", &auth)
-                .json(&serde_json::json!({
-                    "status": "completed",
-                    "alcohol_value": 0.0,
-                    "result_type": "normal",
-                    "measured_at": "2026-09-12T09:30:00Z",
-                    "record_as_tenko": true,
-                    "tenko_type": "pre",
-                }))
-                .send()
-                .await
-                .unwrap();
-            assert_eq!(res.status(), 400);
-
-            let status: String =
-                sqlx::query_scalar("SELECT status FROM alc_api.measurements WHERE id = $1")
-                    .bind(Uuid::parse_str(m_id).unwrap())
-                    .fetch_one(state.pool())
-                    .await
-                    .unwrap();
-            assert_eq!(status, "started", "400 の PUT は測定を更新しない");
-            assert_eq!(counts(state.pool(), tenant).await, (0, 0));
-        }
-    );
-}
-
-#[tokio::test]
-async fn test_typed_record_is_idempotent() {
-    test_group!("通常点呼 → 点呼記録 (始業・終業)");
-    test_case!(
-        "同じ測定へ pre の PUT 2 回・同じ乗務員同時刻の normal と post でも 1 組",
-        {
-            let state = common::setup_app_state().await;
-            let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant = common::create_test_tenant(state.pool(), "Normal Tenko Typed Idem").await;
-            let jwt = common::create_test_jwt(tenant, "admin");
-            let auth = format!("Bearer {jwt}");
-            let client = reqwest::Client::new();
-
-            let emp =
-                common::create_test_employee(&client, &base_url, &auth, "運行者", "NT10").await;
-            let emp_id = emp["id"].as_str().unwrap();
-
-            // 同じ測定へ pre の完了 PUT を 2 回
-            let m = post_measurement(
-                &client,
-                &base_url,
-                &auth,
-                emp_id,
-                "normal",
-                "2026-09-12T10:00:00Z",
-                false,
-            )
-            .await;
-            let m_id = m["id"].as_str().unwrap();
-            for _ in 0..2 {
-                let res = client
-                    .put(format!("{base_url}/api/measurements/{m_id}"))
-                    .header("Authorization", &auth)
-                    .json(&serde_json::json!({
-                        "status": "completed",
-                        "record_as_tenko": true,
-                        "tenko_type": "pre_operation",
-                    }))
-                    .send()
-                    .await
-                    .unwrap();
-                assert_eq!(res.status(), 200);
-            }
-            assert_eq!(counts(state.pool(), tenant).await, (1, 1));
-            let pre = vec![("pre_operation".to_string(), "通常点呼".to_string())];
-            assert_eq!(
-                type_and_method(state.pool(), tenant, m_id).await,
-                (pre.clone(), pre)
-            );
-
-            // 同じ乗務員・同じ measured_at で normal → post
-            let measured_at = "2026-09-12T11:00:00Z";
-            post_measurement(
-                &client,
-                &base_url,
-                &auth,
-                emp_id,
-                "normal",
-                measured_at,
-                true,
-            )
-            .await;
-            let res = send_measurement(
-                &client,
-                &base_url,
-                &auth,
-                emp_id,
-                "normal",
-                measured_at,
-                true,
-                Some("post_operation"),
-            )
-            .await;
-            assert_eq!(res.status(), 201, "測定自体は保存される");
-            assert_eq!(
-                counts(state.pool(), tenant).await,
-                (2, 2),
-                "同じ乗務員・同じ測定時刻の normal と post は 1 組 (先の 1 組と合わせて 2 組)"
-            );
-        }
-    );
-}
-
-#[tokio::test]
-async fn test_old_version_row_still_blocks_typed_resend() {
-    test_group!("通常点呼 → 点呼記録 (始業・終業)");
-    test_case!(
-        "切り替えの窓: 旧版が作った (normal, DEFAULT) の session があれば pre の再送でも 1 組",
-        {
-            let state = common::setup_app_state().await;
-            let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant = common::create_test_tenant(state.pool(), "Normal Tenko Window").await;
-            let jwt = common::create_test_jwt(tenant, "admin");
-            let auth = format!("Bearer {jwt}");
-            let client = reqwest::Client::new();
-
-            let emp =
-                common::create_test_employee(&client, &base_url, &auth, "運行者", "NT11").await;
-            let emp_id = emp["id"].as_str().unwrap();
-
-            let m = post_measurement(
-                &client,
-                &base_url,
-                &auth,
-                emp_id,
-                "normal",
-                "2026-09-12T12:00:00Z",
-                false,
-            )
-            .await;
-            let m_id = m["id"].as_str().unwrap();
-
-            // 旧版の INSERT を模す: tenko_method を指定しない (DEFAULT '自動点呼' が入る)
-            sqlx::query(
-                "INSERT INTO alc_api.tenko_sessions (
-                     tenant_id, employee_id, tenko_type, status, measurement_id,
-                     started_at, completed_at
-                 ) VALUES ($1, $2, 'normal', 'completed', $3, $4, NOW())",
-            )
-            .bind(tenant)
-            .bind(Uuid::parse_str(emp_id).unwrap())
-            .bind(Uuid::parse_str(m_id).unwrap())
-            .bind(chrono::DateTime::parse_from_rfc3339("2026-09-12T12:00:00Z").unwrap())
-            .execute(state.pool())
-            .await
-            .unwrap();
-
-            let res = client
-                .put(format!("{base_url}/api/measurements/{m_id}"))
-                .header("Authorization", &auth)
-                .json(&serde_json::json!({
-                    "status": "completed",
-                    "record_as_tenko": true,
-                    "tenko_type": "pre_operation",
-                }))
-                .send()
-                .await
-                .unwrap();
-            assert_eq!(res.status(), 200, "再送の保存は成功する");
-
-            let (sessions, records) = type_and_method(state.pool(), tenant, m_id).await;
-            assert_eq!(
-                sessions,
-                vec![("normal".to_string(), "自動点呼".to_string())],
-                "旧版の 1 行のまま (pre の 2 行目はできない)"
-            );
-            assert!(records.is_empty(), "記録も増えない");
-        }
-    );
-}
-
-#[tokio::test]
 async fn test_remote_tenko_session_is_not_caught_by_normal_flow_index() {
     test_group!("通常点呼 → 点呼記録 (始業・終業)");
     test_case!(
@@ -821,20 +119,17 @@ async fn test_remote_tenko_session_is_not_caught_by_normal_flow_index() {
             let emp_id = emp["id"].as_str().unwrap();
 
             // 通常点呼 (終業) で記録済みの測定
-            let res = send_measurement(
-                &client,
-                &base_url,
-                &auth,
-                emp_id,
-                "pass",
+            let (m_id, _) = common::insert_normal_flow_tenko(
+                state.pool(),
+                tenant,
+                Uuid::parse_str(emp_id).unwrap(),
                 "2026-09-12T13:00:00Z",
-                true,
-                Some("post_operation"),
+                "post_operation",
+                "通常点呼",
+                false,
             )
             .await;
-            assert_eq!(res.status(), 201);
-            let m: Value = res.json().await.unwrap();
-            let m_id = m["id"].as_str().unwrap();
+            let m_id = m_id.to_string();
 
             // 遠隔点呼 (スケジュール無し) の終業 (Refs ippoan/rust-alc-api#655)
             let res = client
@@ -885,1135 +180,6 @@ async fn test_remote_tenko_session_is_not_caught_by_normal_flow_index() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// 電子車検証の番号と carins の車検期限 (migration 142、Refs ippoan/alc-app-s3#110)
-//
-// 値はすべて合成値。照合の SQL (alc-core の repo/car_inspections.rs) は RLS と
-// 正規表現・to_date を実 DB で通すので mock では検証できない。
-// ---------------------------------------------------------------------------
-
-/// car_inspection に合成の行を 1 件入れる (取り込みと同じ UPSERT を通す)
-async fn insert_car_inspection(
-    state: &rust_alc_api::AppState,
-    tenant: Uuid,
-    cert_no: &str,
-    car_id: &str,
-    expirdate: &str,
-    grantdate_d: &str,
-) {
-    let cert_info = serde_json::json!({
-        "ElectCertMgNo": cert_no,
-        "CarId": car_id,
-        "EntryNoCarNo": format!("TEST-CAR-NO-{cert_no}"),
-        "GrantdateE": "R",
-        "GrantdateY": "07",
-        "GrantdateM": "01",
-        "GrantdateD": grantdate_d,
-        "TwodimensionCodeInfoValidPeriodExpirdate": expirdate,
-    });
-    state
-        .car_inspections
-        .upsert_from_json(tenant, &cert_info, "test")
-        .await
-        .expect("car_inspection の合成行を入れられない");
-}
-
-/// 電子車検証の番号付きで通常点呼の測定を保存する
-#[allow(clippy::too_many_arguments)]
-async fn send_carins_measurement(
-    client: &reqwest::Client,
-    base_url: &str,
-    auth: &str,
-    employee_id: &str,
-    measured_at: &str,
-    cert_no: Option<&str>,
-    vehicle_id: Option<&str>,
-) -> reqwest::Response {
-    let mut body = serde_json::json!({
-        "employee_id": employee_id,
-        "alcohol_value": 0.0,
-        "result_type": "normal",
-        "measured_at": measured_at,
-        "record_as_tenko": true,
-    });
-    if let Some(v) = cert_no {
-        body["carins_cert_no"] = Value::from(v);
-    }
-    if let Some(v) = vehicle_id {
-        body["carins_vehicle_id"] = Value::from(v);
-    }
-    client
-        .post(format!("{base_url}/api/measurements"))
-        .header("Authorization", auth)
-        .json(&body)
-        .send()
-        .await
-        .unwrap()
-}
-
-type CarinsCols = (
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-);
-
-/// 測定に紐づく session の 4 列と、record の record_data の同じ 4 値
-async fn carins_of(
-    pool: &sqlx::PgPool,
-    tenant_id: Uuid,
-    measurement: &Value,
-) -> (CarinsCols, CarinsCols) {
-    let mid = Uuid::parse_str(measurement["id"].as_str().unwrap()).unwrap();
-    let session: CarinsCols = sqlx::query_as(
-        "SELECT carins_cert_no, carins_vehicle_id, carins_expires_on::text, carins_matched_by
-         FROM alc_api.tenko_sessions WHERE tenant_id = $1 AND measurement_id = $2",
-    )
-    .bind(tenant_id)
-    .bind(mid)
-    .fetch_one(pool)
-    .await
-    .unwrap();
-    let record: CarinsCols = sqlx::query_as(
-        "SELECT r.record_data->>'carins_cert_no', r.record_data->>'carins_vehicle_id',
-                r.record_data->>'carins_expires_on', r.record_data->>'carins_matched_by'
-         FROM alc_api.tenko_records r
-         JOIN alc_api.tenko_sessions s ON s.id = r.session_id
-         WHERE r.tenant_id = $1 AND s.measurement_id = $2",
-    )
-    .bind(tenant_id)
-    .bind(mid)
-    .fetch_one(pool)
-    .await
-    .unwrap();
-    (session, record)
-}
-
-fn cols(
-    cert_no: Option<&str>,
-    vehicle_id: Option<&str>,
-    expires_on: Option<&str>,
-    matched_by: Option<&str>,
-) -> CarinsCols {
-    (
-        cert_no.map(str::to_string),
-        vehicle_id.map(str::to_string),
-        expires_on.map(str::to_string),
-        matched_by.map(str::to_string),
-    )
-}
-
-#[tokio::test]
-async fn test_carins_expiry_is_recorded() {
-    test_group!("通常点呼 → 点呼記録 (電子車検証)");
-    test_case!(
-        "管理番号一致 / 車両 ID 一致 / 未登録 / 番号なし を session・record_data・CSV に残す",
-        {
-            let state = common::setup_app_state().await;
-            let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant = common::create_test_tenant(state.pool(), "Normal Tenko Carins").await;
-            let jwt = common::create_test_jwt(tenant, "admin");
-            let auth = format!("Bearer {jwt}");
-            let client = reqwest::Client::new();
-
-            let emp =
-                common::create_test_employee(&client, &base_url, &auth, "運行者", "NTC1").await;
-            let emp_id = emp["id"].as_str().unwrap();
-            insert_car_inspection(
-                &state,
-                tenant,
-                "000000000001",
-                "TESTCARID00001",
-                "301231",
-                "01",
-            )
-            .await;
-
-            // 管理番号で一致
-            let res = send_carins_measurement(
-                &client,
-                &base_url,
-                &auth,
-                emp_id,
-                "2026-09-15T01:00:00Z",
-                Some("000000000001"),
-                Some("TESTCARID00009"),
-            )
-            .await;
-            assert_eq!(res.status(), 201);
-            let by_cert: Value = res.json().await.unwrap();
-            let expected = cols(
-                Some("000000000001"),
-                Some("TESTCARID00009"),
-                Some("2030-12-31"),
-                Some("cert_no"),
-            );
-            assert_eq!(
-                carins_of(state.pool(), tenant, &by_cert).await,
-                (expected.clone(), expected)
-            );
-
-            // 管理番号は不一致、車両 ID で一致
-            let res = send_carins_measurement(
-                &client,
-                &base_url,
-                &auth,
-                emp_id,
-                "2026-09-15T02:00:00Z",
-                Some("000000000009"),
-                Some("TESTCARID00001"),
-            )
-            .await;
-            assert_eq!(res.status(), 201);
-            let by_car: Value = res.json().await.unwrap();
-            let expected = cols(
-                Some("000000000009"),
-                Some("TESTCARID00001"),
-                Some("2030-12-31"),
-                Some("car_id"),
-            );
-            assert_eq!(
-                carins_of(state.pool(), tenant, &by_car).await,
-                (expected.clone(), expected)
-            );
-
-            // carins に無い → none・期限 NULL (点呼は記録する)
-            let res = send_carins_measurement(
-                &client,
-                &base_url,
-                &auth,
-                emp_id,
-                "2026-09-15T03:00:00Z",
-                Some("000000000008"),
-                None,
-            )
-            .await;
-            assert_eq!(res.status(), 201);
-            let none: Value = res.json().await.unwrap();
-            let expected = cols(Some("000000000008"), None, None, Some("none"));
-            assert_eq!(
-                carins_of(state.pool(), tenant, &none).await,
-                (expected.clone(), expected)
-            );
-
-            // 番号を送らない (空文字も無しと同じ) → 4 列とも NULL
-            let res = send_carins_measurement(
-                &client,
-                &base_url,
-                &auth,
-                emp_id,
-                "2026-09-15T04:00:00Z",
-                Some(""),
-                None,
-            )
-            .await;
-            assert_eq!(res.status(), 201);
-            let without: Value = res.json().await.unwrap();
-            let expected = cols(None, None, None, None);
-            assert_eq!(
-                carins_of(state.pool(), tenant, &without).await,
-                (expected.clone(), expected)
-            );
-            assert_eq!(counts(state.pool(), tenant).await, (4, 4));
-
-            // CSV の末尾 4 列
-            let res = client
-                .get(format!("{base_url}/api/tenko/records/csv"))
-                .header("Authorization", &auth)
-                .send()
-                .await
-                .unwrap();
-            assert_eq!(res.status(), 200);
-            let csv = res.text().await.unwrap();
-            let mut lines = csv.trim_start_matches('\u{feff}').lines();
-            let header = lines.next().unwrap();
-            assert!(
-                header.ends_with(
-                    "record_hash,carins_cert_no,carins_vehicle_id,carins_expires_on,carins_matched_by"
-                ),
-                "CSV の末尾 4 列: {header}"
-            );
-            let tails: Vec<String> = lines
-                .map(|l| l.rsplitn(5, ',').collect::<Vec<_>>()[..4].join("|"))
-                .collect();
-            for expected in [
-                "cert_no|2030-12-31|TESTCARID00009|000000000001",
-                "car_id|2030-12-31|TESTCARID00001|000000000009",
-                "none|||000000000008",
-                "|||",
-            ] {
-                assert!(
-                    tails.iter().any(|t| t == expected),
-                    "CSV に {expected} の行がある: {tails:?}"
-                );
-            }
-        }
-    );
-}
-
-#[tokio::test]
-async fn test_carins_newer_row_of_same_car_wins() {
-    test_group!("通常点呼 → 点呼記録 (電子車検証)");
-    test_case!(
-        "同じ車両 ID で管理番号の違う古い行と新しい行 → 新しい期限 (記録と照合口の両方)",
-        {
-            let state = common::setup_app_state().await;
-            let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant = common::create_test_tenant(state.pool(), "Normal Tenko Carins New").await;
-            let jwt = common::create_test_jwt(tenant, "admin");
-            let auth = format!("Bearer {jwt}");
-            let client = reqwest::Client::new();
-
-            let emp =
-                common::create_test_employee(&client, &base_url, &auth, "運行者", "NTC2").await;
-            let emp_id = emp["id"].as_str().unwrap();
-            // 継続検査の前 (古い管理番号) と後 (新しい管理番号)
-            insert_car_inspection(
-                &state,
-                tenant,
-                "000000000002",
-                "TESTCARID00002",
-                "250101",
-                "01",
-            )
-            .await;
-            insert_car_inspection(
-                &state,
-                tenant,
-                "000000000003",
-                "TESTCARID00002",
-                "301231",
-                "02",
-            )
-            .await;
-
-            // 古い電子車検証の番号でタップしても、同じ車の新しい期限が出る
-            let res = send_carins_measurement(
-                &client,
-                &base_url,
-                &auth,
-                emp_id,
-                "2026-09-15T05:00:00Z",
-                Some("000000000002"),
-                Some("TESTCARID00002"),
-            )
-            .await;
-            assert_eq!(res.status(), 201);
-            let m: Value = res.json().await.unwrap();
-            let (session, _) = carins_of(state.pool(), tenant, &m).await;
-            assert_eq!(session.2.as_deref(), Some("2030-12-31"));
-            assert_eq!(
-                session.3.as_deref(),
-                Some("car_id"),
-                "新しい行は管理番号が違うので car_id で一致"
-            );
-
-            // 照合口 (kiosk) も同じ SQL
-            let res = client
-                .post(format!("{base_url}/api/car-inspections/lookup"))
-                .header("Authorization", &auth)
-                .json(&serde_json::json!({"cert_no": "000000000003", "car_id": "TESTCARID00002"}))
-                .send()
-                .await
-                .unwrap();
-            assert_eq!(res.status(), 200);
-            let body: Value = res.json().await.unwrap();
-            assert_eq!(
-                body,
-                serde_json::json!({
-                    "expires_on": "2030-12-31",
-                    "matched_by": "cert_no",
-                    "car_no": "TEST-CAR-NO-000000000003",
-                })
-            );
-        }
-    );
-}
-
-#[tokio::test]
-async fn test_carins_broken_expiry_still_records() {
-    test_group!("通常点呼 → 点呼記録 (電子車検証)");
-    test_case!(
-        "壊れた期限の行でも記録は作られ、期限は NULL",
-        {
-            let state = common::setup_app_state().await;
-            let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant =
-                common::create_test_tenant(state.pool(), "Normal Tenko Carins Broken").await;
-            let jwt = common::create_test_jwt(tenant, "admin");
-            let auth = format!("Bearer {jwt}");
-            let client = reqwest::Client::new();
-
-            let emp =
-                common::create_test_employee(&client, &base_url, &auth, "運行者", "NTC3").await;
-            let emp_id = emp["id"].as_str().unwrap();
-            // 月が 13 — 正規表現で外れて NULL (照合は成功)
-            insert_car_inspection(
-                &state,
-                tenant,
-                "000000000004",
-                "TESTCARID00004",
-                "301399",
-                "01",
-            )
-            .await;
-            // 2 月 31 日 — 正規表現は通るが to_date が失敗する (照合の SQL エラー)
-            insert_car_inspection(
-                &state,
-                tenant,
-                "000000000005",
-                "TESTCARID00005",
-                "300231",
-                "01",
-            )
-            .await;
-
-            let res = send_carins_measurement(
-                &client,
-                &base_url,
-                &auth,
-                emp_id,
-                "2026-09-15T06:00:00Z",
-                Some("000000000004"),
-                None,
-            )
-            .await;
-            assert_eq!(res.status(), 201);
-            let m: Value = res.json().await.unwrap();
-            let expected = cols(Some("000000000004"), None, None, Some("cert_no"));
-            assert_eq!(
-                carins_of(state.pool(), tenant, &m).await,
-                (expected.clone(), expected)
-            );
-
-            let res = send_carins_measurement(
-                &client,
-                &base_url,
-                &auth,
-                emp_id,
-                "2026-09-15T07:00:00Z",
-                Some("000000000005"),
-                Some("TESTCARID00005"),
-            )
-            .await;
-            assert_eq!(res.status(), 201);
-            let m: Value = res.json().await.unwrap();
-            let expected = cols(Some("000000000005"), Some("TESTCARID00005"), None, None);
-            assert_eq!(
-                carins_of(state.pool(), tenant, &m).await,
-                (expected.clone(), expected),
-                "照合に失敗しても番号は保存し、期限と matched_by は NULL"
-            );
-            assert_eq!(counts(state.pool(), tenant).await, (2, 2));
-        }
-    );
-}
-
-#[tokio::test]
-async fn test_invalid_carins_number_is_rejected() {
-    test_group!("通常点呼 → 点呼記録 (電子車検証)");
-    test_case!(
-        "不正な桁の番号は 400 で、測定も記録も作らない (POST / PUT)",
-        {
-            let state = common::setup_app_state().await;
-            let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant =
-                common::create_test_tenant(state.pool(), "Normal Tenko Carins Invalid").await;
-            let jwt = common::create_test_jwt(tenant, "admin");
-            let auth = format!("Bearer {jwt}");
-            let client = reqwest::Client::new();
-
-            let emp =
-                common::create_test_employee(&client, &base_url, &auth, "運行者", "NTC4").await;
-            let emp_id = emp["id"].as_str().unwrap();
-
-            // POST
-            let res = send_carins_measurement(
-                &client,
-                &base_url,
-                &auth,
-                emp_id,
-                "2026-09-15T08:00:00Z",
-                Some("0000000001"),
-                None,
-            )
-            .await;
-            assert_eq!(res.status(), 400);
-            assert_eq!(measurement_count(state.pool(), tenant).await, 0);
-
-            // PUT (測定開始 → 完了 PUT に不正な車両 ID)
-            let res = client
-                .post(format!("{base_url}/api/measurements/start"))
-                .header("Authorization", &auth)
-                .json(&serde_json::json!({ "employee_id": emp_id }))
-                .send()
-                .await
-                .unwrap();
-            assert_eq!(res.status(), 201);
-            let started: Value = res.json().await.unwrap();
-            let m_id = started["id"].as_str().unwrap();
-
-            let res = client
-                .put(format!("{base_url}/api/measurements/{m_id}"))
-                .header("Authorization", &auth)
-                .json(&serde_json::json!({
-                    "status": "completed",
-                    "alcohol_value": 0.0,
-                    "result_type": "normal",
-                    "measured_at": "2026-09-15T08:30:00Z",
-                    "record_as_tenko": true,
-                    "carins_vehicle_id": "TESTCARID-0001",
-                }))
-                .send()
-                .await
-                .unwrap();
-            assert_eq!(res.status(), 400);
-
-            let status: String =
-                sqlx::query_scalar("SELECT status FROM alc_api.measurements WHERE id = $1")
-                    .bind(Uuid::parse_str(m_id).unwrap())
-                    .fetch_one(state.pool())
-                    .await
-                    .unwrap();
-            assert_eq!(status, "started", "400 の PUT は測定を更新しない");
-            assert_eq!(counts(state.pool(), tenant).await, (0, 0));
-        }
-    );
-}
-
-// =========================================================================
-// 点呼方法 (通常点呼 / IT点呼) と、保存の応答に載る点呼セッションの id
-// (Refs ippoan/alc-app#387)
-// =========================================================================
-
-/// 測定を開始して id を返す (この後 `put_completed` で完了させる)
-async fn start_measurement(
-    client: &reqwest::Client,
-    base_url: &str,
-    auth: &str,
-    employee_id: &str,
-) -> String {
-    let res = client
-        .post(format!("{base_url}/api/measurements/start"))
-        .header("Authorization", auth)
-        .json(&serde_json::json!({ "employee_id": employee_id }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 201, "measurement start failed");
-    let started: Value = res.json().await.unwrap();
-    started["id"].as_str().unwrap().to_string()
-}
-
-/// 完了 PUT の body (`tenko_type` / `tenko_method` は付けたときだけ載る)
-fn completed_body(
-    result_type: &str,
-    measured_at: &str,
-    record_as_tenko: bool,
-    tenko_type: Option<&str>,
-    tenko_method: Option<&str>,
-) -> Value {
-    let mut body = serde_json::json!({
-        "status": "completed",
-        "alcohol_value": 0.0,
-        "result_type": result_type,
-        "measured_at": measured_at,
-        "temperature": 36.5,
-        "record_as_tenko": record_as_tenko,
-    });
-    if let Some(tt) = tenko_type {
-        body["tenko_type"] = Value::from(tt);
-    }
-    if let Some(method) = tenko_method {
-        body["tenko_method"] = Value::from(method);
-    }
-    body
-}
-
-/// 完了 PUT を送り、応答をそのまま返す
-async fn put_measurement(
-    client: &reqwest::Client,
-    base_url: &str,
-    auth: &str,
-    measurement_id: &str,
-    body: &Value,
-) -> reqwest::Response {
-    client
-        .put(format!("{base_url}/api/measurements/{measurement_id}"))
-        .header("Authorization", auth)
-        .json(body)
-        .send()
-        .await
-        .unwrap()
-}
-
-/// 完了 PUT を送り、200 の応答 JSON を返す
-async fn put_measurement_ok(
-    client: &reqwest::Client,
-    base_url: &str,
-    auth: &str,
-    measurement_id: &str,
-    body: &Value,
-) -> Value {
-    let res = put_measurement(client, base_url, auth, measurement_id, body).await;
-    assert_eq!(res.status(), 200, "measurement PUT failed");
-    res.json().await.unwrap()
-}
-
-/// 測定に紐づく session の (id, tenko_type, tenko_method, status)
-async fn session_rows(
-    pool: &sqlx::PgPool,
-    tenant_id: Uuid,
-    measurement_id: &str,
-) -> Vec<(Uuid, String, String, String)> {
-    sqlx::query_as::<_, (Uuid, String, String, String)>(
-        "SELECT id, tenko_type, tenko_method, status FROM alc_api.tenko_sessions
-         WHERE tenant_id = $1 AND measurement_id = $2",
-    )
-    .bind(tenant_id)
-    .bind(Uuid::parse_str(measurement_id).unwrap())
-    .fetch_all(pool)
-    .await
-    .unwrap()
-}
-
-/// 測定に紐づく session の identity_method と、record の record_data の同じ値。
-/// record 側は (key が在るか, 値)
-async fn identity_methods(
-    pool: &sqlx::PgPool,
-    tenant_id: Uuid,
-    measurement_id: &str,
-) -> (Vec<Option<String>>, Vec<(bool, Option<String>)>) {
-    let mid = Uuid::parse_str(measurement_id).unwrap();
-    let sessions = sqlx::query_scalar::<_, Option<String>>(
-        "SELECT identity_method FROM alc_api.tenko_sessions
-         WHERE tenant_id = $1 AND measurement_id = $2",
-    )
-    .bind(tenant_id)
-    .bind(mid)
-    .fetch_all(pool)
-    .await
-    .unwrap();
-    let records = sqlx::query_as::<_, (bool, Option<String>)>(
-        "SELECT r.record_data ? 'identity_method', r.record_data->>'identity_method'
-         FROM alc_api.tenko_records r
-         JOIN alc_api.tenko_sessions s ON s.id = r.session_id
-         WHERE r.tenant_id = $1 AND s.measurement_id = $2",
-    )
-    .bind(tenant_id)
-    .bind(mid)
-    .fetch_all(pool)
-    .await
-    .unwrap();
-    (sessions, records)
-}
-
-/// テナント内の点呼セッション / 点呼記録の件数 (点呼方法を問わない)
-async fn counts_any_method(pool: &sqlx::PgPool, tenant_id: Uuid) -> (i64, i64) {
-    let sessions: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM alc_api.tenko_sessions WHERE tenant_id = $1")
-            .bind(tenant_id)
-            .fetch_one(pool)
-            .await
-            .unwrap();
-    let records: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM alc_api.tenko_records WHERE tenant_id = $1")
-            .bind(tenant_id)
-            .fetch_one(pool)
-            .await
-            .unwrap();
-    (sessions, records)
-}
-
-#[tokio::test]
-async fn test_put_without_tenko_method_stays_normal_and_returns_session_id() {
-    test_group!("通常点呼 → 点呼記録 (点呼方法)");
-    test_case!(
-        "tenko_method を送らない PUT は通常点呼のまま、応答に session の id が載る",
-        {
-            let state = common::setup_app_state().await;
-            let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant = common::create_test_tenant(state.pool(), "Tenko Method Default").await;
-            let jwt = common::create_test_jwt(tenant, "admin");
-            let auth = format!("Bearer {jwt}");
-            let client = reqwest::Client::new();
-
-            let emp =
-                common::create_test_employee(&client, &base_url, &auth, "運行者", "NT30").await;
-            let emp_id = emp["id"].as_str().unwrap();
-
-            // 未指定 と 明示の '通常点呼' は同じ結果になる
-            for (method, measured_at) in [
-                (None, "2026-09-13T01:00:00Z"),
-                (Some("通常点呼"), "2026-09-13T02:00:00Z"),
-            ] {
-                let m_id = start_measurement(&client, &base_url, &auth, emp_id).await;
-                let json = put_measurement_ok(
-                    &client,
-                    &base_url,
-                    &auth,
-                    &m_id,
-                    &completed_body("normal", measured_at, true, None, method),
-                )
-                .await;
-
-                // 既存の欄はそのまま (入れ子にならない)
-                assert_eq!(json["id"], m_id);
-                assert_eq!(json["status"], "completed");
-                assert_eq!(json["result_type"], "normal");
-                assert_eq!(json["employee_id"], emp_id);
-                assert_eq!(json["temperature"], 36.5);
-
-                let rows = session_rows(state.pool(), tenant, &m_id).await;
-                assert_eq!(rows.len(), 1);
-                assert_eq!(
-                    json["tenko_session_id"],
-                    rows[0].0.to_string(),
-                    "応答の id は作られた session の id (tenko_method={method:?})"
-                );
-                let normal = vec![("normal".to_string(), "通常点呼".to_string())];
-                assert_eq!(
-                    type_and_method(state.pool(), tenant, &m_id).await,
-                    (normal.clone(), normal),
-                    "session も record も '通常点呼' (tenko_method={method:?})"
-                );
-            }
-            assert_eq!(counts(state.pool(), tenant).await, (2, 2));
-        }
-    );
-}
-
-#[tokio::test]
-async fn test_put_it_tenko_records_method_on_session_and_record() {
-    test_group!("通常点呼 → 点呼記録 (点呼方法)");
-    test_case!(
-        "IT点呼 は session と record の両方に書かれ、状態の決まり方は通常点呼と同じ",
-        {
-            let state = common::setup_app_state().await;
-            let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant = common::create_test_tenant(state.pool(), "Tenko Method IT").await;
-            let jwt = common::create_test_jwt(tenant, "admin");
-            let auth = format!("Bearer {jwt}");
-            let client = reqwest::Client::new();
-
-            let emp =
-                common::create_test_employee(&client, &base_url, &auth, "運行者", "NT31").await;
-            let emp_id = emp["id"].as_str().unwrap();
-
-            // (送る種別, 記録される種別, 結果, 期待する状態)
-            let cases = [
-                (None, "normal", "normal", "completed"),
-                (Some("pre_operation"), "pre_operation", "pass", "completed"),
-                (
-                    Some("post_operation"),
-                    "post_operation",
-                    "normal",
-                    "completed",
-                ),
-                // アルコール検知は IT点呼 でも中止 (status_for_result を共有している)
-                (Some("pre_operation"), "pre_operation", "over", "cancelled"),
-            ];
-            for (i, (tenko_type, recorded_type, result, status)) in cases.into_iter().enumerate() {
-                let measured_at = format!("2026-09-13T1{i}:00:00Z");
-                let m_id = start_measurement(&client, &base_url, &auth, emp_id).await;
-                let json = put_measurement_ok(
-                    &client,
-                    &base_url,
-                    &auth,
-                    &m_id,
-                    &completed_body(result, &measured_at, true, tenko_type, Some("IT点呼")),
-                )
-                .await;
-
-                let rows = session_rows(state.pool(), tenant, &m_id).await;
-                assert_eq!(rows.len(), 1, "session は 1 行 (tenko_type={tenko_type:?})");
-                assert_eq!(json["tenko_session_id"], rows[0].0.to_string());
-                assert_eq!(rows[0].1, recorded_type);
-                assert_eq!(rows[0].2, "IT点呼");
-                assert_eq!(rows[0].3, status, "結果 {result} → {status}");
-
-                let expected = vec![(recorded_type.to_string(), "IT点呼".to_string())];
-                assert_eq!(
-                    type_and_method(state.pool(), tenant, &m_id).await,
-                    (expected.clone(), expected),
-                    "session・record とも点呼方法は 'IT点呼' (tenko_type={tenko_type:?})"
-                );
-            }
-            assert_eq!(counts_any_method(state.pool(), tenant).await, (4, 4));
-            assert_eq!(
-                counts(state.pool(), tenant).await,
-                (0, 0),
-                "'通常点呼' の行は 1 つもできていない"
-            );
-
-            // 判定待ちは専用の状態ではなく manager_judgment IS NULL で表す
-            let judged: i64 = sqlx::query_scalar(
-                "SELECT count(*) FROM alc_api.tenko_sessions
-                 WHERE tenant_id = $1 AND manager_judgment IS NOT NULL",
-            )
-            .bind(tenant)
-            .fetch_one(state.pool())
-            .await
-            .unwrap();
-            assert_eq!(judged, 0);
-        }
-    );
-}
-
-#[tokio::test]
-async fn test_put_resend_returns_same_session_id() {
-    test_group!("通常点呼 → 点呼記録 (点呼方法)");
-    test_case!(
-        "同じ測定の再送は session 1 行のまま、応答の id も 1 回目と同じ",
-        {
-            let state = common::setup_app_state().await;
-            let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant = common::create_test_tenant(state.pool(), "Tenko Method Resend").await;
-            let jwt = common::create_test_jwt(tenant, "admin");
-            let auth = format!("Bearer {jwt}");
-            let client = reqwest::Client::new();
-
-            let emp =
-                common::create_test_employee(&client, &base_url, &auth, "運行者", "NT32").await;
-            let emp_id = emp["id"].as_str().unwrap();
-            let measured_at = "2026-09-13T03:00:00Z";
-
-            let m_id = start_measurement(&client, &base_url, &auth, emp_id).await;
-            let mut body = completed_body(
-                "normal",
-                measured_at,
-                true,
-                Some("pre_operation"),
-                Some("IT点呼"),
-            );
-            body["identity_method"] = Value::from("ic_card");
-
-            let first = put_measurement_ok(&client, &base_url, &auth, &m_id, &body).await;
-            let first_id = first["tenko_session_id"].as_str().unwrap().to_string();
-            assert_eq!(counts_any_method(state.pool(), tenant).await, (1, 1));
-            let ic_card = (
-                vec![Some("ic_card".to_string())],
-                vec![(true, Some("ic_card".to_string()))],
-            );
-            assert_eq!(identity_methods(state.pool(), tenant, &m_id).await, ic_card);
-
-            // 同じ内容で再送 (ON CONFLICT DO NOTHING は対象指定なしなので、
-            // 行数と id の両方で確かめる)
-            for _ in 0..2 {
-                let again = put_measurement_ok(&client, &base_url, &auth, &m_id, &body).await;
-                assert_eq!(again["tenko_session_id"], first_id, "再送でも同じ id");
-                assert_eq!(again["status"], "completed");
-            }
-            assert_eq!(
-                counts_any_method(state.pool(), tenant).await,
-                (1, 1),
-                "再送で session も record も増えない"
-            );
-            let rows = session_rows(state.pool(), tenant, &m_id).await;
-            assert_eq!(rows.len(), 1);
-            assert_eq!(rows[0].0.to_string(), first_id);
-
-            // 点呼方法を変えて再送しても、最初の 1 行のまま (書き換えない)
-            let as_normal = put_measurement_ok(
-                &client,
-                &base_url,
-                &auth,
-                &m_id,
-                &completed_body("normal", measured_at, true, Some("pre_operation"), None),
-            )
-            .await;
-            assert_eq!(as_normal["tenko_session_id"], first_id);
-            let it = vec![("pre_operation".to_string(), "IT点呼".to_string())];
-            assert_eq!(
-                type_and_method(state.pool(), tenant, &m_id).await,
-                (it.clone(), it),
-                "先に記録された点呼方法のまま"
-            );
-            assert_eq!(counts_any_method(state.pool(), tenant).await, (1, 1));
-
-            // 本人確認の方法も先勝ち: 送らない再送 (上) でも、別の値の再送でも書き換えない
-            assert_eq!(
-                identity_methods(state.pool(), tenant, &m_id).await,
-                ic_card,
-                "identity_method を送らない再送で NULL に戻らない"
-            );
-            let mut as_manual = body.clone();
-            as_manual["identity_method"] = Value::from("manual");
-            let again = put_measurement_ok(&client, &base_url, &auth, &m_id, &as_manual).await;
-            assert_eq!(again["tenko_session_id"], first_id);
-            assert_eq!(
-                identity_methods(state.pool(), tenant, &m_id).await,
-                ic_card,
-                "別の値の再送でも、先に記録された本人確認の方法のまま"
-            );
-            assert_eq!(counts_any_method(state.pool(), tenant).await, (1, 1));
-
-            // 同じ乗務員・同じ測定時刻の別の測定 (offline 保存へ回った経路) は
-            // (employee_id, started_at) の unique が弾く。その測定には session が
-            // 紐づいていないので、応答の id は null
-            let other = start_measurement(&client, &base_url, &auth, emp_id).await;
-            let json = put_measurement_ok(&client, &base_url, &auth, &other, &body).await;
-            assert_eq!(json["status"], "completed", "測定自体は保存される");
-            assert!(json["tenko_session_id"].is_null());
-            assert_eq!(counts_any_method(state.pool(), tenant).await, (1, 1));
-        }
-    );
-}
-
-#[tokio::test]
-async fn test_put_identity_method_is_stored_on_session_and_record_data() {
-    test_group!("通常点呼 → 点呼記録 (本人確認の方法)");
-    test_case!(
-        "identity_method は session の列と record_data に入り、省略は NULL、応答に出る",
-        {
-            let state = common::setup_app_state().await;
-            let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant = common::create_test_tenant(state.pool(), "Identity Method").await;
-            let jwt = common::create_test_jwt(tenant, "admin");
-            let auth = format!("Bearer {jwt}");
-            let client = reqwest::Client::new();
-
-            let emp =
-                common::create_test_employee(&client, &base_url, &auth, "運行者", "NT35").await;
-            let emp_id = emp["id"].as_str().unwrap();
-
-            // 5 つの値。点呼方法 (通常点呼 / IT点呼) とは独立に書かれる
-            let cases = [
-                ("license", None),
-                ("ic_card", Some("IT点呼")),
-                ("remote_punch", None),
-                ("nfc_card", Some("通常点呼")),
-                ("manual", Some("IT点呼")),
-            ];
-            for (i, (identity, tenko_method)) in cases.into_iter().enumerate() {
-                let measured_at = format!("2026-09-14T1{i}:00:00Z");
-                let m_id = start_measurement(&client, &base_url, &auth, emp_id).await;
-                let mut body = completed_body("normal", &measured_at, true, None, tenko_method);
-                body["identity_method"] = Value::from(identity);
-                let json = put_measurement_ok(&client, &base_url, &auth, &m_id, &body).await;
-                assert!(
-                    !json.as_object().unwrap().contains_key("identity_method"),
-                    "測定の応答の形は変えていない"
-                );
-
-                assert_eq!(
-                    identity_methods(state.pool(), tenant, &m_id).await,
-                    (
-                        vec![Some(identity.to_string())],
-                        vec![(true, Some(identity.to_string()))]
-                    ),
-                    "session の列と record_data の両方に入る (identity_method={identity})"
-                );
-                let method = tenko_method.unwrap_or("通常点呼").to_string();
-                let expected = vec![("normal".to_string(), method)];
-                assert_eq!(
-                    type_and_method(state.pool(), tenant, &m_id).await,
-                    (expected.clone(), expected),
-                    "点呼方法は identity_method に引きずられない"
-                );
-
-                // 点呼セッションの応答に出る
-                let session_id = json["tenko_session_id"].as_str().unwrap();
-                let res = client
-                    .get(format!("{base_url}/api/tenko/sessions/{session_id}"))
-                    .header("Authorization", &auth)
-                    .send()
-                    .await
-                    .unwrap();
-                assert_eq!(res.status(), 200);
-                let session: Value = res.json().await.unwrap();
-                assert_eq!(session["identity_method"], identity);
-            }
-
-            // 省略 (既存の端末): 列は NULL、record_data には key が在って null
-            let m_id = start_measurement(&client, &base_url, &auth, emp_id).await;
-            let body = completed_body("normal", "2026-09-14T20:00:00Z", true, None, None);
-            let json = put_measurement_ok(&client, &base_url, &auth, &m_id, &body).await;
-            let none = (vec![None], vec![(true, None)]);
-            assert_eq!(identity_methods(state.pool(), tenant, &m_id).await, none);
-            let session_id = json["tenko_session_id"].as_str().unwrap();
-            let res = client
-                .get(format!("{base_url}/api/tenko/sessions/{session_id}"))
-                .header("Authorization", &auth)
-                .send()
-                .await
-                .unwrap();
-            assert_eq!(res.status(), 200);
-            let session: Value = res.json().await.unwrap();
-            assert!(session.as_object().unwrap().contains_key("identity_method"));
-            assert!(session["identity_method"].is_null());
-
-            // 先勝ち: 省略で記録された後に値を付けて再送しても NULL のまま
-            let mut with_value = body.clone();
-            with_value["identity_method"] = Value::from("license");
-            let again = put_measurement_ok(&client, &base_url, &auth, &m_id, &with_value).await;
-            assert_eq!(again["tenko_session_id"], session_id);
-            assert_eq!(
-                identity_methods(state.pool(), tenant, &m_id).await,
-                none,
-                "2 回目の保存は書かない"
-            );
-            assert_eq!(counts_any_method(state.pool(), tenant).await, (6, 6));
-
-            // 知らない値は 400 (測定も更新しない・session も作らない)
-            let m_id = start_measurement(&client, &base_url, &auth, emp_id).await;
-            let mut bad = completed_body("normal", "2026-09-14T21:00:00Z", true, None, None);
-            bad["identity_method"] = Value::from("face");
-            let res = put_measurement(&client, &base_url, &auth, &m_id, &bad).await;
-            assert_eq!(res.status(), 400);
-            let status: String =
-                sqlx::query_scalar("SELECT status FROM alc_api.measurements WHERE id = $1")
-                    .bind(Uuid::parse_str(&m_id).unwrap())
-                    .fetch_one(state.pool())
-                    .await
-                    .unwrap();
-            assert_eq!(status, "started", "400 の PUT は測定を更新しない");
-            assert_eq!(counts_any_method(state.pool(), tenant).await, (6, 6));
-        }
-    );
-}
-
-#[tokio::test]
-async fn test_put_without_session_returns_null_session_id() {
-    test_group!("通常点呼 → 点呼記録 (点呼方法)");
-    test_case!(
-        "印なし・点呼にならない結果・不正な点呼方法では session を作らない",
-        {
-            let state = common::setup_app_state().await;
-            let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant = common::create_test_tenant(state.pool(), "Tenko Method Null").await;
-            let jwt = common::create_test_jwt(tenant, "admin");
-            let auth = format!("Bearer {jwt}");
-            let client = reqwest::Client::new();
-
-            let emp =
-                common::create_test_employee(&client, &base_url, &auth, "運行者", "NT33").await;
-            let emp_id = emp["id"].as_str().unwrap();
-
-            // record_as_tenko: false (点呼方法を付けていても作らない)
-            let m_id = start_measurement(&client, &base_url, &auth, emp_id).await;
-            let json = put_measurement_ok(
-                &client,
-                &base_url,
-                &auth,
-                &m_id,
-                &completed_body(
-                    "normal",
-                    "2026-09-13T04:00:00Z",
-                    false,
-                    None,
-                    Some("IT点呼"),
-                ),
-            )
-            .await;
-            assert_eq!(json["status"], "completed");
-            assert!(json.as_object().unwrap().contains_key("tenko_session_id"));
-            assert!(json["tenko_session_id"].is_null());
-
-            // 結果が error (点呼にならない測定)
-            let m_id = start_measurement(&client, &base_url, &auth, emp_id).await;
-            let json = put_measurement_ok(
-                &client,
-                &base_url,
-                &auth,
-                &m_id,
-                &completed_body("error", "2026-09-13T05:00:00Z", true, None, Some("IT点呼")),
-            )
-            .await;
-            assert_eq!(json["status"], "completed", "測定は保存される");
-            assert!(json["tenko_session_id"].is_null());
-
-            // まだ完了していない保存 (status を送らない途中の PUT)
-            let m_id = start_measurement(&client, &base_url, &auth, emp_id).await;
-            let json = put_measurement_ok(
-                &client,
-                &base_url,
-                &auth,
-                &m_id,
-                &serde_json::json!({ "temperature": 36.4, "record_as_tenko": true }),
-            )
-            .await;
-            assert_eq!(json["status"], "started");
-            assert!(json["tenko_session_id"].is_null());
-
-            // 自動点呼・遠隔点呼はこの口から作らせない (400、測定も更新しない)
-            for method in ["自動点呼", "遠隔点呼"] {
-                let res = put_measurement(
-                    &client,
-                    &base_url,
-                    &auth,
-                    &m_id,
-                    &completed_body("normal", "2026-09-13T06:00:00Z", true, None, Some(method)),
-                )
-                .await;
-                assert_eq!(res.status(), 400, "tenko_method={method} は 400");
-            }
-            let status: String =
-                sqlx::query_scalar("SELECT status FROM alc_api.measurements WHERE id = $1")
-                    .bind(Uuid::parse_str(&m_id).unwrap())
-                    .fetch_one(state.pool())
-                    .await
-                    .unwrap();
-            assert_eq!(status, "started", "400 の PUT は測定を更新しない");
-
-            assert_eq!(counts_any_method(state.pool(), tenant).await, (0, 0));
-        }
-    );
-}
-
-#[tokio::test]
-async fn test_post_ignores_tenko_method() {
-    test_group!("通常点呼 → 点呼記録 (点呼方法)");
-    test_case!(
-        "POST は tenko_method を受けず、通常点呼のまま",
-        {
-            let state = common::setup_app_state().await;
-            let base_url = common::spawn_test_server(state.clone()).await;
-            let tenant = common::create_test_tenant(state.pool(), "Tenko Method POST").await;
-            let jwt = common::create_test_jwt(tenant, "admin");
-            let auth = format!("Bearer {jwt}");
-            let client = reqwest::Client::new();
-
-            let emp =
-                common::create_test_employee(&client, &base_url, &auth, "運行者", "NT34").await;
-            let emp_id = emp["id"].as_str().unwrap();
-
-            let res = client
-                .post(format!("{base_url}/api/measurements"))
-                .header("Authorization", &auth)
-                .json(&serde_json::json!({
-                    "employee_id": emp_id,
-                    "alcohol_value": 0.0,
-                    "result_type": "normal",
-                    "measured_at": "2026-09-13T07:00:00Z",
-                    "record_as_tenko": true,
-                    "tenko_method": "IT点呼",
-                    "identity_method": "ic_card",
-                }))
-                .send()
-                .await
-                .unwrap();
-            assert_eq!(res.status(), 201);
-            let m: Value = res.json().await.unwrap();
-            assert!(
-                !m.as_object().unwrap().contains_key("tenko_session_id"),
-                "POST の応答の形は変えていない"
-            );
-
-            let normal = vec![("normal".to_string(), "通常点呼".to_string())];
-            assert_eq!(
-                type_and_method(state.pool(), tenant, m["id"].as_str().unwrap()).await,
-                (normal.clone(), normal)
-            );
-            // POST は本人確認の方法も受けない (記録なし = NULL)
-            assert_eq!(
-                identity_methods(state.pool(), tenant, m["id"].as_str().unwrap()).await,
-                (vec![None], vec![(true, None)])
-            );
-        }
-    );
-}
-
 #[tokio::test]
 async fn test_it_tenko_session_accepts_manager_judgment() {
     test_group!("通常点呼 → 点呼記録 (点呼方法)");
@@ -2047,22 +213,17 @@ async fn test_it_tenko_session_accepts_manager_judgment() {
             let manager: Value = res.json().await.unwrap();
             let manager_id = manager["id"].as_str().unwrap();
 
-            let m_id = start_measurement(&client, &base_url, &auth, emp_id).await;
-            let json = put_measurement_ok(
-                &client,
-                &base_url,
-                &auth,
-                &m_id,
-                &completed_body(
-                    "normal",
-                    "2026-09-13T08:00:00Z",
-                    true,
-                    Some("pre_operation"),
-                    Some("IT点呼"),
-                ),
+            let (m_id, session_id) = common::insert_normal_flow_tenko(
+                state.pool(),
+                tenant,
+                Uuid::parse_str(emp_id).unwrap(),
+                "2026-09-13T08:00:00Z",
+                "pre_operation",
+                "IT点呼",
+                false,
             )
             .await;
-            let session_id = json["tenko_session_id"].as_str().unwrap().to_string();
+            let (m_id, session_id) = (m_id.to_string(), session_id.to_string());
 
             // 保存の直後: 完了扱いで、判定はまだ無い (= 判定待ち)
             let res = client
@@ -2135,32 +296,26 @@ async fn create_manager(
     manager["id"].as_str().unwrap().to_string()
 }
 
-/// 測定を開始 → 完了 PUT で点呼のセッションを 1 件作り、session の id を返す
+/// 始業の点呼のセッション (と記録) を 1 件入れ、session の id を返す
 /// (`tenko_method` が None なら通常点呼)
-async fn tenko_session_via_put(
-    client: &reqwest::Client,
-    base_url: &str,
-    auth: &str,
+async fn tenko_session(
+    pool: &sqlx::PgPool,
+    tenant: Uuid,
     employee_id: &str,
     measured_at: &str,
     tenko_method: Option<&str>,
 ) -> String {
-    let m_id = start_measurement(client, base_url, auth, employee_id).await;
-    let json = put_measurement_ok(
-        client,
-        base_url,
-        auth,
-        &m_id,
-        &completed_body(
-            "normal",
-            measured_at,
-            true,
-            Some("pre_operation"),
-            tenko_method,
-        ),
+    let (_, session_id) = common::insert_normal_flow_tenko(
+        pool,
+        tenant,
+        Uuid::parse_str(employee_id).unwrap(),
+        measured_at,
+        "pre_operation",
+        tenko_method.unwrap_or("通常点呼"),
+        false,
     )
     .await;
-    json["tenko_session_id"].as_str().unwrap().to_string()
+    session_id.to_string()
 }
 
 /// 判定の POST を送り、応答をそのまま返す (`method` は付けたときだけ載る)
@@ -2252,33 +407,23 @@ async fn test_it_tenko_judgment_method_is_stored_and_kept() {
     let emp_id = emp["id"].as_str().unwrap();
     let manager_id = create_manager(&client, &base_url, &auth, "NT41M").await;
 
-    let s_in_person = tenko_session_via_put(
-        &client,
-        &base_url,
-        &auth,
+    let s_in_person = tenko_session(
+        state.pool(),
+        tenant,
         emp_id,
         "2026-09-14T08:00:00Z",
         Some("IT点呼"),
     )
     .await;
-    let s_it = tenko_session_via_put(
-        &client,
-        &base_url,
-        &auth,
+    let s_it = tenko_session(
+        state.pool(),
+        tenant,
         emp_id,
         "2026-09-14T09:00:00Z",
         Some("IT点呼"),
     )
     .await;
-    let s_normal = tenko_session_via_put(
-        &client,
-        &base_url,
-        &auth,
-        emp_id,
-        "2026-09-14T10:00:00Z",
-        None,
-    )
-    .await;
+    let s_normal = tenko_session(state.pool(), tenant, emp_id, "2026-09-14T10:00:00Z", None).await;
 
     test_case!(
         "IT点呼 の最初の確定に method が無ければ 400 で、行は変わらない",
@@ -2461,42 +606,31 @@ async fn test_list_pending_it_tenko_sessions() {
     let manager_id = create_manager(&client, &base_url, &auth, "NT42M").await;
 
     // IT点呼 3 件 (a: 未判定のまま / b: 後で判定する / c: 先に判定済み) と通常点呼 1 件 (未判定)
-    let it_a = tenko_session_via_put(
-        &client,
-        &base_url,
-        &auth,
+    let it_a = tenko_session(
+        state.pool(),
+        tenant,
         emp_id,
         "2026-09-15T08:00:00Z",
         Some("IT点呼"),
     )
     .await;
-    let it_b = tenko_session_via_put(
-        &client,
-        &base_url,
-        &auth,
+    let it_b = tenko_session(
+        state.pool(),
+        tenant,
         emp_id,
         "2026-09-15T09:00:00Z",
         Some("IT点呼"),
     )
     .await;
-    let it_c = tenko_session_via_put(
-        &client,
-        &base_url,
-        &auth,
+    let it_c = tenko_session(
+        state.pool(),
+        tenant,
         emp_id,
         "2026-09-15T10:00:00Z",
         Some("IT点呼"),
     )
     .await;
-    let normal = tenko_session_via_put(
-        &client,
-        &base_url,
-        &auth,
-        emp_id,
-        "2026-09-15T11:00:00Z",
-        None,
-    )
-    .await;
+    let normal = tenko_session(state.pool(), tenant, emp_id, "2026-09-15T11:00:00Z", None).await;
     let res = post_judgment(
         &client,
         &base_url,
@@ -2616,42 +750,31 @@ async fn test_csv_reads_in_person_it_tenko_as_in_person_tenko() {
     let emp_id = emp["id"].as_str().unwrap();
     let manager_id = create_manager(&client, &base_url, &auth, "NT43M").await;
 
-    let s_in_person = tenko_session_via_put(
-        &client,
-        &base_url,
-        &auth,
+    let s_in_person = tenko_session(
+        state.pool(),
+        tenant,
         emp_id,
         "2026-09-16T08:00:00Z",
         Some("IT点呼"),
     )
     .await;
-    let s_it = tenko_session_via_put(
-        &client,
-        &base_url,
-        &auth,
+    let s_it = tenko_session(
+        state.pool(),
+        tenant,
         emp_id,
         "2026-09-16T09:00:00Z",
         Some("IT点呼"),
     )
     .await;
-    let s_pending = tenko_session_via_put(
-        &client,
-        &base_url,
-        &auth,
+    let s_pending = tenko_session(
+        state.pool(),
+        tenant,
         emp_id,
         "2026-09-16T10:00:00Z",
         Some("IT点呼"),
     )
     .await;
-    let s_normal = tenko_session_via_put(
-        &client,
-        &base_url,
-        &auth,
-        emp_id,
-        "2026-09-16T11:00:00Z",
-        None,
-    )
-    .await;
+    let s_normal = tenko_session(state.pool(), tenant, emp_id, "2026-09-16T11:00:00Z", None).await;
     for (session_id, method) in [(&s_in_person, "in_person"), (&s_it, "it")] {
         let res = post_judgment(
             &client,

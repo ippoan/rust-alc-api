@@ -815,9 +815,8 @@ impl TenkoSessionRepository for PgTenkoSessionRepository {
 
 /// 点呼記録 (`tenko_records`) の INSERT 本体。
 ///
-/// 自動点呼 / 遠隔点呼 (`create_tenko_record`) と通常点呼 ([`crate::normal_tenko`]) で
-/// 32 列の INSERT を 1 本に保つための共有関数。通常点呼は測定の保存と同じ
-/// transaction の中で呼ぶので、接続を自分で取らず `conn` を受け取る形にしてある。
+/// 自動点呼 / 遠隔点呼 (`create_tenko_record`) が呼ぶ。通常点呼の記録は alc-measurements-worker が
+/// 同じ列・同じ値で書く (列を変えるときは worker の `INSERT_RECORD` も揃える)。
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn insert_record(
     conn: &mut sqlx::PgConnection,

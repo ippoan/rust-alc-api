@@ -611,7 +611,7 @@ async fn dashboard(
 /// * `pass` / `normal` → 完了 (`completed`)
 /// * `error` / 未知の値 / 無し → `None` (点呼として閉じない = 記録を作らない)
 ///
-/// 自動点呼 (`submit_alcohol`) と通常点呼 ([`crate::normal_tenko`]) で規則を 1 本に保つ。
+/// 通常点呼の判定は alc-measurements-worker が同じ規則で持つ (変えるときは worker も揃える)。
 pub(crate) fn status_for_result(
     result: Option<&str>,
 ) -> Option<(&'static str, Option<&'static str>)> {

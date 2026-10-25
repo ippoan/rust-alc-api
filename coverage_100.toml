@@ -192,10 +192,6 @@ path = "crates/alc-misc/src/health.rs"
 type = "mock"
 
 [[files]]
-path = "crates/alc-misc/src/measurements.rs"
-type = "mock"
-
-[[files]]
 path = "crates/alc-misc/src/sso_admin.rs"
 type = "mock"
 
