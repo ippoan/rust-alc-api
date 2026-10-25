@@ -28,7 +28,6 @@ pub use alc_maintenance::files as maintenance_files;
 pub use alc_maintenance::records as maintenance_records;
 pub use alc_maintenance::vehicles as maintenance_vehicles;
 pub use alc_misc::access_requests;
-pub use alc_misc::api_tokens;
 pub use alc_misc::bot_admin;
 pub use alc_misc::carrying_items;
 pub use alc_misc::communication_items;
@@ -36,7 +35,6 @@ pub use alc_misc::employees;
 pub use alc_misc::guidance_records;
 pub use alc_misc::health;
 pub use alc_misc::items;
-pub use alc_misc::members;
 pub use alc_misc::sso_admin;
 pub use alc_misc::staging;
 pub use alc_misc::tenant_users;
@@ -94,8 +92,6 @@ pub fn router(
         .merge(sso_admin::router())
         .merge(bot_admin::router())
         .merge(tenant_users::router())
-        .merge(members::router())
-        .merge(api_tokens::router())
         .layer(axum_middleware::from_fn(require_tenant_header));
 
     // 内部 API ルート (auth-worker 等の信頼できる呼び出し元のみ、aud=alc-api-internal)
