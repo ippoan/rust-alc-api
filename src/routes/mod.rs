@@ -103,7 +103,6 @@ pub fn router(
         .merge(notify_lineworks_channels::internal_router())
         .merge(notify_viewer::internal_router())
         .merge(notify_line_webhook::internal_router())
-        .merge(auth::internal_router())
         // device_id から有効な端末の tenant を返す内部口。auth-worker の
         // pair-internal が tenant 決定に使う (Refs ippoan/auth-worker#544)。
         .merge(devices::internal_router())
