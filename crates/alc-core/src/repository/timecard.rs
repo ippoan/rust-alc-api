@@ -3,9 +3,8 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use crate::models::{
-    TimePunch, TimePunchWithDevice, TimecardCard, TimecardCardConflictPolicy,
-    TimecardCardDeleteResult, TimecardCardUpsertItem, TimecardCardUpsertSkipped,
-    TimecardCardUpsertSummary,
+    TimePunchWithDevice, TimecardCard, TimecardCardConflictPolicy, TimecardCardDeleteResult,
+    TimecardCardUpsertItem, TimecardCardUpsertSkipped, TimecardCardUpsertSummary,
 };
 
 /// 一括取り込み (`PUT /timecard/cards/bulk-by-code`) が入れた行に刻む出所
@@ -124,41 +123,6 @@ pub trait TimecardRepository: Send + Sync {
         tenant_id: Uuid,
         nfc_id: &str,
     ) -> Result<Option<Uuid>, sqlx::Error>;
-
-    /// ブラウザ版 (キオスク / Android) の打刻を 1 件記録する。
-    ///
-    /// **書き込み先は `hub_measurements` ただ 1 つ**
-    /// (Refs ippoan/alc-app-s3#134)。打刻の一次表を 1 つにするため — 2 つあると
-    /// 「時刻がサーバ時刻になる」「端末 ID が入らない」「重複排除が要る」が
-    /// そこから生まれる。端末 (NFC タイムカード端末) は同じ表に WS 経由で入れる。
-    ///
-    /// `employee_id` は**呼び出し側が解決済みのものを渡し、payload に凍結する**。
-    /// 端末側 (`freeze_employee_id`) と同じ理由で、読み出し時に引き直すと
-    /// カードを付け替えたときに過去の打刻が別人に動く。
-    ///
-    /// 戻り値は旧・打刻表の時代からの互換で `TimePunch` の形にして返すが、`id` は
-    /// `hub_measurements.id` である。
-    async fn create_punch(
-        &self,
-        tenant_id: Uuid,
-        employee_id: Uuid,
-        device_id: Option<Uuid>,
-        card_id: &str,
-    ) -> Result<TimePunch, sqlx::Error>;
-
-    /// Get employee name by id.
-    async fn get_employee_name(
-        &self,
-        tenant_id: Uuid,
-        employee_id: Uuid,
-    ) -> Result<String, sqlx::Error>;
-
-    /// List today's punches for an employee.
-    async fn list_today_punches(
-        &self,
-        tenant_id: Uuid,
-        employee_id: Uuid,
-    ) -> Result<Vec<TimePunch>, sqlx::Error>;
 
     /// Count punches with filters.
     async fn count_punches(

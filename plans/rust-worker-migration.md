@@ -95,5 +95,6 @@ W4 を W5〜W7 より前に置くのは、employees / timecard を他の wave �
 - W4a: `staging/export・import` を削除 (#761、auth-worker v0.2.332)
 - W4b: upload 3 口を alc-measurements-worker (v0.1.12) に移し、本番で切り替え済み (auth-worker v0.2.333)。dev 端末の測定で `face-photo`・`blow-video` の書き込みと読み返しを確認。`report-audio` は W7 で確かめる。rust 側の 3 口はこの PR で削除
 - W4c: items・carrying・communication・guidance を新 alc-records-worker (v0.0.1) に移し、本番で切り替え済み (auth-worker v0.2.336)。本番で 4 つの一覧の読み取りを確認 (worker のログで 200)。書き込みとファイルの上げ下ろしは未確認。rust 側の口はこの PR で削除 (先に alc-app#532・nuxt-items#60 で live の検証を外した)
-- 次は W4d (employees・timecard → alc-people-worker)
+- W4d は 3 段に分ける (2026-10-26 に Cloud Run の 7 日の件数と呼び手を調べて決めた): W4d-0 使われていない `POST /api/timecard/punch` を消す (この PR。打刻は alc-app → cf-alc-recorder → `/api/hub/measurements` で入る) / W4d-a timecard (カード・打刻一覧・CSV) → 新 alc-people-worker (振り分けは browser・device・rpc の 3 種。カードの照合 `resolve_employee_by_card` は hub_measurements 用に monolith に残す) / W4d-b employees → 同じ worker (`bulk-by-code` が保留カードを同じ transaction で結ぶので 1 つの worker に置く)
+- 次は W4d-a (timecard → alc-people-worker)
 rust-alc-api は open PR 1 本までなので、W1 以降の worker 側の PR (別 repo) と並行して進める。
