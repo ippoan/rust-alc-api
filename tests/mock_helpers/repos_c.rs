@@ -16,9 +16,7 @@ use rust_alc_api::db::repository::tenko_records::TenkoRecordsRepository;
 use rust_alc_api::db::repository::tenko_schedules::{ScheduleListResult, TenkoSchedulesRepository};
 use rust_alc_api::db::repository::tenko_sessions::{SessionListResult, TenkoSessionRepository};
 use rust_alc_api::db::repository::tenko_webhooks::TenkoWebhooksRepository;
-use rust_alc_api::db::repository::timecard::{
-    PreparedCardUpsert, TimePunchCsvRow, TimecardRepository,
-};
+use rust_alc_api::db::repository::timecard::TimecardRepository;
 
 macro_rules! check_fail {
     ($self:expr) => {
@@ -1622,208 +1620,33 @@ impl TenkoWebhooksRepository for MockTenkoWebhooksRepository {
 }
 
 // ---------------------------------------------------------------------------
-// MockTimecardRepository
+// MockTimecardRepository (カードの照合だけ。hub_measurements の打刻中継が使う)
 // ---------------------------------------------------------------------------
 
 pub struct MockTimecardRepository {
     pub fail_next: AtomicBool,
-    /// Controls create_card: when true, returns a card; when false, returns conflict error
-    pub create_card_conflict: AtomicBool,
-    /// Controls get_card / get_card_by_card_id: when set, returns Some
-    pub card_data: std::sync::Mutex<Option<TimecardCard>>,
-    /// Controls delete_card: when true, returns true (deleted)
-    pub delete_returns_true: AtomicBool,
-    /// Controls find_card_by_card_id for punch: when set, returns Some
+    /// find_card_by_card_id が返すカード (None = 台帳に無い)
     pub find_card_data: std::sync::Mutex<Option<TimecardCard>>,
-    /// Controls find_employee_id_by_nfc for punch fallback
+    /// find_employee_id_by_nfc が返す社員 (免許証番号のフォールバック)
     pub nfc_employee_id: std::sync::Mutex<Option<Uuid>>,
-    /// CSV rows returned by list_punches_for_csv
-    pub csv_rows: std::sync::Mutex<Vec<TimePunchCsvRow>>,
-    /// Cards returned by list_cards
-    pub cards_list: std::sync::Mutex<Vec<TimecardCard>>,
     /// find_card_by_card_id が実際に引いた card_id の記録。
-    /// 照合の手前で正規化が 1 回だけ効いていること (Refs ippoan/alc-app-s3#134) を
-    /// ブラウザ版と端末中継の両経路で固定するために使う
+    /// 照合の手前で正規化が 1 回だけ効いていること (Refs ippoan/alc-app-s3#134) を固定するために使う
     pub card_lookups: std::sync::Mutex<Vec<String>>,
-    /// 一括取り込み (Refs ippoan/rust-alc-api#644) 用の社員台帳: code → employee_id
-    pub bulk_employees: std::sync::Mutex<std::collections::HashMap<String, Uuid>>,
-    /// 同じく カード台帳: **正規化済み** card_id → employee_id。
-    /// **値が `None` = 社員がまだ居ない保留行** (Refs ippoan/rust-alc-api#644)
-    pub bulk_cards: std::sync::Mutex<std::collections::HashMap<String, Option<Uuid>>>,
-    /// 削除 (Refs ippoan/rust-alc-api#644) が返す `(deleted, reason, code)`。
-    /// 既定は「そもそも無い」
-    pub delete_by_card_result: std::sync::Mutex<(usize, String, Option<String>)>,
-    /// 削除に渡された `(card_id, dry_run)`。**card_id は handler で正規化された後の値** —
-    /// 正規化が効いていること・形不正で repository を呼ばないことを固定するために記録する
-    pub delete_by_card_calls: std::sync::Mutex<Vec<(String, bool)>>,
 }
 
 impl Default for MockTimecardRepository {
     fn default() -> Self {
         Self {
             fail_next: AtomicBool::new(false),
-            create_card_conflict: AtomicBool::new(false),
-            card_data: std::sync::Mutex::new(None),
-            delete_returns_true: AtomicBool::new(false),
             find_card_data: std::sync::Mutex::new(None),
             nfc_employee_id: std::sync::Mutex::new(None),
-            csv_rows: std::sync::Mutex::new(vec![]),
-            cards_list: std::sync::Mutex::new(vec![]),
             card_lookups: std::sync::Mutex::new(vec![]),
-            bulk_employees: std::sync::Mutex::new(std::collections::HashMap::new()),
-            bulk_cards: std::sync::Mutex::new(std::collections::HashMap::new()),
-            delete_by_card_result: std::sync::Mutex::new((0, "not_found".to_string(), None)),
-            delete_by_card_calls: std::sync::Mutex::new(vec![]),
         }
     }
 }
 
 #[async_trait::async_trait]
 impl TimecardRepository for MockTimecardRepository {
-    async fn create_card(
-        &self,
-        tenant_id: Uuid,
-        employee_id: Uuid,
-        card_id: &str,
-        label: Option<&str>,
-    ) -> Result<TimecardCard, sqlx::Error> {
-        check_fail!(self);
-        if self.create_card_conflict.load(Ordering::SeqCst) {
-            return Err(sqlx::Error::Database(Box::new(MockDbErrorC(
-                "duplicate key value violates unique constraint \"idx_timecard_cards_unique\""
-                    .to_string(),
-            ))));
-        }
-        Ok(TimecardCard {
-            id: Uuid::new_v4(),
-            tenant_id,
-            employee_id: Some(employee_id),
-            card_id: card_id.to_string(),
-            label: label.map(|s| s.to_string()),
-            source: None,
-            pending_employee_code: None,
-            created_at: Utc::now(),
-        })
-    }
-
-    async fn list_cards(
-        &self,
-        _tenant_id: Uuid,
-        _employee_id: Option<Uuid>,
-    ) -> Result<Vec<TimecardCard>, sqlx::Error> {
-        check_fail!(self);
-        Ok(self.cards_list.lock().unwrap().clone())
-    }
-
-    /// 一括取り込みの in-memory 版 (Refs ippoan/rust-alc-api#644)。
-    ///
-    /// **SQL は 1 行も通らない** — `ON CONFLICT` の実挙動は `tests/timecard_cards_bulk_test.rs`
-    /// (実 DB) が固定する。ここで固定するのは handler 側の受け渡し
-    /// (skip 理由の合流と index 順、dry_run の素通し、DB error) だけ。
-    async fn bulk_upsert_cards_by_code(
-        &self,
-        _tenant_id: Uuid,
-        items: &[PreparedCardUpsert],
-        on_conflict: TimecardCardConflictPolicy,
-        dry_run: bool,
-    ) -> Result<TimecardCardUpsertSummary, sqlx::Error> {
-        check_fail!(self);
-        let employees = self.bulk_employees.lock().unwrap();
-        let mut cards = self.bulk_cards.lock().unwrap();
-        // dry_run は「判定は同じ、書かない」。実装 (Pg 側) は tx を commit しない
-        let mut staged = cards.clone();
-        let mut summary = TimecardCardUpsertSummary::default();
-
-        for item in items {
-            // 社員が引けなくても**落とさない** (Refs ippoan/rust-alc-api#644)。
-            // 持ち主 `None` = 保留行として台帳に載せ、`pending` に数える
-            let employee_id: Option<Uuid> = employees.get(&item.code).copied();
-            let mut accepted = true;
-
-            match staged.get(&item.card_id).copied() {
-                None => {
-                    staged.insert(item.card_id.clone(), employee_id);
-                    summary.created += 1;
-                }
-                Some(owner) if owner == employee_id => summary.unchanged += 1,
-                // 持ち主の居ない行は `reassign` を待たずに引き取る (Pg 側と同じ)
-                Some(None) => {
-                    staged.insert(item.card_id.clone(), employee_id);
-                    summary.updated += 1;
-                }
-                Some(_) if on_conflict == TimecardCardConflictPolicy::Reassign => {
-                    staged.insert(item.card_id.clone(), employee_id);
-                    summary.updated += 1;
-                }
-                Some(_) => {
-                    accepted = false;
-                    summary.skipped.push(TimecardCardUpsertSkipped {
-                        index: item.index,
-                        code: item.code.clone(),
-                        reason: "card_owner_conflict".to_string(),
-                    });
-                }
-            }
-
-            if accepted && employee_id.is_none() {
-                summary.pending += 1;
-            }
-        }
-
-        if !dry_run {
-            *cards = staged;
-        }
-        Ok(summary)
-    }
-
-    async fn get_card(
-        &self,
-        _tenant_id: Uuid,
-        _id: Uuid,
-    ) -> Result<Option<TimecardCard>, sqlx::Error> {
-        check_fail!(self);
-        Ok(self.card_data.lock().unwrap().clone())
-    }
-
-    async fn get_card_by_card_id(
-        &self,
-        _tenant_id: Uuid,
-        _card_id: &str,
-    ) -> Result<Option<TimecardCard>, sqlx::Error> {
-        check_fail!(self);
-        Ok(self.card_data.lock().unwrap().clone())
-    }
-
-    async fn delete_card(&self, _tenant_id: Uuid, _id: Uuid) -> Result<bool, sqlx::Error> {
-        check_fail!(self);
-        Ok(self.delete_returns_true.load(Ordering::SeqCst))
-    }
-
-    /// 削除の in-memory 版 (Refs ippoan/rust-alc-api#644)。
-    ///
-    /// **SQL は 1 行も通らない** — `source` で射程を縛る `WHERE` と、DELETE と
-    /// 「そもそも在るか」を 1 文で分ける CTE の実挙動は
-    /// `tests/timecard_cards_bulk_test.rs` (実 DB) が固定する。ここで固定するのは
-    /// handler 側 (正規化・形の検査・応答の形・dry_run の受け渡し) だけ。
-    async fn delete_card_by_card_id_from_sync(
-        &self,
-        _tenant_id: Uuid,
-        card_id: &str,
-        dry_run: bool,
-    ) -> Result<TimecardCardDeleteResult, sqlx::Error> {
-        self.delete_by_card_calls
-            .lock()
-            .unwrap()
-            .push((card_id.to_string(), dry_run));
-        check_fail!(self);
-        let (deleted, reason, code) = self.delete_by_card_result.lock().unwrap().clone();
-        Ok(TimecardCardDeleteResult {
-            deleted,
-            reason,
-            code,
-        })
-    }
-
     async fn find_card_by_card_id(
         &self,
         _tenant_id: Uuid,
@@ -1841,41 +1664,6 @@ impl TimecardRepository for MockTimecardRepository {
     ) -> Result<Option<Uuid>, sqlx::Error> {
         check_fail!(self);
         Ok(*self.nfc_employee_id.lock().unwrap())
-    }
-
-    async fn count_punches(
-        &self,
-        _tenant_id: Uuid,
-        _employee_id: Option<Uuid>,
-        _date_from: Option<DateTime<Utc>>,
-        _date_to: Option<DateTime<Utc>>,
-    ) -> Result<i64, sqlx::Error> {
-        check_fail!(self);
-        Ok(0)
-    }
-
-    async fn list_punches(
-        &self,
-        _tenant_id: Uuid,
-        _employee_id: Option<Uuid>,
-        _date_from: Option<DateTime<Utc>>,
-        _date_to: Option<DateTime<Utc>>,
-        _limit: i64,
-        _offset: i64,
-    ) -> Result<Vec<TimePunchWithDevice>, sqlx::Error> {
-        check_fail!(self);
-        Ok(vec![])
-    }
-
-    async fn list_punches_for_csv(
-        &self,
-        _tenant_id: Uuid,
-        _employee_id: Option<Uuid>,
-        _date_from: Option<DateTime<Utc>>,
-        _date_to: Option<DateTime<Utc>>,
-    ) -> Result<Vec<TimePunchCsvRow>, sqlx::Error> {
-        check_fail!(self);
-        Ok(self.csv_rows.lock().unwrap().clone())
     }
 }
 

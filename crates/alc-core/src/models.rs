@@ -94,11 +94,11 @@ pub struct UpdateNfcId {
     pub nfc_id: String,
 }
 
-/// 一括 upsert (`PUT /employees/bulk-by-code` と
-/// `PUT /timecard/cards/bulk-by-code`) で 1 リクエストに詰められる items の上限。
+/// 一括 upsert (`PUT /employees/bulk-by-code`) で 1 リクエストに詰められる items の上限。
 ///
-/// **2 つの口で共有する。** 送り手 (relay / Worker) は同じ分割ロジックで投げるので、
-/// 片方だけ広げるともう片方が黙って 400 を返す側になる。
+/// **カード台帳の一括取り込み (`PUT /timecard/cards/bulk-by-code`、ippoan/alc-people-worker の
+/// `timecard::MAX_BULK_UPSERT_ITEMS`) と同じ値にする。** 送り手 (relay / Worker) は同じ分割ロジックで
+/// 投げるので、片方だけ広げるともう片方が黙って 400 を返す側になる。
 pub const MAX_BULK_UPSERT_ITEMS: usize = 500;
 
 /// `PUT /api/employees/bulk-by-code` の 1 件分 (Refs ippoan/alc-app-s3#125)。
@@ -233,64 +233,6 @@ pub struct TimecardCard {
     pub created_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct CreateTimecardCard {
-    pub employee_id: Uuid,
-    pub card_id: String,
-    pub label: Option<String>,
-}
-
-/// `PUT /api/timecard/cards/bulk-by-code` の 1 件分 (Refs ippoan/rust-alc-api#644)。
-/// 既存タイムカード (別システム) のカード台帳を社員番号 (`code`) をキーに
-/// こちらへ初回移行するための形。**送り手は社員の UUID を知らない。**
-///
-/// `card_id` は**読み取った生値のまま**でよい (大文字・`:` 区切りも可)。
-/// 正規化は受け側の `normalize_card_id` 1 か所で行う。
-#[derive(Debug, Deserialize)]
-pub struct TimecardCardUpsertItem {
-    pub code: String,
-    pub card_id: String,
-    pub label: Option<String>,
-}
-
-/// 既に**別の社員**に付いているカードをどう扱うか。既定は `skip`。
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TimecardCardConflictPolicy {
-    /// 付け替えない (`card_owner_conflict` として skipped に載せる)。
-    #[default]
-    Skip,
-    /// `employee_id` を送られてきた社員へ付け替える。
-    Reassign,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct TimecardCardBulkUpsert {
-    /// true なら**1 行も書かない**。判定は本番と同じコードを通し、
-    /// トランザクションを commit しない形で実現する。
-    #[serde(default)]
-    pub dry_run: bool,
-    #[serde(default)]
-    pub on_conflict: TimecardCardConflictPolicy,
-    pub items: Vec<TimecardCardUpsertItem>,
-}
-
-/// 取り込めなかった 1 件。
-///
-/// **`card_id` は載せない。** 呼び出し元は public repo の Worker で、応答が
-/// そのままログや issue に写る。`index` (リクエストの items 内の位置) と
-/// `code` があれば送り手は行を特定できる。
-#[derive(Debug, Serialize)]
-pub struct TimecardCardUpsertSkipped {
-    pub index: usize,
-    pub code: String,
-    /// `invalid_card_id` / `card_owner_conflict` / `duplicate_in_batch` の 3 種。
-    ///
-    /// **`employee_not_found` は無くなった** (Refs ippoan/rust-alc-api#644) —
-    /// 社員がまだ居ないカードは skip せず受け入れ、`pending` に数える。
-    pub reason: String,
-}
-
 /// `POST /employees/lookup` のリクエスト (Refs ippoan/rust-alc-api#644)。
 ///
 /// 旧来の NFC ID をパス直書きで受けていた口の置き換え。NFC ID は免許証 IC 由来の
@@ -299,121 +241,6 @@ pub struct TimecardCardUpsertSkipped {
 #[derive(Debug, Deserialize)]
 pub struct EmployeeLookupByNfc {
     pub nfc_id: String,
-}
-
-/// `POST /api/timecard/cards/delete-by-card` のリクエスト (Refs ippoan/rust-alc-api#644)。
-///
-/// 外部の画面でカードを外したときに 1 枚ずつ反映するための口。`card_id` は
-/// **読み取った生値のまま**でよい (大文字・`:` 区切りも可) — 正規化は受け側の
-/// `normalize_card_id` 1 か所で行う。
-///
-/// **出所 (`source`) は body に持たせない。** どの範囲まで消してよいかはサーバ側の
-/// 定数だけで決まる。
-#[derive(Debug, Deserialize)]
-pub struct TimecardCardDeleteByCard {
-    pub card_id: String,
-    /// true なら**1 行も消さない**。判定は本番と同じコードを通し、
-    /// トランザクションを commit しない形で実現する。
-    #[serde(default)]
-    pub dry_run: bool,
-}
-
-/// `POST /api/timecard/cards/delete-by-card` の応答 (Refs ippoan/rust-alc-api#644)。
-///
-/// **範囲外・不在でも 200 + `reason`** にする。404 だと呼び出し元の画面が
-/// 「消えた」と誤解する文面を出してしまう。
-///
-/// **`card_id` は載せない** (`TimecardCardUpsertSkipped` と同じ理由 — 呼び出し元は
-/// public repo の Worker で、応答がそのままログや issue に写る)。
-#[derive(Debug, Serialize, PartialEq, Eq)]
-pub struct TimecardCardDeleteResult {
-    /// 0 か 1。
-    pub deleted: usize,
-    /// `deleted` / `not_found` / `out_of_scope` / `invalid_card_id` の 4 種。
-    pub reason: String,
-    /// **誰のカードを外したか** (`employees.code`)。消さなかったときは `None` —
-    /// 画面に「〜さんのカードを外しました」と出すためだけに返す。
-    ///
-    /// 社員がまだ居ない保留行を外したときは `pending_employee_code`
-    /// (= 台帳が言っている社員番号) が入る (Refs ippoan/rust-alc-api#644)。
-    pub code: Option<String>,
-}
-
-#[derive(Debug, Default, Serialize)]
-pub struct TimecardCardUpsertSummary {
-    pub created: usize,
-    pub updated: usize,
-    /// 既に**同じ社員**に同じカードが付いていて、何も書かなかった件数。
-    pub unchanged: usize,
-    /// 受け入れたが、その社員番号の社員が alc にまだ**居なかった**件数
-    /// (Refs ippoan/rust-alc-api#644)。
-    ///
-    /// **`skipped` ではない — 行は作られている。** `created` / `updated` /
-    /// `unchanged` とは別軸の数え方で、そのどれかと必ず重なる (合計には足さない)。
-    /// 社員マスタ同期が同じ code の社員を入れた時点で自動的に結び付くので、
-    /// 呼び出し元の画面は**エラーではなく「後で結び付く」通知**として出すこと。
-    pub pending: usize,
-    pub skipped: Vec<TimecardCardUpsertSkipped>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct TimePunchFilter {
-    pub employee_id: Option<Uuid>,
-    pub date_from: Option<DateTime<Utc>>,
-    pub date_to: Option<DateTime<Utc>>,
-    pub page: Option<i64>,
-    pub per_page: Option<i64>,
-}
-
-/// 打刻 1 件。**`hub_measurements` から導出する** (Refs ippoan/alc-app-s3#134) ので
-/// `id` は `hub_measurements.id`。
-#[derive(Debug, Clone, Serialize, FromRow)]
-pub struct TimePunchWithDevice {
-    pub id: Uuid,
-    pub tenant_id: Uuid,
-    /// 解決できた社員。**未登録カードのタップでは None** — 行ごと落とすと
-    /// 「タップしたのに履歴に出ない」になり、登録漏れに気付けなくなる
-    pub employee_id: Option<Uuid>,
-    /// 常に None。`devices(id)` への UUID FK だが、打刻端末の device_id は
-    /// auth-worker 発行の文字列で入らない。どの端末かは `device_name` を見る
-    pub device_id: Option<Uuid>,
-    /// 打刻端末の `hub_measurements.device_id` (auth-worker 発行の文字列)
-    pub device_name: Option<String>,
-    /// かざしたカードの値 (`timecard` は card_id、`license` は nfc_id)。
-    /// **未解決のタップで「どのカードが未登録か」を出すために要る** — これが
-    /// 無いと画面は「未登録カード」としか出せず、登録しに行けない
-    pub card_id: Option<String>,
-    /// `timecard` (打刻機のタップ) か `license` (点呼開始時の免許証)。
-    /// **一覧は両方を返すので、区別はこの列でしかできない** — 始業点呼 = 始業打刻
-    /// として同じ表に並べる運用のため (Refs ippoan/alc-app-s3#134)
-    pub kind: String,
-    /// かざしたカードの種別。`license` (免許証) / `felica_idm` / `nfca_uid`、
-    /// ブラウザ打刻と旧行は None。**`kind` とは別の軸** — `kind` は「打刻か点呼か」、
-    /// こちらは「免許証か他の IC カードか」。端末のファームは打刻の `kind` を
-    /// 常に `timecard` で送るので、種別はこの列でしか分からない。
-    /// **表示専用。社員の解決 (照合) には使わない** (ブラウザ版と挙動が割れる)
-    pub card_kind: Option<String>,
-    pub employee_name: Option<String>,
-    pub punched_at: DateTime<Utc>,
-    pub created_at: DateTime<Utc>,
-    /// 打刻の payload の `measurement_id` で結ばれた測定 (Refs ippoan/alc-app#436)。
-    /// 結ぶのは tenant・is_dev・社員・id が全部そろったときだけ。**結ばれていない打刻では
-    /// この欄から `tenko_recorded` まで全部 None** (payload に無い・形が違う・別の社員等)
-    pub measurement_id: Option<Uuid>,
-    /// 結ばれた測定のアルコール値 (`measurements.alcohol_level`)。測定中で未確定なら None
-    pub alcohol_level: Option<f64>,
-    /// 結ばれた測定の判定 (`measurements.result`)
-    pub result: Option<String>,
-    /// 結ばれた測定が点呼として記録されたか (`tenko_sessions.measurement_id` が在るか)
-    pub tenko_recorded: Option<bool>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct TimePunchesResponse {
-    pub punches: Vec<TimePunchWithDevice>,
-    pub total: i64,
-    pub page: i64,
-    pub per_page: i64,
 }
 
 // --- Dtako: Office ---

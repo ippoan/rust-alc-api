@@ -33,7 +33,6 @@ pub use alc_misc::employees;
 pub use alc_misc::health;
 pub use alc_misc::sso_admin;
 pub use alc_misc::tenant_users;
-pub use alc_misc::timecard;
 pub use alc_notify::documents as notify_documents;
 pub use alc_notify::email_documents as notify_email_documents;
 pub use alc_notify::ingest as notify_ingest;
@@ -110,7 +109,6 @@ pub fn router(
     // キオスク経路も含め前段 proxy が introspect 検証 → header 注入する。
     let tenant_protected = Router::new()
         .merge(employees::tenant_router())
-        .merge(timecard::tenant_router())
         .merge(devices::tenant_router())
         // CoreS3 ハブ測定の閲覧 (Refs #592)。ingest 側 (internal_router) は
         // cf-alc-recorder 専用の shared-secret 経路なので混ぜない。
