@@ -356,29 +356,6 @@ pub struct TimecardCardUpsertSummary {
     pub skipped: Vec<TimecardCardUpsertSkipped>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct TimePunch {
-    pub id: Uuid,
-    pub tenant_id: Uuid,
-    pub employee_id: Uuid,
-    pub device_id: Option<Uuid>,
-    pub punched_at: DateTime<Utc>,
-    pub created_at: DateTime<Utc>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct CreateTimePunchByCard {
-    pub card_id: String,
-    pub device_id: Option<Uuid>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct TimePunchWithEmployee {
-    pub punch: TimePunch,
-    pub employee_name: String,
-    pub today_punches: Vec<TimePunch>,
-}
-
 #[derive(Debug, Deserialize)]
 pub struct TimePunchFilter {
     pub employee_id: Option<Uuid>,

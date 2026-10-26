@@ -1637,23 +1637,14 @@ pub struct MockTimecardRepository {
     pub find_card_data: std::sync::Mutex<Option<TimecardCard>>,
     /// Controls find_employee_id_by_nfc for punch fallback
     pub nfc_employee_id: std::sync::Mutex<Option<Uuid>>,
-    /// Employee name returned by get_employee_name
-    pub employee_name: std::sync::Mutex<String>,
     /// CSV rows returned by list_punches_for_csv
     pub csv_rows: std::sync::Mutex<Vec<TimePunchCsvRow>>,
     /// Cards returned by list_cards
     pub cards_list: std::sync::Mutex<Vec<TimecardCard>>,
-    /// create_punch の呼び出し記録 (tenant_id, employee_id, device_id)。
-    /// hub_measurements の打刻中継 (Refs ippoan/alc-app-s3#134) が
-    /// 「新規に入った行のときだけ 1 回」打刻することを固定するために使う
-    pub punches: std::sync::Mutex<Vec<(Uuid, Uuid, Option<Uuid>)>>,
     /// find_card_by_card_id が実際に引いた card_id の記録。
     /// 照合の手前で正規化が 1 回だけ効いていること (Refs ippoan/alc-app-s3#134) を
     /// ブラウザ版と端末中継の両経路で固定するために使う
     pub card_lookups: std::sync::Mutex<Vec<String>>,
-    /// create_punch に渡された card_id。**打刻の payload に凍結される値**なので、
-    /// 照合に使った値とずれていないかを固定する (Refs ippoan/alc-app-s3#134)
-    pub punch_card_ids: std::sync::Mutex<Vec<String>>,
     /// 一括取り込み (Refs ippoan/rust-alc-api#644) 用の社員台帳: code → employee_id
     pub bulk_employees: std::sync::Mutex<std::collections::HashMap<String, Uuid>>,
     /// 同じく カード台帳: **正規化済み** card_id → employee_id。
@@ -1676,12 +1667,9 @@ impl Default for MockTimecardRepository {
             delete_returns_true: AtomicBool::new(false),
             find_card_data: std::sync::Mutex::new(None),
             nfc_employee_id: std::sync::Mutex::new(None),
-            employee_name: std::sync::Mutex::new(String::new()),
             csv_rows: std::sync::Mutex::new(vec![]),
             cards_list: std::sync::Mutex::new(vec![]),
-            punches: std::sync::Mutex::new(vec![]),
             card_lookups: std::sync::Mutex::new(vec![]),
-            punch_card_ids: std::sync::Mutex::new(vec![]),
             bulk_employees: std::sync::Mutex::new(std::collections::HashMap::new()),
             bulk_cards: std::sync::Mutex::new(std::collections::HashMap::new()),
             delete_by_card_result: std::sync::Mutex::new((0, "not_found".to_string(), None)),
@@ -1853,50 +1841,6 @@ impl TimecardRepository for MockTimecardRepository {
     ) -> Result<Option<Uuid>, sqlx::Error> {
         check_fail!(self);
         Ok(*self.nfc_employee_id.lock().unwrap())
-    }
-
-    async fn create_punch(
-        &self,
-        tenant_id: Uuid,
-        employee_id: Uuid,
-        device_id: Option<Uuid>,
-        card_id: &str,
-    ) -> Result<TimePunch, sqlx::Error> {
-        check_fail!(self);
-        self.punch_card_ids
-            .lock()
-            .unwrap()
-            .push(card_id.to_string());
-        self.punches
-            .lock()
-            .unwrap()
-            .push((tenant_id, employee_id, device_id));
-        Ok(TimePunch {
-            id: Uuid::new_v4(),
-            tenant_id,
-            employee_id,
-            device_id,
-            punched_at: Utc::now(),
-            created_at: Utc::now(),
-        })
-    }
-
-    async fn get_employee_name(
-        &self,
-        _tenant_id: Uuid,
-        _employee_id: Uuid,
-    ) -> Result<String, sqlx::Error> {
-        check_fail!(self);
-        Ok(self.employee_name.lock().unwrap().clone())
-    }
-
-    async fn list_today_punches(
-        &self,
-        _tenant_id: Uuid,
-        _employee_id: Uuid,
-    ) -> Result<Vec<TimePunch>, sqlx::Error> {
-        check_fail!(self);
-        Ok(vec![])
     }
 
     async fn count_punches(

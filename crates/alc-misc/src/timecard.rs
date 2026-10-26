@@ -9,9 +9,9 @@ use uuid::Uuid;
 
 use alc_core::auth_middleware::TenantId;
 use alc_core::models::{
-    CreateTimePunchByCard, CreateTimecardCard, Employee, TimePunchFilter, TimePunchWithEmployee,
-    TimePunchesResponse, TimecardCard, TimecardCardBulkUpsert, TimecardCardDeleteByCard,
-    TimecardCardDeleteResult, TimecardCardUpsertSummary, MAX_BULK_UPSERT_ITEMS,
+    CreateTimecardCard, Employee, TimePunchFilter, TimePunchesResponse, TimecardCard,
+    TimecardCardBulkUpsert, TimecardCardDeleteByCard, TimecardCardDeleteResult,
+    TimecardCardUpsertSummary, MAX_BULK_UPSERT_ITEMS,
 };
 use alc_core::repository::timecard::{
     is_valid_bulk_card_id, normalize_card_id, prepare_bulk_cards,
@@ -43,7 +43,6 @@ pub fn tenant_router() -> Router<AppState> {
         // 載せないため body で受ける。固定の segment は `/timecard/cards/{id}` より
         // 優先して当たるので、`lookup` が `{id}` に食われることはない
         .route("/timecard/cards/lookup", post(lookup_employee_by_card))
-        .route("/timecard/punch", post(punch))
         .route("/timecard/punches", get(list_punches))
         .route("/timecard/punches/csv", get(export_csv))
 }
@@ -294,60 +293,6 @@ async fn lookup_employee_by_card(
 }
 
 // --- Punch ---
-
-async fn punch(
-    State(state): State<AppState>,
-    tenant: axum::Extension<TenantId>,
-    Json(body): Json<CreateTimePunchByCard>,
-) -> Result<(StatusCode, Json<TimePunchWithEmployee>), StatusCode> {
-    let tenant_id = tenant.0 .0;
-
-    // カードIDから社員を特定 (timecard_cards -> employees.nfc_id フォールバック)。
-    // 照合は NFC タイムカード端末の打刻中継 (alc-devices の hub_measurements、
-    // Refs ippoan/alc-app-s3#134) と**同じ 1 か所**を使う — 2 実装目を作ると
-    // どちらか片方だけフォールバックがズレる
-    let employee_id = alc_core::repository::timecard::resolve_employee_by_card(
-        state.timecard.as_ref(),
-        tenant_id,
-        &body.card_id,
-    )
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-    .ok_or(StatusCode::NOT_FOUND)?;
-
-    // 打刻記録
-    let punch = state
-        .timecard
-        .create_punch(tenant_id, employee_id, body.device_id, &body.card_id)
-        .await
-        .map_err(|e| {
-            tracing::error!("punch error: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-
-    // 社員名を取得
-    let employee_name = state
-        .timecard
-        .get_employee_name(tenant_id, employee_id)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    // 当日の打刻一覧
-    let today_punches = state
-        .timecard
-        .list_today_punches(tenant_id, employee_id)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    Ok((
-        StatusCode::CREATED,
-        Json(TimePunchWithEmployee {
-            punch,
-            employee_name,
-            today_punches,
-        }),
-    ))
-}
 
 // --- List Punches ---
 
