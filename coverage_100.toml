@@ -187,10 +187,6 @@ type = "mock"
 path = "crates/alc-misc/src/tenant_users.rs"
 type = "mock"
 
-[[files]]
-path = "crates/alc-misc/src/timecard.rs"
-type = "mock"
-
 # auth.rs — state.pool() 直接 SQL (20行) + env var error (7行) で mock テスト 100% 不可
 # [[files]]
 # path = "crates/alc-misc/src/auth.rs"
