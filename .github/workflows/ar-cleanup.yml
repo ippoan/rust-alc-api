@@ -4,7 +4,8 @@ name: Artifact Registry cleanup (rust-alc-api images)
 # sweep が ~日次なので、より細かく回すため self-host する。
 #
 # 方式: 「動作中 (in-use) の digest だけ残し、それ以外を全削除」。
-#   1. Cloud Run の現行リビジョンが参照している digest を keep-set にする
+#   1. Cloud Run のリビジョン (トラフィックを受けているもの + 直近 5 つ) が参照している
+#      digest を keep-set にする。service の定義 (spec.template) はタグ参照なので見ない
 #      (+ 各 image の現行 :latest / :dev tag の digest も保護 = tag 参照の sidecar 対策)。
 #   2. keep-set 以外を multi-pass で delete。keep した index の子 manifest は
 #      "referenced by parent manifests" で削除拒否され**自動的に残る** (= multi-arch
@@ -61,12 +62,23 @@ jobs:
           KEEP="$RUNNER_TEMP/keep.txt"
           : > "$KEEP"
 
-          # 1. Cloud Run 現行リビジョンが参照する digest (digest-pin container + sidecar)
+          # 1. Cloud Run のリビジョンが参照する digest (container + sidecar)。
+          #    deploy は image を commit SHA の**タグ**で指す (deploy.yml の inputs.image_sha) ので、
+          #    service の定義 (spec.template) には digest が無い。digest は revision の側にある
+          #    (Cloud Run が deploy 時にタグを digest に解決して revision に記録する)。
+          #    トラフィックを受けている revision と、rollback 先になる直近 5 つを残す
           for svc in $(gcloud run services list --region="$REGION" --project="$PROJECT" \
                 --filter='metadata.name~rust-alc-api' --format='value(metadata.name)' 2>/dev/null); do
-            gcloud run services describe "$svc" --region="$REGION" --project="$PROJECT" \
-              --format='value(spec.template.spec.containers[].image)' 2>/dev/null
-          done | grep -oE 'sha256:[0-9a-f]+' >> "$KEEP" || true
+            {
+              gcloud run services describe "$svc" --region="$REGION" --project="$PROJECT" \
+                --format='value(status.traffic[].revisionName)' | tr ';,' '\n\n'
+              gcloud run revisions list --service="$svc" --region="$REGION" --project="$PROJECT" \
+                --limit=5 --format='value(metadata.name)'
+            } | sort -u | while read -r rev; do
+              [ -n "$rev" ] && gcloud run revisions describe "$rev" --region="$REGION" \
+                --project="$PROJECT" --format='value(spec.containers[].image)'
+            done
+          done 2>/dev/null | grep -oE 'sha256:[0-9a-f]+' >> "$KEEP" || true
 
           # 2. 各 image の現行 :latest / :dev tag の digest (tag 参照の sidecar 等を保護)
           for img in $IMAGES; do
