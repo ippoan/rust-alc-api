@@ -2,7 +2,7 @@
 //!
 //! ## 期間の絞り込みは 読取日 **と** 運行日 の OR (Refs ohishi-exp/rust-ichibanboshi#205 の 38)
 //!
-//! この 4 つの列挙クエリは全部同じ期間条件を共有する:
+//! 列挙クエリ (`list_operations`) の期間条件:
 //!
 //! ```sql
 //! (reading_date BETWEEN $from AND $to OR operation_date BETWEEN $from AND $to)
@@ -43,9 +43,8 @@
 //! `time_card_dtako` を 1 行も持たない運行 (別件 = ohishi-exp/rust-ichibanboshi#205 の 39)
 //! で、読みはするが押し込み側に対応が無い。混同しないこと。
 //!
-//! R2 の LIST 往復は増えない見込み: `dtako_events.rs` の `derive_day_prefixes` は prefix を
-//! **`unko_no` の先頭 6 桁 (運行開始日)** から作るので、運行日が窓の中の運行の prefix は
-//! 既存の prefix 集合に含まれる (実測ベースライン `prefixes=49`)。
+//! 勤怠向けの読み取り (`GET /api/dtako/events`・`/etags`) は ippoan/alc-dtako-worker へ移り
+//! (W5b、Refs #680)、同じ期間条件の文はそちらの `repo::sql` に在る。
 //!
 //! ### 消費側 (月ゲート) への影響
 //!
@@ -131,101 +130,6 @@ impl DtakoYTimeExportRepository for PgDtakoYTimeExportRepository {
         )
         .bind(tenant_id)
         .bind(driver_id)
-        .bind(from_widened)
-        .bind(to_widened)
-        .fetch_all(&mut *tc.conn)
-        .await
-    }
-
-    async fn list_drivers_with_operations(
-        &self,
-        tenant_id: Uuid,
-        from: NaiveDate,
-        to: NaiveDate,
-        after_driver_cd: Option<&str>,
-        limit: i64,
-    ) -> Result<Vec<DtakoDriverRef>, sqlx::Error> {
-        // list_operations と同じく暦日跨ぎのため ±1 日広げる
-        let from_widened = from - chrono::Duration::days(1);
-        let to_widened = to + chrono::Duration::days(1);
-        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
-        sqlx::query_as::<_, DtakoDriverRef>(
-            "SELECT DISTINCT d.id AS driver_id, d.driver_cd, d.name AS driver_name \
-             FROM alc_api.dtako_operations o \
-             JOIN alc_api.employees d ON o.driver_id = d.id \
-             WHERE o.tenant_id = $1 \
-               AND (o.reading_date BETWEEN $2 AND $3 \
-                    OR o.operation_date BETWEEN $2 AND $3) \
-               AND o.has_kudgivt = TRUE \
-               AND d.deleted_at IS NULL \
-               AND d.driver_cd IS NOT NULL \
-               AND ($4::TEXT IS NULL OR d.driver_cd > $4) \
-             ORDER BY d.driver_cd \
-             LIMIT $5",
-        )
-        .bind(tenant_id)
-        .bind(from_widened)
-        .bind(to_widened)
-        .bind(after_driver_cd)
-        .bind(limit)
-        .fetch_all(&mut *tc.conn)
-        .await
-    }
-
-    async fn list_operations_for_drivers(
-        &self,
-        tenant_id: Uuid,
-        driver_ids: &[Uuid],
-        from: NaiveDate,
-        to: NaiveDate,
-    ) -> Result<Vec<DtakoDriverOperation>, sqlx::Error> {
-        let from_widened = from - chrono::Duration::days(1);
-        let to_widened = to + chrono::Duration::days(1);
-        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
-        // list_operations と同じ dedup (crew_role=1 優先) を乗務員ごとに行う
-        sqlx::query_as::<_, DtakoDriverOperation>(
-            "SELECT DISTINCT ON (driver_id, unko_no) \
-                    driver_id, unko_no, crew_role, departure_at, return_at, r2_key_prefix \
-             FROM alc_api.dtako_operations \
-             WHERE tenant_id = $1 \
-               AND driver_id = ANY($2) \
-               AND (reading_date BETWEEN $3 AND $4 \
-                    OR operation_date BETWEEN $3 AND $4) \
-               AND has_kudgivt = TRUE \
-             ORDER BY driver_id, unko_no, crew_role ASC, departure_at NULLS LAST",
-        )
-        .bind(tenant_id)
-        .bind(driver_ids)
-        .bind(from_widened)
-        .bind(to_widened)
-        .fetch_all(&mut *tc.conn)
-        .await
-    }
-
-    async fn list_unsplit_operations(
-        &self,
-        tenant_id: Uuid,
-        from: NaiveDate,
-        to: NaiveDate,
-    ) -> Result<Vec<UnsplitOperation>, sqlx::Error> {
-        // 他 3 クエリと同じ ±1 日広げ (暦日跨ぎの運行取りこぼし防止)
-        let from_widened = from - chrono::Duration::days(1);
-        let to_widened = to + chrono::Duration::days(1);
-        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
-        // has_kudgivt だけ他 3 クエリと反転。employees の join は
-        // list_drivers_with_operations と同じ経路 (driver_id = employees.id)。
-        sqlx::query_as::<_, UnsplitOperation>(
-            "SELECT o.unko_no, d.driver_cd, o.reading_date \
-             FROM alc_api.dtako_operations o \
-             JOIN alc_api.employees d ON o.driver_id = d.id \
-             WHERE o.tenant_id = $1 \
-               AND (o.reading_date BETWEEN $2 AND $3 \
-                    OR o.operation_date BETWEEN $2 AND $3) \
-               AND o.has_kudgivt = FALSE \
-               AND d.driver_cd IS NOT NULL \
-             ORDER BY o.unko_no",
-        )
-        .bind(tenant_id)
         .bind(from_widened)
         .bind(to_widened)
         .fetch_all(&mut *tc.conn)

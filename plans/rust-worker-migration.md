@@ -101,5 +101,6 @@ W4 を W5〜W7 より前に置くのは、employees / timecard を他の wave �
 - W5・W6 は 6 段に分ける (2026-10-26 に Cloud Run の 30 日の件数と呼び手を調べて決めた): W5-0 30 日 0 件の口の呼び手を調べて、使われていない口を消す / W5a 機械の取り込み (`dtako-logs/bulk`・`dvr/*`) → alc-dtako-worker / W5b 勤怠向けの読み取り (`dtako/events`・`etags`) → alc-dtako-worker / W5c 画面の読み取りと分類の更新・拘束時間の PDF → alc-dtako-worker / W6a `hub/measurements` (カードの照合 `resolve_employee_by_card` ごと) / W6b devices の管理・FCM・登録・OTA → 新 alc-devices-worker
 - W5-0: 30 日 0 件の 37 口 (dtako 15・devices 22) のうち、呼び手が無いのは `vehicle-settings-dumps` の 3 口だけだったので消した (この PR。表は残す)。ほかは nuxt_dtako_logs・nuxt-dtako-admin・daiun-salary・email-receiver・alc-app 等が呼ぶ (頻度が低いだけ)
 - W5a: 機械の取り込み (`dtako-logs/bulk`・`dvr/notifications`・`dvr/files/{id}`) を alc-dtako-worker (v0.3.7) に移し、本番で切り替え済み (auth-worker v0.2.339。bulk は端末用・RPC、dvr は内部用)。本番で 13:20 UTC の回までが Cloud Run、13:30 からが worker で 200、書いた車両位置が読み取りの口から見えることを確認。`dvr/files` と端末用の bulk は本番の要求がまだ来ていない。rust 側の 3 口はこの PR で削除 (live の検証は叩いていなかった)
-- 次は W5b (勤怠向けの読み取り `dtako/events`・`etags`)
+- W5b: 勤怠向けの読み取り (`dtako/events`・`dtako/events/etags`) を alc-dtako-worker (v0.3.8) に移し、本番で切り替え済み (auth-worker v0.2.340。events は RPC、etags は RPC・画面用・端末用)。etags の ETag は切り替えの前後で一致 (265 件、先頭 25 件の運行NO と ETag が同じ)、切り替え後の Cloud Run への `dtako/events*` の要求は 0 件。rust 側の 2 口と、それ専用の列挙 3 つ (`list_drivers_with_operations`・`list_operations_for_drivers`・`list_unsplit_operations`) はこの PR で削除 (live の検証は 404 を「届いた」と数えるので外さなくてよかった)
+- 次は W5c (画面の読み取りと分類の更新・拘束時間の PDF)
 rust-alc-api は open PR 1 本までなので、W1 以降の worker 側の PR (別 repo) と並行して進める。
