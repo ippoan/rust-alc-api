@@ -30,16 +30,14 @@ use std::sync::Arc;
 
 use repository::{
     AuthRepository, BotAdminRepository, CarInspectionRepository, CarinsFilesRepository,
-    CarryingItemsRepository, CommunicationItemsRepository, DeviceRepository,
-    DtakoCsvProxyRepository, DtakoDailyHoursRepository, DtakoDriversRepository,
+    DeviceRepository, DtakoCsvProxyRepository, DtakoDailyHoursRepository, DtakoDriversRepository,
     DtakoEventClassificationsRepository, DtakoLogsRepository, DtakoOperationsRepository,
     DtakoRestraintReportPdfRepository, DtakoRestraintReportRepository, DtakoScraperRepository,
     DtakoTicketsRepository, DtakoVehiclesRepository, DtakoWorkTimesRepository,
-    DtakoYTimeExportRepository, EmployeeRepository, GuidanceRecordsRepository,
-    HubMeasurementsRepository, ItemFilesRepository, ItemsRepository, LineworksChannelsRepository,
-    NfcTagRepository, NotifyDeliveryRepository, NotifyDocumentRepository,
-    NotifyRecipientRepository, SsoAdminRepository, TenantUsersRepository, TimecardRepository,
-    VehicleSettingsDumpsRepository,
+    DtakoYTimeExportRepository, EmployeeRepository, HubMeasurementsRepository,
+    LineworksChannelsRepository, NfcTagRepository, NotifyDeliveryRepository,
+    NotifyDocumentRepository, NotifyRecipientRepository, SsoAdminRepository, TenantUsersRepository,
+    TimecardRepository, VehicleSettingsDumpsRepository,
 };
 use storage::StorageBackend;
 
@@ -50,8 +48,6 @@ pub struct AppState {
     pub bot_admin: Arc<dyn BotAdminRepository>,
     pub car_inspections: Arc<dyn CarInspectionRepository>,
     pub carins_files: Arc<dyn CarinsFilesRepository>,
-    pub carrying_items: Arc<dyn CarryingItemsRepository>,
-    pub communication_items: Arc<dyn CommunicationItemsRepository>,
     pub devices: Arc<dyn DeviceRepository>,
     pub dtako_csv_proxy: Arc<dyn DtakoCsvProxyRepository>,
     pub dtako_daily_hours: Arc<dyn DtakoDailyHoursRepository>,
@@ -68,10 +64,7 @@ pub struct AppState {
     pub dtako_y_time_export: Arc<dyn DtakoYTimeExportRepository>,
     pub vehicle_settings_dumps: Arc<dyn VehicleSettingsDumpsRepository>,
     pub employees: Arc<dyn EmployeeRepository>,
-    pub guidance_records: Arc<dyn GuidanceRecordsRepository>,
     pub hub_measurements: Arc<dyn HubMeasurementsRepository>,
-    pub items: Arc<dyn ItemsRepository>,
-    pub item_files: Arc<dyn ItemFilesRepository>,
     pub nfc_tags: Arc<dyn NfcTagRepository>,
     pub sso_admin: Arc<dyn SsoAdminRepository>,
     pub tenant_users: Arc<dyn TenantUsersRepository>,

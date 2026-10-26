@@ -1,11 +1,7 @@
 pub mod access_requests;
 pub mod bot_admin;
-pub mod carrying_items;
-pub mod communication_items;
 pub mod employees;
-pub mod guidance_records;
 pub mod health;
-pub mod items;
 pub mod repo;
 pub mod sso_admin;
 pub mod tenant_users;

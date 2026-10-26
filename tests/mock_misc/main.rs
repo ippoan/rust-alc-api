@@ -9,16 +9,10 @@ mod mock_helpers;
 mod mock_auth_test;
 #[path = "../mock_tests/mock_bot_admin_test.rs"]
 mod mock_bot_admin_test;
-#[path = "../mock_tests/mock_carrying_items_test.rs"]
-mod mock_carrying_items_test;
-#[path = "../mock_tests/mock_communication_items_test.rs"]
-mod mock_communication_items_test;
 #[path = "../mock_tests/mock_driver_info_test.rs"]
 mod mock_driver_info_test;
 #[path = "../mock_tests/mock_employees_test.rs"]
 mod mock_employees_test;
-#[path = "../mock_tests/mock_guidance_records_test.rs"]
-mod mock_guidance_records_test;
 #[path = "../mock_tests/mock_health_test.rs"]
 mod mock_health_test;
 #[path = "../mock_tests/mock_lineworks_internal_test.rs"]

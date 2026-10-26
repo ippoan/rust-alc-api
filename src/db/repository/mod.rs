@@ -1,16 +1,14 @@
 // Re-export traits from alc-core
 pub use alc_core::repository::{
     AuthRepository, BotAdminRepository, CarInspectionRepository, CarinsFilesRepository,
-    CarryingItemsRepository, CommunicationItemsRepository, DeviceRepository,
-    DtakoCsvProxyRepository, DtakoDailyHoursRepository, DtakoDriversRepository,
+    DeviceRepository, DtakoCsvProxyRepository, DtakoDailyHoursRepository, DtakoDriversRepository,
     DtakoEventClassificationsRepository, DtakoLogsRepository, DtakoOperationsRepository,
     DtakoRestraintReportPdfRepository, DtakoRestraintReportRepository, DtakoScraperRepository,
     DtakoTicketsRepository, DtakoVehiclesRepository, DtakoWorkTimesRepository,
-    DtakoYTimeExportRepository, EmployeeRepository, GuidanceRecordsRepository,
-    HubMeasurementsRepository, ItemFilesRepository, ItemsRepository, LineworksChannelsRepository,
-    NfcTagRepository, NotifyDeliveryRepository, NotifyDocumentRepository,
-    NotifyRecipientRepository, SsoAdminRepository, TenantUsersRepository, TimecardRepository,
-    VehicleSettingsDumpsRepository, WebhookRepository,
+    DtakoYTimeExportRepository, EmployeeRepository, HubMeasurementsRepository,
+    LineworksChannelsRepository, NfcTagRepository, NotifyDeliveryRepository,
+    NotifyDocumentRepository, NotifyRecipientRepository, SsoAdminRepository, TenantUsersRepository,
+    TimecardRepository, VehicleSettingsDumpsRepository, WebhookRepository,
 };
 
 // Re-export tenko traits from alc-tenko (Refs #513)
@@ -33,10 +31,7 @@ pub use alc_dtako::repo::{
     dtako_operations, dtako_restraint_report, dtako_restraint_report_pdf, dtako_scraper,
     dtako_tickets, dtako_vehicles, dtako_work_times, dtako_y_time_export, vehicle_settings_dumps,
 };
-pub use alc_misc::repo::{
-    bot_admin, carrying_items, communication_items, employees, guidance_records, items, sso_admin,
-    tenant_users, timecard, webhook,
-};
+pub use alc_misc::repo::{bot_admin, employees, sso_admin, tenant_users, timecard, webhook};
 pub use alc_tenko::repo::{
     daily_health, driver_info, equipment_failures, health_baselines, overdue, tenko_call,
     tenko_records, tenko_schedules, tenko_sessions, tenko_webhooks,
@@ -66,9 +61,8 @@ pub use alc_dtako::repo::{
     PgDtakoWorkTimesRepository, PgDtakoYTimeExportRepository, PgVehicleSettingsDumpsRepository,
 };
 pub use alc_misc::repo::{
-    PgBotAdminRepository, PgCarryingItemsRepository, PgCommunicationItemsRepository,
-    PgEmployeeRepository, PgGuidanceRecordsRepository, PgItemFilesRepository, PgItemsRepository,
-    PgSsoAdminRepository, PgTenantUsersRepository, PgTimecardRepository, PgWebhookRepository,
+    PgBotAdminRepository, PgEmployeeRepository, PgSsoAdminRepository, PgTenantUsersRepository,
+    PgTimecardRepository, PgWebhookRepository,
 };
 pub use alc_tenko::repo::{
     PgDailyHealthRepository, PgDriverInfoRepository, PgEquipmentFailuresRepository,

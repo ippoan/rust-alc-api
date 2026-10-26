@@ -94,5 +94,6 @@ W4 を W5〜W7 より前に置くのは、employees / timecard を他の wave �
 - W3: carins (呼び手の無い 7 本を除く) と maintenance を新 ippoan/alc-carins-worker (v0.0.1) に移し、本番で切り替え済み (auth-worker v0.2.331、smb の取り込みも RPC で worker へ)。読み取りは本番で確認済み。smb の取り込みと書き込みの確認・rust 側の削除は後で
 - W4a: `staging/export・import` を削除 (#761、auth-worker v0.2.332)
 - W4b: upload 3 口を alc-measurements-worker (v0.1.12) に移し、本番で切り替え済み (auth-worker v0.2.333)。dev 端末の測定で `face-photo`・`blow-video` の書き込みと読み返しを確認。`report-audio` は W7 で確かめる。rust 側の 3 口はこの PR で削除
-- 次は W4c (items・carrying・communication・guidance → alc-records-worker)、その後 W4d (employees・timecard)
+- W4c: items・carrying・communication・guidance を新 alc-records-worker (v0.0.1) に移し、本番で切り替え済み (auth-worker v0.2.336)。本番で 4 つの一覧の読み取りを確認 (worker のログで 200)。書き込みとファイルの上げ下ろしは未確認。rust 側の口はこの PR で削除 (先に alc-app#532・nuxt-items#60 で live の検証を外した)
+- 次は W4d (employees・timecard → alc-people-worker)
 rust-alc-api は open PR 1 本までなので、W1 以降の worker 側の PR (別 repo) と並行して進める。

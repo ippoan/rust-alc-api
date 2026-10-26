@@ -1,20 +1,12 @@
 pub mod bot_admin;
-pub mod carrying_items;
-pub mod communication_items;
 pub mod employees;
-pub mod guidance_records;
-pub mod items;
 pub mod sso_admin;
 pub mod tenant_users;
 pub mod timecard;
 pub mod webhook;
 
 pub use bot_admin::PgBotAdminRepository;
-pub use carrying_items::PgCarryingItemsRepository;
-pub use communication_items::PgCommunicationItemsRepository;
 pub use employees::PgEmployeeRepository;
-pub use guidance_records::PgGuidanceRecordsRepository;
-pub use items::{PgItemFilesRepository, PgItemsRepository};
 pub use sso_admin::PgSsoAdminRepository;
 pub use tenant_users::PgTenantUsersRepository;
 pub use timecard::PgTimecardRepository;

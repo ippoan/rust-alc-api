@@ -655,37 +655,6 @@ pub struct CarryingItem {
     pub created_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct CreateCarryingItem {
-    pub item_name: String,
-    pub is_required: Option<bool>,
-    pub sort_order: Option<i32>,
-    #[serde(default)]
-    pub vehicle_conditions: Vec<VehicleConditionInput>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct UpdateCarryingItem {
-    pub item_name: Option<String>,
-    pub is_required: Option<bool>,
-    pub sort_order: Option<i32>,
-    pub vehicle_conditions: Option<Vec<VehicleConditionInput>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct CarryingItemVehicleCondition {
-    pub id: Uuid,
-    pub carrying_item_id: Uuid,
-    pub category: String,
-    pub value: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VehicleConditionInput {
-    pub category: String,
-    pub value: String,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct CarryingItemCheck {
     pub id: Uuid,
@@ -705,95 +674,6 @@ pub struct SubmitCarryingItemCheck {
 #[derive(Debug, Deserialize)]
 pub struct SubmitCarryingItemChecks {
     pub checks: Vec<SubmitCarryingItemCheck>,
-}
-
-// --- Guidance Records ---
-
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct GuidanceRecord {
-    pub id: Uuid,
-    pub tenant_id: Uuid,
-    pub employee_id: Uuid,
-    pub guidance_type: String,
-    pub title: String,
-    pub content: String,
-    pub guided_by: Option<String>,
-    pub guided_at: DateTime<Utc>,
-    pub parent_id: Option<Uuid>,
-    pub depth: i32,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct CreateGuidanceRecord {
-    pub employee_id: Uuid,
-    pub guidance_type: Option<String>,
-    pub title: String,
-    pub content: Option<String>,
-    pub guided_by: Option<String>,
-    pub guided_at: Option<DateTime<Utc>>,
-    pub parent_id: Option<Uuid>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct GuidanceRecordAttachment {
-    pub id: Uuid,
-    pub record_id: Uuid,
-    pub file_name: String,
-    pub file_type: String,
-    pub file_size: Option<i32>,
-    pub storage_url: String,
-    pub created_at: DateTime<Utc>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct UpdateGuidanceRecord {
-    pub guidance_type: Option<String>,
-    pub title: Option<String>,
-    pub content: Option<String>,
-    pub guided_by: Option<String>,
-    pub guided_at: Option<DateTime<Utc>>,
-}
-
-// --- Communication Items ---
-
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct CommunicationItem {
-    pub id: Uuid,
-    pub tenant_id: Uuid,
-    pub title: String,
-    pub content: String,
-    pub priority: String,
-    pub target_employee_id: Option<Uuid>,
-    pub is_active: bool,
-    pub effective_from: Option<DateTime<Utc>>,
-    pub effective_until: Option<DateTime<Utc>>,
-    pub created_by: Option<String>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct CreateCommunicationItem {
-    pub title: String,
-    pub content: Option<String>,
-    pub priority: Option<String>,
-    pub target_employee_id: Option<Uuid>,
-    pub effective_from: Option<DateTime<Utc>>,
-    pub effective_until: Option<DateTime<Utc>>,
-    pub created_by: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct UpdateCommunicationItem {
-    pub title: Option<String>,
-    pub content: Option<String>,
-    pub priority: Option<String>,
-    pub target_employee_id: Option<Uuid>,
-    pub is_active: Option<bool>,
-    pub effective_from: Option<DateTime<Utc>>,
-    pub effective_until: Option<DateTime<Utc>>,
 }
 
 // --- Dtako Logs (リアルタイム車両GPS) ---
@@ -1105,63 +985,6 @@ mod dtakolog_tests {
         assert!(json.get("State2").is_some());
         assert!(json.get("Speed").is_some());
     }
-}
-
-// --- Items (物品管理) ---
-
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
-pub struct Item {
-    pub id: Uuid,
-    pub tenant_id: Uuid,
-    pub parent_id: Option<Uuid>,
-    pub owner_type: String,
-    pub owner_user_id: Option<Uuid>,
-    pub item_type: String,
-    pub name: String,
-    pub barcode: String,
-    pub category: String,
-    pub description: String,
-    pub image_url: String,
-    pub url: String,
-    pub quantity: i32,
-    pub created_at: chrono::DateTime<chrono::Utc>,
-    pub updated_at: chrono::DateTime<chrono::Utc>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct CreateItem {
-    pub parent_id: Option<Uuid>,
-    pub owner_type: Option<String>,
-    pub owner_user_id: Option<Uuid>,
-    pub item_type: Option<String>,
-    pub name: String,
-    pub barcode: Option<String>,
-    pub category: Option<String>,
-    pub description: Option<String>,
-    pub image_url: Option<String>,
-    pub url: Option<String>,
-    pub quantity: Option<i32>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct UpdateItem {
-    pub name: Option<String>,
-    pub barcode: Option<String>,
-    pub category: Option<String>,
-    pub description: Option<String>,
-    pub image_url: Option<String>,
-    pub url: Option<String>,
-    pub quantity: Option<i32>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
-pub struct ItemFile {
-    pub id: Uuid,
-    pub tenant_id: Uuid,
-    pub filename: String,
-    pub content_type: String,
-    pub size_bytes: i64,
-    pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
 // ============================================================
