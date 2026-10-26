@@ -78,7 +78,7 @@ pub fn router() -> Router<AppState> {
 }
 
 // ---------------------------------------------------------------------------
-// Developer-only export (Bot Config dump compatible with /api/staging/import)
+// Developer-only export (Bot Config dump)
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Deserialize)]

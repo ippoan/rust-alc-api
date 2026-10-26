@@ -36,7 +36,6 @@ pub use alc_misc::guidance_records;
 pub use alc_misc::health;
 pub use alc_misc::items;
 pub use alc_misc::sso_admin;
-pub use alc_misc::staging;
 pub use alc_misc::tenant_users;
 pub use alc_misc::timecard;
 pub use alc_misc::upload;
@@ -157,7 +156,6 @@ pub fn router(
     let public_routes = Router::new()
         .merge(health::router())
         .merge(devices::public_router())
-        .merge(staging::router())
         .merge(notify_ingest::public_router())
         .merge(notify_line_webhook::public_router())
         .merge(notify_read_tracker::public_router())
