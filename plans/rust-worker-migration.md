@@ -66,7 +66,7 @@ worker の Tag Release (手動 = 本番 / merge = staging)。
 | W6 | devices | 新 `alc-devices-worker` | L | FCM は SA 鍵で RS256 を自前署名 (`rsa` crate は unknown で動作確認済み)。OTA・pair の外部呼び出しの置き換え |
 | W7 | tenko + tenko-call + core の公開口 (`/i` `/t` `/u` `/public`) | 新 `alc-tenko-worker` | XL | **切り替えの確かめに、dev 端末の業務後点呼で運行報告の音声 (`POST /api/upload/report-audio`、W4b で alc-measurements に移した口) も通す** (W4b では測定だけ確かめた)。予定超過の 60 秒ループ → Cron Trigger (1 分)。webhook 配信 → `wait_until` か Queues (fire-and-forget 禁止の規範を引き継ぐ)。`realtime_bus` の代替 (DO)。`device_dev` の扱いを `alc-core-wasm` 側へ。業務の中心なので最後に、他の wave で型を固めてから |
 | W8 | notify の残り (documents・emails・ingest・viewer・LINE webhook) | alc-notify-worker 拡張 + **redact/rasterize は Containers** | L | pdfium は wasm 不可。Cloudflare Containers に redact だけ置き worker から呼ぶ (#486 Phase 2・#476)。viewer の token を URL パスに載せる問題 (#648) を移行と同時に直す |
-| W9 | 撤収 | — | M | archive Job を Cron + R2 か Container へ → Cloud Run 停止 → contract migration (`bot_configs.private_key_encrypted` 等) → secret 退役 (#494・#503・#502) → rust-alc-api を archive |
+| W9 | 撤収 | — | M | archive Job を Cron + R2 か Container へ → Cloud Run 停止 → contract migration (`bot_configs.private_key_encrypted` 等) → secret 退役 (#494・#503・#502) → rust-alc-api を archive。Cloud Run を止めるときは、使われていない Cloud Run `rust-logi` (古い平文の env が残る) も一緒に消す (2026-10-26 のオーナー判断)。cloudsql-sv は組織配下に移り、端末の gcloud は閲覧だけなので、Cloud Run の削除・変更は PAM の `run-admin` を申請し、オーナーの承認を待ってから行う |
 
 依存: W0 → (W1, W2, W3 は並行可) → W4 → (W5, W6 並行可) → W7 → W8 → W9。
 W4 を W5〜W7 より前に置くのは、employees / timecard を他の wave が読むため所有者を先に決めたいから。
