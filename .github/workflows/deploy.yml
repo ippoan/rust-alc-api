@@ -237,16 +237,17 @@ jobs:
             --project ${{ env.PROJECT }}
 
       - name: Ensure public access (staging)
+        # allUsers の invoker 付与ではなく invoker IAM check を無効化して公開する。
+        # 組織配下ではドメイン制限 (iam.allowedPolicyMemberDomains) で allUsers を付けられないため。
         if: github.event_name == 'pull_request'
         run: |
           case "${{ matrix.service }}" in
             backend) SVC_NAME="rust-alc-api-staging" ;;
             *)       SVC_NAME="rust-alc-api-staging-${{ matrix.service }}" ;;
           esac
-          gcloud run services add-iam-policy-binding "$SVC_NAME" \
+          gcloud run services update "$SVC_NAME" \
             --region ${{ env.REGION }} \
-            --member="allUsers" \
-            --role="roles/run.invoker" \
+            --no-invoker-iam-check \
             --project ${{ env.PROJECT }}
 
       - name: Print URL
