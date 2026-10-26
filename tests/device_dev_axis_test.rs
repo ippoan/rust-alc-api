@@ -98,9 +98,7 @@ impl Ctx {
     }
 
     async fn employee(&self, code: &str) -> String {
-        let emp =
-            common::create_test_employee(&self.client, &self.base_url, &self.auth, "乗務員", code)
-                .await;
+        let emp = common::create_test_employee(&self.admin, self.tenant, "乗務員", code).await;
         emp["id"].as_str().unwrap().to_string()
     }
 
@@ -521,13 +519,17 @@ async fn test_dev_tenko_manager_key_judges_only_dev_sessions() {
     let ctx = setup("Dev Axis Judgment", 5, true).await;
     let emp = ctx.employee("DA4").await;
     // 判定者 (運行管理者)。employees は軸を持たないので、どちらの軸からも引ける
-    let judge = ctx
-        .create(
-            "/api/employees",
-            None,
-            json!({ "name": "運行管理者", "code": "DA4M", "role": ["manager"] }),
-        )
-        .await;
+    let judge = common::create_test_employee_with_role(
+        &ctx.admin,
+        ctx.tenant,
+        "運行管理者",
+        "DA4M",
+        &["manager"],
+    )
+    .await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let judge_uuid = Uuid::parse_str(&judge).unwrap();
 
     let dev_session = ctx.start_session(&emp, Some("1")).await;
@@ -601,13 +603,17 @@ async fn test_pending_it_tenko_list_is_split_by_the_header() {
     test_group!("未完了の IT点呼 の一覧 (dev端末の印による出し分け)");
     let ctx = setup("Dev Axis Pending IT", 5, true).await;
     let emp = ctx.employee("DA7").await;
-    let judge = ctx
-        .create(
-            "/api/employees",
-            None,
-            json!({ "name": "運行管理者", "code": "DA7M", "role": ["manager"] }),
-        )
-        .await;
+    let judge = common::create_test_employee_with_role(
+        &ctx.admin,
+        ctx.tenant,
+        "運行管理者",
+        "DA7M",
+        &["manager"],
+    )
+    .await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     let dev_session = it_tenko_session(&ctx, &emp, "2026-09-17T08:00:00Z", Some("1")).await;
     let prod_session = it_tenko_session(&ctx, &emp, "2026-09-17T09:00:00Z", None).await;

@@ -151,23 +151,6 @@ rust_test(
     ),
 )
 
-# 社員マスタ同期が保留中のカードを結ぶ (Refs ippoan/rust-alc-api#644)。**実 DB でしか固定できない** —
-# 結び付けは `upsert_by_code` と同じ transaction の SQL (`link_pending_cards`) で、mock では 1 行も通らない。
-# カード台帳と打刻の口は ippoan/alc-people-worker へ移った (W4d-a)。
-rust_test(
-    name = "employees_pending_cards_test",
-    srcs = ["tests/employees_pending_cards_test.rs"] + glob(["tests/common/**/*.rs"]),
-    crate_root = "tests/employees_pending_cards_test.rs",
-    deps = [":rust_alc_api_lib"] + all_crate_deps(
-        normal = True,
-        normal_dev = True,
-    ) + _WORKSPACE_CRATES,
-    proc_macro_deps = all_crate_deps(
-        proc_macro = True,
-        proc_macro_dev = True,
-    ),
-)
-
 rust_test(
     name = "hub_measurements_test",
     srcs = ["tests/hub_measurements_test.rs"] + glob(["tests/common/**/*.rs"]),

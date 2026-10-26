@@ -172,10 +172,6 @@ path = "crates/alc-tenko/src/driver_info.rs"
 type = "mock"
 
 [[files]]
-path = "crates/alc-misc/src/employees.rs"
-type = "mock"
-
-[[files]]
 path = "crates/alc-misc/src/health.rs"
 type = "mock"
 

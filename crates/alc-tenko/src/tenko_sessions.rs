@@ -337,7 +337,7 @@ async fn submit_medical(
 /// 画面は選択肢から短い語を送る想定 (例: 「血圧計の故障」「血圧計が繋がっていない」
 /// 「その他」) だが、サーバ側は特定の値に縛らない — 選択肢が増えても API・migration に
 /// 手を入れずに済むようにするため。上限を超えたときは**切り詰めずに 400 で弾く**
-/// (`crates/alc-misc/src/employees.rs` の `MAX_NAME_LEN` と同じ作法 — 切り詰めると
+/// (社員の名前の上限 `MAX_NAME_LEN` と同じ作法。社員の口はいま ippoan/alc-people-worker — 切り詰めると
 /// 監査に残る理由が静かに欠けるため、はっきり拒否する方を選ぶ)
 const MAX_ESCALATE_REASON_LEN: usize = 200;
 

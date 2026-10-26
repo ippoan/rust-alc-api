@@ -22,14 +22,8 @@ use serde_json::Value;
 use uuid::Uuid;
 
 /// 乗務員を作り、id を返す
-async fn employee(
-    client: &reqwest::Client,
-    base_url: &str,
-    auth: &str,
-    name: &str,
-    code: &str,
-) -> Uuid {
-    let emp = common::create_test_employee(client, base_url, auth, name, code).await;
+async fn employee(pool: &sqlx::PgPool, tenant: Uuid, name: &str, code: &str) -> Uuid {
+    let emp = common::create_test_employee(pool, tenant, name, code).await;
     Uuid::parse_str(emp["id"].as_str().unwrap()).unwrap()
 }
 
@@ -46,7 +40,7 @@ async fn test_normal_tenko_record_is_listed_with_empty_manager() {
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
 
-            let emp = employee(&client, &base_url, &auth, "運行者", "NT1").await;
+            let emp = employee(state.pool(), tenant, "運行者", "NT1").await;
             common::insert_normal_flow_tenko(
                 state.pool(),
                 tenant,
@@ -114,8 +108,7 @@ async fn test_remote_tenko_session_is_not_caught_by_normal_flow_index() {
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
 
-            let emp =
-                common::create_test_employee(&client, &base_url, &auth, "運行者", "NT12").await;
+            let emp = common::create_test_employee(state.pool(), tenant, "運行者", "NT12").await;
             let emp_id = emp["id"].as_str().unwrap();
 
             // 通常点呼 (終業) で記録済みの測定
@@ -193,24 +186,18 @@ async fn test_it_tenko_session_accepts_manager_judgment() {
             let auth = format!("Bearer {jwt}");
             let client = reqwest::Client::new();
 
-            let emp =
-                common::create_test_employee(&client, &base_url, &auth, "運行者", "NT35").await;
+            let emp = common::create_test_employee(state.pool(), tenant, "運行者", "NT35").await;
             let emp_id = emp["id"].as_str().unwrap();
 
             // 判定する運行管理者 (employees.role に manager を持つ)
-            let res = client
-                .post(format!("{base_url}/api/employees"))
-                .header("Authorization", &auth)
-                .json(&serde_json::json!({
-                    "name": "運行管理者",
-                    "code": "NT35M",
-                    "role": ["manager"],
-                }))
-                .send()
-                .await
-                .unwrap();
-            assert_eq!(res.status(), 201);
-            let manager: Value = res.json().await.unwrap();
+            let manager = common::create_test_employee_with_role(
+                state.pool(),
+                tenant,
+                "運行管理者",
+                "NT35M",
+                &["manager"],
+            )
+            .await;
             let manager_id = manager["id"].as_str().unwrap();
 
             let (m_id, session_id) = common::insert_normal_flow_tenko(
@@ -278,21 +265,10 @@ async fn test_it_tenko_session_accepts_manager_judgment() {
 // =========================================================================
 
 /// 判定する運行管理者 (employees.role に manager を持つ) を作り、id を返す
-async fn create_manager(
-    client: &reqwest::Client,
-    base_url: &str,
-    auth: &str,
-    code: &str,
-) -> String {
-    let res = client
-        .post(format!("{base_url}/api/employees"))
-        .header("Authorization", auth)
-        .json(&serde_json::json!({ "name": "運行管理者", "code": code, "role": ["manager"] }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 201);
-    let manager: Value = res.json().await.unwrap();
+async fn create_manager(pool: &sqlx::PgPool, tenant: Uuid, code: &str) -> String {
+    let manager =
+        common::create_test_employee_with_role(pool, tenant, "運行管理者", code, &["manager"])
+            .await;
     manager["id"].as_str().unwrap().to_string()
 }
 
@@ -403,9 +379,9 @@ async fn test_it_tenko_judgment_method_is_stored_and_kept() {
     let auth = format!("Bearer {jwt}");
     let client = reqwest::Client::new();
 
-    let emp = common::create_test_employee(&client, &base_url, &auth, "運行者", "NT41").await;
+    let emp = common::create_test_employee(state.pool(), tenant, "運行者", "NT41").await;
     let emp_id = emp["id"].as_str().unwrap();
-    let manager_id = create_manager(&client, &base_url, &auth, "NT41M").await;
+    let manager_id = create_manager(state.pool(), tenant, "NT41M").await;
 
     let s_in_person = tenko_session(
         state.pool(),
@@ -601,9 +577,9 @@ async fn test_list_pending_it_tenko_sessions() {
     let auth = format!("Bearer {jwt}");
     let client = reqwest::Client::new();
 
-    let emp = common::create_test_employee(&client, &base_url, &auth, "運行者", "NT42").await;
+    let emp = common::create_test_employee(state.pool(), tenant, "運行者", "NT42").await;
     let emp_id = emp["id"].as_str().unwrap();
-    let manager_id = create_manager(&client, &base_url, &auth, "NT42M").await;
+    let manager_id = create_manager(state.pool(), tenant, "NT42M").await;
 
     // IT点呼 3 件 (a: 未判定のまま / b: 後で判定する / c: 先に判定済み) と通常点呼 1 件 (未判定)
     let it_a = tenko_session(
@@ -746,9 +722,9 @@ async fn test_csv_reads_in_person_it_tenko_as_in_person_tenko() {
     let auth = format!("Bearer {jwt}");
     let client = reqwest::Client::new();
 
-    let emp = common::create_test_employee(&client, &base_url, &auth, "運行者", "NT43").await;
+    let emp = common::create_test_employee(state.pool(), tenant, "運行者", "NT43").await;
     let emp_id = emp["id"].as_str().unwrap();
-    let manager_id = create_manager(&client, &base_url, &auth, "NT43M").await;
+    let manager_id = create_manager(state.pool(), tenant, "NT43M").await;
 
     let s_in_person = tenko_session(
         state.pool(),
