@@ -99,7 +99,7 @@ async fn auto_tenko_requires_bp() {
     let auth = format!("Bearer {jwt}");
 
     let employee =
-        common::create_test_employee(&client, &base_url, &auth, "BP Test Driver", "BP001").await;
+        common::create_test_employee(state.pool(), tenant, "BP Test Driver", "BP001").await;
     let employee_id = employee["id"].as_str().unwrap();
 
     test_case!("自動点呼で血圧なしは 400 で弾く", {
@@ -165,7 +165,7 @@ async fn escalate_to_remote_flow() {
     let auth = format!("Bearer {jwt}");
 
     let employee =
-        common::create_test_employee(&client, &base_url, &auth, "Escalate Driver", "ESC001").await;
+        common::create_test_employee(state.pool(), tenant, "Escalate Driver", "ESC001").await;
     let employee_id = employee["id"].as_str().unwrap();
 
     test_case!(
@@ -415,7 +415,7 @@ async fn no_schedule_start_session_sets_remote_method() {
     let auth = format!("Bearer {jwt}");
 
     let employee =
-        common::create_test_employee(&client, &base_url, &auth, "Remote Driver", "REM001").await;
+        common::create_test_employee(state.pool(), tenant, "Remote Driver", "REM001").await;
     let employee_id = employee["id"].as_str().unwrap();
 
     test_case!(
@@ -492,7 +492,7 @@ async fn scheduled_start_session_keeps_auto_method() {
     let auth = format!("Bearer {jwt}");
 
     let employee =
-        common::create_test_employee(&client, &base_url, &auth, "Scheduled Driver", "SCH001").await;
+        common::create_test_employee(state.pool(), tenant, "Scheduled Driver", "SCH001").await;
     let employee_id = Uuid::parse_str(employee["id"].as_str().unwrap()).unwrap();
 
     let schedule_id: Uuid = sqlx::query_scalar(

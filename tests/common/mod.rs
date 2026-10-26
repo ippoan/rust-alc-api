@@ -19,10 +19,10 @@ use rust_alc_api::db::repository::{
     PgDtakoLogsRepository, PgDtakoOperationsRepository, PgDtakoRestraintReportPdfRepository,
     PgDtakoRestraintReportRepository, PgDtakoScraperRepository, PgDtakoTicketsRepository,
     PgDtakoVehiclesRepository, PgDtakoWorkTimesRepository, PgDtakoYTimeExportRepository,
-    PgEmployeeRepository, PgEquipmentFailuresRepository, PgHealthBaselinesRepository,
-    PgHubMeasurementsRepository, PgLineworksChannelsRepository, PgNfcTagRepository,
-    PgNotifyDeliveryRepository, PgNotifyDocumentRepository, PgNotifyRecipientRepository,
-    PgSsoAdminRepository, PgTenantUsersRepository, PgTenkoCallRepository, PgTenkoRecordsRepository,
+    PgEquipmentFailuresRepository, PgHealthBaselinesRepository, PgHubMeasurementsRepository,
+    PgLineworksChannelsRepository, PgNfcTagRepository, PgNotifyDeliveryRepository,
+    PgNotifyDocumentRepository, PgNotifyRecipientRepository, PgSsoAdminRepository,
+    PgTenantUsersRepository, PgTenkoCallRepository, PgTenkoRecordsRepository,
     PgTenkoSchedulesRepository, PgTenkoSessionRepository, PgTenkoWebhooksRepository,
     PgTimecardRepository, PgVehicleSettingsDumpsRepository,
 };
@@ -78,23 +78,39 @@ pub fn db_rename_flock() -> FileLockGuard {
 /// (複数テナントが同じ email_domain を持つと google login ハンドラが混乱する)
 pub static GOOGLE_LOGIN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-/// テスト用従業員を作成し、JSON レスポンスを返す
+/// テスト用従業員を DB に直接入れ、`{"id", "name", "code"}` の JSON を返す。
+///
+/// 社員の口 (`/api/employees`) は ippoan/alc-people-worker へ移ったので (W4d-b、Refs #680)、
+/// rust に残る口のテストはこれで社員を用意する。role は社員の作成の既定と同じ `driver`。
 pub async fn create_test_employee(
-    client: &reqwest::Client,
-    base_url: &str,
-    auth_header: &str,
+    pool: &sqlx::PgPool,
+    tenant_id: Uuid,
     name: &str,
     code: &str,
 ) -> serde_json::Value {
-    let res = client
-        .post(format!("{base_url}/api/employees"))
-        .header("Authorization", auth_header)
-        .json(&serde_json::json!({ "name": name, "code": code }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 201, "Failed to create test employee");
-    res.json().await.unwrap()
+    create_test_employee_with_role(pool, tenant_id, name, code, &["driver"]).await
+}
+
+/// `create_test_employee` の role 指定版 (判定する運行管理者 = `manager` など)。
+pub async fn create_test_employee_with_role(
+    pool: &sqlx::PgPool,
+    tenant_id: Uuid,
+    name: &str,
+    code: &str,
+    role: &[&str],
+) -> serde_json::Value {
+    let (id,): (Uuid,) = sqlx::query_as(
+        "INSERT INTO alc_api.employees (tenant_id, code, name, role) \
+         VALUES ($1, $2, $3, $4) RETURNING id",
+    )
+    .bind(tenant_id)
+    .bind(code)
+    .bind(name)
+    .bind(role)
+    .fetch_one(pool)
+    .await
+    .expect("Failed to create test employee");
+    serde_json::json!({ "id": id, "name": name, "code": code })
 }
 
 /// 通常の流れ (通常点呼 / IT点呼) の点呼 1 件 — 測定・セッション・点呼記録 — を
@@ -312,7 +328,6 @@ fn build_app_state(
     let dtako_work_times = Arc::new(PgDtakoWorkTimesRepository::new(pool.clone()));
     let dtako_y_time_export = Arc::new(PgDtakoYTimeExportRepository::new(pool.clone()));
     let vehicle_settings_dumps = Arc::new(PgVehicleSettingsDumpsRepository::new(pool.clone()));
-    let employees = Arc::new(PgEmployeeRepository::new(pool.clone()));
     let hub_measurements = Arc::new(PgHubMeasurementsRepository::new(pool.clone()));
     let nfc_tags = Arc::new(PgNfcTagRepository::new(pool.clone()));
     let sso_admin = Arc::new(PgSsoAdminRepository::new(pool.clone()));
@@ -344,7 +359,6 @@ fn build_app_state(
         dtako_work_times,
         dtako_y_time_export,
         vehicle_settings_dumps,
-        employees,
         hub_measurements,
         nfc_tags,
         sso_admin,

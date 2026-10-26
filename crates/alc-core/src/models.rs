@@ -54,91 +54,6 @@ pub struct Employee {
     pub deleted_at: Option<DateTime<Utc>>,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct UpdateLicense {
-    pub license_issue_date: Option<chrono::NaiveDate>,
-    pub license_expiry_date: Option<chrono::NaiveDate>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct CreateEmployee {
-    pub code: Option<String>,
-    pub nfc_id: Option<String>,
-    pub name: String,
-    #[serde(default = "default_driver")]
-    pub role: Vec<String>,
-}
-
-fn default_driver() -> Vec<String> {
-    vec!["driver".to_string()]
-}
-
-#[derive(Debug, Deserialize)]
-pub struct UpdateFace {
-    pub face_photo_url: Option<String>,
-    pub face_embedding: Option<Vec<f64>>,
-    pub face_model_version: Option<String>,
-}
-
-#[derive(Debug, Serialize, FromRow)]
-pub struct FaceDataEntry {
-    pub id: Uuid,
-    pub face_embedding: Option<Vec<f64>>,
-    pub face_embedding_at: Option<DateTime<Utc>>,
-    pub face_model_version: Option<String>,
-    pub face_approval_status: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct UpdateNfcId {
-    pub nfc_id: String,
-}
-
-/// 一括 upsert (`PUT /employees/bulk-by-code`) で 1 リクエストに詰められる items の上限。
-///
-/// **カード台帳の一括取り込み (`PUT /timecard/cards/bulk-by-code`、ippoan/alc-people-worker の
-/// `timecard::MAX_BULK_UPSERT_ITEMS`) と同じ値にする。** 送り手 (relay / Worker) は同じ分割ロジックで
-/// 投げるので、片方だけ広げるともう片方が黙って 400 を返す側になる。
-pub const MAX_BULK_UPSERT_ITEMS: usize = 500;
-
-/// `PUT /api/employees/bulk-by-code` の 1 件分 (Refs ippoan/alc-app-s3#125)。
-/// theearth の乗務員マスタを relay 経由で取り込む用途で、乗務員CD (code) を
-/// キーに upsert する。
-#[derive(Debug, Deserialize)]
-pub struct EmployeeUpsertItem {
-    pub code: String,
-    pub name: String,
-    pub nfc_id: Option<String>,
-    pub license_issue_date: Option<chrono::NaiveDate>,
-    pub license_expiry_date: Option<chrono::NaiveDate>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct EmployeeBulkUpsert {
-    pub items: Vec<EmployeeUpsertItem>,
-}
-
-/// upsert できなかった 1 件 (nfc_id 衝突 / INSERT 時の unique 違反)。
-#[derive(Debug, Serialize)]
-pub struct EmployeeUpsertSkipped {
-    pub code: String,
-    pub reason: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct EmployeeUpsertSummary {
-    pub created: usize,
-    pub updated: usize,
-    pub skipped: Vec<EmployeeUpsertSkipped>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct UpdateEmployee {
-    pub name: String,
-    pub code: Option<String>,
-    pub role: Option<Vec<String>>,
-}
-
 // --- User ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -231,16 +146,6 @@ pub struct TimecardCard {
     /// `UNIQUE (tenant_id, card_id)` で 409 になるが、持ち主が空欄だと原因が読めない)。
     pub pending_employee_code: Option<String>,
     pub created_at: DateTime<Utc>,
-}
-
-/// `POST /employees/lookup` のリクエスト (Refs ippoan/rust-alc-api#644)。
-///
-/// 旧来の NFC ID をパス直書きで受けていた口の置き換え。NFC ID は免許証 IC 由来の
-/// 16 桁で個人に直結するため、URL (アクセスログ・Referer・devtools・
-/// エラートラッキング) に平文で残さないよう body で受け取る。
-#[derive(Debug, Deserialize)]
-pub struct EmployeeLookupByNfc {
-    pub nfc_id: String,
 }
 
 // --- Dtako: Office ---

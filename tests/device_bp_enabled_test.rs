@@ -201,7 +201,7 @@ async fn auto_tenko_bp_required_follows_device_bp_enabled() {
     let auth = format!("Bearer {jwt}");
 
     let employee =
-        common::create_test_employee(&client, &base_url, &auth, "BP322 Driver", "BP322-01").await;
+        common::create_test_employee(state.pool(), tenant, "BP322 Driver", "BP322-01").await;
     let employee_id = employee["id"].as_str().unwrap();
 
     let (device_id, _code) = create_device_via_url_flow(&client, &base_url, &auth).await;

@@ -417,7 +417,6 @@ pub fn setup_mock_app_state() -> AppState {
         dtako_work_times: Arc::new(MockDtakoWorkTimesRepository::default()),
         dtako_y_time_export: Arc::new(MockDtakoYTimeExportRepository::default()),
         vehicle_settings_dumps: Arc::new(MockVehicleSettingsDumpsRepository::default()),
-        employees: Arc::new(MockEmployeeRepository::default()),
         nfc_tags: Arc::new(MockNfcTagRepository::default()),
         sso_admin: Arc::new(MockSsoAdminRepository::default()),
         tenant_users: Arc::new(MockTenantUsersRepository::default()),
