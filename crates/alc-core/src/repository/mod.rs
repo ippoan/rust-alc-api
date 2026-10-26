@@ -25,7 +25,6 @@ pub mod notify_recipients;
 pub mod sso_admin;
 pub mod tenant_users;
 pub mod timecard;
-pub mod vehicle_settings_dumps;
 pub mod webhook;
 
 pub use auth::AuthRepository;
@@ -55,7 +54,4 @@ pub use notify_recipients::NotifyRecipientRepository;
 pub use sso_admin::SsoAdminRepository;
 pub use tenant_users::TenantUsersRepository;
 pub use timecard::TimecardRepository;
-pub use vehicle_settings_dumps::{
-    VehicleSettingsDumpInput, VehicleSettingsDumpSummary, VehicleSettingsDumpsRepository,
-};
 pub use webhook::WebhookRepository;

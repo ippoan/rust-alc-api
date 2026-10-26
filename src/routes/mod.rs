@@ -22,7 +22,6 @@ pub use alc_dtako::dtako_vehicles;
 pub use alc_dtako::dtako_work_times;
 pub use alc_dtako::dtako_y_time_export;
 pub use alc_dtako::dvr_notifications;
-pub use alc_dtako::vehicle_settings_dumps;
 pub use alc_maintenance::categories as maintenance_categories;
 pub use alc_maintenance::files as maintenance_files;
 pub use alc_maintenance::records as maintenance_records;
@@ -126,7 +125,6 @@ pub fn router(
         .merge(dtako_work_times::tenant_router())
         .merge(dtako_daily_hours::tenant_router())
         .merge(dtako_vehicles::tenant_router())
-        .merge(vehicle_settings_dumps::tenant_router())
         .merge(dtako_event_classifications::tenant_router())
         .merge(dtako_y_time_export::tenant_router())
         .merge(dtako_events::tenant_router())

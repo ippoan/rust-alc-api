@@ -3,56 +3,15 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use uuid::Uuid;
 
-use alc_core::models::VehicleSettingsDump;
-use alc_core::repository::vehicle_settings_dumps::{
-    VehicleSettingsDumpInput, VehicleSettingsDumpSummary, VehicleSettingsDumpsRepository,
-};
 use rust_alc_api::AppState;
 
 use super::*;
 use crate::common::mock_storage::MockStorage;
 
-/// VehicleSettingsDumpsRepository のスタブ。本 PR 範囲では handler を
-/// mock test ではカバーしないため、読み出しは空 / write はエラーを返す
-/// (重要: AppState の型を揃えるためだけのダミー)。
-#[derive(Default)]
-pub struct MockVehicleSettingsDumpsRepository;
-
-#[async_trait]
-impl VehicleSettingsDumpsRepository for MockVehicleSettingsDumpsRepository {
-    async fn register(
-        &self,
-        _tenant_id: Uuid,
-        _input: VehicleSettingsDumpInput,
-    ) -> Result<VehicleSettingsDump, sqlx::Error> {
-        Err(sqlx::Error::RowNotFound)
-    }
-
-    async fn list_by_vehicle_cd(
-        &self,
-        _tenant_id: Uuid,
-        _vehicle_cd: &str,
-    ) -> Result<Vec<VehicleSettingsDump>, sqlx::Error> {
-        Ok(vec![])
-    }
-
-    async fn summary_by_vehicle(
-        &self,
-        _tenant_id: Uuid,
-    ) -> Result<Vec<VehicleSettingsDumpSummary>, sqlx::Error> {
-        Ok(vec![])
-    }
-
-    async fn confirmed_vehicle_cds(&self, _tenant_id: Uuid) -> Result<Vec<String>, sqlx::Error> {
-        Ok(vec![])
-    }
-}
-
 /// VehiclesRepository のスタブ (Refs #651)。本タスク (#c651-2、車両マスタ土台) の
 /// 範囲では handler を mock test ではカバーしない (実 DB 統合テスト
 /// `tests/maintenance_test.rs` 側で検証する) ため、読み出しは空 / write はエラーを
-/// 返す (重要: MaintenanceState の型を揃えるためだけのダミー。
-/// `MockVehicleSettingsDumpsRepository` と同じ方針)。
+/// 返す (重要: MaintenanceState の型を揃えるためだけのダミー)。
 #[derive(Default)]
 pub struct MockVehiclesRepository;
 
@@ -416,7 +375,6 @@ pub fn setup_mock_app_state() -> AppState {
         dtako_vehicles: Arc::new(MockDtakoVehiclesRepository::default()),
         dtako_work_times: Arc::new(MockDtakoWorkTimesRepository::default()),
         dtako_y_time_export: Arc::new(MockDtakoYTimeExportRepository::default()),
-        vehicle_settings_dumps: Arc::new(MockVehicleSettingsDumpsRepository::default()),
         nfc_tags: Arc::new(MockNfcTagRepository::default()),
         sso_admin: Arc::new(MockSsoAdminRepository::default()),
         tenant_users: Arc::new(MockTenantUsersRepository::default()),

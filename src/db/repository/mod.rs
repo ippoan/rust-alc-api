@@ -8,7 +8,7 @@ pub use alc_core::repository::{
     DtakoYTimeExportRepository, HubMeasurementsRepository, LineworksChannelsRepository,
     NfcTagRepository, NotifyDeliveryRepository, NotifyDocumentRepository,
     NotifyRecipientRepository, SsoAdminRepository, TenantUsersRepository, TimecardRepository,
-    VehicleSettingsDumpsRepository, WebhookRepository,
+    WebhookRepository,
 };
 
 // Re-export tenko traits from alc-tenko (Refs #513)
@@ -29,7 +29,7 @@ pub use alc_devices::repo::devices;
 pub use alc_dtako::repo::{
     dtako_csv_proxy, dtako_daily_hours, dtako_drivers, dtako_event_classifications, dtako_logs,
     dtako_operations, dtako_restraint_report, dtako_restraint_report_pdf, dtako_scraper,
-    dtako_tickets, dtako_vehicles, dtako_work_times, dtako_y_time_export, vehicle_settings_dumps,
+    dtako_tickets, dtako_vehicles, dtako_work_times, dtako_y_time_export,
 };
 pub use alc_misc::repo::{bot_admin, sso_admin, tenant_users, timecard, webhook};
 pub use alc_tenko::repo::{
@@ -58,7 +58,7 @@ pub use alc_dtako::repo::{
     PgDtakoEventClassificationsRepository, PgDtakoLogsRepository, PgDtakoOperationsRepository,
     PgDtakoRestraintReportPdfRepository, PgDtakoRestraintReportRepository,
     PgDtakoScraperRepository, PgDtakoTicketsRepository, PgDtakoVehiclesRepository,
-    PgDtakoWorkTimesRepository, PgDtakoYTimeExportRepository, PgVehicleSettingsDumpsRepository,
+    PgDtakoWorkTimesRepository, PgDtakoYTimeExportRepository,
 };
 pub use alc_misc::repo::{
     PgBotAdminRepository, PgSsoAdminRepository, PgTenantUsersRepository, PgTimecardRepository,

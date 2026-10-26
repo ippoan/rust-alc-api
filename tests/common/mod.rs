@@ -24,7 +24,7 @@ use rust_alc_api::db::repository::{
     PgNotifyDocumentRepository, PgNotifyRecipientRepository, PgSsoAdminRepository,
     PgTenantUsersRepository, PgTenkoCallRepository, PgTenkoRecordsRepository,
     PgTenkoSchedulesRepository, PgTenkoSessionRepository, PgTenkoWebhooksRepository,
-    PgTimecardRepository, PgVehicleSettingsDumpsRepository,
+    PgTimecardRepository,
 };
 use rust_alc_api::AppState;
 
@@ -327,7 +327,6 @@ fn build_app_state(
     let dtako_vehicles = Arc::new(PgDtakoVehiclesRepository::new(pool.clone()));
     let dtako_work_times = Arc::new(PgDtakoWorkTimesRepository::new(pool.clone()));
     let dtako_y_time_export = Arc::new(PgDtakoYTimeExportRepository::new(pool.clone()));
-    let vehicle_settings_dumps = Arc::new(PgVehicleSettingsDumpsRepository::new(pool.clone()));
     let hub_measurements = Arc::new(PgHubMeasurementsRepository::new(pool.clone()));
     let nfc_tags = Arc::new(PgNfcTagRepository::new(pool.clone()));
     let sso_admin = Arc::new(PgSsoAdminRepository::new(pool.clone()));
@@ -358,7 +357,6 @@ fn build_app_state(
         dtako_vehicles,
         dtako_work_times,
         dtako_y_time_export,
-        vehicle_settings_dumps,
         hub_measurements,
         nfc_tags,
         sso_admin,
