@@ -10,4 +10,3 @@ pub mod repo;
 pub mod sso_admin;
 pub mod tenant_users;
 pub mod timecard;
-pub mod upload;

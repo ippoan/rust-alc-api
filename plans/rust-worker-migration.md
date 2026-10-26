@@ -61,10 +61,10 @@ worker の Tag Release (手動 = 本番 / merge = staging)。
 | W1 | `cameras*` (監視カメラの死活監視、#345) | **移さず削除** | S | 60 日間 health-logs の書き込み 0 件 (書き手の ippoan/alc-app#27 が未実装)。台帳は alc-cam-sd-ingest の `/api/cam-clips/cameras` が持つ |
 | W2 | `auth/me`・`logout`・`my-orgs`・`internal/auth/*`、misc の admin 系 (users・sso・members・api-tokens・access-requests・tenants/by-slug) | alc-auth-worker | M | 認証まわりを 1 か所に。`api-tokens` の発行は鍵の扱いを確認 |
 | W3 | carins + maintenance | 新 `alc-carins-worker` | M | ストレージは R2 binding に寄せる (GCS が残っていれば先に R2 へ) |
-| W4 | misc の残り: items / item-files / carrying / communication / guidance / employees (+face/nfc) / timecard / upload 3 口 | 新 `alc-misc-worker` (upload 3 口は measurements へ) | L | employees は多くの worker が読む共有表 → 所有者をここに決める。`staging/export・import` と `health/secret-fingerprint` は移さず廃止を検討 |
+| W4 | misc の残り: items / item-files / carrying / communication / guidance / employees (+face/nfc) / timecard / upload 3 口 | 4 段に分ける: W4a 消す (`staging/export・import`) / W4b upload 3 口 → alc-measurements / W4c items・carrying・communication・guidance → 新 `alc-records-worker` / W4d employees・timecard → 新 `alc-people-worker` | L | employees は多くの worker が読む共有表 → 所有者を W4d の worker に決める。`health/secret-fingerprint` は PR の CI の Drift Check (staging) が使うので W9 まで残す |
 | W5 | dtako の残り | alc-dtako-worker を拡張 | L | 拘束時間 PDF は `alc-pdf` を wasm で (lab で printpdf 確認済み、#486 Phase 1)。email-receiver の internal ingest は Service Binding へ |
 | W6 | devices | 新 `alc-devices-worker` | L | FCM は SA 鍵で RS256 を自前署名 (`rsa` crate は unknown で動作確認済み)。OTA・pair の外部呼び出しの置き換え |
-| W7 | tenko + tenko-call + core の公開口 (`/i` `/t` `/u` `/public`) | 新 `alc-tenko-worker` | XL | 予定超過の 60 秒ループ → Cron Trigger (1 分)。webhook 配信 → `wait_until` か Queues (fire-and-forget 禁止の規範を引き継ぐ)。`realtime_bus` の代替 (DO)。`device_dev` の扱いを `alc-core-wasm` 側へ。業務の中心なので最後に、他の wave で型を固めてから |
+| W7 | tenko + tenko-call + core の公開口 (`/i` `/t` `/u` `/public`) | 新 `alc-tenko-worker` | XL | **切り替えの確かめに、dev 端末の業務後点呼で運行報告の音声 (`POST /api/upload/report-audio`、W4b で alc-measurements に移した口) も通す** (W4b では測定だけ確かめた)。予定超過の 60 秒ループ → Cron Trigger (1 分)。webhook 配信 → `wait_until` か Queues (fire-and-forget 禁止の規範を引き継ぐ)。`realtime_bus` の代替 (DO)。`device_dev` の扱いを `alc-core-wasm` 側へ。業務の中心なので最後に、他の wave で型を固めてから |
 | W8 | notify の残り (documents・emails・ingest・viewer・LINE webhook) | alc-notify-worker 拡張 + **redact/rasterize は Containers** | L | pdfium は wasm 不可。Cloudflare Containers に redact だけ置き worker から呼ぶ (#486 Phase 2・#476)。viewer の token を URL パスに載せる問題 (#648) を移行と同時に直す |
 | W9 | 撤収 | — | M | archive Job を Cron + R2 か Container へ → Cloud Run 停止 → contract migration (`bot_configs.private_key_encrypted` 等) → secret 退役 (#494・#503・#502) → rust-alc-api を archive |
 
@@ -90,5 +90,9 @@ W4 を W5〜W7 より前に置くのは、employees / timecard を他の wave �
 - W2a: ログインの内部口 `/internal/auth/*` 8 本を削除 (本番は 10/13 から alc-auth-worker が受けている)
 - W2b: 本番の me・logout・my-orgs を auth-worker の `ALC_AUTH_SESSION=1` で alc-auth-worker に切り替え済み (auth-worker v0.2.328)。monolith の 3 本の削除は様子見の後
 - W2c: admin 系の分け方を決定。**消す**: API トークン (検証する実装がどこにも無い)・メンバー (`/admin/users` と重複、60 日 0 件) — この PR。**alc-auth-worker へ**: ユーザー・招待、SSO 設定、参加の申請。**alc-lineworks-worker へ**: Bot 設定
-- 次は W2b (本番の me・logout・my-orgs を auth-worker の `ALC_AUTH_SESSION=1` で alc-auth-worker に切り替え、monolith の 3 本を削除) と W2c (admin 系)
+- W2c: ユーザー・招待・SSO 設定・参加の申請は alc-auth-worker (v0.2.4)、Bot 設定は alc-lineworks-worker (v0.1.5) に移し、本番で切り替え済み (auth-worker v0.2.329・v0.2.330)。rust 側の削除は W2b の 3 本と一緒に (10/26–27 以降)
+- W3: carins (呼び手の無い 7 本を除く) と maintenance を新 ippoan/alc-carins-worker (v0.0.1) に移し、本番で切り替え済み (auth-worker v0.2.331、smb の取り込みも RPC で worker へ)。読み取りは本番で確認済み。smb の取り込みと書き込みの確認・rust 側の削除は後で
+- W4a: `staging/export・import` を削除 (#761、auth-worker v0.2.332)
+- W4b: upload 3 口を alc-measurements-worker (v0.1.12) に移し、本番で切り替え済み (auth-worker v0.2.333)。dev 端末の測定で `face-photo`・`blow-video` の書き込みと読み返しを確認。`report-audio` は W7 で確かめる。rust 側の 3 口はこの PR で削除
+- 次は W4c (items・carrying・communication・guidance → alc-records-worker)、その後 W4d (employees・timecard)
 rust-alc-api は open PR 1 本までなので、W1 以降の worker 側の PR (別 repo) と並行して進める。
