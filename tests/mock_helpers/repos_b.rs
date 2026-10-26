@@ -19,8 +19,7 @@ use rust_alc_api::db::repository::dtako_tickets::DtakoTicketsRepository;
 use rust_alc_api::db::repository::dtako_vehicles::DtakoVehiclesRepository;
 use rust_alc_api::db::repository::dtako_work_times::{DtakoWorkTimesRepository, WorkTimeItem};
 use rust_alc_api::db::repository::dtako_y_time_export::{
-    DtakoDriverOperation, DtakoDriverRef, DtakoYTimeExportRepository, UnsplitOperation,
-    YTimeExportOperation,
+    DtakoYTimeExportRepository, YTimeExportOperation,
 };
 use rust_alc_api::db::repository::equipment_failures::EquipmentFailuresRepository;
 use rust_alc_api::db::repository::health_baselines::HealthBaselinesRepository;
@@ -539,17 +538,6 @@ pub struct MockDtakoYTimeExportRepository {
     pub fail_next: AtomicBool,
     pub driver: std::sync::Mutex<Option<(Uuid, String)>>,
     pub operations: std::sync::Mutex<Vec<YTimeExportOperation>>,
-    /// 全乗務員版 (Refs ohishi-exp/rust-ichibanboshi#205 実装計画 01) 用。
-    pub drivers: std::sync::Mutex<Vec<DtakoDriverRef>>,
-    pub driver_operations: std::sync::Mutex<Vec<DtakoDriverOperation>>,
-    /// `list_operations` / `list_operations_for_drivers` だけを失敗させる。
-    /// `fail_next` は先に `lookup_driver` / `list_drivers_with_operations` で
-    /// 消費されるため、後段のエラー経路を単独で試すのに要る。
-    pub fail_operations: AtomicBool,
-    /// etags の `unsplit` (has_kudgivt = FALSE) 用 (Refs #205 の 36)。
-    pub unsplit_operations: std::sync::Mutex<Vec<UnsplitOperation>>,
-    /// `list_unsplit_operations` だけを失敗させる。
-    pub fail_unsplit: AtomicBool,
 }
 
 impl Default for MockDtakoYTimeExportRepository {
@@ -558,11 +546,6 @@ impl Default for MockDtakoYTimeExportRepository {
             fail_next: AtomicBool::new(false),
             driver: std::sync::Mutex::new(None),
             operations: std::sync::Mutex::new(Vec::new()),
-            drivers: std::sync::Mutex::new(Vec::new()),
-            driver_operations: std::sync::Mutex::new(Vec::new()),
-            fail_operations: AtomicBool::new(false),
-            unsplit_operations: std::sync::Mutex::new(Vec::new()),
-            fail_unsplit: AtomicBool::new(false),
         }
     }
 }
@@ -576,45 +559,6 @@ impl MockDtakoYTimeExportRepository {
     pub fn with_operations(self, ops: Vec<YTimeExportOperation>) -> Self {
         *self.operations.lock().unwrap() = ops;
         self
-    }
-
-    pub fn with_drivers(self, drivers: Vec<DtakoDriverRef>) -> Self {
-        *self.drivers.lock().unwrap() = drivers;
-        self
-    }
-
-    pub fn with_driver_operations(self, ops: Vec<DtakoDriverOperation>) -> Self {
-        *self.driver_operations.lock().unwrap() = ops;
-        self
-    }
-
-    pub fn with_unsplit_operations(self, ops: Vec<UnsplitOperation>) -> Self {
-        *self.unsplit_operations.lock().unwrap() = ops;
-        self
-    }
-
-    pub fn failing_operations(self) -> Self {
-        self.fail_operations.store(true, Ordering::SeqCst);
-        self
-    }
-
-    pub fn failing_unsplit(self) -> Self {
-        self.fail_unsplit.store(true, Ordering::SeqCst);
-        self
-    }
-
-    fn check_fail_operations(&self) -> Result<(), sqlx::Error> {
-        if self.fail_operations.swap(false, Ordering::SeqCst) {
-            return Err(sqlx::Error::RowNotFound);
-        }
-        Ok(())
-    }
-
-    fn check_fail_unsplit(&self) -> Result<(), sqlx::Error> {
-        if self.fail_unsplit.swap(false, Ordering::SeqCst) {
-            return Err(sqlx::Error::RowNotFound);
-        }
-        Ok(())
     }
 }
 
@@ -637,58 +581,7 @@ impl DtakoYTimeExportRepository for MockDtakoYTimeExportRepository {
         _to: NaiveDate,
     ) -> Result<Vec<YTimeExportOperation>, sqlx::Error> {
         check_fail!(self);
-        self.check_fail_operations()?;
         Ok(self.operations.lock().unwrap().clone())
-    }
-
-    async fn list_drivers_with_operations(
-        &self,
-        _tenant_id: Uuid,
-        _from: NaiveDate,
-        _to: NaiveDate,
-        after_driver_cd: Option<&str>,
-        limit: i64,
-    ) -> Result<Vec<DtakoDriverRef>, sqlx::Error> {
-        check_fail!(self);
-        // Pg 実装と同じ keyset 挙動 (driver_cd 昇順 / after は排他的下限 / limit 打ち切り)
-        let mut rows: Vec<DtakoDriverRef> = self.drivers.lock().unwrap().clone();
-        rows.sort_by(|a, b| a.driver_cd.cmp(&b.driver_cd));
-        if let Some(after) = after_driver_cd {
-            rows.retain(|d| d.driver_cd.as_str() > after);
-        }
-        rows.truncate(limit as usize);
-        Ok(rows)
-    }
-
-    async fn list_operations_for_drivers(
-        &self,
-        _tenant_id: Uuid,
-        driver_ids: &[Uuid],
-        _from: NaiveDate,
-        _to: NaiveDate,
-    ) -> Result<Vec<DtakoDriverOperation>, sqlx::Error> {
-        check_fail!(self);
-        self.check_fail_operations()?;
-        let rows: Vec<DtakoDriverOperation> = self
-            .driver_operations
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|o| driver_ids.contains(&o.driver_id))
-            .cloned()
-            .collect();
-        Ok(rows)
-    }
-
-    async fn list_unsplit_operations(
-        &self,
-        _tenant_id: Uuid,
-        _from: NaiveDate,
-        _to: NaiveDate,
-    ) -> Result<Vec<UnsplitOperation>, sqlx::Error> {
-        check_fail!(self);
-        self.check_fail_unsplit()?;
-        Ok(self.unsplit_operations.lock().unwrap().clone())
     }
 }
 

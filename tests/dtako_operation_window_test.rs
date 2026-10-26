@@ -1,7 +1,7 @@
 //! `DtakoYTimeExportRepository` の期間条件を実 DB で固定する
 //! (Refs ohishi-exp/rust-ichibanboshi#205 の 38)。
 //!
-//! この 4 メソッドの `WHERE` は
+//! `list_operations` の `WHERE` は
 //! `(reading_date BETWEEN from-1 AND to+1 OR operation_date BETWEEN from-1 AND to+1)`。
 //! **読取日だけで絞ると月末に走った運行が構造的に落ちる** — 読取日はカードを読ませた日
 //! なので、月末の運行ほど読まれるのが翌月上旬になる。2026-06 の勤怠が オンプレ基準より
@@ -9,7 +9,8 @@
 //! 窓の外 (07-03〜07-13)・運行日は窓の中 (06-24〜07-01)」だった。
 //!
 //! SQL は `sqlx::query_as` の実行時クエリでコンパイル時検査が効かない。窓が縮む方向の
-//! 退行は「静かにデータが減る」形で出るため、実 DB で 4 メソッドとも縛る。
+//! 退行は「静かにデータが減る」形で出るため、実 DB で縛る (同じ条件の全乗務員版・未 split 版は
+//! 勤怠向けの読み取りと一緒に ippoan/alc-dtako-worker へ移った。W5b、Refs #680)。
 //!
 //! 4 本の運行を仕込んで境界を固定する (乗務員 1078 の実データを模した B が本題):
 //!
@@ -91,9 +92,8 @@ async fn insert_operation(
     .expect("Failed to insert operation");
 }
 
-/// A/B/C/D の 4 本を仕込み、`(tenant_id, driver_id)` を返す。
-/// `has_kudgivt` は `list_unsplit_operations` 以外の 3 メソッドが TRUE で絞るので引数にする。
-async fn seed(pool: &sqlx::PgPool, label: &str, has_kudgivt: bool) -> (Uuid, Uuid) {
+/// A/B/C/D の 4 本を `has_kudgivt = TRUE` で仕込み、`(tenant_id, driver_id)` を返す。
+async fn seed(pool: &sqlx::PgPool, label: &str) -> (Uuid, Uuid) {
     let tenant_id = common::create_test_tenant(pool, label).await;
     let driver_id = create_driver(pool, tenant_id, "1078").await;
     let p = Uuid::new_v4().simple().to_string();
@@ -106,7 +106,7 @@ async fn seed(pool: &sqlx::PgPool, label: &str, has_kudgivt: bool) -> (Uuid, Uui
         &a,
         d((2026, 6, 19)),
         Some(d((2026, 6, 19))),
-        has_kudgivt,
+        true,
     )
     .await;
     // B: 読取日 07-06 (窓の外) / 運行日 06-24 (窓の中)。乗務員 1078 `2606241140...` の形
@@ -118,7 +118,7 @@ async fn seed(pool: &sqlx::PgPool, label: &str, has_kudgivt: bool) -> (Uuid, Uui
         &b,
         d((2026, 7, 6)),
         Some(d((2026, 6, 24))),
-        has_kudgivt,
+        true,
     )
     .await;
     // C: どちらも窓の外 (翌月に走って翌月に読まれた運行)
@@ -130,7 +130,7 @@ async fn seed(pool: &sqlx::PgPool, label: &str, has_kudgivt: bool) -> (Uuid, Uui
         &c,
         d((2026, 7, 20)),
         Some(d((2026, 7, 20))),
-        has_kudgivt,
+        true,
     )
     .await;
     // D: 運行日が NULL で読取日だけ窓の中。reading_date 側の条件を消すと落ちる行
@@ -142,7 +142,7 @@ async fn seed(pool: &sqlx::PgPool, label: &str, has_kudgivt: bool) -> (Uuid, Uui
         &dd,
         d((2026, 6, 10)),
         None,
-        has_kudgivt,
+        true,
     )
     .await;
     (tenant_id, driver_id)
@@ -160,7 +160,7 @@ fn labels(mut unko_nos: Vec<String>) -> Vec<String> {
 #[tokio::test]
 async fn list_operations_takes_reading_date_or_operation_date() {
     let pool = setup_pool().await;
-    let (tenant_id, driver_id) = seed(&pool, "op window single", true).await;
+    let (tenant_id, driver_id) = seed(&pool, "op window single").await;
     let repo = PgDtakoYTimeExportRepository::new(pool);
 
     let ops = repo
@@ -170,66 +170,4 @@ async fn list_operations_takes_reading_date_or_operation_date() {
 
     let got = labels(ops.into_iter().map(|o| o.unko_no).collect());
     assert_eq!(got, vec!["A", "B", "D"], "B (運行日だけ窓の中) が要る");
-}
-
-#[tokio::test]
-async fn list_operations_for_drivers_takes_reading_date_or_operation_date() {
-    let pool = setup_pool().await;
-    let (tenant_id, driver_id) = seed(&pool, "op window multi", true).await;
-    let repo = PgDtakoYTimeExportRepository::new(pool);
-
-    let ops = repo
-        .list_operations_for_drivers(tenant_id, &[driver_id], d(FROM), d(TO))
-        .await
-        .expect("list_operations_for_drivers failed");
-
-    let got = labels(ops.into_iter().map(|o| o.unko_no).collect());
-    assert_eq!(got, vec!["A", "B", "D"], "全乗務員版も同じ条件で拾う");
-}
-
-#[tokio::test]
-async fn list_unsplit_operations_takes_reading_date_or_operation_date() {
-    let pool = setup_pool().await;
-    // has_kudgivt = FALSE 側。他 3 メソッドと窓が同じであることを固定する
-    let (tenant_id, _driver_id) = seed(&pool, "op window unsplit", false).await;
-    let repo = PgDtakoYTimeExportRepository::new(pool);
-
-    let rows = repo
-        .list_unsplit_operations(tenant_id, d(FROM), d(TO))
-        .await
-        .expect("list_unsplit_operations failed");
-
-    let got = labels(rows.into_iter().map(|r| r.unko_no).collect());
-    assert_eq!(got, vec!["A", "B", "D"], "未 split 側も同じ窓で数える");
-}
-
-#[tokio::test]
-async fn list_drivers_with_operations_finds_a_driver_whose_only_operation_is_read_late() {
-    let pool = setup_pool().await;
-    // B (読取日だけ窓の外) しか持たない乗務員。読取日だけで絞ると 1 件も返らない
-    let tenant_id = common::create_test_tenant(&pool, "op window drivers").await;
-    let driver_id = create_driver(&pool, tenant_id, "1078").await;
-    insert_operation(
-        &pool,
-        tenant_id,
-        driver_id,
-        &format!("B{}", Uuid::new_v4().simple()),
-        d((2026, 7, 6)),
-        Some(d((2026, 6, 24))),
-        true,
-    )
-    .await;
-    let repo = PgDtakoYTimeExportRepository::new(pool);
-
-    let drivers = repo
-        .list_drivers_with_operations(tenant_id, d(FROM), d(TO), None, 100)
-        .await
-        .expect("list_drivers_with_operations failed");
-
-    let cds: Vec<String> = drivers.into_iter().map(|d| d.driver_cd).collect();
-    assert_eq!(
-        cds,
-        vec!["1078".to_string()],
-        "最終運行が翌月読みでも列挙する"
-    );
 }

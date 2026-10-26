@@ -10,7 +10,6 @@ pub use alc_dtako::dtako_csv_proxy;
 pub use alc_dtako::dtako_daily_hours;
 pub use alc_dtako::dtako_drivers;
 pub use alc_dtako::dtako_event_classifications;
-pub use alc_dtako::dtako_events;
 pub use alc_dtako::dtako_logs;
 pub use alc_dtako::dtako_operation_changes;
 pub use alc_dtako::dtako_operations;
@@ -126,7 +125,6 @@ pub fn router(
         .merge(dtako_vehicles::tenant_router())
         .merge(dtako_event_classifications::tenant_router())
         .merge(dtako_y_time_export::tenant_router())
-        .merge(dtako_events::tenant_router())
         .nest("/dtako-logs", dtako_logs::tenant_router())
         .merge(notify_documents::tenant_router())
         .merge(notify_email_documents::tenant_router())
