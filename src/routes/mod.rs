@@ -21,7 +21,6 @@ pub use alc_dtako::dtako_tickets;
 pub use alc_dtako::dtako_vehicles;
 pub use alc_dtako::dtako_work_times;
 pub use alc_dtako::dtako_y_time_export;
-pub use alc_dtako::dvr_notifications;
 pub use alc_maintenance::categories as maintenance_categories;
 pub use alc_maintenance::files as maintenance_files;
 pub use alc_maintenance::records as maintenance_records;
@@ -198,9 +197,6 @@ pub fn internal_shared_secret_router(internal_secret: Option<String>) -> Router<
             .merge(dtako_operations::internal_router())
             // cf-alc-recorder Worker からの CoreS3 測定 ingest (Refs #564)
             .merge(hub_measurements::internal_router())
-            // dtako-scraper-relay の cron からの DVR 動画通知 ingest + .vdf 保存
-            // (Refs ohishi-exp/nuxt-dtako-admin#1094)
-            .merge(dvr_notifications::internal_router())
             .layer(axum_middleware::from_fn(
                 alc_core::auth_middleware::require_internal_shared_secret,
             ))

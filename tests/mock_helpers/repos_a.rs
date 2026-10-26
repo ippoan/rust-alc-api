@@ -1808,15 +1808,6 @@ impl Default for MockDtakoLogsRepository {
 
 #[async_trait::async_trait]
 impl DtakoLogsRepository for MockDtakoLogsRepository {
-    async fn bulk_upsert(
-        &self,
-        _tenant_id: Uuid,
-        records: &[alc_core::models::DtakologInput],
-    ) -> Result<u64, sqlx::Error> {
-        check_fail!(self);
-        Ok(records.len() as u64)
-    }
-
     async fn current_list_all(&self, _tenant_id: Uuid) -> Result<Vec<DtakologRow>, sqlx::Error> {
         check_fail!(self);
         Ok(vec![])
