@@ -26,7 +26,7 @@ use rust_alc_api::db::repository::{
     PgEquipmentFailuresRepository, PgHealthBaselinesRepository, PgHubMeasurementsRepository,
     PgNfcTagRepository, PgSsoAdminRepository, PgTenantUsersRepository, PgTenkoCallRepository,
     PgTenkoRecordsRepository, PgTenkoSchedulesRepository, PgTenkoSessionRepository,
-    PgTenkoWebhooksRepository, PgTimecardRepository, PgVehicleSettingsDumpsRepository,
+    PgTenkoWebhooksRepository, PgTimecardRepository,
 };
 use rust_alc_api::storage::StorageBackend;
 use rust_alc_api::AppState;
@@ -184,7 +184,6 @@ async fn main() -> anyhow::Result<()> {
     let dtako_scraper = Arc::new(PgDtakoScraperRepository::new(pool.clone()));
     let dtako_tickets = Arc::new(PgDtakoTicketsRepository::new(pool.clone()));
     let dtako_vehicles = Arc::new(PgDtakoVehiclesRepository::new(pool.clone()));
-    let vehicle_settings_dumps = Arc::new(PgVehicleSettingsDumpsRepository::new(pool.clone()));
     let dtako_work_times = Arc::new(PgDtakoWorkTimesRepository::new(pool.clone()));
     let dtako_y_time_export = Arc::new(PgDtakoYTimeExportRepository::new(pool.clone()));
     let equipment_failures = Arc::new(PgEquipmentFailuresRepository::new(pool.clone()));
@@ -289,7 +288,6 @@ async fn main() -> anyhow::Result<()> {
         dtako_vehicles,
         dtako_work_times,
         dtako_y_time_export,
-        vehicle_settings_dumps,
         hub_measurements,
         nfc_tags,
         sso_admin,

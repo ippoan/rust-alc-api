@@ -37,7 +37,6 @@ use repository::{
     DtakoYTimeExportRepository, HubMeasurementsRepository, LineworksChannelsRepository,
     NfcTagRepository, NotifyDeliveryRepository, NotifyDocumentRepository,
     NotifyRecipientRepository, SsoAdminRepository, TenantUsersRepository, TimecardRepository,
-    VehicleSettingsDumpsRepository,
 };
 use storage::StorageBackend;
 
@@ -62,7 +61,6 @@ pub struct AppState {
     pub dtako_vehicles: Arc<dyn DtakoVehiclesRepository>,
     pub dtako_work_times: Arc<dyn DtakoWorkTimesRepository>,
     pub dtako_y_time_export: Arc<dyn DtakoYTimeExportRepository>,
-    pub vehicle_settings_dumps: Arc<dyn VehicleSettingsDumpsRepository>,
     pub hub_measurements: Arc<dyn HubMeasurementsRepository>,
     pub nfc_tags: Arc<dyn NfcTagRepository>,
     pub sso_admin: Arc<dyn SsoAdminRepository>,
