@@ -29,12 +29,8 @@ pub use alc_maintenance::records as maintenance_records;
 pub use alc_maintenance::vehicles as maintenance_vehicles;
 pub use alc_misc::access_requests;
 pub use alc_misc::bot_admin;
-pub use alc_misc::carrying_items;
-pub use alc_misc::communication_items;
 pub use alc_misc::employees;
-pub use alc_misc::guidance_records;
 pub use alc_misc::health;
-pub use alc_misc::items;
 pub use alc_misc::sso_admin;
 pub use alc_misc::tenant_users;
 pub use alc_misc::timecard;
@@ -123,10 +119,6 @@ pub fn router(
         .merge(car_inspection_files::tenant_router())
         .merge(carins_files::tenant_router())
         .merge(nfc_tags::tenant_router())
-        .merge(carrying_items::tenant_router())
-        .merge(communication_items::tenant_router())
-        .merge(guidance_records::tenant_router())
-        .merge(items::tenant_router())
         .merge(dtako_csv_proxy::tenant_router())
         .merge(dtako_drivers::tenant_router())
         .merge(dtako_operations::tenant_router())

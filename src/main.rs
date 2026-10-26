@@ -18,15 +18,13 @@ use alc_notify::repo::{
 };
 use rust_alc_api::db::repository::{
     PgAuthRepository, PgBotAdminRepository, PgCarInspectionRepository, PgCarinsFilesRepository,
-    PgCarryingItemsRepository, PgCommunicationItemsRepository, PgDailyHealthRepository,
-    PgDeviceRepository, PgDriverInfoRepository, PgDtakoCsvProxyRepository,
+    PgDailyHealthRepository, PgDeviceRepository, PgDriverInfoRepository, PgDtakoCsvProxyRepository,
     PgDtakoDailyHoursRepository, PgDtakoDriversRepository, PgDtakoEventClassificationsRepository,
     PgDtakoLogsRepository, PgDtakoOperationsRepository, PgDtakoRestraintReportPdfRepository,
     PgDtakoRestraintReportRepository, PgDtakoScraperRepository, PgDtakoTicketsRepository,
     PgDtakoVehiclesRepository, PgDtakoWorkTimesRepository, PgDtakoYTimeExportRepository,
-    PgEmployeeRepository, PgEquipmentFailuresRepository, PgGuidanceRecordsRepository,
-    PgHealthBaselinesRepository, PgHubMeasurementsRepository, PgItemFilesRepository,
-    PgItemsRepository, PgNfcTagRepository, PgSsoAdminRepository, PgTenantUsersRepository,
+    PgEmployeeRepository, PgEquipmentFailuresRepository, PgHealthBaselinesRepository,
+    PgHubMeasurementsRepository, PgNfcTagRepository, PgSsoAdminRepository, PgTenantUsersRepository,
     PgTenkoCallRepository, PgTenkoRecordsRepository, PgTenkoSchedulesRepository,
     PgTenkoSessionRepository, PgTenkoWebhooksRepository, PgTimecardRepository,
     PgVehicleSettingsDumpsRepository,
@@ -171,8 +169,6 @@ async fn main() -> anyhow::Result<()> {
     let bot_admin = Arc::new(PgBotAdminRepository::new(pool.clone()));
     let car_inspections = Arc::new(PgCarInspectionRepository::new(pool.clone()));
     let carins_files = Arc::new(PgCarinsFilesRepository::new(pool.clone()));
-    let carrying_items = Arc::new(PgCarryingItemsRepository::new(pool.clone()));
-    let communication_items = Arc::new(PgCommunicationItemsRepository::new(pool.clone()));
     let daily_health = Arc::new(PgDailyHealthRepository::new(pool.clone()));
     let devices = Arc::new(PgDeviceRepository::new(pool.clone()));
     let driver_info = Arc::new(PgDriverInfoRepository::new(pool.clone()));
@@ -194,11 +190,8 @@ async fn main() -> anyhow::Result<()> {
     let dtako_y_time_export = Arc::new(PgDtakoYTimeExportRepository::new(pool.clone()));
     let employees = Arc::new(PgEmployeeRepository::new(pool.clone()));
     let equipment_failures = Arc::new(PgEquipmentFailuresRepository::new(pool.clone()));
-    let guidance_records = Arc::new(PgGuidanceRecordsRepository::new(pool.clone()));
     let hub_measurements = Arc::new(PgHubMeasurementsRepository::new(pool.clone()));
     let health_baselines = Arc::new(PgHealthBaselinesRepository::new(pool.clone()));
-    let items = Arc::new(PgItemsRepository::new(pool.clone()));
-    let item_files = Arc::new(PgItemFilesRepository::new(pool.clone()));
     let nfc_tags = Arc::new(PgNfcTagRepository::new(pool.clone()));
     let sso_admin = Arc::new(PgSsoAdminRepository::new(pool.clone()));
     let tenant_users = Arc::new(PgTenantUsersRepository::new(pool.clone()));
@@ -284,8 +277,6 @@ async fn main() -> anyhow::Result<()> {
         bot_admin,
         car_inspections,
         carins_files,
-        carrying_items,
-        communication_items,
         devices,
         dtako_csv_proxy,
         dtako_daily_hours,
@@ -302,10 +293,7 @@ async fn main() -> anyhow::Result<()> {
         dtako_y_time_export,
         vehicle_settings_dumps,
         employees,
-        guidance_records,
         hub_measurements,
-        items,
-        item_files,
         nfc_tags,
         sso_admin,
         tenant_users,

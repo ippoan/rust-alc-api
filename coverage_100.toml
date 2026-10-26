@@ -168,23 +168,11 @@ path = "crates/alc-misc/src/bot_admin.rs"
 type = "mock"
 
 [[files]]
-path = "crates/alc-misc/src/carrying_items.rs"
-type = "mock"
-
-[[files]]
-path = "crates/alc-misc/src/communication_items.rs"
-type = "mock"
-
-[[files]]
 path = "crates/alc-tenko/src/driver_info.rs"
 type = "mock"
 
 [[files]]
 path = "crates/alc-misc/src/employees.rs"
-type = "mock"
-
-[[files]]
-path = "crates/alc-misc/src/guidance_records.rs"
 type = "mock"
 
 [[files]]
