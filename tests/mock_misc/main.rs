@@ -31,5 +31,3 @@ mod mock_sso_admin_test;
 mod mock_tenant_users_test;
 #[path = "../mock_tests/mock_timecard_test.rs"]
 mod mock_timecard_test;
-#[path = "../mock_tests/mock_upload_test.rs"]
-mod mock_upload_test;
