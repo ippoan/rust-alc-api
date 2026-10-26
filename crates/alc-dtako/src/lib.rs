@@ -20,7 +20,6 @@ pub mod dtako_tickets;
 pub mod dtako_vehicles;
 pub mod dtako_work_times;
 pub mod dtako_y_time_export;
-pub mod dvr_notifications;
 
 use std::sync::Arc;
 

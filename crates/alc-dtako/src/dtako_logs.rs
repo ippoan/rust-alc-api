@@ -1,15 +1,14 @@
 use axum::{
     extract::{Query, State},
     http::StatusCode,
-    routing::{get, post},
+    routing::get,
     Json, Router,
 };
 
 use crate::DtakoState;
 use alc_core::auth_middleware::TenantId;
 use alc_core::models::{
-    BulkUpsertResponse, DtakologDateQuery, DtakologDateRangeQuery, DtakologInput,
-    DtakologSelectQuery, DtakologView,
+    DtakologDateQuery, DtakologDateRangeQuery, DtakologSelectQuery, DtakologView,
 };
 
 pub fn tenant_router<S>() -> Router<S>
@@ -22,7 +21,6 @@ where
         .route("/by-date", get(get_by_date))
         .route("/current/select", get(current_list_select))
         .route("/by-date-range", get(get_by_date_range))
-        .route("/bulk", post(bulk_upsert))
 }
 
 async fn current_list_all(
@@ -123,35 +121,6 @@ fn extract_date(datetime_str: &str) -> String {
     }
     // Fallback: return first 10 chars (e.g. "26/04/07 12:00" → "26/04/07 1")
     datetime_str.chars().take(10).collect()
-}
-
-async fn bulk_upsert(
-    State(state): State<DtakoState>,
-    tenant: axum::Extension<TenantId>,
-    Json(records): Json<Vec<DtakologInput>>,
-) -> Result<Json<BulkUpsertResponse>, StatusCode> {
-    if records.is_empty() {
-        return Ok(Json(BulkUpsertResponse {
-            success: true,
-            records_added: 0,
-            total_records: 0,
-            message: "No records provided".to_string(),
-        }));
-    }
-
-    let total = records.len() as i32;
-    let affected = state
-        .dtako_logs
-        .bulk_upsert(tenant.0 .0, &records)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    Ok(Json(BulkUpsertResponse {
-        success: true,
-        records_added: affected as i32,
-        total_records: total,
-        message: format!("Upserted {} records", affected),
-    }))
 }
 
 #[cfg(test)]
