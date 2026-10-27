@@ -1,14 +1,11 @@
 // Re-export traits from alc-core
 pub use alc_core::repository::{
     AuthRepository, BotAdminRepository, CarInspectionRepository, CarinsFilesRepository,
-    DeviceRepository, DtakoCsvProxyRepository, DtakoDailyHoursRepository, DtakoDriversRepository,
-    DtakoEventClassificationsRepository, DtakoLogsRepository, DtakoOperationsRepository,
-    DtakoRestraintReportPdfRepository, DtakoRestraintReportRepository, DtakoScraperRepository,
-    DtakoTicketsRepository, DtakoVehiclesRepository, DtakoWorkTimesRepository,
-    DtakoYTimeExportRepository, HubMeasurementsRepository, LineworksChannelsRepository,
-    NfcTagRepository, NotifyDeliveryRepository, NotifyDocumentRepository,
-    NotifyRecipientRepository, SsoAdminRepository, TenantUsersRepository, TimecardRepository,
-    WebhookRepository,
+    DeviceRepository, DtakoRestraintReportPdfRepository, DtakoRestraintReportRepository,
+    DtakoTicketsRepository, DtakoYTimeExportRepository, HubMeasurementsRepository,
+    LineworksChannelsRepository, NfcTagRepository, NotifyDeliveryRepository,
+    NotifyDocumentRepository, NotifyRecipientRepository, SsoAdminRepository, TenantUsersRepository,
+    TimecardRepository, WebhookRepository,
 };
 
 // Re-export tenko traits from alc-tenko (Refs #513)
@@ -27,9 +24,7 @@ pub use alc_core::repo::auth;
 pub use alc_core::repository::hub_measurements;
 pub use alc_devices::repo::devices;
 pub use alc_dtako::repo::{
-    dtako_csv_proxy, dtako_daily_hours, dtako_drivers, dtako_event_classifications, dtako_logs,
-    dtako_operations, dtako_restraint_report, dtako_restraint_report_pdf, dtako_scraper,
-    dtako_tickets, dtako_vehicles, dtako_work_times, dtako_y_time_export,
+    dtako_restraint_report, dtako_restraint_report_pdf, dtako_tickets, dtako_y_time_export,
 };
 pub use alc_misc::repo::{bot_admin, sso_admin, tenant_users, timecard, webhook};
 pub use alc_tenko::repo::{
@@ -54,11 +49,8 @@ pub use alc_core::repo::PgAuthRepository;
 pub use alc_devices::repo::PgDeviceRepository;
 pub use alc_devices::repo::PgHubMeasurementsRepository;
 pub use alc_dtako::repo::{
-    PgDtakoCsvProxyRepository, PgDtakoDailyHoursRepository, PgDtakoDriversRepository,
-    PgDtakoEventClassificationsRepository, PgDtakoLogsRepository, PgDtakoOperationsRepository,
     PgDtakoRestraintReportPdfRepository, PgDtakoRestraintReportRepository,
-    PgDtakoScraperRepository, PgDtakoTicketsRepository, PgDtakoVehiclesRepository,
-    PgDtakoWorkTimesRepository, PgDtakoYTimeExportRepository,
+    PgDtakoTicketsRepository, PgDtakoYTimeExportRepository,
 };
 pub use alc_misc::repo::{
     PgBotAdminRepository, PgSsoAdminRepository, PgTenantUsersRepository, PgTimecardRepository,

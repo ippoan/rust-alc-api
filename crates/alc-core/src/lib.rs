@@ -30,13 +30,11 @@ use std::sync::Arc;
 
 use repository::{
     AuthRepository, BotAdminRepository, CarInspectionRepository, CarinsFilesRepository,
-    DeviceRepository, DtakoCsvProxyRepository, DtakoDailyHoursRepository, DtakoDriversRepository,
-    DtakoEventClassificationsRepository, DtakoLogsRepository, DtakoOperationsRepository,
-    DtakoRestraintReportPdfRepository, DtakoRestraintReportRepository, DtakoScraperRepository,
-    DtakoTicketsRepository, DtakoVehiclesRepository, DtakoWorkTimesRepository,
-    DtakoYTimeExportRepository, HubMeasurementsRepository, LineworksChannelsRepository,
-    NfcTagRepository, NotifyDeliveryRepository, NotifyDocumentRepository,
-    NotifyRecipientRepository, SsoAdminRepository, TenantUsersRepository, TimecardRepository,
+    DeviceRepository, DtakoRestraintReportPdfRepository, DtakoRestraintReportRepository,
+    DtakoTicketsRepository, DtakoYTimeExportRepository, HubMeasurementsRepository,
+    LineworksChannelsRepository, NfcTagRepository, NotifyDeliveryRepository,
+    NotifyDocumentRepository, NotifyRecipientRepository, SsoAdminRepository, TenantUsersRepository,
+    TimecardRepository,
 };
 use storage::StorageBackend;
 
@@ -48,18 +46,9 @@ pub struct AppState {
     pub car_inspections: Arc<dyn CarInspectionRepository>,
     pub carins_files: Arc<dyn CarinsFilesRepository>,
     pub devices: Arc<dyn DeviceRepository>,
-    pub dtako_csv_proxy: Arc<dyn DtakoCsvProxyRepository>,
-    pub dtako_daily_hours: Arc<dyn DtakoDailyHoursRepository>,
-    pub dtako_logs: Arc<dyn DtakoLogsRepository>,
-    pub dtako_drivers: Arc<dyn DtakoDriversRepository>,
-    pub dtako_event_classifications: Arc<dyn DtakoEventClassificationsRepository>,
-    pub dtako_operations: Arc<dyn DtakoOperationsRepository>,
     pub dtako_restraint_report: Arc<dyn DtakoRestraintReportRepository>,
     pub dtako_restraint_report_pdf: Arc<dyn DtakoRestraintReportPdfRepository>,
-    pub dtako_scraper: Arc<dyn DtakoScraperRepository>,
     pub dtako_tickets: Arc<dyn DtakoTicketsRepository>,
-    pub dtako_vehicles: Arc<dyn DtakoVehiclesRepository>,
-    pub dtako_work_times: Arc<dyn DtakoWorkTimesRepository>,
     pub dtako_y_time_export: Arc<dyn DtakoYTimeExportRepository>,
     pub hub_measurements: Arc<dyn HubMeasurementsRepository>,
     pub nfc_tags: Arc<dyn NfcTagRepository>,

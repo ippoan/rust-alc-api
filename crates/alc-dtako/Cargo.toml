@@ -13,9 +13,7 @@ async-trait = "0.1"
 sqlx = { version = "0.8", features = ["postgres", "chrono", "uuid"] }
 alc-csv-parser = { git = "https://github.com/ippoan/alc-dtako-worker", rev = "eec0231cb584e456ae56b2b766f450d7b6ecaeaf" }
 alc-pdf = { path = "../alc-pdf" }
-anyhow = "1"
 axum = { version = "0.8", features = ["multipart"] }
-flate2 = "1"
 base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 futures = "0.3"
