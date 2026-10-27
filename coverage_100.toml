@@ -72,51 +72,11 @@ type = "combined"
 # --- alc-dtako ---
 
 [[files]]
-path = "crates/alc-dtako/src/dtako_csv_proxy.rs"
-type = "mock"
-
-[[files]]
-path = "crates/alc-dtako/src/dtako_daily_hours.rs"
-type = "mock"
-
-[[files]]
-path = "crates/alc-dtako/src/dtako_drivers.rs"
-type = "mock"
-
-[[files]]
-path = "crates/alc-dtako/src/dtako_event_classifications.rs"
-type = "mock"
-
-[[files]]
-path = "crates/alc-dtako/src/dtako_logs.rs"
-type = "mock"
-
-[[files]]
-path = "crates/alc-dtako/src/dtako_operation_changes.rs"
-type = "combined"
-
-[[files]]
-path = "crates/alc-dtako/src/dtako_operations.rs"
-type = "mock"
-
-[[files]]
-path = "crates/alc-dtako/src/dtako_vehicles.rs"
-type = "mock"
-
-[[files]]
-path = "crates/alc-dtako/src/dtako_work_times.rs"
-type = "mock"
-
-[[files]]
 path = "crates/alc-dtako/src/dtako_restraint_report.rs"
 type = "combined"
 
 [[files]]
 path = "crates/alc-dtako/src/dtako_restraint_report_pdf.rs"
-type = "combined"
-
-[[files]]
-path = "crates/alc-dtako/src/dtako_scraper.rs"
 type = "combined"
 
 # --- alc-tenko ---

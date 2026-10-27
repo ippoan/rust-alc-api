@@ -4,27 +4,19 @@ use chrono::{DateTime, NaiveDate, Utc};
 use uuid::Uuid;
 
 use rust_alc_api::db::models::*;
-use rust_alc_api::db::repository::dtako_event_classifications::DtakoEventClassificationsRepository;
-use rust_alc_api::db::repository::dtako_operations::{
-    DtakoOperationsRepository, OperationChangeRow,
-};
 use rust_alc_api::db::repository::dtako_restraint_report::{
     DailyWorkHoursRow, DtakoRestraintReportRepository, OpTimesRow, SegmentRow,
 };
 use rust_alc_api::db::repository::dtako_restraint_report_pdf::{
     DtakoRestraintReportPdfRepository, PdfDriver,
 };
-use rust_alc_api::db::repository::dtako_scraper::DtakoScraperRepository;
 use rust_alc_api::db::repository::dtako_tickets::DtakoTicketsRepository;
-use rust_alc_api::db::repository::dtako_vehicles::DtakoVehiclesRepository;
-use rust_alc_api::db::repository::dtako_work_times::{DtakoWorkTimesRepository, WorkTimeItem};
 use rust_alc_api::db::repository::dtako_y_time_export::{
     DtakoYTimeExportRepository, YTimeExportOperation,
 };
 use rust_alc_api::db::repository::equipment_failures::EquipmentFailuresRepository;
 use rust_alc_api::db::repository::health_baselines::HealthBaselinesRepository;
 use rust_alc_api::db::repository::hub_measurements::HubMeasurementsRepository;
-use rust_alc_api::routes::dtako_scraper::ScrapeHistoryItem;
 
 macro_rules! check_fail {
     ($self:expr) => {
@@ -68,135 +60,6 @@ impl sqlx::error::DatabaseError for MockDbError {
 
     fn kind(&self) -> sqlx::error::ErrorKind {
         sqlx::error::ErrorKind::UniqueViolation
-    }
-}
-
-// =============================================================================
-// MockDtakoEventClassificationsRepository
-// =============================================================================
-
-pub struct MockDtakoEventClassificationsRepository {
-    pub fail_next: AtomicBool,
-    pub update_result: std::sync::Mutex<Option<DtakoEventClassification>>,
-}
-
-impl Default for MockDtakoEventClassificationsRepository {
-    fn default() -> Self {
-        Self {
-            fail_next: AtomicBool::new(false),
-            update_result: std::sync::Mutex::new(None),
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl DtakoEventClassificationsRepository for MockDtakoEventClassificationsRepository {
-    async fn list(&self, _tenant_id: Uuid) -> Result<Vec<DtakoEventClassification>, sqlx::Error> {
-        check_fail!(self);
-        Ok(vec![])
-    }
-
-    async fn update(
-        &self,
-        _tenant_id: Uuid,
-        _id: Uuid,
-        _classification: &str,
-    ) -> Result<Option<DtakoEventClassification>, sqlx::Error> {
-        check_fail!(self);
-        Ok(self.update_result.lock().unwrap().clone())
-    }
-}
-
-// =============================================================================
-// MockDtakoOperationsRepository
-// =============================================================================
-
-pub struct MockDtakoOperationsRepository {
-    pub fail_next: AtomicBool,
-    pub calendar_dates_result: std::sync::Mutex<Vec<(NaiveDate, i64)>>,
-    pub get_result: std::sync::Mutex<Vec<DtakoOperation>>,
-    pub delete_rows_affected: std::sync::Mutex<u64>,
-    pub operation_changes: std::sync::Mutex<Vec<OperationChangeRow>>,
-    pub recording_since: std::sync::Mutex<Option<DateTime<Utc>>>,
-    /// `operation_changes_recording_since` だけを失敗させる (list の後段のエラー経路用)
-    pub fail_recording_since: AtomicBool,
-}
-
-impl Default for MockDtakoOperationsRepository {
-    fn default() -> Self {
-        Self {
-            fail_next: AtomicBool::new(false),
-            calendar_dates_result: std::sync::Mutex::new(vec![]),
-            get_result: std::sync::Mutex::new(vec![]),
-            delete_rows_affected: std::sync::Mutex::new(0),
-            operation_changes: std::sync::Mutex::new(vec![]),
-            recording_since: std::sync::Mutex::new(None),
-            fail_recording_since: AtomicBool::new(false),
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl DtakoOperationsRepository for MockDtakoOperationsRepository {
-    async fn calendar_dates(
-        &self,
-        _tenant_id: Uuid,
-        _date_from: NaiveDate,
-        _date_to: NaiveDate,
-    ) -> Result<Vec<(NaiveDate, i64)>, sqlx::Error> {
-        check_fail!(self);
-        Ok(self.calendar_dates_result.lock().unwrap().clone())
-    }
-
-    async fn list(
-        &self,
-        _tenant_id: Uuid,
-        _filter: &DtakoOperationFilter,
-    ) -> Result<DtakoOperationsResponse, sqlx::Error> {
-        check_fail!(self);
-        Ok(DtakoOperationsResponse {
-            operations: vec![],
-            total: 0,
-            page: 1,
-            per_page: 50,
-        })
-    }
-
-    async fn get_by_unko_no(
-        &self,
-        _tenant_id: Uuid,
-        _unko_no: &str,
-    ) -> Result<Vec<DtakoOperation>, sqlx::Error> {
-        check_fail!(self);
-        Ok(self.get_result.lock().unwrap().clone())
-    }
-
-    async fn delete_by_unko_no(
-        &self,
-        _tenant_id: Uuid,
-        _unko_no: &str,
-    ) -> Result<u64, sqlx::Error> {
-        check_fail!(self);
-        Ok(*self.delete_rows_affected.lock().unwrap())
-    }
-
-    async fn list_operation_changes(
-        &self,
-        _tenant_id: Uuid,
-        _driver_cd: &str,
-    ) -> Result<Vec<OperationChangeRow>, sqlx::Error> {
-        check_fail!(self);
-        Ok(self.operation_changes.lock().unwrap().clone())
-    }
-
-    async fn operation_changes_recording_since(
-        &self,
-        _tenant_id: Uuid,
-    ) -> Result<Option<DateTime<Utc>>, sqlx::Error> {
-        if self.fail_recording_since.load(Ordering::SeqCst) {
-            return Err(sqlx::Error::RowNotFound);
-        }
-        Ok(*self.recording_since.lock().unwrap())
     }
 }
 
@@ -345,59 +208,6 @@ impl DtakoRestraintReportPdfRepository for MockDtakoRestraintReportPdfRepository
 }
 
 // =============================================================================
-// MockDtakoScraperRepository
-// =============================================================================
-
-pub struct MockDtakoScraperRepository {
-    pub fail_next: AtomicBool,
-    pub history_data: std::sync::Mutex<Vec<ScrapeHistoryItem>>,
-    pub insert_count: std::sync::atomic::AtomicUsize,
-    pub inserted_comp_ids: std::sync::Mutex<Vec<String>>,
-}
-
-impl Default for MockDtakoScraperRepository {
-    fn default() -> Self {
-        Self {
-            fail_next: AtomicBool::new(false),
-            history_data: std::sync::Mutex::new(vec![]),
-            insert_count: std::sync::atomic::AtomicUsize::new(0),
-            inserted_comp_ids: std::sync::Mutex::new(vec![]),
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl DtakoScraperRepository for MockDtakoScraperRepository {
-    async fn insert_scrape_history(
-        &self,
-        _tenant_id: Uuid,
-        _target_date: NaiveDate,
-        _comp_id: &str,
-        _status: &str,
-        _message: Option<&str>,
-    ) -> Result<(), sqlx::Error> {
-        check_fail!(self);
-        self.insert_count
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        self.inserted_comp_ids
-            .lock()
-            .unwrap()
-            .push(_comp_id.to_string());
-        Ok(())
-    }
-
-    async fn list_scrape_history(
-        &self,
-        _tenant_id: Uuid,
-        _limit: i64,
-        _offset: i64,
-    ) -> Result<Vec<ScrapeHistoryItem>, sqlx::Error> {
-        check_fail!(self);
-        Ok(self.history_data.lock().unwrap().clone())
-    }
-}
-
-// =============================================================================
 // MockDtakoTicketsRepository
 // =============================================================================
 
@@ -460,73 +270,6 @@ impl DtakoTicketsRepository for MockDtakoTicketsRepository {
     ) -> Result<Option<Uuid>, sqlx::Error> {
         check_fail!(self);
         Ok(None)
-    }
-}
-
-// =============================================================================
-// MockDtakoVehiclesRepository
-// =============================================================================
-
-pub struct MockDtakoVehiclesRepository {
-    pub fail_next: AtomicBool,
-}
-
-impl Default for MockDtakoVehiclesRepository {
-    fn default() -> Self {
-        Self {
-            fail_next: AtomicBool::new(false),
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl DtakoVehiclesRepository for MockDtakoVehiclesRepository {
-    async fn list(&self, _tenant_id: Uuid) -> Result<Vec<DtakoVehicle>, sqlx::Error> {
-        check_fail!(self);
-        Ok(vec![])
-    }
-}
-
-// =============================================================================
-// MockDtakoWorkTimesRepository
-// =============================================================================
-
-pub struct MockDtakoWorkTimesRepository {
-    pub fail_next: AtomicBool,
-}
-
-impl Default for MockDtakoWorkTimesRepository {
-    fn default() -> Self {
-        Self {
-            fail_next: AtomicBool::new(false),
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl DtakoWorkTimesRepository for MockDtakoWorkTimesRepository {
-    async fn count(
-        &self,
-        _tenant_id: Uuid,
-        _driver_id: Option<Uuid>,
-        _date_from: Option<NaiveDate>,
-        _date_to: Option<NaiveDate>,
-    ) -> Result<i64, sqlx::Error> {
-        check_fail!(self);
-        Ok(0)
-    }
-
-    async fn list(
-        &self,
-        _tenant_id: Uuid,
-        _driver_id: Option<Uuid>,
-        _date_from: Option<NaiveDate>,
-        _date_to: Option<NaiveDate>,
-        _limit: i64,
-        _offset: i64,
-    ) -> Result<Vec<WorkTimeItem>, sqlx::Error> {
-        check_fail!(self);
-        Ok(vec![])
     }
 }
 

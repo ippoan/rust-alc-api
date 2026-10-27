@@ -6,19 +6,9 @@ pub use alc_carins::carins_files;
 pub use alc_carins::nfc_tags;
 pub use alc_devices::devices;
 pub use alc_devices::hub_measurements;
-pub use alc_dtako::dtako_csv_proxy;
-pub use alc_dtako::dtako_daily_hours;
-pub use alc_dtako::dtako_drivers;
-pub use alc_dtako::dtako_event_classifications;
-pub use alc_dtako::dtako_logs;
-pub use alc_dtako::dtako_operation_changes;
-pub use alc_dtako::dtako_operations;
 pub use alc_dtako::dtako_restraint_report;
 pub use alc_dtako::dtako_restraint_report_pdf;
-pub use alc_dtako::dtako_scraper;
 pub use alc_dtako::dtako_tickets;
-pub use alc_dtako::dtako_vehicles;
-pub use alc_dtako::dtako_work_times;
 pub use alc_dtako::dtako_y_time_export;
 pub use alc_maintenance::categories as maintenance_categories;
 pub use alc_maintenance::files as maintenance_files;
@@ -112,20 +102,10 @@ pub fn router(
         .merge(car_inspection_files::tenant_router())
         .merge(carins_files::tenant_router())
         .merge(nfc_tags::tenant_router())
-        .merge(dtako_csv_proxy::tenant_router())
-        .merge(dtako_drivers::tenant_router())
-        .merge(dtako_operations::tenant_router())
-        .merge(dtako_operation_changes::tenant_router())
         .merge(dtako_restraint_report::tenant_router())
         .merge(dtako_restraint_report_pdf::tenant_router())
-        .merge(dtako_scraper::tenant_router())
         .merge(dtako_tickets::tenant_router())
-        .merge(dtako_work_times::tenant_router())
-        .merge(dtako_daily_hours::tenant_router())
-        .merge(dtako_vehicles::tenant_router())
-        .merge(dtako_event_classifications::tenant_router())
         .merge(dtako_y_time_export::tenant_router())
-        .nest("/dtako-logs", dtako_logs::tenant_router())
         .merge(notify_documents::tenant_router())
         .merge(notify_email_documents::tenant_router())
         .merge(notify_test_endpoints::tenant_router())
@@ -192,7 +172,6 @@ pub fn internal_shared_secret_router(internal_secret: Option<String>) -> Router<
     match internal_secret {
         Some(secret) if !secret.is_empty() => Router::new()
             .merge(dtako_tickets::internal_router())
-            .merge(dtako_operations::internal_router())
             // cf-alc-recorder Worker からの CoreS3 測定 ingest (Refs #564)
             .merge(hub_measurements::internal_router())
             .layer(axum_middleware::from_fn(
