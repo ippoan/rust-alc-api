@@ -33,22 +33,6 @@ async fn setup_failing() -> (String, String) {
     (base_url, auth_header)
 }
 
-/// Helper: set up with return_some=true (get returns Some).
-async fn setup_found() -> (String, String) {
-    let mock = Arc::new(MockTenkoRecordsRepository::default());
-    mock.return_some.store(true, Ordering::SeqCst);
-    let state = crate::mock_helpers::app_state::setup_mock_app_state();
-    let mut tenko_state = crate::mock_helpers::app_state::setup_mock_tenko_state();
-    tenko_state.tenko_records = mock;
-    let tenant_id = uuid::Uuid::new_v4();
-    let base_url =
-        crate::mock_helpers::app_state::spawn_mock_server_with_tenko(state, tenko_state.clone())
-            .await;
-    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
-    let auth_header = format!("Bearer {jwt}");
-    (base_url, auth_header)
-}
-
 /// Helper: set up with return_data=true (list/count return sample data).
 async fn setup_with_data() -> (String, String) {
     let mock = Arc::new(MockTenkoRecordsRepository::default());
@@ -211,94 +195,6 @@ async fn test_list_records_db_error() {
 
     let res = client
         .get(format!("{base_url}/api/tenko/records"))
-        .header("Authorization", &auth_header)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 500);
-}
-
-// =========================================================================
-// GET /api/tenko/records/{id} — get_record
-// =========================================================================
-
-#[tokio::test]
-async fn test_get_record_not_found() {
-    let (base_url, auth_header, _) = setup().await;
-    let client = reqwest::Client::new();
-    let id = uuid::Uuid::new_v4();
-
-    let res = client
-        .get(format!("{base_url}/api/tenko/records/{id}"))
-        .header("Authorization", &auth_header)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 404);
-}
-
-#[tokio::test]
-async fn test_get_record_found() {
-    let (base_url, auth_header) = setup_found().await;
-    let client = reqwest::Client::new();
-    let id = uuid::Uuid::new_v4();
-
-    let res = client
-        .get(format!("{base_url}/api/tenko/records/{id}"))
-        .header("Authorization", &auth_header)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 200);
-    let body: serde_json::Value = res.json().await.unwrap();
-    assert_eq!(body["id"], id.to_string());
-    assert_eq!(body["employee_name"], "Test Employee");
-    assert_eq!(body["tenko_type"], "pre_operation");
-    assert_eq!(body["status"], "completed");
-    assert_eq!(body["tenko_method"], "face_to_face");
-    assert_eq!(body["alcohol_result"], "negative");
-    assert!(body["alcohol_has_face_photo"].as_bool().unwrap());
-}
-
-#[tokio::test]
-async fn test_get_record_no_auth() {
-    let (base_url, _, _) = setup().await;
-    let client = reqwest::Client::new();
-    let id = uuid::Uuid::new_v4();
-
-    let res = client
-        .get(format!("{base_url}/api/tenko/records/{id}"))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 401);
-}
-
-#[tokio::test]
-async fn test_get_record_x_tenant_id() {
-    let (base_url, _, _) = setup().await;
-    let client = reqwest::Client::new();
-    let tenant_id = uuid::Uuid::new_v4();
-    let id = uuid::Uuid::new_v4();
-
-    // Default mock returns None, so 404 with X-Tenant-ID (auth works, but not found)
-    let res = client
-        .get(format!("{base_url}/api/tenko/records/{id}"))
-        .header("X-Tenant-ID", tenant_id.to_string())
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 404);
-}
-
-#[tokio::test]
-async fn test_get_record_db_error() {
-    let (base_url, auth_header) = setup_failing().await;
-    let client = reqwest::Client::new();
-    let id = uuid::Uuid::new_v4();
-
-    let res = client
-        .get(format!("{base_url}/api/tenko/records/{id}"))
         .header("Authorization", &auth_header)
         .send()
         .await

@@ -144,17 +144,6 @@ impl TenkoRecordsRepository for PgTenkoRecordsRepository {
         query.fetch_all(&mut *tc.conn).await
     }
 
-    async fn get(&self, tenant_id: Uuid, id: Uuid) -> Result<Option<TenkoRecord>, sqlx::Error> {
-        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
-        sqlx::query_as::<_, TenkoRecord>(
-            "SELECT * FROM tenko_records WHERE id = $1 AND tenant_id = $2",
-        )
-        .bind(id)
-        .bind(tenant_id)
-        .fetch_optional(&mut *tc.conn)
-        .await
-    }
-
     async fn list_all(
         &self,
         tenant_id: Uuid,

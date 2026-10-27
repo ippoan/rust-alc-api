@@ -1,19 +1,17 @@
+use crate::models::{
+    TenkoRecordFilter, TenkoRecordsResponse, JUDGMENT_METHOD_IN_PERSON, TENKO_METHOD_IN_PERSON,
+    TENKO_METHOD_IT,
+};
+use crate::TenkoState;
+use alc_core::auth_middleware::TenantId;
 use axum::{
     body::Body,
-    extract::{Path, Query, State},
+    extract::{Query, State},
     http::{header, StatusCode},
     response::Response,
     routing::get,
     Json, Router,
 };
-use uuid::Uuid;
-
-use crate::models::{
-    TenkoRecord, TenkoRecordFilter, TenkoRecordsResponse, JUDGMENT_METHOD_IN_PERSON,
-    TENKO_METHOD_IN_PERSON, TENKO_METHOD_IT,
-};
-use crate::TenkoState;
-use alc_core::auth_middleware::TenantId;
 
 /// テナント対応ルート (JWT or X-Tenant-ID)
 pub fn tenant_router<S>() -> Router<S>
@@ -24,7 +22,6 @@ where
     Router::new()
         .route("/tenko/records", get(list_records))
         .route("/tenko/records/csv", get(export_csv))
-        .route("/tenko/records/{id}", get(get_record))
 }
 
 async fn list_records(
@@ -55,23 +52,6 @@ async fn list_records(
         page,
         per_page,
     }))
-}
-
-async fn get_record(
-    State(state): State<TenkoState>,
-    tenant: axum::Extension<TenantId>,
-    Path(id): Path<Uuid>,
-) -> Result<Json<TenkoRecord>, StatusCode> {
-    let tenant_id = tenant.0 .0;
-
-    let record = state
-        .tenko_records
-        .get(tenant_id, id)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .ok_or(StatusCode::NOT_FOUND)?;
-
-    Ok(Json(record))
 }
 
 /// CSV エクスポート
