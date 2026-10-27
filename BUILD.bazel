@@ -2,9 +2,7 @@ load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_test")
 load("@crates//:defs.bzl", "all_crate_deps")
 
 _WORKSPACE_CRATES = [
-    "//crates/alc-carins",
     "//crates/alc-core",
-    "//crates/alc-maintenance",
     "//crates/alc-misc",
     "//crates/alc-notify",
     "//crates/alc-storage",
@@ -83,20 +81,6 @@ _MOCK_TEST_SRCS = glob([
 # migration・初期化・GRANT の SQL は ippoan/alc-migrations の crate に埋め込み済み (tests/common の
 # migrate_and_grant が空の DB を初期化する) なので compile_data は要らない。新 target を足したら ci.yml の db matrix にも追記
 # (check_bazel_test_matrix.sh が poc/db の union で同期を検証する)。
-
-rust_test(
-    name = "maintenance_test",
-    srcs = ["tests/maintenance_test.rs"] + glob(["tests/common/**/*.rs"]),
-    crate_root = "tests/maintenance_test.rs",
-    deps = [":rust_alc_api_lib"] + all_crate_deps(
-        normal = True,
-        normal_dev = True,
-    ) + _WORKSPACE_CRATES,
-    proc_macro_deps = all_crate_deps(
-        proc_macro = True,
-        proc_macro_dev = True,
-    ),
-)
 
 # driver_info の「ト 車両整備状況」節 (recent_maintenance_records、Refs #c651-7)。
 # tenko_sessions.carins_vehicle_id → maintenance_vehicles.car_id → maintenance_records
@@ -183,23 +167,6 @@ rust_test(
     ),
 )
 
-# 車検期限照合の和暦フォールバック (Refs ippoan/alc-app-s3#110)。alc-core の
-# repo/car_inspections.rs::lookup_expiry は正規表現・LATERAL JOIN・make_date を
-# 含む生 SQL なので、repository を差し替える mock テストでは 1 行も通らない。
-rust_test(
-    name = "car_inspections_expiry_test",
-    srcs = ["tests/car_inspections_expiry_test.rs"] + glob(["tests/common/**/*.rs"]),
-    crate_root = "tests/car_inspections_expiry_test.rs",
-    deps = [":rust_alc_api_lib"] + all_crate_deps(
-        normal = True,
-        normal_dev = True,
-    ) + _WORKSPACE_CRATES,
-    proc_macro_deps = all_crate_deps(
-        proc_macro = True,
-        proc_macro_dev = True,
-    ),
-)
-
 # 自動点呼タブの血圧必須化 + 遠隔点呼への切り替え (migration 144、
 # Refs ippoan/alc-app-s3#135)。**実 DB でしか検証できない** — CHECK 制約の
 # 拡張 (tenko_method に '遠隔点呼' を追加) と escalate-remote の UPDATE は、
@@ -275,20 +242,6 @@ rust_test(
 )
 
 rust_test(
-    name = "mock_carins",
-    srcs = ["tests/mock_carins/main.rs"] + _MOCK_TEST_SRCS,
-    crate_root = "tests/mock_carins/main.rs",
-    deps = [":rust_alc_api_lib"] + all_crate_deps(
-        normal = True,
-        normal_dev = True,
-    ) + _WORKSPACE_CRATES,
-    proc_macro_deps = all_crate_deps(
-        proc_macro = True,
-        proc_macro_dev = True,
-    ),
-)
-
-rust_test(
     name = "mock_misc",
     srcs = ["tests/mock_misc/main.rs"] + _MOCK_TEST_SRCS,
     crate_root = "tests/mock_misc/main.rs",
@@ -316,16 +269,3 @@ rust_test(
     ),
 )
 
-rust_test(
-    name = "mock_maintenance",
-    srcs = ["tests/mock_maintenance/main.rs"] + _MOCK_TEST_SRCS,
-    crate_root = "tests/mock_maintenance/main.rs",
-    deps = [":rust_alc_api_lib"] + all_crate_deps(
-        normal = True,
-        normal_dev = True,
-    ) + _WORKSPACE_CRATES,
-    proc_macro_deps = all_crate_deps(
-        proc_macro = True,
-        proc_macro_dev = True,
-    ),
-)

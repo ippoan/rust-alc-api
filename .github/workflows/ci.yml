@@ -303,14 +303,10 @@ jobs:
           # .bazelrc の hash) が filter 変更で変わらず、warm が save skip して全 PR が毎回
           # coverage 再ビルドになる (詳細は .bazelrc のコメント、Refs #515)。
           - { name: monolith, target: "//:unit_tests", coverage: "cov-monolith" }
-          - { name: mock-carins, target: "//:mock_carins", coverage: "cov-mock-carins" }
           - { name: mock-misc, target: "//:mock_misc", coverage: "cov-mock-misc" }
           - { name: mock-tenko, target: "//:mock_tenko", coverage: "cov-mock-tenko" }
-          - { name: mock-maintenance, target: "//:mock_maintenance" }
           - { name: auth-jwt, target: "//crates/alc-auth-jwt:alc-auth-jwt_test", coverage: "cov-auth-jwt" }
-          - { name: carins, target: "//crates/alc-carins:alc-carins_test", coverage: "cov-carins" }
           - { name: core, target: "//crates/alc-core:alc-core_test", coverage: "cov-core" }
-          - { name: maintenance, target: "//crates/alc-maintenance:alc-maintenance_test", coverage: "cov-maintenance" }
           - { name: misc, target: "//crates/alc-misc:alc-misc_test", coverage: "cov-misc" }
           - { name: notify, target: "//crates/alc-notify:alc-notify_test", pdfium: true, coverage: "cov-notify" }
           - { name: storage, target: "//crates/alc-storage:alc-storage_test" }
@@ -392,11 +388,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # 車両整備記録 (maintenance) の土台: 車両マスタ CRUD + carins 紐づけ/解除/候補提示
-          # (Refs ippoan/rust-alc-api#651)。partial unique (tenant_id, car_id) の 409 と
-          # RLS のテナント分離を実 DB で固定する。ci.yml の bazel-test-db と cache-warm.yml
-          # を同じ内容にすること (check_bazel_test_matrix.sh が pair 一致を検査する)
-          - { name: db-maintenance, target: "//:maintenance_test" }
           # driver_info の「ト 車両整備状況」節 (recent_maintenance_records、Refs #c651-7)。
           # tenko_sessions.carins_vehicle_id → maintenance_vehicles.car_id →
           # maintenance_records の解決は 1 CTE の生 SQL なので mock では 1 行も通らない。
@@ -440,12 +431,6 @@ jobs:
           # ci.yml の bazel-test-db と cache-warm.yml を同じ内容にすること
           # (check_bazel_test_matrix.sh が pair 一致を検査する)
           - { name: db-device-dev-axis, target: "//:device_dev_axis_test" }
-          # Refs ippoan/alc-app-s3#110: 車検期限照合の和暦フォールバック。
-          # alc-core の repo/car_inspections.rs::lookup_expiry は正規表現・
-          # LATERAL JOIN・make_date を含む生 SQL なので mock では 1 行も通らない。
-          # ci.yml の bazel-test-db と cache-warm.yml を同じ内容にすること
-          # (check_bazel_test_matrix.sh が pair 一致を検査する)
-          - { name: db-car-inspections, target: "//:car_inspections_expiry_test" }
           # Refs ippoan/alc-app-s3#135: 端末ごとの血圧計 (Omron) 使用設定。
           # GET /api/devices/settings/{id} は 063/114 の SECURITY DEFINER 関数
           # get_device_settings_by_id() 経由でしか devices を読めないので、mock

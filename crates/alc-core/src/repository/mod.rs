@@ -1,9 +1,6 @@
 pub mod auth;
 pub mod bot_admin;
-pub mod car_inspections;
-pub mod carins_files;
 pub mod lineworks_channels;
-pub mod nfc_tags;
 pub mod notify_deliveries;
 pub mod notify_documents;
 pub mod notify_recipients;
@@ -11,10 +8,7 @@ pub mod webhook;
 
 pub use auth::AuthRepository;
 pub use bot_admin::BotAdminRepository;
-pub use car_inspections::CarInspectionRepository;
-pub use carins_files::CarinsFilesRepository;
 pub use lineworks_channels::{BotConfigForWebhook, LineworksChannel, LineworksChannelsRepository};
-pub use nfc_tags::NfcTagRepository;
 pub use notify_deliveries::NotifyDeliveryRepository;
 pub use notify_documents::NotifyDocumentRepository;
 pub use notify_recipients::NotifyRecipientRepository;

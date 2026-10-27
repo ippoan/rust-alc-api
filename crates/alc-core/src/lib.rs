@@ -11,8 +11,6 @@ pub mod auth_middleware;
 pub mod api_error;
 pub mod constant_time;
 pub mod device_dev;
-pub mod master_data;
-pub mod master_handlers;
 pub mod middleware;
 pub mod models;
 pub mod realtime_bus;
@@ -27,8 +25,7 @@ pub mod webhook;
 use std::sync::Arc;
 
 use repository::{
-    AuthRepository, BotAdminRepository, CarInspectionRepository, CarinsFilesRepository,
-    LineworksChannelsRepository, NfcTagRepository, NotifyDeliveryRepository,
+    AuthRepository, BotAdminRepository, LineworksChannelsRepository, NotifyDeliveryRepository,
     NotifyDocumentRepository, NotifyRecipientRepository,
 };
 use storage::StorageBackend;
@@ -38,11 +35,7 @@ pub struct AppState {
     pub pool: Option<sqlx::PgPool>,
     pub auth: Arc<dyn AuthRepository>,
     pub bot_admin: Arc<dyn BotAdminRepository>,
-    pub car_inspections: Arc<dyn CarInspectionRepository>,
-    pub carins_files: Arc<dyn CarinsFilesRepository>,
-    pub nfc_tags: Arc<dyn NfcTagRepository>,
     pub storage: Arc<dyn StorageBackend>,
-    pub carins_storage: Option<Arc<dyn StorageBackend>>,
     pub webhook: Option<Arc<dyn webhook::WebhookService>>,
     pub notify_recipients: Arc<dyn NotifyRecipientRepository>,
     pub notify_documents: Arc<dyn NotifyDocumentRepository>,

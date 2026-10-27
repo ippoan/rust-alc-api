@@ -1,12 +1,4 @@
 // Re-export route modules from domain crates
-pub use alc_carins::car_inspection_files;
-pub use alc_carins::car_inspections;
-pub use alc_carins::carins_files;
-pub use alc_carins::nfc_tags;
-pub use alc_maintenance::categories as maintenance_categories;
-pub use alc_maintenance::files as maintenance_files;
-pub use alc_maintenance::records as maintenance_records;
-pub use alc_maintenance::vehicles as maintenance_vehicles;
 pub use alc_misc::bot_admin;
 pub use alc_misc::health;
 pub use alc_notify::documents as notify_documents;
@@ -50,7 +42,6 @@ pub fn internal_oidc_trust() -> InternalOidcTrust {
 pub fn router(
     internal_oidc: InternalOidcTrust,
     tenko_state: alc_tenko::TenkoState,
-    maintenance_state: alc_maintenance::MaintenanceState,
 ) -> Router<AppState> {
     // 管理者ルート — 注入 identity (X-User-*) を信頼 (Refs #434)。
     // 前段 proxy / gateway が introspect 検証済みの identity を注入する前提。
@@ -79,10 +70,6 @@ pub fn router(
     // 旧 require_tenant の bare X-Tenant-ID フォールバック / ローカル JWT 検証は撤去。
     // キオスク経路も含め前段 proxy が introspect 検証 → header 注入する。
     let tenant_protected = Router::new()
-        .merge(car_inspections::tenant_router())
-        .merge(car_inspection_files::tenant_router())
-        .merge(carins_files::tenant_router())
-        .merge(nfc_tags::tenant_router())
         .merge(notify_documents::tenant_router())
         .merge(notify_email_documents::tenant_router())
         .merge(notify_test_endpoints::tenant_router())
@@ -114,16 +101,6 @@ pub fn router(
         .with_state(tenko_state.clone());
     let tenko_public: Router<AppState> = tenko_call::public_router().with_state(tenko_state);
 
-    // maintenance ドメイン (Refs #651) — AppState から分離した MaintenanceState で
-    // マウントする。tenant 系ルートには monolith 本体と同じ require_tenant_header を張る。
-    let maintenance_tenant: Router<AppState> = Router::new()
-        .merge(maintenance_vehicles::tenant_router())
-        .merge(maintenance_categories::tenant_router())
-        .merge(maintenance_records::tenant_router())
-        .merge(maintenance_files::tenant_router())
-        .layer(axum_middleware::from_fn(require_tenant_header))
-        .with_state(maintenance_state);
-
     Router::new()
         .merge(public_routes)
         .merge(tenko_public)
@@ -131,7 +108,6 @@ pub fn router(
         .merge(internal_protected)
         .merge(tenant_protected)
         .merge(tenko_tenant)
-        .merge(maintenance_tenant)
 }
 
 #[cfg(test)]
