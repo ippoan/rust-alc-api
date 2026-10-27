@@ -4,7 +4,6 @@ pub mod clients;
 pub mod documents;
 pub mod email_documents;
 pub mod extract;
-pub mod fcm;
 pub mod ingest;
 pub mod line_webhook;
 pub mod lineworks_channels;

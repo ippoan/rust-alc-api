@@ -357,13 +357,11 @@ pub fn setup_mock_app_state() -> AppState {
         bot_admin: Arc::new(MockBotAdminRepository::default()),
         car_inspections: Arc::new(MockCarInspectionRepository::default()),
         carins_files: Arc::new(MockCarinsFilesRepository::default()),
-        devices: Arc::new(MockDeviceRepository::default()),
         nfc_tags: Arc::new(MockNfcTagRepository::default()),
         sso_admin: Arc::new(MockSsoAdminRepository::default()),
         tenant_users: Arc::new(MockTenantUsersRepository::default()),
         storage,
         carins_storage: None,
-        fcm: None,
         notify_recipients: Arc::new(MockNotifyRecipientRepository::default()),
         notify_documents: Arc::new(MockNotifyDocumentRepository::default()),
         notify_deliveries: Arc::new(MockNotifyDeliveryRepository::default()),
@@ -371,7 +369,6 @@ pub fn setup_mock_app_state() -> AppState {
         notify_storage: None,
         redact_broadcaster: None,
         realtime_bus: None,
-        device_pair_client: None,
         webhook: None,
     }
 }

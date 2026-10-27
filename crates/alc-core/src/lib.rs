@@ -11,8 +11,6 @@ pub mod auth_middleware;
 pub mod api_error;
 pub mod constant_time;
 pub mod device_dev;
-pub mod device_pair_client;
-pub mod fcm;
 pub mod master_data;
 pub mod master_handlers;
 pub mod middleware;
@@ -30,7 +28,7 @@ use std::sync::Arc;
 
 use repository::{
     AuthRepository, BotAdminRepository, CarInspectionRepository, CarinsFilesRepository,
-    DeviceRepository, LineworksChannelsRepository, NfcTagRepository, NotifyDeliveryRepository,
+    LineworksChannelsRepository, NfcTagRepository, NotifyDeliveryRepository,
     NotifyDocumentRepository, NotifyRecipientRepository, SsoAdminRepository, TenantUsersRepository,
 };
 use storage::StorageBackend;
@@ -42,13 +40,11 @@ pub struct AppState {
     pub bot_admin: Arc<dyn BotAdminRepository>,
     pub car_inspections: Arc<dyn CarInspectionRepository>,
     pub carins_files: Arc<dyn CarinsFilesRepository>,
-    pub devices: Arc<dyn DeviceRepository>,
     pub nfc_tags: Arc<dyn NfcTagRepository>,
     pub sso_admin: Arc<dyn SsoAdminRepository>,
     pub tenant_users: Arc<dyn TenantUsersRepository>,
     pub storage: Arc<dyn StorageBackend>,
     pub carins_storage: Option<Arc<dyn StorageBackend>>,
-    pub fcm: Option<Arc<dyn fcm::FcmSenderTrait>>,
     pub webhook: Option<Arc<dyn webhook::WebhookService>>,
     pub notify_recipients: Arc<dyn NotifyRecipientRepository>,
     pub notify_documents: Arc<dyn NotifyDocumentRepository>,
@@ -66,11 +62,6 @@ pub struct AppState {
     /// にも使える。env vars 未設定なら None で no-op (POST /jobs 系は 503 返却で
     /// 検知すること、silent に compute しないため)。
     pub realtime_bus: Option<Arc<realtime_bus::RealtimeBus>>,
-    /// kiosk 端末 re-pair (再認証) 用、auth-worker `/device/pair-internal` 呼び出し
-    /// クライアント (Refs #495)。`AUTH_WORKER_URL` / `INTERNAL_SHARED_SECRET`
-    /// が未設定なら None (re-pair endpoint は 404 で "not configured" を表す)。
-    /// shared secret は既存 INTERNAL_SHARED_SECRET (dtako ingest 等と共用) を再利用する。
-    pub device_pair_client: Option<Arc<dyn device_pair_client::DevicePairClient>>,
 }
 
 impl AppState {

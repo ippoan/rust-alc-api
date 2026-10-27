@@ -78,7 +78,7 @@ else
     # mock test は root package から crate を叩く」ので、--lib を外すと crates/* の
     # mock 登録ファイルが人工的な部分集合で測られる (例: alc-misc/health.rs が
     # 124 行中 14 行 = 11.3% に見える。lib を含めれば 355/355 = 100%)
-    cargo llvm-cov --workspace --lib --test mock_tenko --test mock_devices --test mock_carins --test mock_misc --text > "$CACHE_FILE" 2>&1 || { echo "cargo llvm-cov failed:"; tail -50 "$CACHE_FILE"; exit 101; }
+    cargo llvm-cov --workspace --lib --test mock_tenko --test mock_carins --test mock_misc --text > "$CACHE_FILE" 2>&1 || { echo "cargo llvm-cov failed:"; tail -50 "$CACHE_FILE"; exit 101; }
   else
     [[ -f .test-config ]] && source .test-config
     cargo llvm-cov --workspace --text > "$CACHE_FILE" 2>&1 || { echo "cargo llvm-cov failed:"; tail -50 "$CACHE_FILE"; exit 101; }

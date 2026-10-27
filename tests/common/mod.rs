@@ -14,12 +14,11 @@ use uuid::Uuid;
 
 use rust_alc_api::db::repository::{
     PgAuthRepository, PgBotAdminRepository, PgCarInspectionRepository, PgCarinsFilesRepository,
-    PgDailyHealthRepository, PgDeviceRepository, PgDriverInfoRepository,
-    PgEquipmentFailuresRepository, PgHealthBaselinesRepository, PgLineworksChannelsRepository,
-    PgNfcTagRepository, PgNotifyDeliveryRepository, PgNotifyDocumentRepository,
-    PgNotifyRecipientRepository, PgSsoAdminRepository, PgTenantUsersRepository,
-    PgTenkoCallRepository, PgTenkoRecordsRepository, PgTenkoSchedulesRepository,
-    PgTenkoSessionRepository, PgTenkoWebhooksRepository,
+    PgDailyHealthRepository, PgDriverInfoRepository, PgEquipmentFailuresRepository,
+    PgHealthBaselinesRepository, PgLineworksChannelsRepository, PgNfcTagRepository,
+    PgNotifyDeliveryRepository, PgNotifyDocumentRepository, PgNotifyRecipientRepository,
+    PgSsoAdminRepository, PgTenantUsersRepository, PgTenkoCallRepository, PgTenkoRecordsRepository,
+    PgTenkoSchedulesRepository, PgTenkoSessionRepository, PgTenkoWebhooksRepository,
 };
 use rust_alc_api::AppState;
 
@@ -184,34 +183,6 @@ pub fn create_test_jwt_for_user(user_id: Uuid, tenant_id: Uuid, email: &str, rol
     encode_test_token(user_id, tenant_id, email, role)
 }
 
-/// テスト用 MockFcmSender (送信を記録するだけ)
-pub struct MockFcmSender {
-    pub sent: std::sync::Mutex<Vec<(String, std::collections::HashMap<String, String>)>>,
-}
-
-impl MockFcmSender {
-    pub fn new() -> Self {
-        Self {
-            sent: std::sync::Mutex::new(Vec::new()),
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl rust_alc_api::fcm::FcmSenderTrait for MockFcmSender {
-    async fn send_data_message(
-        &self,
-        fcm_token: &str,
-        data: std::collections::HashMap<String, String>,
-    ) -> Result<(), rust_alc_api::fcm::FcmError> {
-        self.sent
-            .lock()
-            .unwrap()
-            .push((fcm_token.to_string(), data));
-        Ok(())
-    }
-}
-
 /// テスト用 DB URL (docker-compose の test-db に接続)
 pub fn test_database_url() -> String {
     std::env::var("TEST_DATABASE_URL").unwrap_or_else(|_| {
@@ -282,22 +253,17 @@ pub async fn setup_app_state() -> AppState {
     let storage: Arc<dyn rust_alc_api::storage::StorageBackend> =
         Arc::new(MockStorage::new("test-bucket"));
 
-    let mock_fcm: Arc<dyn rust_alc_api::fcm::FcmSenderTrait> = Arc::new(MockFcmSender::new());
-
-    let state = build_app_state(pool, storage, Some(mock_fcm));
-    state
+    build_app_state(pool, storage)
 }
 
 fn build_app_state(
     pool: sqlx::PgPool,
     storage: Arc<dyn rust_alc_api::storage::StorageBackend>,
-    fcm: Option<Arc<dyn rust_alc_api::fcm::FcmSenderTrait>>,
 ) -> AppState {
     let auth = Arc::new(PgAuthRepository::new(pool.clone()));
     let bot_admin = Arc::new(PgBotAdminRepository::new(pool.clone()));
     let car_inspections = Arc::new(PgCarInspectionRepository::new(pool.clone()));
     let carins_files = Arc::new(PgCarinsFilesRepository::new(pool.clone()));
-    let devices = Arc::new(PgDeviceRepository::new(pool.clone()));
     let nfc_tags = Arc::new(PgNfcTagRepository::new(pool.clone()));
     let sso_admin = Arc::new(PgSsoAdminRepository::new(pool.clone()));
     let tenant_users = Arc::new(PgTenantUsersRepository::new(pool.clone()));
@@ -312,13 +278,11 @@ fn build_app_state(
         bot_admin,
         car_inspections,
         carins_files,
-        devices,
         nfc_tags,
         sso_admin,
         tenant_users,
         storage,
         carins_storage: None,
-        fcm,
         notify_recipients,
         notify_documents,
         notify_deliveries,
@@ -326,7 +290,6 @@ fn build_app_state(
         notify_storage: None,
         redact_broadcaster: None,
         realtime_bus: None,
-        device_pair_client: None,
         webhook: None,
     }
 }
@@ -368,65 +331,7 @@ pub async fn setup_app_state_as_app_role(max_connections: u32, reset_on_release:
 
     let storage: Arc<dyn rust_alc_api::storage::StorageBackend> =
         Arc::new(MockStorage::new("test-bucket"));
-    build_app_state(pool, storage, None)
-}
-
-/// テスト用 FailingFcmSender (常にエラーを返す)
-pub struct FailingFcmSender;
-
-#[async_trait::async_trait]
-impl rust_alc_api::fcm::FcmSenderTrait for FailingFcmSender {
-    async fn send_data_message(
-        &self,
-        _fcm_token: &str,
-        _data: std::collections::HashMap<String, String>,
-    ) -> Result<(), rust_alc_api::fcm::FcmError> {
-        Err(rust_alc_api::fcm::FcmError::Send("test error".to_string()))
-    }
-}
-
-/// テスト用 AppState を構築 (FCM なし)
-pub async fn setup_app_state_no_fcm() -> AppState {
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter("warn")
-        .with_test_writer()
-        .try_init();
-
-    let pool = PgPoolOptions::new()
-        .max_connections(5)
-        .connect(&test_database_url())
-        .await
-        .expect("Failed to connect to test DB");
-
-    migrate_and_grant(&pool).await;
-
-    let storage: Arc<dyn rust_alc_api::storage::StorageBackend> =
-        Arc::new(MockStorage::new("test-bucket"));
-
-    build_app_state(pool, storage, None)
-}
-
-/// テスト用 AppState を構築 (FailingFcmSender)
-pub async fn setup_app_state_failing_fcm() -> AppState {
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter("warn")
-        .with_test_writer()
-        .try_init();
-
-    let pool = PgPoolOptions::new()
-        .max_connections(5)
-        .connect(&test_database_url())
-        .await
-        .expect("Failed to connect to test DB");
-
-    migrate_and_grant(&pool).await;
-
-    let storage: Arc<dyn rust_alc_api::storage::StorageBackend> =
-        Arc::new(MockStorage::new("test-bucket"));
-
-    let failing_fcm: Arc<dyn rust_alc_api::fcm::FcmSenderTrait> = Arc::new(FailingFcmSender);
-
-    build_app_state(pool, storage, Some(failing_fcm))
+    build_app_state(pool, storage)
 }
 
 /// テスト用テナントを作成し、UUID を返す
