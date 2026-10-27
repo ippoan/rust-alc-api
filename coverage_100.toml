@@ -63,12 +63,6 @@ type = "mock"
 path = "crates/alc-carins/src/nfc_tags.rs"
 type = "mock"
 
-# --- alc-devices ---
-
-[[files]]
-path = "crates/alc-devices/src/devices.rs"
-type = "combined"
-
 # --- alc-tenko ---
 
 [[files]]

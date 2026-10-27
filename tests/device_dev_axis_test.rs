@@ -564,15 +564,11 @@ async fn test_public_route_ignores_the_header() {
         {
             // after_release なしの 1 接続にして、要求の後の接続の状態をそのまま見る
             let ctx = setup("Dev Axis Public", 1, false).await;
+            // 公開の口 (テナントの slug の引き当て。DB を読む)。端末の登録の口は alc-devices-worker へ移った (W6b)
             let res = ctx
                 .client
-                .post(format!("{}/api/devices/register/claim", ctx.base_url))
+                .get(format!("{}/api/tenants/by-slug/no-such-slug", ctx.base_url))
                 .header("X-Device-Dev", "1")
-                .json(&json!({
-                    "registration_code": "no-such-code",
-                    "phone_number": "090-0000-0000",
-                    "device_name": "x"
-                }))
                 .send()
                 .await
                 .unwrap();

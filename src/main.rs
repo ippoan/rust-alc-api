@@ -18,10 +18,10 @@ use alc_notify::repo::{
 };
 use rust_alc_api::db::repository::{
     PgAuthRepository, PgBotAdminRepository, PgCarInspectionRepository, PgCarinsFilesRepository,
-    PgDailyHealthRepository, PgDeviceRepository, PgDriverInfoRepository,
-    PgEquipmentFailuresRepository, PgHealthBaselinesRepository, PgNfcTagRepository,
-    PgSsoAdminRepository, PgTenantUsersRepository, PgTenkoCallRepository, PgTenkoRecordsRepository,
-    PgTenkoSchedulesRepository, PgTenkoSessionRepository, PgTenkoWebhooksRepository,
+    PgDailyHealthRepository, PgDriverInfoRepository, PgEquipmentFailuresRepository,
+    PgHealthBaselinesRepository, PgNfcTagRepository, PgSsoAdminRepository, PgTenantUsersRepository,
+    PgTenkoCallRepository, PgTenkoRecordsRepository, PgTenkoSchedulesRepository,
+    PgTenkoSessionRepository, PgTenkoWebhooksRepository,
 };
 use rust_alc_api::storage::StorageBackend;
 use rust_alc_api::AppState;
@@ -117,19 +117,11 @@ async fn main() -> anyhow::Result<()> {
             ) as Arc<dyn StorageBackend>
         });
 
-    // FCM (optional — disabled if FCM_PROJECT_ID is not set)
-    let fcm = std::env::var("FCM_PROJECT_ID").ok().map(|project_id| {
-        tracing::info!("FCM enabled (project={})", project_id);
-        Arc::new(rust_alc_api::fcm::FcmSender::new(project_id))
-            as Arc<dyn rust_alc_api::fcm::FcmSenderTrait>
-    });
-
     let auth = Arc::new(PgAuthRepository::new(pool.clone()));
     let bot_admin = Arc::new(PgBotAdminRepository::new(pool.clone()));
     let car_inspections = Arc::new(PgCarInspectionRepository::new(pool.clone()));
     let carins_files = Arc::new(PgCarinsFilesRepository::new(pool.clone()));
     let daily_health = Arc::new(PgDailyHealthRepository::new(pool.clone()));
-    let devices = Arc::new(PgDeviceRepository::new(pool.clone()));
     let driver_info = Arc::new(PgDriverInfoRepository::new(pool.clone()));
     let equipment_failures = Arc::new(PgEquipmentFailuresRepository::new(pool.clone()));
     let health_baselines = Arc::new(PgHealthBaselinesRepository::new(pool.clone()));
@@ -217,14 +209,12 @@ async fn main() -> anyhow::Result<()> {
         bot_admin,
         car_inspections,
         carins_files,
-        devices,
 
         nfc_tags,
         sso_admin,
         tenant_users,
         storage,
         carins_storage,
-        fcm,
         notify_recipients,
         notify_documents,
         notify_deliveries,
@@ -232,8 +222,6 @@ async fn main() -> anyhow::Result<()> {
         notify_storage,
         redact_broadcaster: alc_core::redact_broadcast::RedactBroadcaster::from_env().map(Arc::new),
         realtime_bus: alc_core::realtime_bus::RealtimeBus::from_env().map(Arc::new),
-        device_pair_client: rust_alc_api::device_pair_client::HttpDevicePairClient::from_env()
-            .map(|c| Arc::new(c) as Arc<dyn rust_alc_api::device_pair_client::DevicePairClient>),
         webhook: webhook_service,
     };
 

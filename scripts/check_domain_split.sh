@@ -100,10 +100,24 @@ guard_repository_modules hub "ippoan/alc-people-worker" hub_measurements timecar
 guard_model_structs hub "ippoan/alc-people-worker" 'HubMeasurement|TimecardCard'
 guard_appstate_fields hub "ippoan/alc-people-worker" 'hub_measurements|timecard'
 
+# --- devices (Worker へ移した。W6b、Refs #680) ---
+# 端末の登録・管理・再ペアリング・FCM の口は全部 ippoan/alc-devices-worker に移り、alc-devices crate は消した。
+# crate の再作成と、alc-core への devices の repository・FCM・再ペアリングの client・AppState の欄の再流入を落とす。
+if [ -e crates/alc-devices ]; then
+  err "domain-split: crates/alc-devices が再作成されています。devices は ippoan/alc-devices-worker に置いてください (Refs #680)"
+fi
+guard_repository_modules devices "ippoan/alc-devices-worker" devices
+for m in fcm device_pair_client; do
+  if [ -e "crates/alc-core/src/${m}.rs" ]; then
+    err "domain-split: alc-core に devices の ${m}.rs が再流入しています。ippoan/alc-devices-worker に置いてください (Refs #680)"
+  fi
+done
+guard_appstate_fields devices "ippoan/alc-devices-worker" 'devices|fcm|device_pair_client'
+
 # --- (Phase C 以降はここに追記: carins) ---
 
 if [ "$fail" != 0 ]; then
   echo "::error::domain split guard failed — ドメインコードは alc-core ではなく各ドメイン crate に追加してください (設計: issue #513)"
   exit 1
 fi
-echo "domain split guard OK (tenko, trouble, notify, dtako, hub)"
+echo "domain split guard OK (tenko, trouble, notify, dtako, hub, devices)"

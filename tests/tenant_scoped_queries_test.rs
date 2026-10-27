@@ -16,9 +16,8 @@ use uuid::Uuid;
 
 use alc_tenko::overdue::TenkoOverdueRepository;
 use rust_alc_api::db::repository::{
-    AuthRepository, DeviceRepository, PgAuthRepository, PgDeviceRepository,
-    PgTenantUsersRepository, PgTenkoCallRepository, PgTenkoOverdueRepository,
-    TenantUsersRepository, TenkoCallRepository,
+    AuthRepository, PgAuthRepository, PgTenantUsersRepository, PgTenkoCallRepository,
+    PgTenkoOverdueRepository, TenantUsersRepository, TenkoCallRepository,
 };
 
 async fn setup() -> sqlx::PgPool {
@@ -45,18 +44,6 @@ async fn insert_employee(pool: &sqlx::PgPool, tenant_id: Uuid, name: &str) -> Uu
     .fetch_one(pool)
     .await
     .expect("employee insert failed")
-}
-
-async fn insert_device(pool: &sqlx::PgPool, tenant_id: Uuid, fcm_token: &str) -> Uuid {
-    sqlx::query_scalar(
-        "INSERT INTO alc_api.devices (tenant_id, device_name, device_type, status, fcm_token) \
-         VALUES ($1, 'Scoped Device', 'android', 'active', $2) RETURNING id",
-    )
-    .bind(tenant_id)
-    .bind(fcm_token)
-    .fetch_one(pool)
-    .await
-    .expect("device insert failed")
 }
 
 /// 招待の消費 (`delete_invitation`) とログアウト (`clear_refresh_token`) は、
@@ -266,81 +253,6 @@ async fn tenant_users_repo_is_tenant_scoped() {
         .await
         .unwrap();
     assert_eq!(users_left, 0);
-}
-
-/// 端末のクレーム (QR 永久) と dismiss 用の FCM トークン一覧は、渡したテナントの行だけ。
-#[tokio::test]
-async fn devices_repo_is_tenant_scoped() {
-    let pool = setup().await;
-    let repo = PgDeviceRepository::new(pool.clone());
-    let tenant_a = common::create_test_tenant(&pool, "Scoped Devices A").await;
-    let tenant_b = common::create_test_tenant(&pool, "Scoped Devices B").await;
-
-    // --- claim_update_permanent_qr ---
-    let code = unique("qr");
-    repo.create_permanent_qr(tenant_a, &code, "Before", false, false)
-        .await
-        .expect("create_permanent_qr failed");
-    let req_id: Uuid = sqlx::query_scalar(
-        "SELECT id FROM alc_api.device_registration_requests WHERE registration_code = $1",
-    )
-    .bind(&code)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
-
-    repo.claim_update_permanent_qr(tenant_b, req_id, Some("000-0000-0000"), "Hijacked")
-        .await
-        .expect("claim_update_permanent_qr (other tenant) failed");
-    let name: String = sqlx::query_scalar(
-        "SELECT device_name FROM alc_api.device_registration_requests WHERE id = $1",
-    )
-    .bind(req_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
-    assert_eq!(
-        name, "Before",
-        "別テナントからは登録リクエストを書き換えられないこと"
-    );
-
-    repo.claim_update_permanent_qr(tenant_a, req_id, Some("000-0000-0000"), "After")
-        .await
-        .expect("claim_update_permanent_qr failed");
-    let name: String = sqlx::query_scalar(
-        "SELECT device_name FROM alc_api.device_registration_requests WHERE id = $1",
-    )
-    .bind(req_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
-    assert_eq!(name, "After");
-
-    // --- list_tenant_fcm_tokens_except / get_device_fcm_token ---
-    let token_a1 = unique("fcm-a1");
-    let token_a2 = unique("fcm-a2");
-    let token_b = unique("fcm-b");
-    let device_a1 = insert_device(&pool, tenant_a, &token_a1).await;
-    insert_device(&pool, tenant_a, &token_a2).await;
-    let device_b = insert_device(&pool, tenant_b, &token_b).await;
-
-    let tokens = repo
-        .list_tenant_fcm_tokens_except(tenant_a, device_a1)
-        .await
-        .expect("list_tenant_fcm_tokens_except failed");
-    assert_eq!(tokens, vec![token_a2.clone()]);
-
-    // 設定変更の通知 (update_call_settings) はこの tenant 付きの口でトークンを引く
-    let own = repo
-        .get_device_fcm_token(tenant_a, device_a1)
-        .await
-        .expect("get_device_fcm_token failed");
-    assert_eq!(own, Some(Some(token_a1)));
-    let other = repo
-        .get_device_fcm_token(tenant_a, device_b)
-        .await
-        .expect("get_device_fcm_token (other tenant) failed");
-    assert_eq!(other, None, "別テナントの端末のトークンは引けないこと");
 }
 
 /// 超過検知の従業員名の取得・通知済みの印と、点呼用電話番号の削除は、渡したテナントの行だけ。

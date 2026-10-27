@@ -20,7 +20,6 @@
 mod common;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
 
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -31,15 +30,12 @@ use rust_alc_api::db::repository::{
     PgWebhookRepository, TenantUsersRepository,
 };
 
-const FCM_SECRET: &str = "runtime-role-fcm-secret";
-
 struct Ctx {
     /// RLS を素通りする pool (行の準備と検証用)
     admin: sqlx::PgPool,
     /// `alc_api_rt` で繋ぐ、サーバが使う側の pool
     app: sqlx::PgPool,
     base_url: String,
-    fcm: Arc<common::MockFcmSender>,
     client: reqwest::Client,
     /// 実行用ロールの属性・表の FORCE を一時的に変えるテスト (rls-check の陽性対照) と重ならないための共有ロック
     _role_attrs: Option<tokio::sync::RwLockReadGuard<'static, ()>>,
@@ -50,7 +46,7 @@ struct Ctx {
 /// 同じ binary の中で直列にする。
 static ROLE_ATTRS: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
 
-/// `alc_api_rt` で動くサーバを立てる (FCM は送信を記録するだけの mock)
+/// `alc_api_rt` で動くサーバを立てる
 async fn setup() -> Ctx {
     let guard = ROLE_ATTRS.read().await;
     let mut ctx = setup_unlocked().await;
@@ -61,9 +57,7 @@ async fn setup() -> Ctx {
 /// [`setup`] の本体。`ROLE_ATTRS` を自分で取っている呼び出し元だけが直接呼ぶ。
 async fn setup_unlocked() -> Ctx {
     let admin_state = common::setup_app_state().await;
-    let mut app_state = common::setup_app_state_as_app_role(5, true).await;
-    let fcm = Arc::new(common::MockFcmSender::new());
-    app_state.fcm = Some(fcm.clone());
+    let app_state = common::setup_app_state_as_app_role(5, true).await;
     let admin = admin_state.pool().clone();
     let app = app_state.pool().clone();
     let base_url = common::spawn_test_server(app_state).await;
@@ -71,7 +65,6 @@ async fn setup_unlocked() -> Ctx {
         admin,
         app,
         base_url,
-        fcm,
         client: reqwest::Client::new(),
         _role_attrs: None,
     }
@@ -79,13 +72,6 @@ async fn setup_unlocked() -> Ctx {
 
 fn unique(prefix: &str) -> String {
     format!("{prefix}-{}", Uuid::new_v4().simple())
-}
-
-/// 内部用 secret を立てる。この binary の全テストが同じ値を使い、消さない
-/// (立てている間に別のテストが読んでも同じ値)。
-fn set_fcm_secret() {
-    static ONCE: std::sync::Once = std::sync::Once::new();
-    ONCE.call_once(|| std::env::set_var("FCM_INTERNAL_SECRET", FCM_SECRET));
 }
 
 impl Ctx {
@@ -114,42 +100,6 @@ impl Ctx {
             .unwrap();
         assert_eq!(status, 200, "GET /api/internal/rls-check{query}: {text}");
         serde_json::from_str(&text).unwrap()
-    }
-
-    /// 管理者の token を持つ user を 1 人作る (端末の承認者は users への FK)
-    async fn admin_user(&self, tenant: Uuid) -> String {
-        let user = PgAuthRepository::new(self.admin.clone())
-            .create_user_line(tenant, &unique("admin-line"), "Admin")
-            .await
-            .expect("create_user_line failed");
-        format!(
-            "Bearer {}",
-            common::create_test_jwt_for_user(user.id, tenant, "admin@example.test", "admin")
-        )
-    }
-
-    async fn insert_device(&self, tenant: Uuid, fcm_token: &str, is_dev: bool) -> Uuid {
-        sqlx::query_scalar(
-            "INSERT INTO alc_api.devices \
-                (tenant_id, device_name, device_type, status, fcm_token, call_enabled, is_dev_device) \
-             VALUES ($1, 'Runtime Role Device', 'android', 'active', $2, TRUE, $3) RETURNING id",
-        )
-        .bind(tenant)
-        .bind(fcm_token)
-        .bind(is_dev)
-        .fetch_one(&self.admin)
-        .await
-        .expect("device insert failed")
-    }
-
-    fn fcm_tokens_sent(&self) -> Vec<String> {
-        self.fcm
-            .sent
-            .lock()
-            .unwrap()
-            .iter()
-            .map(|(token, _)| token.clone())
-            .collect()
     }
 }
 
@@ -210,227 +160,6 @@ async fn runtime_role_is_subject_to_rls() {
             .await
             .expect("tenant_allowed_emails は tenant 無しでもエラーにならない");
     assert_eq!(invisible, 0);
-}
-
-// ============================================================
-// 3. 端末: 登録要求 → 承認 → 承認後のポーリング → tenant の逆引き
-// ============================================================
-
-#[tokio::test]
-async fn device_registration_status_after_approval_and_tenant_lookup() {
-    let ctx = setup().await;
-    let tenant = common::create_test_tenant(&ctx.admin, "RT Device").await;
-    let admin_auth = ctx.admin_user(tenant).await;
-
-    // 端末が登録要求を出す (公開、tenant 無し)
-    let res = ctx
-        .client
-        .post(ctx.url("/api/devices/register/request"))
-        .json(&json!({ "device_name": "RT Kiosk" }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 200);
-    let body: Value = res.json().await.unwrap();
-    let code = body["registration_code"].as_str().unwrap().to_string();
-
-    // 承認前のポーリング: pending で、端末の情報は返さない
-    let status_url = ctx.url(&format!("/api/devices/register/status/{code}"));
-    let res = ctx.client.get(&status_url).send().await.unwrap();
-    assert_eq!(res.status(), 200);
-    let body: Value = res.json().await.unwrap();
-    assert_eq!(body["status"], "pending");
-    assert!(body.get("device_id").is_none());
-    assert!(body.get("settings_token").is_none());
-
-    // 管理者が承認する
-    let res = ctx
-        .client
-        .post(ctx.url(&format!("/api/devices/approve-by-code/{code}")))
-        .header("Authorization", &admin_auth)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 200);
-    let body: Value = res.json().await.unwrap();
-    let device_id = body["device_id"].as_str().unwrap().to_string();
-    assert_eq!(body["tenant_id"], tenant.to_string());
-
-    // 承認後のポーリング (tenant 無しのまま)。devices の行にしか無い settings_token まで返る
-    let res = ctx.client.get(&status_url).send().await.unwrap();
-    assert_eq!(res.status(), 200);
-    let body: Value = res.json().await.unwrap();
-    assert_eq!(body["status"], "approved");
-    assert_eq!(body["device_id"], device_id);
-    assert_eq!(body["tenant_id"], tenant.to_string());
-    assert_eq!(body["device_name"], "RT Kiosk");
-    let stored_token: Option<Uuid> =
-        sqlx::query_scalar("SELECT settings_token FROM alc_api.devices WHERE id = $1::uuid")
-            .bind(&device_id)
-            .fetch_one(&ctx.admin)
-            .await
-            .unwrap();
-    let stored_token = stored_token.expect("承認で settings_token が発行される");
-    assert_eq!(body["settings_token"], stored_token.to_string());
-
-    // 存在しないコードは 404
-    let res = ctx
-        .client
-        .get(ctx.url(&format!("/api/devices/register/status/{}", Uuid::new_v4())))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 404);
-
-    // device_id から tenant を引く 2 つの口 (内部口と、端末が叩く公開口)
-    let pairing_url = ctx.url(&format!("/api/internal/devices/{device_id}/pairing-tenant"));
-    let internal_auth = format!("Bearer {}", common::create_test_internal_jwt());
-    let res = ctx
-        .client
-        .get(&pairing_url)
-        .header("Authorization", &internal_auth)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 200);
-    let body: Value = res.json().await.unwrap();
-    assert_eq!(body["tenant_id"], tenant.to_string());
-
-    let other_token = unique("fcm-other");
-    ctx.insert_device(tenant, &other_token, false).await;
-    let dismiss = || async {
-        ctx.client
-            .post(ctx.url("/api/devices/fcm-dismiss-test"))
-            .json(&json!({ "device_id": device_id }))
-            .send()
-            .await
-            .unwrap()
-    };
-    let res = dismiss().await;
-    assert_eq!(res.status(), 200);
-    let body: Value = res.json().await.unwrap();
-    assert_eq!(body["sent"], 1, "同じテナントの他の端末 1 台へ送る");
-    assert!(ctx.fcm_tokens_sent().contains(&other_token));
-
-    // 無効にした端末は、どちらの口でも「無い」扱い (status = 'active' だけを返す)
-    let res = ctx
-        .client
-        .post(ctx.url(&format!("/api/devices/disable/{device_id}")))
-        .header("Authorization", &admin_auth)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 204);
-    let res = ctx
-        .client
-        .get(&pairing_url)
-        .header("Authorization", &internal_auth)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 404);
-    assert_eq!(dismiss().await.status(), 404);
-
-    // 登録の無い device_id も 404
-    let res = ctx
-        .client
-        .get(ctx.url(&format!(
-            "/api/internal/devices/{}/pairing-tenant",
-            Uuid::new_v4()
-        )))
-        .header("Authorization", &internal_auth)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 404);
-}
-
-// ============================================================
-// 4. 全テナント横断の端末の列挙 (内部用 secret 付き)
-// ============================================================
-
-#[tokio::test]
-async fn cross_tenant_device_listings_work_with_internal_secret() {
-    set_fcm_secret();
-    let ctx = setup().await;
-    let tenant_a = common::create_test_tenant(&ctx.admin, "RT FCM A").await;
-    let tenant_b = common::create_test_tenant(&ctx.admin, "RT FCM B").await;
-    let token_a = unique("fcm-a");
-    let token_b = unique("fcm-b");
-    let device_a = ctx.insert_device(tenant_a, &token_a, true).await;
-    let device_b = ctx.insert_device(tenant_b, &token_b, false).await;
-
-    // 着信の通知 (list_fcm_devices): 両テナントの端末へ送る
-    let res = ctx
-        .client
-        .post(ctx.url("/api/devices/fcm-notify-call"))
-        .header("X-Internal-Secret", FCM_SECRET)
-        .json(&json!({ "room_ids": ["room-1"] }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 200);
-    let sent = ctx.fcm_tokens_sent();
-    assert!(sent.contains(&token_a) && sent.contains(&token_b));
-
-    // テスト送信 (list_all_callable_devices): 除外した端末以外の全テナントの端末
-    let res = ctx
-        .client
-        .post(ctx.url("/api/devices/test-fcm-all-exclude"))
-        .header("X-Internal-Secret", FCM_SECRET)
-        .json(&json!({ "exclude_device_ids": [device_b.to_string()] }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 200);
-    let body: Value = res.json().await.unwrap();
-    let ids: Vec<&str> = body["results"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|r| r["device_id"].as_str().unwrap())
-        .collect();
-    assert!(ids.contains(&device_a.to_string().as_str()));
-    assert!(!ids.contains(&device_b.to_string().as_str()));
-    let row = body["results"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|r| r["device_id"] == device_a.to_string())
-        .unwrap();
-    assert_eq!(row["device_name"], "Runtime Role Device");
-
-    // 開発用の端末への OTA (list_dev_device_tenant_ids → テナントごとの一覧):
-    // dev の端末だけに届く
-    let res = ctx
-        .client
-        .post(ctx.url("/api/devices/trigger-update-dev"))
-        .header("X-Internal-Secret", FCM_SECRET)
-        .json(&json!({}))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 200);
-    let body: Value = res.json().await.unwrap();
-    let ids: Vec<&str> = body["results"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|r| r["device_id"].as_str().unwrap())
-        .collect();
-    assert!(ids.contains(&device_a.to_string().as_str()));
-    assert!(!ids.contains(&device_b.to_string().as_str()));
-
-    // secret が違えば 401 (認可は変えていない)
-    let res = ctx
-        .client
-        .post(ctx.url("/api/devices/test-fcm-all-exclude"))
-        .header("X-Internal-Secret", "wrong")
-        .json(&json!({}))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 401);
 }
 
 // ============================================================
