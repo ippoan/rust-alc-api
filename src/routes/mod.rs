@@ -5,7 +5,6 @@ pub use alc_carins::car_inspections;
 pub use alc_carins::carins_files;
 pub use alc_carins::nfc_tags;
 pub use alc_devices::devices;
-pub use alc_devices::hub_measurements;
 pub use alc_maintenance::categories as maintenance_categories;
 pub use alc_maintenance::files as maintenance_files;
 pub use alc_maintenance::records as maintenance_records;
@@ -91,9 +90,6 @@ pub fn router(
     // キオスク経路も含め前段 proxy が introspect 検証 → header 注入する。
     let tenant_protected = Router::new()
         .merge(devices::tenant_router())
-        // CoreS3 ハブ測定の閲覧 (Refs #592)。ingest 側 (internal_router) は
-        // cf-alc-recorder 専用の shared-secret 経路なので混ぜない。
-        .merge(hub_measurements::tenant_router())
         .merge(car_inspections::tenant_router())
         .merge(car_inspection_files::tenant_router())
         .merge(carins_files::tenant_router())
@@ -151,46 +147,9 @@ pub fn router(
         .merge(maintenance_tenant)
 }
 
-/// cf-alc-recorder Worker から `POST /api/hub/measurements` を受ける internal ingest
-/// router。`INTERNAL_SHARED_SECRET` env が空 (= 未配布) なら呼出し側で disable
-/// する (= caller が `internal_shared_secret_router(None)` を渡せば empty router、
-/// `Some(secret)` を渡せば middleware + extension 付きで実装する safe fallback、
-/// Refs ippoan/email-receiver#1)。
-///
-/// 本関数自体は env を読まない (= テスト容易性 + main.rs 側で env を読み caller が
-/// branch する設計、`src/main.rs` の deploy/staging 区分けと同様)。
-pub fn internal_shared_secret_router(internal_secret: Option<String>) -> Router<AppState> {
-    match internal_secret {
-        Some(secret) if !secret.is_empty() => Router::new()
-            // cf-alc-recorder Worker からの CoreS3 測定 ingest (Refs #564)
-            .merge(hub_measurements::internal_router())
-            .layer(axum_middleware::from_fn(
-                alc_core::auth_middleware::require_internal_shared_secret,
-            ))
-            .layer(axum::Extension(
-                alc_core::auth_middleware::InternalSharedSecret(secret),
-            )),
-        _ => Router::new(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// `internal_shared_secret_router` の両分岐 (`None` / 空 / Some 非空) を
-    /// 呼ぶだけのカバレッジテスト。Router 自体の挙動は dtako-api の integration
-    /// test がカバーする。ここでは Router build path が panic なく通る + 両分岐
-    /// 行が llvm-cov に乗ることだけを保証する。
-    #[test]
-    fn internal_shared_secret_router_branches() {
-        // None → empty Router (`_ =>` ブランチ)
-        let _ = internal_shared_secret_router(None);
-        // Some("") → empty Router (`_ =>` ブランチ、guard 不一致)
-        let _ = internal_shared_secret_router(Some(String::new()));
-        // Some(non-empty) → middleware + extension 付き Router (`Some(secret)` ブランチ)
-        let _ = internal_shared_secret_router(Some("test-secret".to_string()));
-    }
 
     /// `internal_oidc_trust()` (prod 用 OIDC trust 構築) のカバレッジテスト
     /// (Refs #479)。verifier の検証挙動自体は alc-core の auth_middleware /

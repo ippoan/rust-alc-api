@@ -80,12 +80,12 @@ W4 を W5〜W7 より前に置くのは、employees / timecard を他の wave �
 - **決めること (オーナー判断)**:
   1. W2 の admin 系を alc-auth-worker に入れるか、別 worker にするか
   2. W4 の misc を 1 本にするか (最終形 8 本の「misc」)、employees/timecard を分けるか
-  3. W8 の redact を Containers にするか、小さい Cloud Run を残すか
+  3. ~~W8 の redact を Containers にするか、小さい Cloud Run を残すか~~ → **W8 の黒塗り (pdfium) は GCP に別 repo** (2026-10-27 のオーナー判断。Containers は使わない。notify のほかの口は worker へ)
   4. W9 の archive Job の置き場
 
 ## 4. 次の一歩
 
-- W0: 測定の口 7 本を削除 (#757、本番で読み書きとも確認済み)。#747 の rust 側は済み (残る `internal/lineworks/event` は W8)。`hub/measurements` の置き場は未決
+- W0: 測定の口 7 本を削除 (#757、本番で読み書きとも確認済み)。#747 の rust 側は済み (残る `internal/lineworks/event` は W8)。`hub/measurements` の置き場は alc-people-worker に決めた (2026-10-27、W6a)
 - W1: camera を削除 (この PR)
 - W2a: ログインの内部口 `/internal/auth/*` 8 本を削除 (本番は 10/13 から alc-auth-worker が受けている)
 - W2b: 本番の me・logout・my-orgs を auth-worker の `ALC_AUTH_SESSION=1` で alc-auth-worker に切り替え済み (auth-worker v0.2.328)。monolith の 3 本の削除は様子見の後
@@ -108,4 +108,6 @@ W4 を W5〜W7 より前に置くのは、employees / timecard を他の wave �
 - W5c-3: 拘束時間の帳票の画面の 2 口 (`GET /api/restraint-report`・`POST /api/restraint-report/compare-csv`) を alc-dtako-worker (v0.3.11) に移し、本番で切り替え済み (auth-worker の振り分けは画面用だけ。PDF は回さない)。rust から口・CSV 比較・trait の `get_driver_name`・`list_drivers_with_cd`・alc-dtako の `alc-compare` 依存を消し、組み立て (`build_report_with_name`) は PDF のために残した (mock テストは組み立てを直接呼ぶ形に)
 - W5c-4: 拘束時間の PDF の 2 口 (`GET /api/restraint-report/pdf`・`pdf-stream`) を alc-dtako-worker (v0.3.12。`alc-pdf` とフォントも worker の repo へ移した。wasm は約 20 MB) に移し、本番で切り替え済み (auth-worker v0.2.348。画面用だけ)。rust の PDF は乗務員の SQL の列名 `name` と型の欄 `driver_name` が食い違い、本番で常に 500 だった (worker では列を位置で読み、実 DB のテストで通す)。本番で 1 人ぶんの PDF が worker から 200 (CPU 約 450 ms)。全員ぶん (`pdf-stream`) は、社員の全員 (約 400 人) を 1 ファイルにすると CPU 30 秒の上限で止まり、上限を 5 分にした (v0.3.13) 後はメモリ 128 MB の上限で止まった (CPU 98 秒の時点)。対象を「その月に運行のある乗務員」に絞った (v0.3.14、2026 年 9 月で 110 人)。最後まで出るかは未確認 (rust でも常に 500 だった)。rust から PDF の口・組み立て・trait・repo・mock・`alc-pdf` crate・直下の `assets/fonts` を消した
 - W5c-5: 車両のエラーの起票の 5 口 (`POST /api/dtako/tickets`・`PATCH /api/dtako/tickets/{id}/scraped` = email-receiver の内部用、`GET /api/dtako/tickets`・`GET /api/dtako/tickets/{id}`・`POST /api/dtako/tickets/close` = 画面用) を alc-dtako-worker (v0.3.15) に移し、本番で切り替え済み (auth-worker v0.2.349。id は UUID に固定)。本番で一覧と 1 件が worker から返り、Cloud Run への `dtako/tickets` の要求は切り替え後 0 件。close_token は worker では DB が作る (長さと字種は同じ)。rust から口・trait・repo・型・mock と、これで空になった `alc-dtako` crate・`AppState` の `dtako_storage`・`tests/mock_dtako` を消し、crate の再作成を `check_domain_split.sh` が落とすようにした。**dtako の口はこれで全部 worker に移った**
+- W5c-5 の補足: auth-worker の振り分けの表に proxy ごとの method の絞り (`methods`) を足し、`/api/dtako/tickets` は画面用 GET・内部用 POST だけを worker に渡す (auth-worker v0.2.350)。それまで画面からの起票の POST も worker に届いていた (rust では画面の経路は GET だけ)
+- W6a: 端末の測定・打刻の取り込みと一覧 (`POST`・`GET /api/hub/measurements`) を alc-people-worker (v0.0.3) に移し、本番で切り替え済み (auth-worker v0.2.351。取り込みは内部用の POST、一覧は画面用・RPC の GET。内部用の binding の経路でも dev端末の印を渡すようにした)。打刻はカードを社員に解決して payload に凍結する (カードの照会と同じ SQL)。本番で一覧が worker から返り、切り替え後の Cloud Run への `hub/measurements` の要求は 0 件。取り込みの POST の本番確認は確認中。rust から口・repo・trait・型・mock・実 DB テストと、打刻の照合のためだけに残していた timecard (`TimecardRepository`・`resolve_employee_by_card`)、空になった共有の秘密の経路 (`internal_shared_secret_router`・`require_internal_shared_secret`) を消し、再流入を `check_domain_split.sh` が落とす
 rust-alc-api は open PR 1 本までなので、W1 以降の worker 側の PR (別 repo) と並行して進める。

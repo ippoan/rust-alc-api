@@ -93,10 +93,17 @@ guard_repository_modules dtako "ippoan/alc-dtako-worker" dtako_tickets
 guard_model_structs dtako "ippoan/alc-dtako-worker" 'DtakoTicket'
 guard_appstate_fields dtako "ippoan/alc-dtako-worker" 'dtako_tickets|dtako_storage'
 
+# --- hub (端末の測定・打刻。Worker へ移した。W6a、Refs #680) ---
+# `/api/hub/measurements` は ippoan/alc-people-worker に移り、打刻の照合のためだけに残していた timecard の
+# repository も消した。alc-core への repository / model / AppState field の再流入を落とす。
+guard_repository_modules hub "ippoan/alc-people-worker" hub_measurements timecard
+guard_model_structs hub "ippoan/alc-people-worker" 'HubMeasurement|TimecardCard'
+guard_appstate_fields hub "ippoan/alc-people-worker" 'hub_measurements|timecard'
+
 # --- (Phase C 以降はここに追記: carins) ---
 
 if [ "$fail" != 0 ]; then
   echo "::error::domain split guard failed — ドメインコードは alc-core ではなく各ドメイン crate に追加してください (設計: issue #513)"
   exit 1
 fi
-echo "domain split guard OK (tenko, trouble, notify, dtako)"
+echo "domain split guard OK (tenko, trouble, notify, dtako, hub)"

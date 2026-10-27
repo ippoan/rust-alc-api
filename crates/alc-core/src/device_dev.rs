@@ -1,6 +1,6 @@
 //! dev端末 (開発用の鍵) の印を、要求のスコープに結ぶ (Refs ippoan/alc-app#387)。
 //!
-//! 認証 middleware (`require_tenant_header` / `require_internal_shared_secret`) が
+//! 認証 middleware (`require_tenant_header`) が
 //! 認証を通した要求についてだけ [`scope`] を張り、`tenant::set_current_tenant` が
 //! [`is_device_dev`] を見て DB の接続の設定 `app.device_dev` を立てる。
 //! `set_current_tenant` / `TenantConn::acquire` の引数を増やさないための task-local。
