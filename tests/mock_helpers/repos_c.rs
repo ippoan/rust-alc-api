@@ -4,7 +4,6 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use rust_alc_api::db::models::*;
-use rust_alc_api::db::repository::nfc_tags::NfcTagRepository;
 use rust_alc_api::db::repository::tenko_call::{
     DriverInfo, RegisterDriverResult, TenkoCallDriverRow, TenkoCallNumberRow, TenkoCallRepository,
 };
@@ -28,79 +27,6 @@ macro_rules! check_fail_update {
             return Err(sqlx::Error::RowNotFound);
         }
     };
-}
-
-// ---------------------------------------------------------------------------
-// MockNfcTagRepository
-// ---------------------------------------------------------------------------
-
-pub struct MockNfcTagRepository {
-    pub fail_next: AtomicBool,
-    pub tag_data: std::sync::Mutex<Option<NfcTag>>,
-    pub car_inspection_json: std::sync::Mutex<Option<serde_json::Value>>,
-    pub delete_returns_true: AtomicBool,
-}
-
-impl Default for MockNfcTagRepository {
-    fn default() -> Self {
-        Self {
-            fail_next: AtomicBool::new(false),
-            tag_data: std::sync::Mutex::new(None),
-            car_inspection_json: std::sync::Mutex::new(None),
-            delete_returns_true: AtomicBool::new(false),
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl NfcTagRepository for MockNfcTagRepository {
-    async fn search_by_uuid(
-        &self,
-        _tenant_id: Uuid,
-        _nfc_uuid: &str,
-    ) -> Result<Option<NfcTag>, sqlx::Error> {
-        check_fail!(self);
-        Ok(self.tag_data.lock().unwrap().clone())
-    }
-
-    async fn get_car_inspection_json(
-        &self,
-        _tenant_id: Uuid,
-        _car_inspection_id: i32,
-    ) -> Result<Option<serde_json::Value>, sqlx::Error> {
-        check_fail!(self);
-        Ok(self.car_inspection_json.lock().unwrap().clone())
-    }
-
-    async fn list(
-        &self,
-        _tenant_id: Uuid,
-        _car_inspection_id: Option<i32>,
-    ) -> Result<Vec<NfcTag>, sqlx::Error> {
-        check_fail!(self);
-        let data = self.tag_data.lock().unwrap();
-        Ok(data.iter().cloned().collect())
-    }
-
-    async fn register(
-        &self,
-        _tenant_id: Uuid,
-        nfc_uuid: &str,
-        car_inspection_id: i32,
-    ) -> Result<NfcTag, sqlx::Error> {
-        check_fail!(self);
-        Ok(NfcTag {
-            id: 1,
-            nfc_uuid: nfc_uuid.to_string(),
-            car_inspection_id,
-            created_at: Utc::now(),
-        })
-    }
-
-    async fn delete(&self, _tenant_id: Uuid, _nfc_uuid: &str) -> Result<bool, sqlx::Error> {
-        check_fail!(self);
-        Ok(self.delete_returns_true.load(Ordering::SeqCst))
-    }
 }
 
 // ---------------------------------------------------------------------------

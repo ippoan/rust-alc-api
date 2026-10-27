@@ -13,9 +13,8 @@ use sqlx::postgres::PgPoolOptions;
 use uuid::Uuid;
 
 use rust_alc_api::db::repository::{
-    PgAuthRepository, PgBotAdminRepository, PgCarInspectionRepository, PgCarinsFilesRepository,
-    PgDailyHealthRepository, PgDriverInfoRepository, PgEquipmentFailuresRepository,
-    PgHealthBaselinesRepository, PgLineworksChannelsRepository, PgNfcTagRepository,
+    PgAuthRepository, PgBotAdminRepository, PgDailyHealthRepository, PgDriverInfoRepository,
+    PgEquipmentFailuresRepository, PgHealthBaselinesRepository, PgLineworksChannelsRepository,
     PgNotifyDeliveryRepository, PgNotifyDocumentRepository, PgNotifyRecipientRepository,
     PgTenkoCallRepository, PgTenkoRecordsRepository, PgTenkoSchedulesRepository,
     PgTenkoSessionRepository, PgTenkoWebhooksRepository,
@@ -262,9 +261,6 @@ fn build_app_state(
 ) -> AppState {
     let auth = Arc::new(PgAuthRepository::new(pool.clone()));
     let bot_admin = Arc::new(PgBotAdminRepository::new(pool.clone()));
-    let car_inspections = Arc::new(PgCarInspectionRepository::new(pool.clone()));
-    let carins_files = Arc::new(PgCarinsFilesRepository::new(pool.clone()));
-    let nfc_tags = Arc::new(PgNfcTagRepository::new(pool.clone()));
     let notify_recipients = Arc::new(PgNotifyRecipientRepository::new(pool.clone()));
     let notify_documents = Arc::new(PgNotifyDocumentRepository::new(pool.clone()));
     let notify_deliveries = Arc::new(PgNotifyDeliveryRepository::new(pool.clone()));
@@ -274,11 +270,7 @@ fn build_app_state(
         pool: Some(pool),
         auth,
         bot_admin,
-        car_inspections,
-        carins_files,
-        nfc_tags,
         storage,
-        carins_storage: None,
         notify_recipients,
         notify_documents,
         notify_deliveries,
@@ -570,42 +562,14 @@ pub fn pg_tenko_state(state: &AppState) -> alc_tenko::TenkoState {
     }
 }
 
-/// pool から maintenance ドメインの MaintenanceState を合成する (Refs #651)。
-/// carins 照合 (`lookup_expiry`) は既存の `state.car_inspections` (alc-carins の
-/// `PgCarInspectionRepository`) をそのまま使う — mock を挟まない。
-pub fn pg_maintenance_state(state: &AppState) -> alc_maintenance::MaintenanceState {
-    let pool = state
-        .pool
-        .clone()
-        .expect("spawn_test_server: state.pool is None — mock state は spawn_test_server_with_states を使うこと");
-    alc_maintenance::MaintenanceState {
-        vehicles: Arc::new(alc_maintenance::vehicles::PgVehiclesRepository::new(
-            pool.clone(),
-        )),
-        records: Arc::new(alc_maintenance::records::PgRecordsRepository::new(
-            pool.clone(),
-        )),
-        car_inspections: state.car_inspections.clone(),
-        categories: Arc::new(
-            alc_maintenance::categories::PgMaintenanceCategoriesRepository::new(pool.clone()),
-        ),
-        files: Arc::new(alc_maintenance::files::PgMaintenanceFilesRepository::new(
-            pool,
-        )),
-        storage: Some(Arc::new(MockStorage::new("maintenance-bucket"))),
-    }
-}
-
 pub async fn spawn_test_server(state: AppState) -> String {
     let tenko_state = pg_tenko_state(&state);
-    let maintenance_state = pg_maintenance_state(&state);
-    spawn_test_server_with_states(state, tenko_state, maintenance_state).await
+    spawn_test_server_with_states(state, tenko_state).await
 }
 
 pub async fn spawn_test_server_with_states(
     state: AppState,
     tenko_state: alc_tenko::TenkoState,
-    maintenance_state: alc_maintenance::MaintenanceState,
 ) -> String {
     use axum::{Extension, Router};
     use rust_alc_api::auth::google::GoogleTokenVerifier;
@@ -633,11 +597,7 @@ pub async fn spawn_test_server_with_states(
     let app = Router::new()
         .nest(
             "/api",
-            rust_alc_api::routes::router(
-                internal_oidc_trust_for_tests(),
-                tenko_state,
-                maintenance_state,
-            ),
+            rust_alc_api::routes::router(internal_oidc_trust_for_tests(), tenko_state),
         )
         // テスト用 proxy emulation (Refs #434)。#434 で rust-alc-api は JWT 検証を
         // 撤去し、注入された identity ヘッダー (X-Tenant-ID / X-User-*) を信頼する

@@ -124,10 +124,21 @@ fi
 guard_repository_modules admin "ippoan/alc-auth-worker" sso_admin tenant_users
 guard_appstate_fields admin "ippoan/alc-auth-worker" 'sso_admin|tenant_users'
 
-# --- (Phase C 以降はここに追記: carins) ---
+# --- carins・maintenance (Worker へ移した。W3、Refs #680) ---
+# 車検証・ファイル・NFC タグ・車両整備の口は全部 ippoan/alc-carins-worker に移り、alc-carins・alc-maintenance crate は消した。
+# crate の再作成と、alc-core への carins の repository / model / AppState field の再流入を落とす
+# (点呼 alc-tenko が整備の表を生 SQL で読むのは点呼の機能なので対象外)。
+for c in alc-carins alc-maintenance; do
+  if [ -e "crates/$c" ]; then
+    err "domain-split: crates/$c が再作成されています。carins・maintenance は ippoan/alc-carins-worker に置いてください (Refs #680)"
+  fi
+done
+guard_repository_modules carins "ippoan/alc-carins-worker" car_inspections carins_files nfc_tags
+guard_model_structs carins "ippoan/alc-carins-worker" "NfcTag|CarInspection"
+guard_appstate_fields carins "ippoan/alc-carins-worker" "car_inspections|carins_files|nfc_tags|carins_storage"
 
 if [ "$fail" != 0 ]; then
   echo "::error::domain split guard failed — ドメインコードは alc-core ではなく各ドメイン crate に追加してください (設計: issue #513)"
   exit 1
 fi
-echo "domain split guard OK (tenko, trouble, notify, dtako, hub, devices, admin)"
+echo "domain split guard OK (tenko, trouble, notify, dtako, hub, devices, admin, carins)"

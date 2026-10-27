@@ -17,9 +17,8 @@ use alc_notify::repo::{
     PgNotifyRecipientRepository,
 };
 use rust_alc_api::db::repository::{
-    PgAuthRepository, PgBotAdminRepository, PgCarInspectionRepository, PgCarinsFilesRepository,
-    PgDailyHealthRepository, PgDriverInfoRepository, PgEquipmentFailuresRepository,
-    PgHealthBaselinesRepository, PgNfcTagRepository, PgTenkoCallRepository,
+    PgAuthRepository, PgBotAdminRepository, PgDailyHealthRepository, PgDriverInfoRepository,
+    PgEquipmentFailuresRepository, PgHealthBaselinesRepository, PgTenkoCallRepository,
     PgTenkoRecordsRepository, PgTenkoSchedulesRepository, PgTenkoSessionRepository,
     PgTenkoWebhooksRepository,
 };
@@ -99,33 +98,12 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    // carins ファイル用 R2 (carins-files バケット、別 API トークン)
-    let carins_storage: Option<Arc<dyn StorageBackend>> =
-        std::env::var("CARINS_R2_BUCKET").ok().map(|bucket| {
-            let account_id = std::env::var("R2_ACCOUNT_ID")
-                .expect("R2_ACCOUNT_ID required for CARINS_R2_BUCKET");
-            let access_key =
-                std::env::var("CARINS_R2_ACCESS_KEY").expect("CARINS_R2_ACCESS_KEY required");
-            let secret_key =
-                std::env::var("CARINS_R2_SECRET_KEY").expect("CARINS_R2_SECRET_KEY required");
-            tracing::info!("Carins storage: R2 (bucket={})", bucket);
-            Arc::new(
-                rust_alc_api::storage::R2Backend::new(
-                    bucket, account_id, access_key, secret_key, None,
-                )
-                .expect("Failed to init carins R2 backend"),
-            ) as Arc<dyn StorageBackend>
-        });
-
     let auth = Arc::new(PgAuthRepository::new(pool.clone()));
     let bot_admin = Arc::new(PgBotAdminRepository::new(pool.clone()));
-    let car_inspections = Arc::new(PgCarInspectionRepository::new(pool.clone()));
-    let carins_files = Arc::new(PgCarinsFilesRepository::new(pool.clone()));
     let daily_health = Arc::new(PgDailyHealthRepository::new(pool.clone()));
     let driver_info = Arc::new(PgDriverInfoRepository::new(pool.clone()));
     let equipment_failures = Arc::new(PgEquipmentFailuresRepository::new(pool.clone()));
     let health_baselines = Arc::new(PgHealthBaselinesRepository::new(pool.clone()));
-    let nfc_tags = Arc::new(PgNfcTagRepository::new(pool.clone()));
     let tenko_call = Arc::new(PgTenkoCallRepository::new(pool.clone()));
     let tenko_records = Arc::new(PgTenkoRecordsRepository::new(pool.clone()));
     let tenko_schedules = Arc::new(PgTenkoSchedulesRepository::new(pool.clone()));
@@ -178,39 +156,11 @@ async fn main() -> anyhow::Result<()> {
         webhook: webhook_service.clone(),
     };
 
-    // maintenance ドメイン (Refs #651) — AppState から分離した MaintenanceState で
-    // マウントする (alc-tenko と同じ形)。carins 照合は
-    // 既存の car_inspections repo (alc-carins の PgCarInspectionRepository) を
-    // in-process で呼ぶ (HTTP で自分自身を叩かない)。
-    let maintenance_state = alc_maintenance::MaintenanceState {
-        vehicles: Arc::new(alc_maintenance::vehicles::PgVehiclesRepository::new(
-            pool.clone(),
-        )),
-        records: Arc::new(alc_maintenance::records::PgRecordsRepository::new(
-            pool.clone(),
-        )),
-        car_inspections: car_inspections.clone(),
-        categories: Arc::new(
-            alc_maintenance::categories::PgMaintenanceCategoriesRepository::new(pool.clone()),
-        ),
-        // 写真添付 (Refs #651) — 新しい *_R2_BUCKET は足さず、既定の共有 storage に
-        // prefix (`{tenant_id}/maintenance/{record_id}/{uuid}.{ext}`) で相乗りする。
-        files: Arc::new(alc_maintenance::files::PgMaintenanceFilesRepository::new(
-            pool.clone(),
-        )),
-        storage: Some(storage.clone()),
-    };
-
     let state = AppState {
         pool: Some(pool.clone()),
         auth,
         bot_admin,
-        car_inspections,
-        carins_files,
-
-        nfc_tags,
         storage,
-        carins_storage,
         notify_recipients,
         notify_documents,
         notify_deliveries,
@@ -291,11 +241,8 @@ async fn main() -> anyhow::Result<()> {
         ])
         .allow_headers(Any);
 
-    let api_router = rust_alc_api::routes::router(
-        rust_alc_api::routes::internal_oidc_trust(),
-        tenko_state,
-        maintenance_state,
-    );
+    let api_router =
+        rust_alc_api::routes::router(rust_alc_api::routes::internal_oidc_trust(), tenko_state);
 
     let app = Router::new()
         .nest("/api", api_router)

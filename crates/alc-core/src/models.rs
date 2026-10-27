@@ -161,18 +161,6 @@ pub struct DtakoDailyWorkHours {
 
 // --- Dtako: Daily Work Segments ---
 
-// --- NFC Tag ---
-
-#[derive(Debug, Clone, sqlx::FromRow, serde::Serialize, ts_rs::TS)]
-#[ts(export)]
-#[serde(rename_all = "camelCase")]
-pub struct NfcTag {
-    pub id: i32,
-    pub nfc_uuid: String,
-    pub car_inspection_id: i32,
-    pub created_at: DateTime<Utc>,
-}
-
 // --- Carrying Items ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
