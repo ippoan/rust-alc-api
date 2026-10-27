@@ -258,14 +258,6 @@ impl TenkoRecordsRepository for MockTenkoRecordsRepository {
         Ok(vec![])
     }
 
-    async fn get(&self, _tenant_id: Uuid, _id: Uuid) -> Result<Option<TenkoRecord>, sqlx::Error> {
-        check_fail!(self);
-        if self.return_some.load(Ordering::SeqCst) {
-            return Ok(Some(make_mock_tenko_record_for_list(_tenant_id, _id)));
-        }
-        Ok(None)
-    }
-
     async fn list_all(
         &self,
         _tenant_id: Uuid,

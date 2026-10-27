@@ -15,8 +15,6 @@ pub trait TenkoRecordsRepository: Send + Sync {
         offset: i64,
     ) -> Result<Vec<TenkoRecord>, sqlx::Error>;
 
-    async fn get(&self, tenant_id: Uuid, id: Uuid) -> Result<Option<TenkoRecord>, sqlx::Error>;
-
     async fn list_all(
         &self,
         tenant_id: Uuid,

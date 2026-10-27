@@ -855,16 +855,6 @@ async fn test_csv_reads_in_person_it_tenko_as_in_person_tenko() {
                 .find(|r| r["id"] == in_person_record.as_str())
                 .unwrap();
             assert_eq!(row["tenko_method"], "IT点呼", "JSON は読み替えない");
-
-            let res = client
-                .get(format!("{base_url}/api/tenko/records/{in_person_record}"))
-                .header("Authorization", &auth)
-                .send()
-                .await
-                .unwrap();
-            assert_eq!(res.status(), 200);
-            let one: Value = res.json().await.unwrap();
-            assert_eq!(one["tenko_method"], "IT点呼");
         }
     );
 }
