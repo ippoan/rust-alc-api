@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/alc-auth", "crates/alc-auth-jwt", "crates/alc-carins", "crates/alc-core", "crates/alc-devices", "crates/alc-dtako", "crates/alc-maintenance", "crates/alc-misc", "crates/alc-notify", "crates/alc-storage", "crates/alc-tenko"]
+members = [".", "crates/alc-auth", "crates/alc-auth-jwt", "crates/alc-carins", "crates/alc-core", "crates/alc-devices", "crates/alc-maintenance", "crates/alc-misc", "crates/alc-notify", "crates/alc-storage", "crates/alc-tenko"]
 resolver = "2"
 
 # 暗号 bignum crate だけ opt-level=3 で最適化 (Refs #438)。
@@ -41,13 +41,12 @@ alc-auth = { path = "crates/alc-auth" }
 alc-carins = { path = "crates/alc-carins" }
 alc-core = { path = "crates/alc-core" }
 alc-devices = { path = "crates/alc-devices" }
-alc-dtako = { path = "crates/alc-dtako" }
 alc-maintenance = { path = "crates/alc-maintenance" }
 alc-misc = { path = "crates/alc-misc" }
 alc-notify = { path = "crates/alc-notify" }
 alc-tenko = { path = "crates/alc-tenko" }
 alc-storage = { path = "crates/alc-storage" }
-# 共通の計算 crate の正本は ippoan/alc-dtako-worker (Refs #736)。rev で固定し、3 か所 (ここ・alc-core・alc-dtako) は同じ rev にそろえる (出どころを 2 つにしない)。
+# 共通の計算 crate の正本は ippoan/alc-dtako-worker (Refs #736)。rev で固定し、2 か所 (ここ・alc-core) は同じ rev にそろえる (出どころを 2 つにしない)。
 alc-csv-parser = { git = "https://github.com/ippoan/alc-dtako-worker", rev = "eec0231cb584e456ae56b2b766f450d7b6ecaeaf" }
 alc-compare = { git = "https://github.com/ippoan/alc-dtako-worker", rev = "eec0231cb584e456ae56b2b766f450d7b6ecaeaf" }
 # migration の正本 (ippoan/alc-migrations、public)。版は rev で固定する (tag は無い)。上げるときは Cargo.lock も一緒に更新する。

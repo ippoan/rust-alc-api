@@ -305,7 +305,6 @@ jobs:
           - { name: monolith, target: "//:unit_tests", coverage: "cov-monolith" }
           - { name: mock-carins, target: "//:mock_carins", coverage: "cov-mock-carins" }
           - { name: mock-devices, target: "//:mock_devices", coverage: "cov-mock-devices" }
-          - { name: mock-dtako, target: "//:mock_dtako", coverage: "cov-mock-dtako" }
           - { name: mock-misc, target: "//:mock_misc", coverage: "cov-mock-misc" }
           - { name: mock-tenko, target: "//:mock_tenko", coverage: "cov-mock-tenko" }
           - { name: mock-maintenance, target: "//:mock_maintenance" }
@@ -314,7 +313,6 @@ jobs:
           - { name: carins, target: "//crates/alc-carins:alc-carins_test", coverage: "cov-carins" }
           - { name: core, target: "//crates/alc-core:alc-core_test", coverage: "cov-core" }
           - { name: devices, target: "//crates/alc-devices:alc-devices_test", coverage: "cov-devices" }
-          - { name: dtako, target: "//crates/alc-dtako:alc-dtako_test", coverage: "cov-dtako" }
           - { name: maintenance, target: "//crates/alc-maintenance:alc-maintenance_test", coverage: "cov-maintenance" }
           - { name: misc, target: "//crates/alc-misc:alc-misc_test", coverage: "cov-misc" }
           - { name: notify, target: "//crates/alc-notify:alc-notify_test", pdfium: true, coverage: "cov-notify" }

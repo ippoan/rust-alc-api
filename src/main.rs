@@ -18,7 +18,7 @@ use alc_notify::repo::{
 };
 use rust_alc_api::db::repository::{
     PgAuthRepository, PgBotAdminRepository, PgCarInspectionRepository, PgCarinsFilesRepository,
-    PgDailyHealthRepository, PgDeviceRepository, PgDriverInfoRepository, PgDtakoTicketsRepository,
+    PgDailyHealthRepository, PgDeviceRepository, PgDriverInfoRepository,
     PgEquipmentFailuresRepository, PgHealthBaselinesRepository, PgHubMeasurementsRepository,
     PgNfcTagRepository, PgSsoAdminRepository, PgTenantUsersRepository, PgTenkoCallRepository,
     PgTenkoRecordsRepository, PgTenkoSchedulesRepository, PgTenkoSessionRepository,
@@ -118,41 +118,6 @@ async fn main() -> anyhow::Result<()> {
             ) as Arc<dyn StorageBackend>
         });
 
-    // dtako (digitacho) 用 R2 (ohishi-dtako-apac バケット、別 API トークン)。
-    //
-    // dev サンドボックス (Incus) では `DTAKO_STORAGE_HTTP_PROXY` を設定すると、ホスト側の
-    // `wrangler dev --local --port 8788` (R2 binding 付き) 経由で R2 にアクセスする。
-    // この場合 Incus に R2 keys を投入する必要が無い (本番 R2 は `R2_ACCESS_KEY` 等 経由のみ)。
-    let dtako_storage: Option<Arc<dyn StorageBackend>> =
-        if let Ok(proxy_base) = std::env::var("DTAKO_STORAGE_HTTP_PROXY") {
-            let bucket =
-                std::env::var("DTAKO_R2_BUCKET").unwrap_or_else(|_| "dtako-uploads".to_string());
-            tracing::info!(
-                "Dtako storage: HTTP proxy at {} (bucket label={})",
-                proxy_base,
-                bucket
-            );
-            Some(Arc::new(rust_alc_api::storage::HttpProxyBackend::new(
-                proxy_base, bucket,
-            )) as Arc<dyn StorageBackend>)
-        } else {
-            std::env::var("DTAKO_R2_BUCKET").ok().map(|bucket| {
-                let account_id = std::env::var("R2_ACCOUNT_ID")
-                    .expect("R2_ACCOUNT_ID required for DTAKO_R2_BUCKET");
-                let access_key =
-                    std::env::var("DTAKO_R2_ACCESS_KEY").expect("DTAKO_R2_ACCESS_KEY required");
-                let secret_key =
-                    std::env::var("DTAKO_R2_SECRET_KEY").expect("DTAKO_R2_SECRET_KEY required");
-                tracing::info!("Dtako storage: R2 (bucket={})", bucket);
-                Arc::new(
-                    rust_alc_api::storage::R2Backend::new(
-                        bucket, account_id, access_key, secret_key, None,
-                    )
-                    .expect("Failed to init dtako R2 backend"),
-                ) as Arc<dyn StorageBackend>
-            })
-        };
-
     // FCM (optional — disabled if FCM_PROJECT_ID is not set)
     let fcm = std::env::var("FCM_PROJECT_ID").ok().map(|project_id| {
         tracing::info!("FCM enabled (project={})", project_id);
@@ -167,7 +132,6 @@ async fn main() -> anyhow::Result<()> {
     let daily_health = Arc::new(PgDailyHealthRepository::new(pool.clone()));
     let devices = Arc::new(PgDeviceRepository::new(pool.clone()));
     let driver_info = Arc::new(PgDriverInfoRepository::new(pool.clone()));
-    let dtako_tickets = Arc::new(PgDtakoTicketsRepository::new(pool.clone()));
     let equipment_failures = Arc::new(PgEquipmentFailuresRepository::new(pool.clone()));
     let hub_measurements = Arc::new(PgHubMeasurementsRepository::new(pool.clone()));
     let health_baselines = Arc::new(PgHealthBaselinesRepository::new(pool.clone()));
@@ -257,7 +221,6 @@ async fn main() -> anyhow::Result<()> {
         car_inspections,
         carins_files,
         devices,
-        dtako_tickets,
 
         hub_measurements,
         nfc_tags,
@@ -266,7 +229,6 @@ async fn main() -> anyhow::Result<()> {
         timecard,
         storage,
         carins_storage,
-        dtako_storage,
         fcm,
         notify_recipients,
         notify_documents,
@@ -350,7 +312,7 @@ async fn main() -> anyhow::Result<()> {
         ])
         .allow_headers(Any);
 
-    // email-receiver Worker からの internal ingest 経路 (`POST /api/dtako/tickets` 等)。
+    // cf-alc-recorder Worker からの internal ingest 経路 (`POST /api/hub/measurements`)。
     // INTERNAL_SHARED_SECRET env が空なら mount しない (= caller が None を渡すことで
     // routes::internal_shared_secret_router が empty router を返す)。main.rs は coverage
     // 対象外なのでここで env を読み conditional logic を持つのが安全 (Refs
@@ -360,7 +322,7 @@ async fn main() -> anyhow::Result<()> {
         .filter(|s| !s.is_empty());
     if internal_secret.is_none() {
         tracing::warn!(
-            "INTERNAL_SHARED_SECRET not set; /api/dtako/tickets internal routes are disabled"
+            "INTERNAL_SHARED_SECRET not set; /api/hub/measurements internal routes are disabled"
         );
     }
     let api_router = rust_alc_api::routes::router(
