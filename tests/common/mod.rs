@@ -17,8 +17,8 @@ use rust_alc_api::db::repository::{
     PgDailyHealthRepository, PgDriverInfoRepository, PgEquipmentFailuresRepository,
     PgHealthBaselinesRepository, PgLineworksChannelsRepository, PgNfcTagRepository,
     PgNotifyDeliveryRepository, PgNotifyDocumentRepository, PgNotifyRecipientRepository,
-    PgSsoAdminRepository, PgTenantUsersRepository, PgTenkoCallRepository, PgTenkoRecordsRepository,
-    PgTenkoSchedulesRepository, PgTenkoSessionRepository, PgTenkoWebhooksRepository,
+    PgTenkoCallRepository, PgTenkoRecordsRepository, PgTenkoSchedulesRepository,
+    PgTenkoSessionRepository, PgTenkoWebhooksRepository,
 };
 use rust_alc_api::AppState;
 
@@ -265,8 +265,6 @@ fn build_app_state(
     let car_inspections = Arc::new(PgCarInspectionRepository::new(pool.clone()));
     let carins_files = Arc::new(PgCarinsFilesRepository::new(pool.clone()));
     let nfc_tags = Arc::new(PgNfcTagRepository::new(pool.clone()));
-    let sso_admin = Arc::new(PgSsoAdminRepository::new(pool.clone()));
-    let tenant_users = Arc::new(PgTenantUsersRepository::new(pool.clone()));
     let notify_recipients = Arc::new(PgNotifyRecipientRepository::new(pool.clone()));
     let notify_documents = Arc::new(PgNotifyDocumentRepository::new(pool.clone()));
     let notify_deliveries = Arc::new(PgNotifyDeliveryRepository::new(pool.clone()));
@@ -279,8 +277,6 @@ fn build_app_state(
         car_inspections,
         carins_files,
         nfc_tags,
-        sso_admin,
-        tenant_users,
         storage,
         carins_storage: None,
         notify_recipients,

@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/alc-auth", "crates/alc-auth-jwt", "crates/alc-carins", "crates/alc-core", "crates/alc-maintenance", "crates/alc-misc", "crates/alc-notify", "crates/alc-storage", "crates/alc-tenko"]
+members = [".", "crates/alc-auth-jwt", "crates/alc-carins", "crates/alc-core", "crates/alc-maintenance", "crates/alc-misc", "crates/alc-notify", "crates/alc-storage", "crates/alc-tenko"]
 resolver = "2"
 
 # 暗号 bignum crate だけ opt-level=3 で最適化 (Refs #438)。
@@ -37,7 +37,6 @@ edition = "2021"
 unexpected_cfgs = { level = "allow", check-cfg = ['cfg(coverage)'] }
 
 [dependencies]
-alc-auth = { path = "crates/alc-auth" }
 alc-carins = { path = "crates/alc-carins" }
 alc-core = { path = "crates/alc-core" }
 alc-maintenance = { path = "crates/alc-maintenance" }

@@ -1,5 +1,4 @@
 // Re-export route modules from domain crates
-pub use alc_auth as auth;
 pub use alc_carins::car_inspection_files;
 pub use alc_carins::car_inspections;
 pub use alc_carins::carins_files;
@@ -8,11 +7,8 @@ pub use alc_maintenance::categories as maintenance_categories;
 pub use alc_maintenance::files as maintenance_files;
 pub use alc_maintenance::records as maintenance_records;
 pub use alc_maintenance::vehicles as maintenance_vehicles;
-pub use alc_misc::access_requests;
 pub use alc_misc::bot_admin;
 pub use alc_misc::health;
-pub use alc_misc::sso_admin;
-pub use alc_misc::tenant_users;
 pub use alc_notify::documents as notify_documents;
 pub use alc_notify::email_documents as notify_email_documents;
 pub use alc_notify::ingest as notify_ingest;
@@ -60,11 +56,7 @@ pub fn router(
     // 前段 proxy / gateway が introspect 検証済みの identity を注入する前提。
     // role 判定は各ハンドラが AuthUser から行う。
     let jwt_protected = Router::new()
-        .merge(auth::protected_router())
-        .merge(access_requests::protected_router())
-        .merge(sso_admin::router())
         .merge(bot_admin::router())
-        .merge(tenant_users::router())
         .layer(axum_middleware::from_fn(require_tenant_header));
 
     // 内部 API ルート (auth-worker 等の信頼できる呼び出し元のみ、aud=alc-api-internal)
@@ -104,8 +96,7 @@ pub fn router(
         .merge(notify_ingest::public_router())
         .merge(notify_line_webhook::public_router())
         .merge(notify_read_tracker::public_router())
-        .merge(notify_viewer::public_router())
-        .merge(access_requests::public_router());
+        .merge(notify_viewer::public_router());
 
     // tenko ドメイン (Refs #513) — AppState から分離した TenkoState でマウントする。
     // tenant 系ルートには monolith 本体と同じ require_tenant_header を張る。

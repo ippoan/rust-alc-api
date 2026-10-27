@@ -26,8 +26,7 @@ use uuid::Uuid;
 
 use alc_core::tenant::TenantConn;
 use rust_alc_api::db::repository::{
-    AuthRepository, PgAuthRepository, PgTenantUsersRepository, PgTenkoOverdueRepository,
-    PgWebhookRepository, TenantUsersRepository,
+    AuthRepository, PgAuthRepository, PgTenkoOverdueRepository, PgWebhookRepository,
 };
 
 struct Ctx {
@@ -149,10 +148,12 @@ async fn runtime_role_is_subject_to_rls() {
 
     // 招待は宛先を絞ったポリシー (158 で alc_api_rt を足した)。tenant 無しだと 0 行で、エラーにならない
     let email = format!("{}@example.test", unique("rls-invite"));
-    PgTenantUsersRepository::new(ctx.admin.clone())
-        .invite_user(tenant_a, &email, "viewer")
+    sqlx::query("INSERT INTO alc_api.tenant_allowed_emails (tenant_id, email, role) VALUES ($1, $2, 'viewer')")
+        .bind(tenant_a)
+        .bind(&email)
+        .execute(&ctx.admin)
         .await
-        .expect("invite_user failed");
+        .expect("invitation insert failed");
     let invisible: i64 =
         sqlx::query_scalar("SELECT count(*) FROM alc_api.tenant_allowed_emails WHERE email = $1")
             .bind(&email)
@@ -250,110 +251,6 @@ async fn overdue_tick_marks_and_delivers() {
     .unwrap();
     assert_eq!(deliveries, 1);
     assert_eq!(employee_name.as_deref(), Some("RT Driver"));
-}
-
-// ============================================================
-// 6. 参加の申請: 作成 (申請先は他テナント) → 一覧 → 承認 / 却下
-// ============================================================
-
-#[tokio::test]
-async fn access_request_create_list_approve_decline() {
-    let ctx = setup().await;
-    let target = common::create_test_tenant(&ctx.admin, "RT Access Target").await;
-    let home = common::create_test_tenant(&ctx.admin, "RT Access Home").await;
-    let slug: String = sqlx::query_scalar("SELECT slug FROM alc_api.tenants WHERE id = $1")
-        .bind(target)
-        .fetch_one(&ctx.admin)
-        .await
-        .unwrap();
-    let auth = PgAuthRepository::new(ctx.admin.clone());
-
-    // 申請者は自分のテナント (home) の token で、他テナント (target) へ申請する
-    let mut request_ids = Vec::new();
-    for label in ["approve", "decline"] {
-        let applicant = auth
-            .create_user_line(home, &unique(label), "Applicant")
-            .await
-            .unwrap();
-        let token = common::create_test_jwt_for_user(
-            applicant.id,
-            home,
-            "applicant@example.test",
-            "viewer",
-        );
-        let res = ctx
-            .client
-            .post(ctx.url("/api/access-requests"))
-            .header("Authorization", format!("Bearer {token}"))
-            .json(&json!({ "org_slug": slug }))
-            .send()
-            .await
-            .unwrap();
-        let status = res.status();
-        let text = res.text().await.unwrap();
-        assert_eq!(status, 201, "POST /api/access-requests: {text}");
-        let body: Value = serde_json::from_str(&text).unwrap();
-        assert_eq!(body["tenant_id"], target.to_string());
-        assert_eq!(body["user_id"], applicant.id.to_string());
-        assert_eq!(body["status"], "pending");
-        assert_eq!(body["org_name"], "RT Access Target");
-        request_ids.push(body["id"].as_str().unwrap().to_string());
-    }
-
-    let admin = format!("Bearer {}", common::create_test_jwt(target, "admin"));
-    let list = |query: &'static str| {
-        let ctx = &ctx;
-        let admin = admin.clone();
-        async move {
-            let res = ctx
-                .client
-                .get(ctx.url(&format!("/api/access-requests{query}")))
-                .header("Authorization", admin)
-                .send()
-                .await
-                .unwrap();
-            assert_eq!(res.status(), 200);
-            let body: Value = res.json().await.unwrap();
-            body["requests"].as_array().unwrap().len()
-        }
-    };
-    assert_eq!(list("").await, 2);
-
-    // 申請者のテナントの管理者には見えない
-    let res = ctx
-        .client
-        .get(ctx.url("/api/access-requests"))
-        .header(
-            "Authorization",
-            format!("Bearer {}", common::create_test_jwt(home, "admin")),
-        )
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 200);
-    let body: Value = res.json().await.unwrap();
-    assert_eq!(body["requests"].as_array().unwrap().len(), 0);
-
-    let res = ctx
-        .client
-        .post(ctx.url(&format!("/api/access-requests/{}/approve", request_ids[0])))
-        .header("Authorization", &admin)
-        .json(&json!({}))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 204);
-    let res = ctx
-        .client
-        .post(ctx.url(&format!("/api/access-requests/{}/decline", request_ids[1])))
-        .header("Authorization", &admin)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 204);
-    assert_eq!(list("?status=pending").await, 0);
-    assert_eq!(list("?status=approved").await, 1);
-    assert_eq!(list("?status=declined").await, 1);
 }
 
 // ============================================================

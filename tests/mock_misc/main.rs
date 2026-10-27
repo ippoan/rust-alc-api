@@ -17,7 +17,3 @@ mod mock_health_test;
 mod mock_lineworks_internal_test;
 #[path = "../mock_tests/mock_notify_view_internal_test.rs"]
 mod mock_notify_view_internal_test;
-#[path = "../mock_tests/mock_sso_admin_test.rs"]
-mod mock_sso_admin_test;
-#[path = "../mock_tests/mock_tenant_users_test.rs"]
-mod mock_tenant_users_test;

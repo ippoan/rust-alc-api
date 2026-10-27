@@ -106,7 +106,6 @@ jobs:
           - { name: mock-misc, target: "//:mock_misc", coverage: "cov-mock-misc" }
           - { name: mock-tenko, target: "//:mock_tenko", coverage: "cov-mock-tenko" }
           - { name: mock-maintenance, target: "//:mock_maintenance" }
-          - { name: auth, target: "//crates/alc-auth:alc-auth_test" }
           - { name: auth-jwt, target: "//crates/alc-auth-jwt:alc-auth-jwt_test", coverage: "cov-auth-jwt" }
           - { name: carins, target: "//crates/alc-carins:alc-carins_test", coverage: "cov-carins" }
           - { name: core, target: "//crates/alc-core:alc-core_test", coverage: "cov-core" }

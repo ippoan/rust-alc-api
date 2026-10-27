@@ -7,7 +7,7 @@ use rust_alc_api::db::models::DtakologRow;
 use rust_alc_api::db::models::*;
 use rust_alc_api::db::repository::auth::{AuthRepository, SsoConfigRow};
 use rust_alc_api::db::repository::bot_admin::{
-    BotAdminRepository, BotConfigExportRow, BotConfigRow, TenantInfoForExport,
+    BotAdminRepository, BotConfigExportRow, TenantInfoForExport,
 };
 use rust_alc_api::db::repository::car_inspections::{
     CarInspectionFile, CarInspectionRepository, VehicleCategories,
@@ -376,8 +376,6 @@ pub struct MockBotAdminRepository {
     pub return_configs_for_export: std::sync::Mutex<Vec<BotConfigExportRow>>,
     pub fail_tenant_for_export: AtomicBool,
     pub fail_configs_for_export: AtomicBool,
-    /// update_bot_secret だけ失敗させたい時に使う (create path で先に create_config 成功させるため)
-    pub fail_update_bot_secret_only: AtomicBool,
 }
 
 impl Default for MockBotAdminRepository {
@@ -388,99 +386,12 @@ impl Default for MockBotAdminRepository {
             return_configs_for_export: std::sync::Mutex::new(Vec::new()),
             fail_tenant_for_export: AtomicBool::new(false),
             fail_configs_for_export: AtomicBool::new(false),
-            fail_update_bot_secret_only: AtomicBool::new(false),
         }
     }
 }
 
 #[async_trait::async_trait]
 impl BotAdminRepository for MockBotAdminRepository {
-    async fn list_configs(&self, _tenant_id: Uuid) -> Result<Vec<BotConfigRow>, sqlx::Error> {
-        check_fail!(self);
-        Ok(vec![])
-    }
-
-    async fn update_client_secret(
-        &self,
-        _tenant_id: Uuid,
-        _id: Uuid,
-        _encrypted: &str,
-    ) -> Result<(), sqlx::Error> {
-        check_fail!(self);
-        Ok(())
-    }
-
-    async fn update_bot_secret(
-        &self,
-        _tenant_id: Uuid,
-        _id: Uuid,
-        _encrypted: &str,
-    ) -> Result<(), sqlx::Error> {
-        if self
-            .fail_update_bot_secret_only
-            .swap(false, Ordering::SeqCst)
-        {
-            return Err(sqlx::Error::RowNotFound);
-        }
-        check_fail!(self);
-        Ok(())
-    }
-
-    async fn update_config(
-        &self,
-        _tenant_id: Uuid,
-        _id: Uuid,
-        _provider: &str,
-        _name: &str,
-        _client_id: &str,
-        _service_account: &str,
-        _bot_id: &str,
-        _enabled: bool,
-    ) -> Result<BotConfigRow, sqlx::Error> {
-        check_fail!(self);
-        Ok(BotConfigRow {
-            id: _id,
-            provider: _provider.to_string(),
-            name: _name.to_string(),
-            client_id: _client_id.to_string(),
-            service_account: _service_account.to_string(),
-            bot_id: _bot_id.to_string(),
-            enabled: _enabled,
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
-        })
-    }
-
-    async fn create_config(
-        &self,
-        _tenant_id: Uuid,
-        _provider: &str,
-        _name: &str,
-        _client_id: &str,
-        _client_secret_encrypted: &str,
-        _service_account: &str,
-        _bot_id: &str,
-        _enabled: bool,
-    ) -> Result<BotConfigRow, sqlx::Error> {
-        check_fail!(self);
-        Ok(BotConfigRow {
-            id: Uuid::new_v4(),
-            provider: _provider.to_string(),
-            name: _name.to_string(),
-            client_id: _client_id.to_string(),
-            service_account: _service_account.to_string(),
-            bot_id: _bot_id.to_string(),
-            enabled: _enabled,
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
-        })
-    }
-
-    async fn delete_config(&self, _tenant_id: Uuid, _id: Uuid) -> Result<(), sqlx::Error> {
-        check_fail!(self);
-        Ok(())
-    }
-
     async fn get_tenant_for_export(
         &self,
         _tenant_id: Uuid,

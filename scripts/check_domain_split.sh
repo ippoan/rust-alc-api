@@ -114,10 +114,20 @@ for m in fcm device_pair_client; do
 done
 guard_appstate_fields devices "ippoan/alc-devices-worker" 'devices|fcm|device_pair_client'
 
+# --- 会社の管理とログインの口 (Worker へ移した。W2b・W2c、Refs #680) ---
+# me・logout・my-orgs (alc-auth crate) と、ユーザー・招待・SSO 設定・参加の申請・テナントの slug は ippoan/alc-auth-worker、
+# Bot 設定の一覧・保存・削除は ippoan/alc-lineworks-worker に移った (rust に残るのは開発者だけの Bot 設定の export)。
+# crate の再作成と、alc-core への repository・AppState の欄の再流入を落とす。
+if [ -e crates/alc-auth ]; then
+  err "domain-split: crates/alc-auth が再作成されています。me・logout・my-orgs は ippoan/alc-auth-worker に置いてください (Refs #680)"
+fi
+guard_repository_modules admin "ippoan/alc-auth-worker" sso_admin tenant_users
+guard_appstate_fields admin "ippoan/alc-auth-worker" 'sso_admin|tenant_users'
+
 # --- (Phase C 以降はここに追記: carins) ---
 
 if [ "$fail" != 0 ]; then
   echo "::error::domain split guard failed — ドメインコードは alc-core ではなく各ドメイン crate に追加してください (設計: issue #513)"
   exit 1
 fi
-echo "domain split guard OK (tenko, trouble, notify, dtako, hub, devices)"
+echo "domain split guard OK (tenko, trouble, notify, dtako, hub, devices, admin)"
