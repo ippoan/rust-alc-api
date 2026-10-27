@@ -15,12 +15,11 @@ use uuid::Uuid;
 use rust_alc_api::db::repository::{
     PgAuthRepository, PgBotAdminRepository, PgCarInspectionRepository, PgCarinsFilesRepository,
     PgDailyHealthRepository, PgDeviceRepository, PgDriverInfoRepository,
-    PgEquipmentFailuresRepository, PgHealthBaselinesRepository, PgHubMeasurementsRepository,
-    PgLineworksChannelsRepository, PgNfcTagRepository, PgNotifyDeliveryRepository,
-    PgNotifyDocumentRepository, PgNotifyRecipientRepository, PgSsoAdminRepository,
-    PgTenantUsersRepository, PgTenkoCallRepository, PgTenkoRecordsRepository,
-    PgTenkoSchedulesRepository, PgTenkoSessionRepository, PgTenkoWebhooksRepository,
-    PgTimecardRepository,
+    PgEquipmentFailuresRepository, PgHealthBaselinesRepository, PgLineworksChannelsRepository,
+    PgNfcTagRepository, PgNotifyDeliveryRepository, PgNotifyDocumentRepository,
+    PgNotifyRecipientRepository, PgSsoAdminRepository, PgTenantUsersRepository,
+    PgTenkoCallRepository, PgTenkoRecordsRepository, PgTenkoSchedulesRepository,
+    PgTenkoSessionRepository, PgTenkoWebhooksRepository,
 };
 use rust_alc_api::AppState;
 
@@ -30,11 +29,6 @@ use mock_storage::MockStorage;
 /// 旧名 TEST_JWT_SECRET — JWT の発行・検証は #479 PR-3 で rust から全撤去された
 /// ため、残る用途は SSO_ENCRYPTION_KEY の値のみ (名前もそれに揃えた)。
 pub const TEST_ENCRYPTION_KEY: &str = "test-jwt-secret-for-integration-tests-2026";
-
-/// テスト用 `INTERNAL_SHARED_SECRET` (`internal_shared_secret_router` 経由の
-/// `X-Internal-Shared-Secret` 検証に使う、hub_measurements の
-/// internal_router テストが参照する)。
-pub const TEST_INTERNAL_SHARED_SECRET: &str = "test-internal-shared-secret-2026";
 
 /// env::set_var を使うテスト同士の直列化用ロック
 /// (env var はプロセスグローバルなので並列実行すると競合する)
@@ -304,11 +298,9 @@ fn build_app_state(
     let car_inspections = Arc::new(PgCarInspectionRepository::new(pool.clone()));
     let carins_files = Arc::new(PgCarinsFilesRepository::new(pool.clone()));
     let devices = Arc::new(PgDeviceRepository::new(pool.clone()));
-    let hub_measurements = Arc::new(PgHubMeasurementsRepository::new(pool.clone()));
     let nfc_tags = Arc::new(PgNfcTagRepository::new(pool.clone()));
     let sso_admin = Arc::new(PgSsoAdminRepository::new(pool.clone()));
     let tenant_users = Arc::new(PgTenantUsersRepository::new(pool.clone()));
-    let timecard = Arc::new(PgTimecardRepository::new(pool.clone()));
     let notify_recipients = Arc::new(PgNotifyRecipientRepository::new(pool.clone()));
     let notify_documents = Arc::new(PgNotifyDocumentRepository::new(pool.clone()));
     let notify_deliveries = Arc::new(PgNotifyDeliveryRepository::new(pool.clone()));
@@ -321,11 +313,9 @@ fn build_app_state(
         car_inspections,
         carins_files,
         devices,
-        hub_measurements,
         nfc_tags,
         sso_admin,
         tenant_users,
-        timecard,
         storage,
         carins_storage: None,
         fcm,
@@ -746,12 +736,7 @@ pub async fn spawn_test_server_with_states(
                 internal_oidc_trust_for_tests(),
                 tenko_state,
                 maintenance_state,
-            )
-            // main.rs と同じ配線 (internal_shared_secret_router を /api 直下にマージ)。
-            // テスト用共有 secret は TEST_INTERNAL_SHARED_SECRET で固定する。
-            .merge(rust_alc_api::routes::internal_shared_secret_router(Some(
-                TEST_INTERNAL_SHARED_SECRET.to_string(),
-            ))),
+            ),
         )
         // テスト用 proxy emulation (Refs #434)。#434 で rust-alc-api は JWT 検証を
         // 撤去し、注入された identity ヘッダー (X-Tenant-ID / X-User-*) を信頼する

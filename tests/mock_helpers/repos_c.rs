@@ -16,7 +16,6 @@ use rust_alc_api::db::repository::tenko_records::TenkoRecordsRepository;
 use rust_alc_api::db::repository::tenko_schedules::{ScheduleListResult, TenkoSchedulesRepository};
 use rust_alc_api::db::repository::tenko_sessions::{SessionListResult, TenkoSessionRepository};
 use rust_alc_api::db::repository::tenko_webhooks::TenkoWebhooksRepository;
-use rust_alc_api::db::repository::timecard::TimecardRepository;
 
 macro_rules! check_fail {
     ($self:expr) => {
@@ -1616,54 +1615,6 @@ impl TenkoWebhooksRepository for MockTenkoWebhooksRepository {
     ) -> Result<Vec<WebhookDelivery>, sqlx::Error> {
         check_fail!(self);
         Ok(vec![])
-    }
-}
-
-// ---------------------------------------------------------------------------
-// MockTimecardRepository (カードの照合だけ。hub_measurements の打刻中継が使う)
-// ---------------------------------------------------------------------------
-
-pub struct MockTimecardRepository {
-    pub fail_next: AtomicBool,
-    /// find_card_by_card_id が返すカード (None = 台帳に無い)
-    pub find_card_data: std::sync::Mutex<Option<TimecardCard>>,
-    /// find_employee_id_by_nfc が返す社員 (免許証番号のフォールバック)
-    pub nfc_employee_id: std::sync::Mutex<Option<Uuid>>,
-    /// find_card_by_card_id が実際に引いた card_id の記録。
-    /// 照合の手前で正規化が 1 回だけ効いていること (Refs ippoan/alc-app-s3#134) を固定するために使う
-    pub card_lookups: std::sync::Mutex<Vec<String>>,
-}
-
-impl Default for MockTimecardRepository {
-    fn default() -> Self {
-        Self {
-            fail_next: AtomicBool::new(false),
-            find_card_data: std::sync::Mutex::new(None),
-            nfc_employee_id: std::sync::Mutex::new(None),
-            card_lookups: std::sync::Mutex::new(vec![]),
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl TimecardRepository for MockTimecardRepository {
-    async fn find_card_by_card_id(
-        &self,
-        _tenant_id: Uuid,
-        card_id: &str,
-    ) -> Result<Option<TimecardCard>, sqlx::Error> {
-        self.card_lookups.lock().unwrap().push(card_id.to_string());
-        check_fail!(self);
-        Ok(self.find_card_data.lock().unwrap().clone())
-    }
-
-    async fn find_employee_id_by_nfc(
-        &self,
-        _tenant_id: Uuid,
-        _nfc_id: &str,
-    ) -> Result<Option<Uuid>, sqlx::Error> {
-        check_fail!(self);
-        Ok(*self.nfc_employee_id.lock().unwrap())
     }
 }
 

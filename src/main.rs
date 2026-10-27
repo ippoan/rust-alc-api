@@ -19,10 +19,9 @@ use alc_notify::repo::{
 use rust_alc_api::db::repository::{
     PgAuthRepository, PgBotAdminRepository, PgCarInspectionRepository, PgCarinsFilesRepository,
     PgDailyHealthRepository, PgDeviceRepository, PgDriverInfoRepository,
-    PgEquipmentFailuresRepository, PgHealthBaselinesRepository, PgHubMeasurementsRepository,
-    PgNfcTagRepository, PgSsoAdminRepository, PgTenantUsersRepository, PgTenkoCallRepository,
-    PgTenkoRecordsRepository, PgTenkoSchedulesRepository, PgTenkoSessionRepository,
-    PgTenkoWebhooksRepository, PgTimecardRepository,
+    PgEquipmentFailuresRepository, PgHealthBaselinesRepository, PgNfcTagRepository,
+    PgSsoAdminRepository, PgTenantUsersRepository, PgTenkoCallRepository, PgTenkoRecordsRepository,
+    PgTenkoSchedulesRepository, PgTenkoSessionRepository, PgTenkoWebhooksRepository,
 };
 use rust_alc_api::storage::StorageBackend;
 use rust_alc_api::AppState;
@@ -133,7 +132,6 @@ async fn main() -> anyhow::Result<()> {
     let devices = Arc::new(PgDeviceRepository::new(pool.clone()));
     let driver_info = Arc::new(PgDriverInfoRepository::new(pool.clone()));
     let equipment_failures = Arc::new(PgEquipmentFailuresRepository::new(pool.clone()));
-    let hub_measurements = Arc::new(PgHubMeasurementsRepository::new(pool.clone()));
     let health_baselines = Arc::new(PgHealthBaselinesRepository::new(pool.clone()));
     let nfc_tags = Arc::new(PgNfcTagRepository::new(pool.clone()));
     let sso_admin = Arc::new(PgSsoAdminRepository::new(pool.clone()));
@@ -143,7 +141,6 @@ async fn main() -> anyhow::Result<()> {
     let tenko_schedules = Arc::new(PgTenkoSchedulesRepository::new(pool.clone()));
     let tenko_sessions = Arc::new(PgTenkoSessionRepository::new(pool.clone()));
     let tenko_webhooks = Arc::new(PgTenkoWebhooksRepository::new(pool.clone()));
-    let timecard = Arc::new(PgTimecardRepository::new(pool.clone()));
     let notify_recipients = Arc::new(PgNotifyRecipientRepository::new(pool.clone()));
     let notify_documents = Arc::new(PgNotifyDocumentRepository::new(pool.clone()));
     let notify_deliveries = Arc::new(PgNotifyDeliveryRepository::new(pool.clone()));
@@ -222,11 +219,9 @@ async fn main() -> anyhow::Result<()> {
         carins_files,
         devices,
 
-        hub_measurements,
         nfc_tags,
         sso_admin,
         tenant_users,
-        timecard,
         storage,
         carins_storage,
         fcm,
@@ -312,27 +307,11 @@ async fn main() -> anyhow::Result<()> {
         ])
         .allow_headers(Any);
 
-    // cf-alc-recorder Worker からの internal ingest 経路 (`POST /api/hub/measurements`)。
-    // INTERNAL_SHARED_SECRET env が空なら mount しない (= caller が None を渡すことで
-    // routes::internal_shared_secret_router が empty router を返す)。main.rs は coverage
-    // 対象外なのでここで env を読み conditional logic を持つのが安全 (Refs
-    // ippoan/email-receiver#1)。
-    let internal_secret = std::env::var("INTERNAL_SHARED_SECRET")
-        .ok()
-        .filter(|s| !s.is_empty());
-    if internal_secret.is_none() {
-        tracing::warn!(
-            "INTERNAL_SHARED_SECRET not set; /api/hub/measurements internal routes are disabled"
-        );
-    }
     let api_router = rust_alc_api::routes::router(
         rust_alc_api::routes::internal_oidc_trust(),
         tenko_state,
         maintenance_state,
-    )
-    .merge(rust_alc_api::routes::internal_shared_secret_router(
-        internal_secret,
-    ));
+    );
 
     let app = Router::new()
         .nest("/api", api_router)

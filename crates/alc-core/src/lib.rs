@@ -30,9 +30,8 @@ use std::sync::Arc;
 
 use repository::{
     AuthRepository, BotAdminRepository, CarInspectionRepository, CarinsFilesRepository,
-    DeviceRepository, HubMeasurementsRepository, LineworksChannelsRepository, NfcTagRepository,
-    NotifyDeliveryRepository, NotifyDocumentRepository, NotifyRecipientRepository,
-    SsoAdminRepository, TenantUsersRepository, TimecardRepository,
+    DeviceRepository, LineworksChannelsRepository, NfcTagRepository, NotifyDeliveryRepository,
+    NotifyDocumentRepository, NotifyRecipientRepository, SsoAdminRepository, TenantUsersRepository,
 };
 use storage::StorageBackend;
 
@@ -44,11 +43,9 @@ pub struct AppState {
     pub car_inspections: Arc<dyn CarInspectionRepository>,
     pub carins_files: Arc<dyn CarinsFilesRepository>,
     pub devices: Arc<dyn DeviceRepository>,
-    pub hub_measurements: Arc<dyn HubMeasurementsRepository>,
     pub nfc_tags: Arc<dyn NfcTagRepository>,
     pub sso_admin: Arc<dyn SsoAdminRepository>,
     pub tenant_users: Arc<dyn TenantUsersRepository>,
-    pub timecard: Arc<dyn TimecardRepository>,
     pub storage: Arc<dyn StorageBackend>,
     pub carins_storage: Option<Arc<dyn StorageBackend>>,
     pub fcm: Option<Arc<dyn fcm::FcmSenderTrait>>,
