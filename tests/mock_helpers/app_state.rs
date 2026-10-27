@@ -365,7 +365,6 @@ pub fn setup_mock_app_state() -> AppState {
         dtako_restraint_report_pdf: Arc::new(MockDtakoRestraintReportPdfRepository::default()),
         dtako_tickets: Arc::new(MockDtakoTicketsRepository::default()),
         hub_measurements: Arc::new(MockHubMeasurementsRepository::default()),
-        dtako_y_time_export: Arc::new(MockDtakoYTimeExportRepository::default()),
         nfc_tags: Arc::new(MockNfcTagRepository::default()),
         sso_admin: Arc::new(MockSsoAdminRepository::default()),
         tenant_users: Arc::new(MockTenantUsersRepository::default()),

@@ -4,7 +4,6 @@
 //! 用途:
 //! - redact 完了通知 (`crates/alc-core/src/redact_broadcast.rs` の RedactBroadcaster
 //!   が同 Worker に送る既存仕様と互換)
-//! - Y時間 export job 完了通知 (Phase: 2026-05-10 perf 改善、`crates/alc-dtako/src/dtako_y_time_export/`)
 //! - 今後の async job 完了系イベント全般
 //!
 //! Worker (`workers/realtime-bus/src/index.ts`) は payload に `tenant_id` /

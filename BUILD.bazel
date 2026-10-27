@@ -255,21 +255,6 @@ rust_test(
 )
 
 rust_test(
-    name = "dtako_operation_window_test",
-    srcs = ["tests/dtako_operation_window_test.rs"] + glob(["tests/common/**/*.rs"]),
-    crate_root = "tests/dtako_operation_window_test.rs",
-    deps = [":rust_alc_api_lib"] + all_crate_deps(
-        normal = True,
-        normal_dev = True,
-    ) + _WORKSPACE_CRATES,
-    proc_macro_deps = all_crate_deps(
-        proc_macro = True,
-        proc_macro_dev = True,
-    ),
-)
-
-
-rust_test(
     name = "dtako_driver_dedup_test",
     srcs = ["tests/dtako_driver_dedup_test.rs"] + glob(["tests/common/**/*.rs"]),
     crate_root = "tests/dtako_driver_dedup_test.rs",

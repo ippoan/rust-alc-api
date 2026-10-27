@@ -16,12 +16,12 @@ use rust_alc_api::db::repository::{
     PgAuthRepository, PgBotAdminRepository, PgCarInspectionRepository, PgCarinsFilesRepository,
     PgDailyHealthRepository, PgDeviceRepository, PgDriverInfoRepository,
     PgDtakoRestraintReportPdfRepository, PgDtakoRestraintReportRepository,
-    PgDtakoTicketsRepository, PgDtakoYTimeExportRepository, PgEquipmentFailuresRepository,
-    PgHealthBaselinesRepository, PgHubMeasurementsRepository, PgLineworksChannelsRepository,
-    PgNfcTagRepository, PgNotifyDeliveryRepository, PgNotifyDocumentRepository,
-    PgNotifyRecipientRepository, PgSsoAdminRepository, PgTenantUsersRepository,
-    PgTenkoCallRepository, PgTenkoRecordsRepository, PgTenkoSchedulesRepository,
-    PgTenkoSessionRepository, PgTenkoWebhooksRepository, PgTimecardRepository,
+    PgDtakoTicketsRepository, PgEquipmentFailuresRepository, PgHealthBaselinesRepository,
+    PgHubMeasurementsRepository, PgLineworksChannelsRepository, PgNfcTagRepository,
+    PgNotifyDeliveryRepository, PgNotifyDocumentRepository, PgNotifyRecipientRepository,
+    PgSsoAdminRepository, PgTenantUsersRepository, PgTenkoCallRepository, PgTenkoRecordsRepository,
+    PgTenkoSchedulesRepository, PgTenkoSessionRepository, PgTenkoWebhooksRepository,
+    PgTimecardRepository,
 };
 use rust_alc_api::AppState;
 
@@ -313,7 +313,6 @@ fn build_app_state(
     let dtako_restraint_report_pdf =
         Arc::new(PgDtakoRestraintReportPdfRepository::new(pool.clone()));
     let dtako_tickets = Arc::new(PgDtakoTicketsRepository::new(pool.clone()));
-    let dtako_y_time_export = Arc::new(PgDtakoYTimeExportRepository::new(pool.clone()));
     let hub_measurements = Arc::new(PgHubMeasurementsRepository::new(pool.clone()));
     let nfc_tags = Arc::new(PgNfcTagRepository::new(pool.clone()));
     let sso_admin = Arc::new(PgSsoAdminRepository::new(pool.clone()));
@@ -334,7 +333,7 @@ fn build_app_state(
         dtako_restraint_report,
         dtako_restraint_report_pdf,
         dtako_tickets,
-        dtako_y_time_export,
+
         hub_measurements,
         nfc_tags,
         sso_admin,

@@ -9,5 +9,3 @@ mod mock_helpers;
 mod mock_dtako_restraint_report_pdf_test;
 #[path = "../mock_tests/mock_dtako_restraint_report_test.rs"]
 mod mock_dtako_restraint_report_test;
-#[path = "../mock_tests/mock_dtako_y_time_export_test.rs"]
-mod mock_dtako_y_time_export_test;

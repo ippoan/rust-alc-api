@@ -20,11 +20,10 @@ use rust_alc_api::db::repository::{
     PgAuthRepository, PgBotAdminRepository, PgCarInspectionRepository, PgCarinsFilesRepository,
     PgDailyHealthRepository, PgDeviceRepository, PgDriverInfoRepository,
     PgDtakoRestraintReportPdfRepository, PgDtakoRestraintReportRepository,
-    PgDtakoTicketsRepository, PgDtakoYTimeExportRepository, PgEquipmentFailuresRepository,
-    PgHealthBaselinesRepository, PgHubMeasurementsRepository, PgNfcTagRepository,
-    PgSsoAdminRepository, PgTenantUsersRepository, PgTenkoCallRepository, PgTenkoRecordsRepository,
-    PgTenkoSchedulesRepository, PgTenkoSessionRepository, PgTenkoWebhooksRepository,
-    PgTimecardRepository,
+    PgDtakoTicketsRepository, PgEquipmentFailuresRepository, PgHealthBaselinesRepository,
+    PgHubMeasurementsRepository, PgNfcTagRepository, PgSsoAdminRepository, PgTenantUsersRepository,
+    PgTenkoCallRepository, PgTenkoRecordsRepository, PgTenkoSchedulesRepository,
+    PgTenkoSessionRepository, PgTenkoWebhooksRepository, PgTimecardRepository,
 };
 use rust_alc_api::storage::StorageBackend;
 use rust_alc_api::AppState;
@@ -173,7 +172,6 @@ async fn main() -> anyhow::Result<()> {
     let dtako_restraint_report_pdf =
         Arc::new(PgDtakoRestraintReportPdfRepository::new(pool.clone()));
     let dtako_tickets = Arc::new(PgDtakoTicketsRepository::new(pool.clone()));
-    let dtako_y_time_export = Arc::new(PgDtakoYTimeExportRepository::new(pool.clone()));
     let equipment_failures = Arc::new(PgEquipmentFailuresRepository::new(pool.clone()));
     let hub_measurements = Arc::new(PgHubMeasurementsRepository::new(pool.clone()));
     let health_baselines = Arc::new(PgHealthBaselinesRepository::new(pool.clone()));
@@ -266,7 +264,7 @@ async fn main() -> anyhow::Result<()> {
         dtako_restraint_report,
         dtako_restraint_report_pdf,
         dtako_tickets,
-        dtako_y_time_export,
+
         hub_measurements,
         nfc_tags,
         sso_admin,
