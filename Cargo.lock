@@ -163,7 +163,6 @@ dependencies = [
 name = "alc-dtako"
 version = "0.1.0"
 dependencies = [
- "alc-compare",
  "alc-core",
  "alc-pdf",
  "async-trait",

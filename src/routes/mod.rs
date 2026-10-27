@@ -101,7 +101,6 @@ pub fn router(
         .merge(car_inspection_files::tenant_router())
         .merge(carins_files::tenant_router())
         .merge(nfc_tags::tenant_router())
-        .merge(dtako_restraint_report::tenant_router())
         .merge(dtako_restraint_report_pdf::tenant_router())
         .merge(dtako_tickets::tenant_router())
         .merge(notify_documents::tenant_router())

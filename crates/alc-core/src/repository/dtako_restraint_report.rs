@@ -43,13 +43,6 @@ pub struct DailyWorkHoursRow {
 
 #[async_trait]
 pub trait DtakoRestraintReportRepository: Send + Sync {
-    /// ドライバー名を取得
-    async fn get_driver_name(
-        &self,
-        tenant_id: Uuid,
-        driver_id: Uuid,
-    ) -> Result<Option<String>, sqlx::Error>;
-
     /// 月間のセグメント一覧を取得
     async fn get_segments(
         &self,
@@ -93,10 +86,4 @@ pub trait DtakoRestraintReportRepository: Send + Sync {
         month_start: NaiveDate,
         month_end: NaiveDate,
     ) -> Result<Vec<OpTimesRow>, sqlx::Error>;
-
-    /// driver_cd を持つドライバー一覧を取得 (CSV比較用)
-    async fn list_drivers_with_cd(
-        &self,
-        tenant_id: Uuid,
-    ) -> Result<Vec<(Uuid, Option<String>, String)>, sqlx::Error>;
 }

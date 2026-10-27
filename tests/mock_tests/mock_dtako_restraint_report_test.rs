@@ -6,54 +6,39 @@ use std::sync::Arc;
 use chrono::{Datelike, NaiveDate, NaiveTime, TimeZone, Utc};
 use serde_json::Value;
 
+use axum::http::StatusCode;
 use rust_alc_api::db::repository::dtako_restraint_report::{
     DailyWorkHoursRow, DtakoRestraintReportRepository, OpTimesRow, SegmentRow,
 };
-use rust_alc_api::routes::dtako_restraint_report::{
-    parse_hhmm, report_to_csv_days, MonthlyTotal, RestraintDayRow, RestraintReportResponse,
-};
+use rust_alc_api::routes::dtako_restraint_report::build_report_with_name;
 
 // ============================================================
-// Helper: spawn server with a given mock
+// Helper: 組み立てを直接呼ぶ (画面の口は ippoan/alc-dtako-worker へ移した。W5c-3)
 // ============================================================
 
-async fn spawn_with_mock(mock: Arc<dyn DtakoRestraintReportRepository>) -> (String, String, Uuid) {
-    let tenant_id = Uuid::new_v4();
-    let jwt = crate::common::create_test_jwt(tenant_id, "admin");
-
-    let mut state = crate::mock_helpers::app_state::setup_mock_app_state();
-    state.dtako_restraint_report = mock;
-    let base_url = crate::mock_helpers::app_state::spawn_mock_server(state).await;
-
-    (base_url, jwt, tenant_id)
-}
-
-fn auth(jwt: &str) -> String {
-    format!("Bearer {jwt}")
+/// mock を渡して `build_report_with_name` を呼ぶ (PDF が使う組み立て)。
+async fn report(
+    mock: &dyn DtakoRestraintReportRepository,
+    driver_id: Uuid,
+    year: i32,
+    month: u32,
+) -> Result<Value, (StatusCode, String)> {
+    build_report_with_name(mock, Uuid::new_v4(), driver_id, "", year, month)
+        .await
+        .map(|r| serde_json::to_value(r).unwrap())
 }
 
 // ============================================================
-// GET /api/restraint-report — success (empty data, driver_name default)
+// 組み立て — success (empty data, driver_name default)
 // ============================================================
 
 #[tokio::test]
 async fn test_get_restraint_report_success_empty_data() {
     let mock = Arc::new(crate::mock_helpers::MockDtakoRestraintReportRepository::default());
-    let (base_url, jwt, _) = spawn_with_mock(mock).await;
-    let client = reqwest::Client::new();
 
     let driver_id = Uuid::new_v4();
-    let res = client
-        .get(format!(
-            "{base_url}/api/restraint-report?driver_id={driver_id}&year=2026&month=3"
-        ))
-        .header("Authorization", auth(&jwt))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 200);
-
-    let body: Value = res.json().await.unwrap();
+    let res = report(&*mock, driver_id, 2026, 3).await;
+    let body = res.unwrap();
     assert_eq!(body["driver_name"], "");
     assert_eq!(body["year"], 2026);
     assert_eq!(body["month"], 3);
@@ -63,288 +48,18 @@ async fn test_get_restraint_report_success_empty_data() {
 }
 
 // ============================================================
-// GET /api/restraint-report — success with driver name
-// ============================================================
-
-#[tokio::test]
-async fn test_get_restraint_report_success_with_driver_name() {
-    let mock = Arc::new(crate::mock_helpers::MockDtakoRestraintReportRepository::default());
-    mock.return_driver_name.store(true, Ordering::SeqCst);
-    let (base_url, jwt, _) = spawn_with_mock(mock).await;
-    let client = reqwest::Client::new();
-
-    let driver_id = Uuid::new_v4();
-    let res = client
-        .get(format!(
-            "{base_url}/api/restraint-report?driver_id={driver_id}&year=2026&month=6"
-        ))
-        .header("Authorization", auth(&jwt))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 200);
-
-    let body: Value = res.json().await.unwrap();
-    assert_eq!(body["driver_name"], "テスト太郎");
-    assert_eq!(body["year"], 2026);
-    assert_eq!(body["month"], 6);
-}
-
-// ============================================================
-// GET /api/restraint-report — missing query params → 400
-// ============================================================
-
-#[tokio::test]
-async fn test_get_restraint_report_missing_params() {
-    let mock = Arc::new(crate::mock_helpers::MockDtakoRestraintReportRepository::default());
-    let (base_url, jwt, _) = spawn_with_mock(mock).await;
-    let client = reqwest::Client::new();
-
-    // Missing all params
-    let res = client
-        .get(format!("{base_url}/api/restraint-report"))
-        .header("Authorization", auth(&jwt))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 400);
-
-    // Missing year and month
-    let driver_id = Uuid::new_v4();
-    let res = client
-        .get(format!(
-            "{base_url}/api/restraint-report?driver_id={driver_id}"
-        ))
-        .header("Authorization", auth(&jwt))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 400);
-
-    // Invalid driver_id (not a UUID)
-    let res = client
-        .get(format!(
-            "{base_url}/api/restraint-report?driver_id=not-a-uuid&year=2026&month=3"
-        ))
-        .header("Authorization", auth(&jwt))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 400);
-}
-
-// ============================================================
-// GET /api/restraint-report — DB error → 500
+// 組み立て — DB error → 500
 // ============================================================
 
 #[tokio::test]
 async fn test_get_restraint_report_db_error() {
     let mock = Arc::new(crate::mock_helpers::MockDtakoRestraintReportRepository::default());
     mock.fail_next.store(true, Ordering::SeqCst);
-    let (base_url, jwt, _) = spawn_with_mock(mock).await;
-    let client = reqwest::Client::new();
 
     let driver_id = Uuid::new_v4();
-    let res = client
-        .get(format!(
-            "{base_url}/api/restraint-report?driver_id={driver_id}&year=2026&month=3"
-        ))
-        .header("Authorization", auth(&jwt))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 500);
-}
-
-// ============================================================
-// GET /api/restraint-report — unauthorized (no JWT) → 401
-// ============================================================
-
-#[tokio::test]
-async fn test_get_restraint_report_unauthorized() {
-    let mock = Arc::new(crate::mock_helpers::MockDtakoRestraintReportRepository::default());
-    let (base_url, _, _) = spawn_with_mock(mock).await;
-    let client = reqwest::Client::new();
-
-    let driver_id = Uuid::new_v4();
-    let res = client
-        .get(format!(
-            "{base_url}/api/restraint-report?driver_id={driver_id}&year=2026&month=3"
-        ))
-        .send()
-        .await
-        .unwrap();
-    // require_tenant middleware: no JWT and no X-Tenant-ID → 401
-    assert_eq!(res.status(), 401);
-}
-
-// ============================================================
-// POST /api/restraint-report/compare-csv — no file → 400
-// ============================================================
-
-#[tokio::test]
-async fn test_compare_csv_no_file() {
-    let mock = Arc::new(crate::mock_helpers::MockDtakoRestraintReportRepository::default());
-    let (base_url, jwt, _) = spawn_with_mock(mock).await;
-    let client = reqwest::Client::new();
-
-    // Send empty multipart form
-    let form = reqwest::multipart::Form::new();
-    let res = client
-        .post(format!("{base_url}/api/restraint-report/compare-csv"))
-        .header("Authorization", auth(&jwt))
-        .multipart(form)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 400);
-}
-
-// ============================================================
-// POST /api/restraint-report/compare-csv — success (minimal CSV)
-// ============================================================
-
-#[tokio::test]
-async fn test_compare_csv_success() {
-    let mock = Arc::new(crate::mock_helpers::MockDtakoRestraintReportRepository::default());
-    let (base_url, jwt, _) = spawn_with_mock(mock).await;
-    let client = reqwest::Client::new();
-
-    // Minimal valid CSV matching parse_restraint_csv format
-    let csv_content = "\
-氏名,テスト太郎,,001
-日付,休日,始業,終業,運転,重複運転,荷役,重複荷役,休憩,重複休憩,小計,重複小計,拘束合計,拘束累計,休息,実労,残業,深夜,残深夜,備考
-2月1日,,8:00,17:00,1:00,,1:00,,0:30,,2:30,,2:30,2:30,,,,,,
-合計,,,1:00,,1:00,,0:30,,,,2:30,,,,,,,,
-";
-
-    let part = reqwest::multipart::Part::bytes(csv_content.as_bytes().to_vec())
-        .file_name("test.csv")
-        .mime_str("text/csv")
-        .unwrap();
-    let form = reqwest::multipart::Form::new().part("file", part);
-
-    let res = client
-        .post(format!("{base_url}/api/restraint-report/compare-csv"))
-        .header("Authorization", auth(&jwt))
-        .multipart(form)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 200);
-
-    let body: Vec<Value> = res.json().await.unwrap();
-    assert_eq!(body.len(), 1);
-    assert_eq!(body[0]["driver_name"], "テスト太郎");
-    assert_eq!(body[0]["driver_cd"], "001");
-    // No DB match → driver_id is null, system is null
-    assert!(body[0]["driver_id"].is_null());
-    assert!(body[0]["system"].is_null());
-}
-
-// ============================================================
-// POST /api/restraint-report/compare-csv — DB error on list_drivers_with_cd → 500
-// ============================================================
-
-#[tokio::test]
-async fn test_compare_csv_db_error() {
-    let mock = Arc::new(crate::mock_helpers::MockDtakoRestraintReportRepository::default());
-    // fail_next will trigger on list_drivers_with_cd (the first DB call after CSV parse)
-    mock.fail_next.store(true, Ordering::SeqCst);
-    let (base_url, jwt, _) = spawn_with_mock(mock).await;
-    let client = reqwest::Client::new();
-
-    let csv_content = "\
-氏名,テスト太郎,,001
-日付,休日,始業,終業,運転,重複運転,荷役,重複荷役,休憩,重複休憩,小計,重複小計,拘束合計,拘束累計,休息,実労,残業,深夜,残深夜,備考
-2月1日,,8:00,17:00,1:00,,1:00,,0:30,,2:30,,2:30,2:30,,,,,,
-合計,,,1:00,,1:00,,0:30,,,,2:30,,,,,,,,
-";
-
-    let part = reqwest::multipart::Part::bytes(csv_content.as_bytes().to_vec())
-        .file_name("test.csv")
-        .mime_str("text/csv")
-        .unwrap();
-    let form = reqwest::multipart::Form::new().part("file", part);
-
-    let res = client
-        .post(format!("{base_url}/api/restraint-report/compare-csv"))
-        .header("Authorization", auth(&jwt))
-        .multipart(form)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 500);
-}
-
-// ============================================================
-// POST /api/restraint-report/compare-csv — unauthorized → 401
-// ============================================================
-
-#[tokio::test]
-async fn test_compare_csv_unauthorized() {
-    let mock = Arc::new(crate::mock_helpers::MockDtakoRestraintReportRepository::default());
-    let (base_url, _, _) = spawn_with_mock(mock).await;
-    let client = reqwest::Client::new();
-
-    let csv_content = "氏名,テスト,,001\n";
-    let part = reqwest::multipart::Part::bytes(csv_content.as_bytes().to_vec())
-        .file_name("test.csv")
-        .mime_str("text/csv")
-        .unwrap();
-    let form = reqwest::multipart::Form::new().part("file", part);
-
-    let res = client
-        .post(format!("{base_url}/api/restraint-report/compare-csv"))
-        .multipart(form)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 401);
-}
-
-// ============================================================
-// POST /api/restraint-report/compare-csv — with matching driver in DB
-// ============================================================
-
-#[tokio::test]
-async fn test_compare_csv_with_matching_driver() {
-    let driver_id = Uuid::new_v4();
-    let mock = Arc::new(crate::mock_helpers::MockDtakoRestraintReportRepository::default());
-    // Set up list_drivers_with_cd to return a matching driver
-    *mock.drivers_with_cd.lock().unwrap() =
-        vec![(driver_id, Some("001".to_string()), "テスト太郎".to_string())];
-    let (base_url, jwt, _) = spawn_with_mock(mock).await;
-    let client = reqwest::Client::new();
-
-    let csv_content = "\
-氏名,テスト太郎,,001
-日付,休日,始業,終業,運転,重複運転,荷役,重複荷役,休憩,重複休憩,小計,重複小計,拘束合計,拘束累計,休息,実労,残業,深夜,残深夜,備考
-2月1日,,8:00,17:00,1:00,,1:00,,0:30,,2:30,,2:30,2:30,,,,,,
-合計,,,1:00,,1:00,,0:30,,,,2:30,,,,,,,,
-";
-
-    let part = reqwest::multipart::Part::bytes(csv_content.as_bytes().to_vec())
-        .file_name("test.csv")
-        .mime_str("text/csv")
-        .unwrap();
-    let form = reqwest::multipart::Form::new().part("file", part);
-
-    let res = client
-        .post(format!("{base_url}/api/restraint-report/compare-csv"))
-        .header("Authorization", auth(&jwt))
-        .multipart(form)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 200);
-
-    let body: Vec<Value> = res.json().await.unwrap();
-    assert_eq!(body.len(), 1);
-    assert_eq!(body[0]["driver_cd"], "001");
-    // Driver matched → driver_id is set, system data is present
-    assert_eq!(body[0]["driver_id"], driver_id.to_string());
-    assert!(body[0]["system"].is_object());
+    let (status, body) = report(&*mock, driver_id, 2026, 3).await.unwrap_err();
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(body, "internal server error");
 }
 
 // ============================================================
@@ -401,52 +116,32 @@ fn make_op_times(date: NaiveDate) -> OpTimesRow {
 }
 
 // ============================================================
-// GET /api/restraint-report — invalid year/month → 400
+// 組み立て — invalid year/month → 400
 // ============================================================
 
 #[tokio::test]
 async fn test_get_restraint_report_invalid_month() {
     let mock = Arc::new(crate::mock_helpers::MockDtakoRestraintReportRepository::default());
-    let (base_url, jwt, _) = spawn_with_mock(mock).await;
-    let client = reqwest::Client::new();
 
     let driver_id = Uuid::new_v4();
     // month=13 → invalid
-    let res = client
-        .get(format!(
-            "{base_url}/api/restraint-report?driver_id={driver_id}&year=2026&month=13"
-        ))
-        .header("Authorization", auth(&jwt))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 400);
-    let body = res.text().await.unwrap();
-    assert!(body.contains("invalid year/month"), "body: {body}");
+    let res = report(&*mock, driver_id, 2026, 13).await;
+    let (status, body) = res.unwrap_err();
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body, "invalid year/month");
 }
 
 // ============================================================
-// GET /api/restraint-report — month=12 (December boundary)
+// 組み立て — month=12 (December boundary)
 // ============================================================
 
 #[tokio::test]
 async fn test_get_restraint_report_december() {
     let mock = Arc::new(crate::mock_helpers::MockDtakoRestraintReportRepository::default());
-    let (base_url, jwt, _) = spawn_with_mock(mock).await;
-    let client = reqwest::Client::new();
 
     let driver_id = Uuid::new_v4();
-    let res = client
-        .get(format!(
-            "{base_url}/api/restraint-report?driver_id={driver_id}&year=2025&month=12"
-        ))
-        .header("Authorization", auth(&jwt))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 200);
-
-    let body: Value = res.json().await.unwrap();
+    let res = report(&*mock, driver_id, 2025, 12).await;
+    let body = res.unwrap();
     assert_eq!(body["year"], 2025);
     assert_eq!(body["month"], 12);
     // December should have 31 days
@@ -454,13 +149,12 @@ async fn test_get_restraint_report_december() {
 }
 
 // ============================================================
-// GET /api/restraint-report — with segments + dwh + op_times data
+// 組み立て — with segments + dwh + op_times data
 // ============================================================
 
 #[tokio::test]
 async fn test_get_restraint_report_with_rich_data() {
     let mock = Arc::new(crate::mock_helpers::MockDtakoRestraintReportRepository::default());
-    mock.return_driver_name.store(true, Ordering::SeqCst);
 
     let d1 = NaiveDate::from_ymd_opt(2026, 1, 5).unwrap(); // Monday
     let d2 = NaiveDate::from_ymd_opt(2026, 1, 6).unwrap(); // Tuesday
@@ -485,22 +179,9 @@ async fn test_get_restraint_report_with_rich_data() {
     // Fiscal cumulative (January → fiscal year start is April of previous year)
     *mock.fiscal_cumulative.lock().unwrap() = 5000;
 
-    let (base_url, jwt, _) = spawn_with_mock(mock).await;
-    let client = reqwest::Client::new();
-
     let driver_id = Uuid::new_v4();
-    let res = client
-        .get(format!(
-            "{base_url}/api/restraint-report?driver_id={driver_id}&year=2026&month=1"
-        ))
-        .header("Authorization", auth(&jwt))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 200);
-
-    let body: Value = res.json().await.unwrap();
-    assert_eq!(body["driver_name"], "テスト太郎");
+    let res = report(&*mock, driver_id, 2026, 1).await;
+    let body = res.unwrap();
     assert_eq!(body["year"], 2026);
     assert_eq!(body["month"], 1);
     assert_eq!(body["max_restraint_minutes"], 16500);
@@ -560,7 +241,7 @@ async fn test_get_restraint_report_with_rich_data() {
 }
 
 // ============================================================
-// GET /api/restraint-report — multiple dwh rows on same day
+// 組み立て — multiple dwh rows on same day
 // ============================================================
 
 #[tokio::test]
@@ -580,21 +261,9 @@ async fn test_get_restraint_report_multiple_dwh_same_day() {
 
     *mock.op_times.lock().unwrap() = vec![make_op_times(d1)];
 
-    let (base_url, jwt, _) = spawn_with_mock(mock).await;
-    let client = reqwest::Client::new();
-
     let driver_id = Uuid::new_v4();
-    let res = client
-        .get(format!(
-            "{base_url}/api/restraint-report?driver_id={driver_id}&year=2026&month=3"
-        ))
-        .header("Authorization", auth(&jwt))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 200);
-
-    let body: Value = res.json().await.unwrap();
+    let res = report(&*mock, driver_id, 2026, 3).await;
+    let body = res.unwrap();
     let days = body["days"].as_array().unwrap();
 
     // Day 2 should generate 2 rows (multi-dwh), so total > 31
@@ -620,7 +289,7 @@ async fn test_get_restraint_report_multiple_dwh_same_day() {
 }
 
 // ============================================================
-// GET /api/restraint-report — segments without dwh (fallback to segment sums)
+// 組み立て — segments without dwh (fallback to segment sums)
 // ============================================================
 
 #[tokio::test]
@@ -636,21 +305,10 @@ async fn test_get_restraint_report_segments_no_dwh() {
     ];
 
     // No dwh, no op_times → fallback to segment start/end
-    let (base_url, jwt, _) = spawn_with_mock(mock).await;
-    let client = reqwest::Client::new();
 
     let driver_id = Uuid::new_v4();
-    let res = client
-        .get(format!(
-            "{base_url}/api/restraint-report?driver_id={driver_id}&year=2026&month=2"
-        ))
-        .header("Authorization", auth(&jwt))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 200);
-
-    let body: Value = res.json().await.unwrap();
+    let res = report(&*mock, driver_id, 2026, 2).await;
+    let body = res.unwrap();
     let days = body["days"].as_array().unwrap();
     assert_eq!(days.len(), 28); // Feb 2026
 
@@ -673,7 +331,7 @@ async fn test_get_restraint_report_segments_no_dwh() {
 }
 
 // ============================================================
-// GET /api/restraint-report — fiscal year boundary (month=4, April)
+// 組み立て — fiscal year boundary (month=4, April)
 // ============================================================
 
 #[tokio::test]
@@ -683,27 +341,16 @@ async fn test_get_restraint_report_fiscal_year_april() {
     // fiscal_year_start <= prev_month_end is false (April 1 > March 31 is false, equal)
     // Actually: fiscal_year_start = April 1, prev_month_end = March 31
     // April 1 <= March 31 is false → fiscal_cum = 0 (else branch)
-    let (base_url, jwt, _) = spawn_with_mock(mock).await;
-    let client = reqwest::Client::new();
 
     let driver_id = Uuid::new_v4();
-    let res = client
-        .get(format!(
-            "{base_url}/api/restraint-report?driver_id={driver_id}&year=2026&month=4"
-        ))
-        .header("Authorization", auth(&jwt))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 200);
-
-    let body: Value = res.json().await.unwrap();
+    let res = report(&*mock, driver_id, 2026, 4).await;
+    let body = res.unwrap();
     // For April (first month of fiscal year), cumulative should be 0
     assert_eq!(body["monthly_total"]["fiscal_year_cumulative_minutes"], 0);
 }
 
 // ============================================================
-// GET /api/restraint-report — with Sunday boundary for weekly subtotals
+// 組み立て — with Sunday boundary for weekly subtotals
 // ============================================================
 
 #[tokio::test]
@@ -725,21 +372,9 @@ async fn test_get_restraint_report_weekly_sunday_boundary() {
         make_segment(d6, "OP004", 450, 280, 110),
     ];
 
-    let (base_url, jwt, _) = spawn_with_mock(mock).await;
-    let client = reqwest::Client::new();
-
     let driver_id = Uuid::new_v4();
-    let res = client
-        .get(format!(
-            "{base_url}/api/restraint-report?driver_id={driver_id}&year=2026&month=1"
-        ))
-        .header("Authorization", auth(&jwt))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 200);
-
-    let body: Value = res.json().await.unwrap();
+    let res = report(&*mock, driver_id, 2026, 1).await;
+    let body = res.unwrap();
     let ws = body["weekly_subtotals"].as_array().unwrap();
     // Should have at least 2 weekly subtotals (before and after Sunday boundary)
     assert!(
@@ -755,7 +390,7 @@ async fn test_get_restraint_report_weekly_sunday_boundary() {
 }
 
 // ============================================================
-// GET /api/restraint-report — drive_avg_after calculation
+// 組み立て — drive_avg_after calculation
 // ============================================================
 
 #[tokio::test]
@@ -774,21 +409,9 @@ async fn test_get_restraint_report_drive_avg_after() {
     *mock.daily_work_hours.lock().unwrap() =
         vec![make_dwh(d1, 400, 100, 600), make_dwh(d2, 300, 80, 480)];
 
-    let (base_url, jwt, _) = spawn_with_mock(mock).await;
-    let client = reqwest::Client::new();
-
     let driver_id = Uuid::new_v4();
-    let res = client
-        .get(format!(
-            "{base_url}/api/restraint-report?driver_id={driver_id}&year=2026&month=6"
-        ))
-        .header("Authorization", auth(&jwt))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 200);
-
-    let body: Value = res.json().await.unwrap();
+    let res = report(&*mock, driver_id, 2026, 6).await;
+    let body = res.unwrap();
     let days = body["days"].as_array().unwrap();
 
     // Day 1 (index 0): drive=400, next day drive=300 → after = (400+300)/2 = 350
@@ -801,7 +424,7 @@ async fn test_get_restraint_report_drive_avg_after() {
 }
 
 // ============================================================
-// GET /api/restraint-report — overtime and late_night calculations
+// 組み立て — overtime and late_night calculations
 // ============================================================
 
 #[tokio::test]
@@ -820,21 +443,9 @@ async fn test_get_restraint_report_overtime_calculation() {
     dwh.total_rest_minutes = Some(60);
     *mock.daily_work_hours.lock().unwrap() = vec![dwh];
 
-    let (base_url, jwt, _) = spawn_with_mock(mock).await;
-    let client = reqwest::Client::new();
-
     let driver_id = Uuid::new_v4();
-    let res = client
-        .get(format!(
-            "{base_url}/api/restraint-report?driver_id={driver_id}&year=2026&month=5"
-        ))
-        .header("Authorization", auth(&jwt))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 200);
-
-    let body: Value = res.json().await.unwrap();
+    let res = report(&*mock, driver_id, 2026, 5).await;
+    let body = res.unwrap();
     let days = body["days"].as_array().unwrap();
     let day1 = &days[0];
 
@@ -850,215 +461,7 @@ async fn test_get_restraint_report_overtime_calculation() {
 }
 
 // ============================================================
-// POST /api/restraint-report/compare-csv — with driver_cd filter
-// ============================================================
-
-#[tokio::test]
-async fn test_compare_csv_with_driver_cd_filter() {
-    let mock = Arc::new(crate::mock_helpers::MockDtakoRestraintReportRepository::default());
-    let (base_url, jwt, _) = spawn_with_mock(mock).await;
-    let client = reqwest::Client::new();
-
-    // CSV with driver_cd=001
-    let csv_content = "\
-氏名,テスト太郎,,001
-日付,休日,始業,終業,運転,重複運転,荷役,重複荷役,休憩,重複休憩,小計,重複小計,拘束合計,拘束累計,休息,実労,残業,深夜,残深夜,備考
-2月1日,,8:00,17:00,1:00,,1:00,,0:30,,2:30,,2:30,2:30,,,,,,
-合計,,,1:00,,1:00,,0:30,,,,2:30,,,,,,,,
-";
-
-    let part = reqwest::multipart::Part::bytes(csv_content.as_bytes().to_vec())
-        .file_name("test.csv")
-        .mime_str("text/csv")
-        .unwrap();
-    let form = reqwest::multipart::Form::new().part("file", part);
-
-    // Filter for driver_cd=999 → no match → empty results
-    let res = client
-        .post(format!(
-            "{base_url}/api/restraint-report/compare-csv?driver_cd=999"
-        ))
-        .header("Authorization", auth(&jwt))
-        .multipart(form)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 200);
-
-    let body: Vec<Value> = res.json().await.unwrap();
-    assert_eq!(
-        body.len(),
-        0,
-        "driver_cd filter should exclude non-matching drivers"
-    );
-
-    // Now filter for driver_cd=001 → should match
-    let part2 = reqwest::multipart::Part::bytes(csv_content.as_bytes().to_vec())
-        .file_name("test.csv")
-        .mime_str("text/csv")
-        .unwrap();
-    let form2 = reqwest::multipart::Form::new().part("file", part2);
-
-    let res2 = client
-        .post(format!(
-            "{base_url}/api/restraint-report/compare-csv?driver_cd=001"
-        ))
-        .header("Authorization", auth(&jwt))
-        .multipart(form2)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res2.status(), 200);
-
-    let body2: Vec<Value> = res2.json().await.unwrap();
-    assert_eq!(body2.len(), 1);
-    assert_eq!(body2[0]["driver_cd"], "001");
-}
-
-// ============================================================
-// POST /api/restraint-report/compare-csv — multipart with no file field → empty bytes → 400
-// ============================================================
-
-#[tokio::test]
-async fn test_compare_csv_empty_file_field() {
-    let mock = Arc::new(crate::mock_helpers::MockDtakoRestraintReportRepository::default());
-    let (base_url, jwt, _) = spawn_with_mock(mock).await;
-    let client = reqwest::Client::new();
-
-    // Send a file field with empty content
-    let part = reqwest::multipart::Part::bytes(Vec::new())
-        .file_name("empty.csv")
-        .mime_str("text/csv")
-        .unwrap();
-    let form = reqwest::multipart::Form::new().part("file", part);
-
-    let res = client
-        .post(format!("{base_url}/api/restraint-report/compare-csv"))
-        .header("Authorization", auth(&jwt))
-        .multipart(form)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 400);
-}
-
-// ============================================================
-// POST /api/restraint-report/compare-csv — with matching driver + system data + diffs
-// ============================================================
-
-#[tokio::test]
-async fn test_compare_csv_with_system_data_and_diffs() {
-    let driver_id = Uuid::new_v4();
-    let mock = Arc::new(crate::mock_helpers::MockDtakoRestraintReportRepository::default());
-    mock.return_driver_name.store(true, Ordering::SeqCst);
-
-    // Set up matching driver
-    *mock.drivers_with_cd.lock().unwrap() =
-        vec![(driver_id, Some("001".to_string()), "テスト太郎".to_string())];
-
-    // Add segment data so system report has non-zero values
-    let d1 = NaiveDate::from_ymd_opt(2026, 2, 1).unwrap();
-    *mock.segments.lock().unwrap() = vec![make_segment(d1, "OP001", 480, 300, 120)];
-    *mock.daily_work_hours.lock().unwrap() = vec![make_dwh(d1, 300, 120, 480)];
-    *mock.op_times.lock().unwrap() = vec![make_op_times(d1)];
-
-    let (base_url, jwt, _) = spawn_with_mock(mock).await;
-    let client = reqwest::Client::new();
-
-    // CSV that intentionally differs from system data to generate diffs
-    let csv_content = "\
-氏名,テスト太郎,,001
-日付,休日,始業,終業,運転,重複運転,荷役,重複荷役,休憩,重複休憩,小計,重複小計,拘束合計,拘束累計,休息,実労,残業,深夜,残深夜,備考
-2月1日,,8:00,17:00,9:99,,1:00,,0:30,,2:30,,2:30,2:30,,,,,,
-合計,,,9:99,,1:00,,0:30,,,,2:30,,,,,,,,
-";
-
-    let part = reqwest::multipart::Part::bytes(csv_content.as_bytes().to_vec())
-        .file_name("test.csv")
-        .mime_str("text/csv")
-        .unwrap();
-    let form = reqwest::multipart::Form::new().part("file", part);
-
-    let res = client
-        .post(format!("{base_url}/api/restraint-report/compare-csv"))
-        .header("Authorization", auth(&jwt))
-        .multipart(form)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 200);
-
-    let body: Vec<Value> = res.json().await.unwrap();
-    assert_eq!(body.len(), 1);
-    assert_eq!(body[0]["driver_id"], driver_id.to_string());
-    assert!(body[0]["system"].is_object());
-    // System data should have days
-    let sys = &body[0]["system"];
-    assert!(sys["days"].is_array());
-    let sys_days = sys["days"].as_array().unwrap();
-    assert!(!sys_days.is_empty());
-    // System total fields should be present
-    assert!(sys["total_drive"].is_string());
-    assert!(sys["total_restraint"].is_string());
-
-    // Diffs should exist (CSV drive "9:99" vs system drive)
-    let diffs = body[0]["diffs"].as_array().unwrap();
-    assert!(
-        !diffs.is_empty(),
-        "Should have diffs between CSV and system data"
-    );
-    // known_bug_diffs and unknown_diffs fields should be present
-    assert!(body[0]["known_bug_diffs"].is_number());
-    assert!(body[0]["unknown_diffs"].is_number());
-}
-
-// ============================================================
-// POST /api/restraint-report/compare-csv — matching driver but build_report fails
-// ============================================================
-
-#[tokio::test]
-async fn test_compare_csv_matching_driver_report_error() {
-    let driver_id = Uuid::new_v4();
-    let mock = Arc::new(crate::mock_helpers::MockDtakoRestraintReportRepository::default());
-
-    // Set up matching driver but DON'T set fail_next (fail_next would fail list_drivers_with_cd)
-    // Instead, the mock returns empty data, so the report succeeds but has no segments
-    *mock.drivers_with_cd.lock().unwrap() =
-        vec![(driver_id, Some("001".to_string()), "テスト太郎".to_string())];
-
-    let (base_url, jwt, _) = spawn_with_mock(mock).await;
-    let client = reqwest::Client::new();
-
-    let csv_content = "\
-氏名,テスト太郎,,001
-日付,休日,始業,終業,運転,重複運転,荷役,重複荷役,休憩,重複休憩,小計,重複小計,拘束合計,拘束累計,休息,実労,残業,深夜,残深夜,備考
-2月1日,,8:00,17:00,1:00,,1:00,,0:30,,2:30,,2:30,2:30,,,,,,
-合計,,,1:00,,1:00,,0:30,,,,2:30,,,,,,,,
-";
-
-    let part = reqwest::multipart::Part::bytes(csv_content.as_bytes().to_vec())
-        .file_name("test.csv")
-        .mime_str("text/csv")
-        .unwrap();
-    let form = reqwest::multipart::Form::new().part("file", part);
-
-    let res = client
-        .post(format!("{base_url}/api/restraint-report/compare-csv"))
-        .header("Authorization", auth(&jwt))
-        .multipart(form)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 200);
-
-    let body: Vec<Value> = res.json().await.unwrap();
-    assert_eq!(body.len(), 1);
-    // System data should be present (empty report, not error)
-    assert!(body[0]["system"].is_object());
-}
-
-// ============================================================
-// GET /api/restraint-report — month before April (fiscal year previous year)
+// 組み立て — month before April (fiscal year previous year)
 // ============================================================
 
 #[tokio::test]
@@ -1067,21 +470,9 @@ async fn test_get_restraint_report_january_fiscal_year() {
     // January → fiscal_year_start = previous year April
     *mock.fiscal_cumulative.lock().unwrap() = 12000;
 
-    let (base_url, jwt, _) = spawn_with_mock(mock).await;
-    let client = reqwest::Client::new();
-
     let driver_id = Uuid::new_v4();
-    let res = client
-        .get(format!(
-            "{base_url}/api/restraint-report?driver_id={driver_id}&year=2026&month=1"
-        ))
-        .header("Authorization", auth(&jwt))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 200);
-
-    let body: Value = res.json().await.unwrap();
+    let res = report(&*mock, driver_id, 2026, 1).await;
+    let body = res.unwrap();
     assert_eq!(
         body["monthly_total"]["fiscal_year_cumulative_minutes"],
         12000
@@ -1089,50 +480,7 @@ async fn test_get_restraint_report_january_fiscal_year() {
 }
 
 // ============================================================
-// POST /api/restraint-report/compare-csv — multiple drivers in CSV
-// ============================================================
-
-#[tokio::test]
-async fn test_compare_csv_multiple_drivers() {
-    let mock = Arc::new(crate::mock_helpers::MockDtakoRestraintReportRepository::default());
-    let (base_url, jwt, _) = spawn_with_mock(mock).await;
-    let client = reqwest::Client::new();
-
-    // Two drivers in one CSV
-    let csv_content = "\
-氏名,ドライバーA,,001
-日付,休日,始業,終業,運転,重複運転,荷役,重複荷役,休憩,重複休憩,小計,重複小計,拘束合計,拘束累計,休息,実労,残業,深夜,残深夜,備考
-2月1日,,8:00,17:00,1:00,,1:00,,0:30,,2:30,,2:30,2:30,,,,,,
-合計,,,1:00,,1:00,,0:30,,,,2:30,,,,,,,,
-氏名,ドライバーB,,002
-日付,休日,始業,終業,運転,重複運転,荷役,重複荷役,休憩,重複休憩,小計,重複小計,拘束合計,拘束累計,休息,実労,残業,深夜,残深夜,備考
-2月1日,,9:00,18:00,2:00,,0:30,,0:15,,2:45,,2:45,2:45,,,,,,
-合計,,,2:00,,0:30,,0:15,,,,2:45,,,,,,,,
-";
-
-    let part = reqwest::multipart::Part::bytes(csv_content.as_bytes().to_vec())
-        .file_name("test.csv")
-        .mime_str("text/csv")
-        .unwrap();
-    let form = reqwest::multipart::Form::new().part("file", part);
-
-    let res = client
-        .post(format!("{base_url}/api/restraint-report/compare-csv"))
-        .header("Authorization", auth(&jwt))
-        .multipart(form)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 200);
-
-    let body: Vec<Value> = res.json().await.unwrap();
-    assert_eq!(body.len(), 2);
-    assert_eq!(body[0]["driver_cd"], "001");
-    assert_eq!(body[1]["driver_cd"], "002");
-}
-
-// ============================================================
-// GET /api/restraint-report — rest_period_minutes = 0 should be None
+// 組み立て — rest_period_minutes = 0 should be None
 // ============================================================
 
 #[tokio::test]
@@ -1147,21 +495,9 @@ async fn test_get_restraint_report_rest_period_zero_filtered() {
     dwh.total_rest_minutes = Some(0); // 0 should be filtered to None
     *mock.daily_work_hours.lock().unwrap() = vec![dwh];
 
-    let (base_url, jwt, _) = spawn_with_mock(mock).await;
-    let client = reqwest::Client::new();
-
     let driver_id = Uuid::new_v4();
-    let res = client
-        .get(format!(
-            "{base_url}/api/restraint-report?driver_id={driver_id}&year=2026&month=7"
-        ))
-        .header("Authorization", auth(&jwt))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 200);
-
-    let body: Value = res.json().await.unwrap();
+    let res = report(&*mock, driver_id, 2026, 7).await;
+    let body = res.unwrap();
     let days = body["days"].as_array().unwrap();
     let day1 = &days[0];
     // rest_period_minutes = Some(0) filtered by .filter(|&v| v > 0) → None → null
@@ -1169,7 +505,7 @@ async fn test_get_restraint_report_rest_period_zero_filtered() {
 }
 
 // ============================================================
-// GET /api/restraint-report — no prev_day_drive → drive_avg = day_drive
+// 組み立て — no prev_day_drive → drive_avg = day_drive
 // ============================================================
 
 #[tokio::test]
@@ -1182,251 +518,13 @@ async fn test_get_restraint_report_no_prev_day_drive() {
     *mock.daily_work_hours.lock().unwrap() = vec![make_dwh(d1, 300, 120, 480)];
     // prev_day_drive = None (default)
 
-    let (base_url, jwt, _) = spawn_with_mock(mock).await;
-    let client = reqwest::Client::new();
-
     let driver_id = Uuid::new_v4();
-    let res = client
-        .get(format!(
-            "{base_url}/api/restraint-report?driver_id={driver_id}&year=2026&month=8"
-        ))
-        .header("Authorization", auth(&jwt))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 200);
-
-    let body: Value = res.json().await.unwrap();
+    let res = report(&*mock, driver_id, 2026, 8).await;
+    let body = res.unwrap();
     let days = body["days"].as_array().unwrap();
     let day1 = &days[0];
     // No prev_day_drive → drive_avg_before = None
     assert!(day1["drive_avg_before"].is_null());
     // drive_average = day_drive as f64 = 300.0
     assert_eq!(day1["drive_average_minutes"].as_f64().unwrap(), 300.0);
-}
-
-// ============================================================
-// report_to_csv_days — direct unit test (covers lines 567-594)
-// ============================================================
-
-#[test]
-fn test_report_to_csv_days_direct() {
-    let report = RestraintReportResponse {
-        driver_id: Uuid::nil(),
-        driver_name: "テスト運転者".to_string(),
-        year: 2026,
-        month: 2,
-        max_restraint_minutes: 16500,
-        days: vec![
-            RestraintDayRow {
-                date: NaiveDate::from_ymd_opt(2026, 2, 1).unwrap(),
-                is_holiday: false,
-                start_time: Some("8:00".to_string()),
-                end_time: Some("17:00".to_string()),
-                operations: vec![],
-                drive_minutes: 300,
-                cargo_minutes: 120,
-                break_minutes: 60,
-                restraint_total_minutes: 540,
-                restraint_cumulative_minutes: 540,
-                drive_average_minutes: 300.0,
-                rest_period_minutes: Some(45),
-                remarks: "メモ".to_string(),
-                overlap_drive_minutes: 10,
-                overlap_cargo_minutes: 5,
-                overlap_break_minutes: 3,
-                overlap_restraint_minutes: 18,
-                restraint_main_minutes: 480,
-                drive_avg_before: Some(250),
-                drive_avg_after: Some(280),
-                actual_work_minutes: 420,
-                overtime_minutes: 60,
-                late_night_minutes: 30,
-                overtime_late_night_minutes: 15,
-            },
-            RestraintDayRow {
-                date: NaiveDate::from_ymd_opt(2026, 2, 2).unwrap(),
-                is_holiday: true,
-                start_time: None,
-                end_time: None,
-                operations: vec![],
-                drive_minutes: 0,
-                cargo_minutes: 0,
-                break_minutes: 0,
-                restraint_total_minutes: 0,
-                restraint_cumulative_minutes: 540,
-                drive_average_minutes: 0.0,
-                rest_period_minutes: None,
-                remarks: "休".to_string(),
-                overlap_drive_minutes: 0,
-                overlap_cargo_minutes: 0,
-                overlap_break_minutes: 0,
-                overlap_restraint_minutes: 0,
-                restraint_main_minutes: 0,
-                drive_avg_before: None,
-                drive_avg_after: None,
-                actual_work_minutes: 0,
-                overtime_minutes: 0,
-                late_night_minutes: 0,
-                overtime_late_night_minutes: 0,
-            },
-        ],
-        weekly_subtotals: vec![],
-        monthly_total: MonthlyTotal {
-            drive_minutes: 300,
-            cargo_minutes: 120,
-            break_minutes: 60,
-            restraint_minutes: 540,
-            fiscal_year_cumulative_minutes: 0,
-            fiscal_year_total_minutes: 540,
-            overlap_drive_minutes: 10,
-            overlap_cargo_minutes: 5,
-            overlap_break_minutes: 3,
-            overlap_restraint_minutes: 18,
-            actual_work_minutes: 420,
-            overtime_minutes: 60,
-            late_night_minutes: 30,
-            overtime_late_night_minutes: 15,
-        },
-    };
-
-    let csv_days = report_to_csv_days(&report);
-    assert_eq!(csv_days.len(), 2);
-
-    // Working day
-    let d0 = &csv_days[0];
-    assert_eq!(d0.date, "2月1日");
-    assert!(!d0.is_holiday);
-    assert_eq!(d0.start_time, "8:00");
-    assert_eq!(d0.end_time, "17:00");
-    assert_eq!(d0.drive, "5:00");
-    assert_eq!(d0.overlap_drive, "0:10");
-    assert_eq!(d0.cargo, "2:00");
-    assert_eq!(d0.overlap_cargo, "0:05");
-    assert_eq!(d0.break_time, "1:00");
-    assert_eq!(d0.overlap_break, "0:03");
-    assert_eq!(d0.subtotal, "8:00");
-    assert_eq!(d0.overlap_subtotal, "0:18");
-    assert_eq!(d0.total, "9:00");
-    assert_eq!(d0.cumulative, "9:00");
-    assert_eq!(d0.rest, "0:45");
-    assert_eq!(d0.actual_work, "7:00");
-    assert_eq!(d0.overtime, "1:00");
-    assert_eq!(d0.late_night, "0:30");
-    assert_eq!(d0.ot_late_night, "0:15");
-    assert_eq!(d0.remarks, "メモ");
-
-    // Holiday
-    let d1 = &csv_days[1];
-    assert_eq!(d1.date, "2月2日");
-    assert!(d1.is_holiday);
-    assert_eq!(d1.start_time, "");
-    assert_eq!(d1.end_time, "");
-    assert_eq!(d1.rest, ""); // None → empty
-    assert_eq!(d1.drive, "");
-    assert_eq!(d1.remarks, "休");
-}
-
-// ============================================================
-// parse_hhmm — direct unit test (covers lines 597-609)
-// ============================================================
-
-#[test]
-fn test_parse_hhmm_direct() {
-    // Empty string → 0
-    assert_eq!(parse_hhmm(""), 0);
-    // Whitespace-only → trimmed to empty → 0
-    assert_eq!(parse_hhmm("  "), 0);
-    // Valid HH:MM
-    assert_eq!(parse_hhmm("5:18"), 318);
-    assert_eq!(parse_hhmm("9:25"), 565);
-    assert_eq!(parse_hhmm("0:03"), 3);
-    assert_eq!(parse_hhmm("242:40"), 14560);
-    // Invalid: no colon → parts.len() != 2 → 0
-    assert_eq!(parse_hhmm("123"), 0);
-    // Invalid: multiple colons → parts.len() != 2 → 0
-    assert_eq!(parse_hhmm("1:2:3"), 0);
-    // Non-numeric → parse().unwrap_or(0)
-    assert_eq!(parse_hhmm("abc:def"), 0);
-    // Leading/trailing whitespace trimmed
-    assert_eq!(parse_hhmm(" 1:30 "), 90);
-}
-
-// ============================================================
-// POST compare-csv — holiday row + missing sys day (covers lines 801, 813)
-// ============================================================
-
-#[tokio::test]
-async fn test_compare_csv_holiday_and_missing_sys_day() {
-    let driver_id = Uuid::new_v4();
-    let mock = Arc::new(crate::mock_helpers::MockDtakoRestraintReportRepository::default());
-    mock.return_driver_name.store(true, Ordering::SeqCst);
-
-    // Set up matching driver
-    *mock.drivers_with_cd.lock().unwrap() =
-        vec![(driver_id, Some("001".to_string()), "テスト太郎".to_string())];
-
-    // Add segment data for Feb 2
-    let d1 = NaiveDate::from_ymd_opt(2026, 2, 2).unwrap();
-    *mock.segments.lock().unwrap() = vec![make_segment(d1, "OP001", 480, 300, 120)];
-    *mock.daily_work_hours.lock().unwrap() = vec![make_dwh(d1, 300, 120, 480)];
-    *mock.op_times.lock().unwrap() = vec![make_op_times(d1)];
-
-    let (base_url, jwt, _) = spawn_with_mock(mock).await;
-    let client = reqwest::Client::new();
-
-    // CSV with:
-    // - 2月1日 as holiday (is_holiday=true) → line 801: continue
-    // - 2月2日 normal day (matches system)
-    // - 2月29日 does not exist in system (Feb 2026 has 28 days) → line 813: None => continue
-    let csv_content = "\
-氏名,テスト太郎,,001
-日付,休日,始業,終業,運転,重複運転,荷役,重複荷役,休憩,重複休憩,小計,重複小計,拘束合計,拘束累計,休息,実労,残業,深夜,残深夜,備考
-2月1日,休,,,,,,,,,,,,,,,,,,
-2月2日,,8:00,17:00,5:00,,2:00,,1:00,,8:00,,9:00,9:00,,7:00,1:00,0:30,0:15,
-2月29日,,8:00,17:00,5:00,,2:00,,1:00,,8:00,,9:00,18:00,,7:00,1:00,0:30,0:15,
-合計,,,5:00,,2:00,,1:00,,,,9:00,,,,,,,,
-";
-
-    let part = reqwest::multipart::Part::bytes(csv_content.as_bytes().to_vec())
-        .file_name("test.csv")
-        .mime_str("text/csv")
-        .unwrap();
-    let form = reqwest::multipart::Form::new().part("file", part);
-
-    let res = client
-        .post(format!("{base_url}/api/restraint-report/compare-csv"))
-        .header("Authorization", auth(&jwt))
-        .multipart(form)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 200);
-
-    let body: Vec<Value> = res.json().await.unwrap();
-    assert_eq!(body.len(), 1);
-    assert_eq!(body[0]["driver_id"], driver_id.to_string());
-    // System data should be present
-    assert!(body[0]["system"].is_object());
-}
-
-/// POST compare-csv: 空のマルチパート (ファイルフィールドなし) → 400
-#[tokio::test]
-async fn test_compare_csv_empty_multipart_no_field() {
-    use crate::mock_helpers::MockDtakoRestraintReportRepository;
-    let mock = Arc::new(MockDtakoRestraintReportRepository::default());
-    let (base_url, jwt, _) = spawn_with_mock(mock).await;
-    let client = reqwest::Client::new();
-
-    // 空の multipart — next_field() が None → Vec::new() → is_empty → 400
-    let form = reqwest::multipart::Form::new();
-
-    let res = client
-        .post(format!("{base_url}/api/restraint-report/compare-csv"))
-        .header("Authorization", format!("Bearer {jwt}"))
-        .multipart(form)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 400);
 }
