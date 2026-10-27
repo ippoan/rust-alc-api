@@ -18,12 +18,11 @@ use alc_notify::repo::{
 };
 use rust_alc_api::db::repository::{
     PgAuthRepository, PgBotAdminRepository, PgCarInspectionRepository, PgCarinsFilesRepository,
-    PgDailyHealthRepository, PgDeviceRepository, PgDriverInfoRepository,
-    PgDtakoRestraintReportPdfRepository, PgDtakoRestraintReportRepository,
-    PgDtakoTicketsRepository, PgEquipmentFailuresRepository, PgHealthBaselinesRepository,
-    PgHubMeasurementsRepository, PgNfcTagRepository, PgSsoAdminRepository, PgTenantUsersRepository,
-    PgTenkoCallRepository, PgTenkoRecordsRepository, PgTenkoSchedulesRepository,
-    PgTenkoSessionRepository, PgTenkoWebhooksRepository, PgTimecardRepository,
+    PgDailyHealthRepository, PgDeviceRepository, PgDriverInfoRepository, PgDtakoTicketsRepository,
+    PgEquipmentFailuresRepository, PgHealthBaselinesRepository, PgHubMeasurementsRepository,
+    PgNfcTagRepository, PgSsoAdminRepository, PgTenantUsersRepository, PgTenkoCallRepository,
+    PgTenkoRecordsRepository, PgTenkoSchedulesRepository, PgTenkoSessionRepository,
+    PgTenkoWebhooksRepository, PgTimecardRepository,
 };
 use rust_alc_api::storage::StorageBackend;
 use rust_alc_api::AppState;
@@ -168,9 +167,6 @@ async fn main() -> anyhow::Result<()> {
     let daily_health = Arc::new(PgDailyHealthRepository::new(pool.clone()));
     let devices = Arc::new(PgDeviceRepository::new(pool.clone()));
     let driver_info = Arc::new(PgDriverInfoRepository::new(pool.clone()));
-    let dtako_restraint_report = Arc::new(PgDtakoRestraintReportRepository::new(pool.clone()));
-    let dtako_restraint_report_pdf =
-        Arc::new(PgDtakoRestraintReportPdfRepository::new(pool.clone()));
     let dtako_tickets = Arc::new(PgDtakoTicketsRepository::new(pool.clone()));
     let equipment_failures = Arc::new(PgEquipmentFailuresRepository::new(pool.clone()));
     let hub_measurements = Arc::new(PgHubMeasurementsRepository::new(pool.clone()));
@@ -261,8 +257,6 @@ async fn main() -> anyhow::Result<()> {
         car_inspections,
         carins_files,
         devices,
-        dtako_restraint_report,
-        dtako_restraint_report_pdf,
         dtako_tickets,
 
         hub_measurements,

@@ -318,7 +318,6 @@ jobs:
           - { name: maintenance, target: "//crates/alc-maintenance:alc-maintenance_test", coverage: "cov-maintenance" }
           - { name: misc, target: "//crates/alc-misc:alc-misc_test", coverage: "cov-misc" }
           - { name: notify, target: "//crates/alc-notify:alc-notify_test", pdfium: true, coverage: "cov-notify" }
-          - { name: pdf, target: "//crates/alc-pdf:alc-pdf_test", coverage: "cov-pdf" }
           - { name: storage, target: "//crates/alc-storage:alc-storage_test" }
           - { name: tenko, target: "//crates/alc-tenko:alc-tenko_test", coverage: "cov-tenko" }
     steps:

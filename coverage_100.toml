@@ -69,16 +69,6 @@ type = "mock"
 path = "crates/alc-devices/src/devices.rs"
 type = "combined"
 
-# --- alc-dtako ---
-
-[[files]]
-path = "crates/alc-dtako/src/dtako_restraint_report.rs"
-type = "combined"
-
-[[files]]
-path = "crates/alc-dtako/src/dtako_restraint_report_pdf.rs"
-type = "combined"
-
 # --- alc-tenko ---
 
 [[files]]
@@ -143,12 +133,6 @@ type = "mock"
 # [[files]]
 # path = "crates/alc-misc/src/auth.rs"
 # type = "combined"
-
-# --- alc-pdf ---
-
-[[files]]
-path = "crates/alc-pdf/src/render.rs"
-type = "combined"
 
 # --- root package ---
 

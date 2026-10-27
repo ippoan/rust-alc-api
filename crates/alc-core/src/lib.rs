@@ -30,10 +30,10 @@ use std::sync::Arc;
 
 use repository::{
     AuthRepository, BotAdminRepository, CarInspectionRepository, CarinsFilesRepository,
-    DeviceRepository, DtakoRestraintReportPdfRepository, DtakoRestraintReportRepository,
-    DtakoTicketsRepository, HubMeasurementsRepository, LineworksChannelsRepository,
-    NfcTagRepository, NotifyDeliveryRepository, NotifyDocumentRepository,
-    NotifyRecipientRepository, SsoAdminRepository, TenantUsersRepository, TimecardRepository,
+    DeviceRepository, DtakoTicketsRepository, HubMeasurementsRepository,
+    LineworksChannelsRepository, NfcTagRepository, NotifyDeliveryRepository,
+    NotifyDocumentRepository, NotifyRecipientRepository, SsoAdminRepository, TenantUsersRepository,
+    TimecardRepository,
 };
 use storage::StorageBackend;
 
@@ -45,8 +45,6 @@ pub struct AppState {
     pub car_inspections: Arc<dyn CarInspectionRepository>,
     pub carins_files: Arc<dyn CarinsFilesRepository>,
     pub devices: Arc<dyn DeviceRepository>,
-    pub dtako_restraint_report: Arc<dyn DtakoRestraintReportRepository>,
-    pub dtako_restraint_report_pdf: Arc<dyn DtakoRestraintReportPdfRepository>,
     pub dtako_tickets: Arc<dyn DtakoTicketsRepository>,
     pub hub_measurements: Arc<dyn HubMeasurementsRepository>,
     pub nfc_tags: Arc<dyn NfcTagRepository>,

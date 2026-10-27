@@ -4,12 +4,6 @@ use chrono::{DateTime, NaiveDate, Utc};
 use uuid::Uuid;
 
 use rust_alc_api::db::models::*;
-use rust_alc_api::db::repository::dtako_restraint_report::{
-    DailyWorkHoursRow, DtakoRestraintReportRepository, OpTimesRow, SegmentRow,
-};
-use rust_alc_api::db::repository::dtako_restraint_report_pdf::{
-    DtakoRestraintReportPdfRepository, PdfDriver,
-};
 use rust_alc_api::db::repository::dtako_tickets::DtakoTicketsRepository;
 use rust_alc_api::db::repository::equipment_failures::EquipmentFailuresRepository;
 use rust_alc_api::db::repository::health_baselines::HealthBaselinesRepository;
@@ -57,125 +51,6 @@ impl sqlx::error::DatabaseError for MockDbError {
 
     fn kind(&self) -> sqlx::error::ErrorKind {
         sqlx::error::ErrorKind::UniqueViolation
-    }
-}
-
-// =============================================================================
-// MockDtakoRestraintReportRepository
-// =============================================================================
-
-pub struct MockDtakoRestraintReportRepository {
-    pub fail_next: AtomicBool,
-    pub segments: std::sync::Mutex<Vec<SegmentRow>>,
-    pub daily_work_hours: std::sync::Mutex<Vec<DailyWorkHoursRow>>,
-    pub op_times: std::sync::Mutex<Vec<OpTimesRow>>,
-    pub prev_day_drive: std::sync::Mutex<Option<i32>>,
-    pub fiscal_cumulative: std::sync::Mutex<i32>,
-}
-
-impl Default for MockDtakoRestraintReportRepository {
-    fn default() -> Self {
-        Self {
-            fail_next: AtomicBool::new(false),
-            segments: std::sync::Mutex::new(vec![]),
-            daily_work_hours: std::sync::Mutex::new(vec![]),
-            op_times: std::sync::Mutex::new(vec![]),
-            prev_day_drive: std::sync::Mutex::new(None),
-            fiscal_cumulative: std::sync::Mutex::new(0),
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl DtakoRestraintReportRepository for MockDtakoRestraintReportRepository {
-    async fn get_segments(
-        &self,
-        _tenant_id: Uuid,
-        _driver_id: Uuid,
-        _month_start: NaiveDate,
-        _month_end: NaiveDate,
-    ) -> Result<Vec<SegmentRow>, sqlx::Error> {
-        check_fail!(self);
-        Ok(self.segments.lock().unwrap().clone())
-    }
-
-    async fn get_daily_work_hours(
-        &self,
-        _tenant_id: Uuid,
-        _driver_id: Uuid,
-        _month_start: NaiveDate,
-        _month_end: NaiveDate,
-    ) -> Result<Vec<DailyWorkHoursRow>, sqlx::Error> {
-        check_fail!(self);
-        Ok(self.daily_work_hours.lock().unwrap().clone())
-    }
-
-    async fn get_prev_day_drive(
-        &self,
-        _tenant_id: Uuid,
-        _driver_id: Uuid,
-        _prev_day: NaiveDate,
-    ) -> Result<Option<i32>, sqlx::Error> {
-        check_fail!(self);
-        Ok(*self.prev_day_drive.lock().unwrap())
-    }
-
-    async fn get_fiscal_cumulative(
-        &self,
-        _tenant_id: Uuid,
-        _driver_id: Uuid,
-        _fiscal_year_start: NaiveDate,
-        _prev_month_end: NaiveDate,
-    ) -> Result<i32, sqlx::Error> {
-        check_fail!(self);
-        Ok(*self.fiscal_cumulative.lock().unwrap())
-    }
-
-    async fn get_operation_times(
-        &self,
-        _tenant_id: Uuid,
-        _driver_id: Uuid,
-        _month_start: NaiveDate,
-        _month_end: NaiveDate,
-    ) -> Result<Vec<OpTimesRow>, sqlx::Error> {
-        check_fail!(self);
-        Ok(self.op_times.lock().unwrap().clone())
-    }
-}
-
-// =============================================================================
-// MockDtakoRestraintReportPdfRepository
-// =============================================================================
-
-pub struct MockDtakoRestraintReportPdfRepository {
-    pub fail_next: AtomicBool,
-    pub drivers: std::sync::Mutex<Vec<PdfDriver>>,
-}
-
-impl Default for MockDtakoRestraintReportPdfRepository {
-    fn default() -> Self {
-        Self {
-            fail_next: AtomicBool::new(false),
-            drivers: std::sync::Mutex::new(vec![]),
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl DtakoRestraintReportPdfRepository for MockDtakoRestraintReportPdfRepository {
-    async fn list_drivers(&self, _tenant_id: Uuid) -> Result<Vec<PdfDriver>, sqlx::Error> {
-        check_fail!(self);
-        Ok(self.drivers.lock().unwrap().clone())
-    }
-
-    async fn get_driver(
-        &self,
-        _tenant_id: Uuid,
-        driver_id: Uuid,
-    ) -> Result<Vec<PdfDriver>, sqlx::Error> {
-        check_fail!(self);
-        let all = self.drivers.lock().unwrap();
-        Ok(all.iter().filter(|d| d.id == driver_id).cloned().collect())
     }
 }
 
