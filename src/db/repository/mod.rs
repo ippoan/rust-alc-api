@@ -2,8 +2,7 @@
 pub use alc_core::repository::{
     AuthRepository, BotAdminRepository, CarInspectionRepository, CarinsFilesRepository,
     LineworksChannelsRepository, NfcTagRepository, NotifyDeliveryRepository,
-    NotifyDocumentRepository, NotifyRecipientRepository, SsoAdminRepository, TenantUsersRepository,
-    WebhookRepository,
+    NotifyDocumentRepository, NotifyRecipientRepository, WebhookRepository,
 };
 
 // Re-export tenko traits from alc-tenko (Refs #513)
@@ -19,7 +18,7 @@ pub use alc_core::tenant::TenantConn;
 // Re-export submodules for backward compatibility (tests use repository::xxx::TypeName)
 pub use alc_carins::repo::{car_inspections, carins_files, nfc_tags};
 pub use alc_core::repo::auth;
-pub use alc_misc::repo::{bot_admin, sso_admin, tenant_users, webhook};
+pub use alc_misc::repo::{bot_admin, webhook};
 pub use alc_tenko::repo::{
     daily_health, driver_info, equipment_failures, health_baselines, overdue, tenko_call,
     tenko_records, tenko_schedules, tenko_sessions, tenko_webhooks,
@@ -39,9 +38,7 @@ pub use alc_carins::repo::{
     PgCarInspectionRepository, PgCarinsFilesRepository, PgNfcTagRepository,
 };
 pub use alc_core::repo::PgAuthRepository;
-pub use alc_misc::repo::{
-    PgBotAdminRepository, PgSsoAdminRepository, PgTenantUsersRepository, PgWebhookRepository,
-};
+pub use alc_misc::repo::{PgBotAdminRepository, PgWebhookRepository};
 pub use alc_tenko::repo::{
     PgDailyHealthRepository, PgDriverInfoRepository, PgEquipmentFailuresRepository,
     PgHealthBaselinesRepository, PgTenkoCallRepository, PgTenkoOverdueRepository,

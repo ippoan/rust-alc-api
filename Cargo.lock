@@ -38,16 +38,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "alc-auth"
-version = "0.1.0"
-dependencies = [
- "alc-core",
- "axum",
- "serde",
- "uuid",
-]
-
-[[package]]
 name = "alc-auth-jwt"
 version = "0.1.0"
 
@@ -176,16 +166,13 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "chrono",
- "csv",
  "reqwest",
- "ring",
  "serde",
  "serde_json",
  "sha2",
  "sqlx",
  "tokio",
  "tracing",
- "ts-rs",
  "uuid",
  "wiremock",
 ]
@@ -2533,7 +2520,6 @@ dependencies = [
 name = "rust-alc-api"
 version = "0.1.0"
 dependencies = [
- "alc-auth",
  "alc-carins",
  "alc-compare",
  "alc-core",

@@ -68,13 +68,7 @@ find "$TMPDIR/bindings" -name "*.ts" -print0 | sort -z | while IFS= read -r -d '
   grep "^export type" "$f"
 done | awk -F'[ =]' '!seen[$3]++' >> "$OUTPUT"
 
-echo "" >> "$OUTPUT"
-cat >> "$OUTPUT" << 'WRAPPERS'
-// List response wrappers
-export type SsoConfigListResponse = { configs: SsoConfigRow[] };
-export type BotConfigListResponse = { configs: BotConfigResponse[] };
-export type UsersListResponse = { users: UserResponse[] };
-export type InvitationsListResponse = { invitations: TenantAllowedEmail[] };
-WRAPPERS
+# 一覧の応答の wrapper (SSO 設定・Bot 設定・ユーザー・招待) は、その口ごと alc-auth-worker /
+# alc-lineworks-worker へ移った (W2c、Refs #680) ので出さない
 
 echo "✅ $OUTPUT (SHA: ${SHA:0:12})"

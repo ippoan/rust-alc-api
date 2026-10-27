@@ -103,6 +103,7 @@ type = "combined"
 
 # --- alc-misc ---
 
+# Bot 設定の export だけ (一覧・保存・削除は alc-lineworks-worker へ。W2c)
 [[files]]
 path = "crates/alc-misc/src/bot_admin.rs"
 type = "mock"
@@ -113,14 +114,6 @@ type = "mock"
 
 [[files]]
 path = "crates/alc-misc/src/health.rs"
-type = "mock"
-
-[[files]]
-path = "crates/alc-misc/src/sso_admin.rs"
-type = "mock"
-
-[[files]]
-path = "crates/alc-misc/src/tenant_users.rs"
 type = "mock"
 
 # auth.rs — state.pool() 直接 SQL (20行) + env var error (7行) で mock テスト 100% 不可

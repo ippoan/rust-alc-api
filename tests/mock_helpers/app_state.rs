@@ -358,8 +358,6 @@ pub fn setup_mock_app_state() -> AppState {
         car_inspections: Arc::new(MockCarInspectionRepository::default()),
         carins_files: Arc::new(MockCarinsFilesRepository::default()),
         nfc_tags: Arc::new(MockNfcTagRepository::default()),
-        sso_admin: Arc::new(MockSsoAdminRepository::default()),
-        tenant_users: Arc::new(MockTenantUsersRepository::default()),
         storage,
         carins_storage: None,
         notify_recipients: Arc::new(MockNotifyRecipientRepository::default()),

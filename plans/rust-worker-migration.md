@@ -91,6 +91,7 @@ W4 を W5〜W7 より前に置くのは、employees / timecard を他の wave �
 - W2b: 本番の me・logout・my-orgs を auth-worker の `ALC_AUTH_SESSION=1` で alc-auth-worker に切り替え済み (auth-worker v0.2.328)。monolith の 3 本の削除は様子見の後
 - W2c: admin 系の分け方を決定。**消す**: API トークン (検証する実装がどこにも無い)・メンバー (`/admin/users` と重複、60 日 0 件) — この PR。**alc-auth-worker へ**: ユーザー・招待、SSO 設定、参加の申請。**alc-lineworks-worker へ**: Bot 設定
 - W2c: ユーザー・招待・SSO 設定・参加の申請は alc-auth-worker (v0.2.4)、Bot 設定は alc-lineworks-worker (v0.1.5) に移し、本番で切り替え済み (auth-worker v0.2.329・v0.2.330)。rust 側の削除は W2b の 3 本と一緒に (10/26–27 以降)
+- W2b・W2c の rust 側の削除: alc-auth crate (me・logout・my-orgs) と alc-misc の sso_admin・tenant_users・access_requests (`tenants/by-slug` を含む)・Bot 設定の一覧・保存・削除を消した。Cloud Run への要求は切り替え (2026-10-25 13:25・15:22・15:59 UTC) の後 0 件。Bot 設定の export (開発者だけ。auth-worker の `handleBotConfigExport` が Cloud Run を呼ぶ) は残す。auth-worker の my-orgs は `ALC_AUTH` が無いときだけ Cloud Run に落ちる作りなので、消した後その落ち先は 404 になる
 - W3: carins (呼び手の無い 7 本を除く) と maintenance を新 ippoan/alc-carins-worker (v0.0.1) に移し、本番で切り替え済み (auth-worker v0.2.331、smb の取り込みも RPC で worker へ)。読み取りは本番で確認済み。smb の取り込みと書き込みの確認・rust 側の削除は後で
 - W4a: `staging/export・import` を削除 (#761、auth-worker v0.2.332)
 - W4b: upload 3 口を alc-measurements-worker (v0.1.12) に移し、本番で切り替え済み (auth-worker v0.2.333)。dev 端末の測定で `face-photo`・`blow-video` の書き込みと読み返しを確認。`report-audio` は W7 で確かめる。rust 側の 3 口はこの PR で削除

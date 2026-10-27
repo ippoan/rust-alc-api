@@ -19,9 +19,9 @@ use alc_notify::repo::{
 use rust_alc_api::db::repository::{
     PgAuthRepository, PgBotAdminRepository, PgCarInspectionRepository, PgCarinsFilesRepository,
     PgDailyHealthRepository, PgDriverInfoRepository, PgEquipmentFailuresRepository,
-    PgHealthBaselinesRepository, PgNfcTagRepository, PgSsoAdminRepository, PgTenantUsersRepository,
-    PgTenkoCallRepository, PgTenkoRecordsRepository, PgTenkoSchedulesRepository,
-    PgTenkoSessionRepository, PgTenkoWebhooksRepository,
+    PgHealthBaselinesRepository, PgNfcTagRepository, PgTenkoCallRepository,
+    PgTenkoRecordsRepository, PgTenkoSchedulesRepository, PgTenkoSessionRepository,
+    PgTenkoWebhooksRepository,
 };
 use rust_alc_api::storage::StorageBackend;
 use rust_alc_api::AppState;
@@ -126,8 +126,6 @@ async fn main() -> anyhow::Result<()> {
     let equipment_failures = Arc::new(PgEquipmentFailuresRepository::new(pool.clone()));
     let health_baselines = Arc::new(PgHealthBaselinesRepository::new(pool.clone()));
     let nfc_tags = Arc::new(PgNfcTagRepository::new(pool.clone()));
-    let sso_admin = Arc::new(PgSsoAdminRepository::new(pool.clone()));
-    let tenant_users = Arc::new(PgTenantUsersRepository::new(pool.clone()));
     let tenko_call = Arc::new(PgTenkoCallRepository::new(pool.clone()));
     let tenko_records = Arc::new(PgTenkoRecordsRepository::new(pool.clone()));
     let tenko_schedules = Arc::new(PgTenkoSchedulesRepository::new(pool.clone()));
@@ -211,8 +209,6 @@ async fn main() -> anyhow::Result<()> {
         carins_files,
 
         nfc_tags,
-        sso_admin,
-        tenant_users,
         storage,
         carins_storage,
         notify_recipients,

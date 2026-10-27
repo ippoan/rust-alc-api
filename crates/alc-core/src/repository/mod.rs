@@ -7,8 +7,6 @@ pub mod nfc_tags;
 pub mod notify_deliveries;
 pub mod notify_documents;
 pub mod notify_recipients;
-pub mod sso_admin;
-pub mod tenant_users;
 pub mod webhook;
 
 pub use auth::AuthRepository;
@@ -20,6 +18,4 @@ pub use nfc_tags::NfcTagRepository;
 pub use notify_deliveries::NotifyDeliveryRepository;
 pub use notify_documents::NotifyDocumentRepository;
 pub use notify_recipients::NotifyRecipientRepository;
-pub use sso_admin::SsoAdminRepository;
-pub use tenant_users::TenantUsersRepository;
 pub use webhook::WebhookRepository;

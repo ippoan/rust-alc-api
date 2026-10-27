@@ -16,8 +16,8 @@ use uuid::Uuid;
 
 use alc_tenko::overdue::TenkoOverdueRepository;
 use rust_alc_api::db::repository::{
-    AuthRepository, PgAuthRepository, PgTenantUsersRepository, PgTenkoCallRepository,
-    PgTenkoOverdueRepository, TenantUsersRepository, TenkoCallRepository,
+    AuthRepository, PgAuthRepository, PgTenkoCallRepository, PgTenkoOverdueRepository,
+    TenkoCallRepository,
 };
 
 async fn setup() -> sqlx::PgPool {
@@ -52,35 +52,38 @@ async fn insert_employee(pool: &sqlx::PgPool, tenant_id: Uuid, name: &str) -> Uu
 async fn auth_repo_writes_are_tenant_scoped() {
     let pool = setup().await;
     let auth = PgAuthRepository::new(pool.clone());
-    let tenant_users = PgTenantUsersRepository::new(pool.clone());
     let tenant_a = common::create_test_tenant(&pool, "Scoped Auth A").await;
     let tenant_b = common::create_test_tenant(&pool, "Scoped Auth B").await;
 
     // --- delete_invitation ---
     let email = format!("{}@example.test", unique("invite"));
-    let invitation = tenant_users
-        .invite_user(tenant_a, &email, "viewer")
-        .await
-        .expect("invite_user failed");
-    assert_eq!(invitation.tenant_id, tenant_a);
+    // 招待の作成の口は alc-auth-worker へ移った (W2c) ので、行は直接入れる
+    let invitation_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO alc_api.tenant_allowed_emails (tenant_id, email, role) VALUES ($1, $2, 'viewer') RETURNING id",
+    )
+    .bind(tenant_a)
+    .bind(&email)
+    .fetch_one(&pool)
+    .await
+    .expect("invitation insert failed");
 
-    auth.delete_invitation(tenant_b, invitation.id)
+    auth.delete_invitation(tenant_b, invitation_id)
         .await
         .expect("delete_invitation (other tenant) failed");
     let remaining: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM alc_api.tenant_allowed_emails WHERE id = $1")
-            .bind(invitation.id)
+            .bind(invitation_id)
             .fetch_one(&pool)
             .await
             .unwrap();
     assert_eq!(remaining, 1, "別テナントからは招待を消せないこと");
 
-    auth.delete_invitation(tenant_a, invitation.id)
+    auth.delete_invitation(tenant_a, invitation_id)
         .await
         .expect("delete_invitation failed");
     let remaining: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM alc_api.tenant_allowed_emails WHERE id = $1")
-            .bind(invitation.id)
+            .bind(invitation_id)
             .fetch_one(&pool)
             .await
             .unwrap();
@@ -138,121 +141,6 @@ async fn auth_repo_writes_are_tenant_scoped() {
     .await
     .unwrap();
     assert_eq!(recipient_tenant, tenant_a);
-}
-
-/// 管理画面のユーザー / 招待の一覧・削除・role 変更は、自テナントの行だけに届く。
-#[tokio::test]
-async fn tenant_users_repo_is_tenant_scoped() {
-    let pool = setup().await;
-    let auth = PgAuthRepository::new(pool.clone());
-    let repo = PgTenantUsersRepository::new(pool.clone());
-    let tenant_a = common::create_test_tenant(&pool, "Scoped Users A").await;
-    let tenant_b = common::create_test_tenant(&pool, "Scoped Users B").await;
-
-    let user_a = auth
-        .create_user_line(tenant_a, &unique("line-a"), "User A")
-        .await
-        .expect("create_user_line A failed");
-    let user_b = auth
-        .create_user_line(tenant_b, &unique("line-b"), "User B")
-        .await
-        .expect("create_user_line B failed");
-    let invite_a = repo
-        .invite_user(tenant_a, &format!("{}@example.test", unique("a")), "viewer")
-        .await
-        .expect("invite_user A failed");
-    let invite_b = repo
-        .invite_user(tenant_b, &format!("{}@example.test", unique("b")), "viewer")
-        .await
-        .expect("invite_user B failed");
-
-    // 一覧
-    let users = repo.list_users(tenant_a).await.expect("list_users failed");
-    assert!(users.iter().any(|u| u.id == user_a.id));
-    assert!(
-        users.iter().all(|u| u.id != user_b.id),
-        "別テナントのユーザーが一覧に出ないこと"
-    );
-    let invitations = repo
-        .list_invitations(tenant_a)
-        .await
-        .expect("list_invitations failed");
-    assert!(invitations.iter().any(|i| i.id == invite_a.id));
-    assert!(
-        invitations.iter().all(|i| i.tenant_id == tenant_a),
-        "別テナントの招待が一覧に出ないこと"
-    );
-
-    // role 変更 (email 指定): 別テナントからは 0 行
-    assert!(!repo
-        .update_role_by_email(tenant_a, &user_b.email, "admin")
-        .await
-        .expect("update_role_by_email (user) failed"));
-    assert!(!repo
-        .update_role_by_email(tenant_a, &invite_b.email, "admin")
-        .await
-        .expect("update_role_by_email (invite) failed"));
-    let role: String = sqlx::query_scalar("SELECT role FROM alc_api.users WHERE id = $1")
-        .bind(user_b.id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-    assert_eq!(role, "viewer", "別テナントのユーザーの role が動かないこと");
-    let role: String =
-        sqlx::query_scalar("SELECT role FROM alc_api.tenant_allowed_emails WHERE id = $1")
-            .bind(invite_b.id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-    assert_eq!(role, "viewer", "別テナントの招待の role が動かないこと");
-
-    // 削除 (id 指定 / email 指定): 別テナントからは 0 行
-    repo.delete_invitation(tenant_a, invite_b.id)
-        .await
-        .expect("delete_invitation failed");
-    repo.delete_user(tenant_a, user_b.id)
-        .await
-        .expect("delete_user failed");
-    assert!(!repo
-        .delete_by_email(tenant_a, &user_b.email)
-        .await
-        .expect("delete_by_email (user) failed"));
-    assert!(!repo
-        .delete_by_email(tenant_a, &invite_b.email)
-        .await
-        .expect("delete_by_email (invite) failed"));
-    let users_left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM alc_api.users WHERE id = $1")
-        .bind(user_b.id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-    assert_eq!(users_left, 1, "別テナントのユーザーが消えないこと");
-    let invites_left: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM alc_api.tenant_allowed_emails WHERE id = $1")
-            .bind(invite_b.id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-    assert_eq!(invites_left, 1, "別テナントの招待が消えないこと");
-
-    // 自テナントには効く
-    assert!(repo
-        .update_role_by_email(tenant_b, &user_b.email, "admin")
-        .await
-        .expect("update_role_by_email (own) failed"));
-    assert!(repo
-        .delete_by_email(tenant_b, &invite_b.email)
-        .await
-        .expect("delete_by_email (own) failed"));
-    repo.delete_user(tenant_b, user_b.id)
-        .await
-        .expect("delete_user (own) failed");
-    let users_left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM alc_api.users WHERE id = $1")
-        .bind(user_b.id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-    assert_eq!(users_left, 0);
 }
 
 /// 超過検知の従業員名の取得・通知済みの印と、点呼用電話番号の削除は、渡したテナントの行だけ。
@@ -351,110 +239,4 @@ async fn tenko_repos_are_tenant_scoped() {
             .await
             .unwrap();
     assert_eq!(left, 0);
-}
-
-/// 参加申請の一覧・承認・却下は、管理者のテナントの申請にしか届かない (HTTP 経由)。
-#[tokio::test]
-async fn access_requests_are_tenant_scoped() {
-    let state = common::setup_app_state().await;
-    let base_url = common::spawn_test_server(state.clone()).await;
-    let client = reqwest::Client::new();
-    let pool = state.pool().clone();
-    let auth = PgAuthRepository::new(pool.clone());
-
-    let tenant_a = common::create_test_tenant(&pool, "Scoped Access A").await;
-    let tenant_b = common::create_test_tenant(&pool, "Scoped Access B").await;
-    let applicant = auth
-        .create_user_line(tenant_b, &unique("applicant"), "Applicant")
-        .await
-        .expect("create_user_line failed");
-
-    let mut request_ids = Vec::new();
-    for _ in 0..2 {
-        let id: Uuid = sqlx::query_scalar(
-            "INSERT INTO alc_api.access_requests (tenant_id, user_id) VALUES ($1, $2) RETURNING id",
-        )
-        .bind(tenant_a)
-        .bind(applicant.id)
-        .fetch_one(&pool)
-        .await
-        .expect("access request insert failed");
-        request_ids.push(id);
-    }
-    let (approve_id, decline_id) = (request_ids[0], request_ids[1]);
-
-    let admin_a = format!("Bearer {}", common::create_test_jwt(tenant_a, "admin"));
-    let admin_b = format!("Bearer {}", common::create_test_jwt(tenant_b, "admin"));
-
-    // 別テナントの管理者: 一覧に出ず、承認も却下も 404
-    let res = client
-        .get(format!("{base_url}/api/access-requests"))
-        .header("Authorization", &admin_b)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 200);
-    let body: serde_json::Value = res.json().await.unwrap();
-    assert_eq!(body["requests"].as_array().unwrap().len(), 0);
-
-    let res = client
-        .post(format!(
-            "{base_url}/api/access-requests/{approve_id}/approve"
-        ))
-        .header("Authorization", &admin_b)
-        .json(&serde_json::json!({}))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 404);
-    let res = client
-        .post(format!(
-            "{base_url}/api/access-requests/{decline_id}/decline"
-        ))
-        .header("Authorization", &admin_b)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 404);
-
-    // 自テナントの管理者: 一覧 (status 絞り込みあり / なし)・承認・却下が通る
-    let res = client
-        .get(format!("{base_url}/api/access-requests"))
-        .header("Authorization", &admin_a)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 200);
-    let body: serde_json::Value = res.json().await.unwrap();
-    assert_eq!(body["requests"].as_array().unwrap().len(), 2);
-
-    let res = client
-        .post(format!(
-            "{base_url}/api/access-requests/{approve_id}/approve"
-        ))
-        .header("Authorization", &admin_a)
-        .json(&serde_json::json!({}))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 204);
-    let res = client
-        .post(format!(
-            "{base_url}/api/access-requests/{decline_id}/decline"
-        ))
-        .header("Authorization", &admin_a)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 204);
-
-    let res = client
-        .get(format!("{base_url}/api/access-requests?status=pending"))
-        .header("Authorization", &admin_a)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 200);
-    let body: serde_json::Value = res.json().await.unwrap();
-    assert_eq!(body["requests"].as_array().unwrap().len(), 0);
 }
