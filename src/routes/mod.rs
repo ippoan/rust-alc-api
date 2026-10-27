@@ -9,7 +9,6 @@ pub use alc_devices::hub_measurements;
 pub use alc_dtako::dtako_restraint_report;
 pub use alc_dtako::dtako_restraint_report_pdf;
 pub use alc_dtako::dtako_tickets;
-pub use alc_dtako::dtako_y_time_export;
 pub use alc_maintenance::categories as maintenance_categories;
 pub use alc_maintenance::files as maintenance_files;
 pub use alc_maintenance::records as maintenance_records;
@@ -105,7 +104,6 @@ pub fn router(
         .merge(dtako_restraint_report::tenant_router())
         .merge(dtako_restraint_report_pdf::tenant_router())
         .merge(dtako_tickets::tenant_router())
-        .merge(dtako_y_time_export::tenant_router())
         .merge(notify_documents::tenant_router())
         .merge(notify_email_documents::tenant_router())
         .merge(notify_test_endpoints::tenant_router())

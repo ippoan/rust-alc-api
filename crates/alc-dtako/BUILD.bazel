@@ -9,7 +9,6 @@ rust_library(
         "//crates/alc-core",
         "//crates/alc-pdf",
         "@crates//:alc-compare",
-        "@crates//:alc-csv-parser",
     ],
     proc_macro_deps = all_crate_deps(proc_macro = True),
     visibility = ["//visibility:public"],
