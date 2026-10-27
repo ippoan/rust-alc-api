@@ -6,8 +6,6 @@ pub use alc_carins::carins_files;
 pub use alc_carins::nfc_tags;
 pub use alc_devices::devices;
 pub use alc_devices::hub_measurements;
-pub use alc_dtako::dtako_restraint_report;
-pub use alc_dtako::dtako_restraint_report_pdf;
 pub use alc_dtako::dtako_tickets;
 pub use alc_maintenance::categories as maintenance_categories;
 pub use alc_maintenance::files as maintenance_files;
@@ -101,7 +99,6 @@ pub fn router(
         .merge(car_inspection_files::tenant_router())
         .merge(carins_files::tenant_router())
         .merge(nfc_tags::tenant_router())
-        .merge(dtako_restraint_report_pdf::tenant_router())
         .merge(dtako_tickets::tenant_router())
         .merge(notify_documents::tenant_router())
         .merge(notify_email_documents::tenant_router())

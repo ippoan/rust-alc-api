@@ -361,8 +361,6 @@ pub fn setup_mock_app_state() -> AppState {
         car_inspections: Arc::new(MockCarInspectionRepository::default()),
         carins_files: Arc::new(MockCarinsFilesRepository::default()),
         devices: Arc::new(MockDeviceRepository::default()),
-        dtako_restraint_report: Arc::new(MockDtakoRestraintReportRepository::default()),
-        dtako_restraint_report_pdf: Arc::new(MockDtakoRestraintReportPdfRepository::default()),
         dtako_tickets: Arc::new(MockDtakoTicketsRepository::default()),
         hub_measurements: Arc::new(MockHubMeasurementsRepository::default()),
         nfc_tags: Arc::new(MockNfcTagRepository::default()),
