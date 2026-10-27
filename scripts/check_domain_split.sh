@@ -82,10 +82,21 @@ guard_repository_modules notify "ippoan/alc-notify-worker" \
 guard_appstate_fields notify "ippoan/alc-notify-worker" \
   'notify_groups|notify_line_config'
 
-# --- (Phase C 以降はここに追記: dtako / carins) ---
+# --- dtako (Worker へ移した。Refs #680) ---
+# dtako の口は全部 ippoan/alc-dtako-worker に移り (最後が W5c-5 の起票 dtako_tickets)、alc-dtako crate は消した。
+# crate の再作成と、alc-core への起票の repository / model / AppState field の再流入を落とす
+# (alc-core に残る Dtako の型 = DtakologRow・DtakoDailyWorkHours 等はアーカイブの Job と点呼が使う)。
+if [ -e crates/alc-dtako ]; then
+  err "domain-split: crates/alc-dtako が再作成されています。dtako は ippoan/alc-dtako-worker に置いてください (Refs #680)"
+fi
+guard_repository_modules dtako "ippoan/alc-dtako-worker" dtako_tickets
+guard_model_structs dtako "ippoan/alc-dtako-worker" 'DtakoTicket'
+guard_appstate_fields dtako "ippoan/alc-dtako-worker" 'dtako_tickets|dtako_storage'
+
+# --- (Phase C 以降はここに追記: carins) ---
 
 if [ "$fail" != 0 ]; then
   echo "::error::domain split guard failed — ドメインコードは alc-core ではなく各ドメイン crate に追加してください (設計: issue #513)"
   exit 1
 fi
-echo "domain split guard OK (tenko, trouble, notify)"
+echo "domain split guard OK (tenko, trouble, notify, dtako)"

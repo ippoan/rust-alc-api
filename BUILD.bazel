@@ -6,7 +6,6 @@ _WORKSPACE_CRATES = [
     "//crates/alc-carins",
     "//crates/alc-core",
     "//crates/alc-devices",
-    "//crates/alc-dtako",
     "//crates/alc-maintenance",
     "//crates/alc-misc",
     "//crates/alc-notify",
@@ -328,20 +327,6 @@ rust_test(
     name = "mock_devices",
     srcs = ["tests/mock_devices/main.rs"] + _MOCK_TEST_SRCS,
     crate_root = "tests/mock_devices/main.rs",
-    deps = [":rust_alc_api_lib"] + all_crate_deps(
-        normal = True,
-        normal_dev = True,
-    ) + _WORKSPACE_CRATES,
-    proc_macro_deps = all_crate_deps(
-        proc_macro = True,
-        proc_macro_dev = True,
-    ),
-)
-
-rust_test(
-    name = "mock_dtako",
-    srcs = ["tests/mock_dtako/main.rs"] + _MOCK_TEST_SRCS,
-    crate_root = "tests/mock_dtako/main.rs",
     deps = [":rust_alc_api_lib"] + all_crate_deps(
         normal = True,
         normal_dev = True,

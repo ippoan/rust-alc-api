@@ -6,7 +6,6 @@ pub use alc_carins::carins_files;
 pub use alc_carins::nfc_tags;
 pub use alc_devices::devices;
 pub use alc_devices::hub_measurements;
-pub use alc_dtako::dtako_tickets;
 pub use alc_maintenance::categories as maintenance_categories;
 pub use alc_maintenance::files as maintenance_files;
 pub use alc_maintenance::records as maintenance_records;
@@ -99,7 +98,6 @@ pub fn router(
         .merge(car_inspection_files::tenant_router())
         .merge(carins_files::tenant_router())
         .merge(nfc_tags::tenant_router())
-        .merge(dtako_tickets::tenant_router())
         .merge(notify_documents::tenant_router())
         .merge(notify_email_documents::tenant_router())
         .merge(notify_test_endpoints::tenant_router())
@@ -115,8 +113,7 @@ pub fn router(
         .merge(notify_line_webhook::public_router())
         .merge(notify_read_tracker::public_router())
         .merge(notify_viewer::public_router())
-        .merge(access_requests::public_router())
-        .merge(dtako_tickets::public_close_router());
+        .merge(access_requests::public_router());
 
     // tenko ドメイン (Refs #513) — AppState から分離した TenkoState でマウントする。
     // tenant 系ルートには monolith 本体と同じ require_tenant_header を張る。
@@ -154,7 +151,7 @@ pub fn router(
         .merge(maintenance_tenant)
 }
 
-/// email-receiver Worker から `POST /api/dtako/tickets` を受ける internal ingest
+/// cf-alc-recorder Worker から `POST /api/hub/measurements` を受ける internal ingest
 /// router。`INTERNAL_SHARED_SECRET` env が空 (= 未配布) なら呼出し側で disable
 /// する (= caller が `internal_shared_secret_router(None)` を渡せば empty router、
 /// `Some(secret)` を渡せば middleware + extension 付きで実装する safe fallback、
@@ -165,7 +162,6 @@ pub fn router(
 pub fn internal_shared_secret_router(internal_secret: Option<String>) -> Router<AppState> {
     match internal_secret {
         Some(secret) if !secret.is_empty() => Router::new()
-            .merge(dtako_tickets::internal_router())
             // cf-alc-recorder Worker からの CoreS3 測定 ingest (Refs #564)
             .merge(hub_measurements::internal_router())
             .layer(axum_middleware::from_fn(

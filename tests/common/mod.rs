@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use rust_alc_api::db::repository::{
     PgAuthRepository, PgBotAdminRepository, PgCarInspectionRepository, PgCarinsFilesRepository,
-    PgDailyHealthRepository, PgDeviceRepository, PgDriverInfoRepository, PgDtakoTicketsRepository,
+    PgDailyHealthRepository, PgDeviceRepository, PgDriverInfoRepository,
     PgEquipmentFailuresRepository, PgHealthBaselinesRepository, PgHubMeasurementsRepository,
     PgLineworksChannelsRepository, PgNfcTagRepository, PgNotifyDeliveryRepository,
     PgNotifyDocumentRepository, PgNotifyRecipientRepository, PgSsoAdminRepository,
@@ -32,7 +32,7 @@ use mock_storage::MockStorage;
 pub const TEST_ENCRYPTION_KEY: &str = "test-jwt-secret-for-integration-tests-2026";
 
 /// テスト用 `INTERNAL_SHARED_SECRET` (`internal_shared_secret_router` 経由の
-/// `X-Internal-Shared-Secret` 検証に使う、dtako_tickets/dtako_operations の
+/// `X-Internal-Shared-Secret` 検証に使う、hub_measurements の
 /// internal_router テストが参照する)。
 pub const TEST_INTERNAL_SHARED_SECRET: &str = "test-internal-shared-secret-2026";
 
@@ -288,19 +288,15 @@ pub async fn setup_app_state() -> AppState {
     let storage: Arc<dyn rust_alc_api::storage::StorageBackend> =
         Arc::new(MockStorage::new("test-bucket"));
 
-    let dtako_storage: Arc<dyn rust_alc_api::storage::StorageBackend> =
-        Arc::new(MockStorage::new("dtako-bucket"));
-
     let mock_fcm: Arc<dyn rust_alc_api::fcm::FcmSenderTrait> = Arc::new(MockFcmSender::new());
 
-    let state = build_app_state(pool, storage, Some(dtako_storage), Some(mock_fcm));
+    let state = build_app_state(pool, storage, Some(mock_fcm));
     state
 }
 
 fn build_app_state(
     pool: sqlx::PgPool,
     storage: Arc<dyn rust_alc_api::storage::StorageBackend>,
-    dtako_storage: Option<Arc<dyn rust_alc_api::storage::StorageBackend>>,
     fcm: Option<Arc<dyn rust_alc_api::fcm::FcmSenderTrait>>,
 ) -> AppState {
     let auth = Arc::new(PgAuthRepository::new(pool.clone()));
@@ -308,7 +304,6 @@ fn build_app_state(
     let car_inspections = Arc::new(PgCarInspectionRepository::new(pool.clone()));
     let carins_files = Arc::new(PgCarinsFilesRepository::new(pool.clone()));
     let devices = Arc::new(PgDeviceRepository::new(pool.clone()));
-    let dtako_tickets = Arc::new(PgDtakoTicketsRepository::new(pool.clone()));
     let hub_measurements = Arc::new(PgHubMeasurementsRepository::new(pool.clone()));
     let nfc_tags = Arc::new(PgNfcTagRepository::new(pool.clone()));
     let sso_admin = Arc::new(PgSsoAdminRepository::new(pool.clone()));
@@ -326,8 +321,6 @@ fn build_app_state(
         car_inspections,
         carins_files,
         devices,
-        dtako_tickets,
-
         hub_measurements,
         nfc_tags,
         sso_admin,
@@ -335,7 +328,6 @@ fn build_app_state(
         timecard,
         storage,
         carins_storage: None,
-        dtako_storage,
         fcm,
         notify_recipients,
         notify_documents,
@@ -386,10 +378,7 @@ pub async fn setup_app_state_as_app_role(max_connections: u32, reset_on_release:
 
     let storage: Arc<dyn rust_alc_api::storage::StorageBackend> =
         Arc::new(MockStorage::new("test-bucket"));
-    let dtako_storage: Arc<dyn rust_alc_api::storage::StorageBackend> =
-        Arc::new(MockStorage::new("dtako-bucket"));
-
-    build_app_state(pool, storage, Some(dtako_storage), None)
+    build_app_state(pool, storage, None)
 }
 
 /// テスト用 FailingFcmSender (常にエラーを返す)
@@ -424,10 +413,7 @@ pub async fn setup_app_state_no_fcm() -> AppState {
     let storage: Arc<dyn rust_alc_api::storage::StorageBackend> =
         Arc::new(MockStorage::new("test-bucket"));
 
-    let dtako_storage: Arc<dyn rust_alc_api::storage::StorageBackend> =
-        Arc::new(MockStorage::new("dtako-bucket"));
-
-    build_app_state(pool, storage, Some(dtako_storage), None)
+    build_app_state(pool, storage, None)
 }
 
 /// テスト用 AppState を構築 (FailingFcmSender)
@@ -448,12 +434,9 @@ pub async fn setup_app_state_failing_fcm() -> AppState {
     let storage: Arc<dyn rust_alc_api::storage::StorageBackend> =
         Arc::new(MockStorage::new("test-bucket"));
 
-    let dtako_storage: Arc<dyn rust_alc_api::storage::StorageBackend> =
-        Arc::new(MockStorage::new("dtako-bucket"));
-
     let failing_fcm: Arc<dyn rust_alc_api::fcm::FcmSenderTrait> = Arc::new(FailingFcmSender);
 
-    build_app_state(pool, storage, Some(dtako_storage), Some(failing_fcm))
+    build_app_state(pool, storage, Some(failing_fcm))
 }
 
 /// テスト用テナントを作成し、UUID を返す

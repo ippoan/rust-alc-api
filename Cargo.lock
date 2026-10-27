@@ -160,19 +160,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "alc-dtako"
-version = "0.1.0"
-dependencies = [
- "alc-core",
- "async-trait",
- "axum",
- "rand",
- "sqlx",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "alc-maintenance"
 version = "0.1.0"
 dependencies = [
@@ -2570,7 +2557,6 @@ dependencies = [
  "alc-core",
  "alc-csv-parser",
  "alc-devices",
- "alc-dtako",
  "alc-maintenance",
  "alc-migrations",
  "alc-misc",

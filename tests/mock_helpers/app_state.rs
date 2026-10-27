@@ -351,9 +351,6 @@ pub fn setup_mock_app_state() -> AppState {
     let storage: Arc<dyn rust_alc_api::storage::StorageBackend> =
         Arc::new(MockStorage::new("test-bucket"));
 
-    let dtako_storage: Arc<dyn rust_alc_api::storage::StorageBackend> =
-        Arc::new(MockStorage::new("dtako-bucket"));
-
     AppState {
         pool: None,
         auth: Arc::new(MockAuthRepository::default()),
@@ -361,7 +358,6 @@ pub fn setup_mock_app_state() -> AppState {
         car_inspections: Arc::new(MockCarInspectionRepository::default()),
         carins_files: Arc::new(MockCarinsFilesRepository::default()),
         devices: Arc::new(MockDeviceRepository::default()),
-        dtako_tickets: Arc::new(MockDtakoTicketsRepository::default()),
         hub_measurements: Arc::new(MockHubMeasurementsRepository::default()),
         nfc_tags: Arc::new(MockNfcTagRepository::default()),
         sso_admin: Arc::new(MockSsoAdminRepository::default()),
@@ -369,7 +365,6 @@ pub fn setup_mock_app_state() -> AppState {
         timecard: Arc::new(MockTimecardRepository::default()),
         storage,
         carins_storage: None,
-        dtako_storage: Some(dtako_storage),
         fcm: None,
         notify_recipients: Arc::new(MockNotifyRecipientRepository::default()),
         notify_documents: Arc::new(MockNotifyDocumentRepository::default()),

@@ -4,7 +4,6 @@ use chrono::{DateTime, NaiveDate, Utc};
 use uuid::Uuid;
 
 use rust_alc_api::db::models::*;
-use rust_alc_api::db::repository::dtako_tickets::DtakoTicketsRepository;
 use rust_alc_api::db::repository::equipment_failures::EquipmentFailuresRepository;
 use rust_alc_api::db::repository::health_baselines::HealthBaselinesRepository;
 use rust_alc_api::db::repository::hub_measurements::HubMeasurementsRepository;
@@ -51,72 +50,6 @@ impl sqlx::error::DatabaseError for MockDbError {
 
     fn kind(&self) -> sqlx::error::ErrorKind {
         sqlx::error::ErrorKind::UniqueViolation
-    }
-}
-
-// =============================================================================
-// MockDtakoTicketsRepository
-// =============================================================================
-
-pub struct MockDtakoTicketsRepository {
-    pub fail_next: AtomicBool,
-}
-
-impl Default for MockDtakoTicketsRepository {
-    fn default() -> Self {
-        Self {
-            fail_next: AtomicBool::new(false),
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl DtakoTicketsRepository for MockDtakoTicketsRepository {
-    async fn create(
-        &self,
-        _tenant_id: Uuid,
-        _input: &DtakoTicketCreate,
-    ) -> Result<DtakoTicket, sqlx::Error> {
-        check_fail!(self);
-        Err(sqlx::Error::RowNotFound)
-    }
-
-    async fn patch_scraped(
-        &self,
-        _tenant_id: Uuid,
-        _id: Uuid,
-        _input: &DtakoTicketScrapedPatch,
-    ) -> Result<Option<DtakoTicket>, sqlx::Error> {
-        check_fail!(self);
-        Ok(None)
-    }
-
-    async fn list(
-        &self,
-        _tenant_id: Uuid,
-        filter: &DtakoTicketFilter,
-    ) -> Result<DtakoTicketsResponse, sqlx::Error> {
-        check_fail!(self);
-        Ok(DtakoTicketsResponse {
-            tickets: vec![],
-            total: 0,
-            page: filter.page.unwrap_or(1),
-            per_page: filter.per_page.unwrap_or(50),
-        })
-    }
-
-    async fn get(&self, _tenant_id: Uuid, _id: Uuid) -> Result<Option<DtakoTicket>, sqlx::Error> {
-        check_fail!(self);
-        Ok(None)
-    }
-
-    async fn close_by_token(
-        &self,
-        _close_token: &str,
-        _closed_by: Option<&str>,
-    ) -> Result<Option<Uuid>, sqlx::Error> {
-        check_fail!(self);
-        Ok(None)
     }
 }
 
