@@ -19,19 +19,6 @@ impl PgDtakoRestraintReportRepository {
 
 #[async_trait]
 impl DtakoRestraintReportRepository for PgDtakoRestraintReportRepository {
-    async fn get_driver_name(
-        &self,
-        tenant_id: Uuid,
-        driver_id: Uuid,
-    ) -> Result<Option<String>, sqlx::Error> {
-        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
-        sqlx::query_scalar("SELECT name FROM alc_api.employees WHERE id = $1 AND tenant_id = $2")
-            .bind(driver_id)
-            .bind(tenant_id)
-            .fetch_optional(&mut *tc.conn)
-            .await
-    }
-
     async fn get_segments(
         &self,
         tenant_id: Uuid,
@@ -149,16 +136,5 @@ impl DtakoRestraintReportRepository for PgDtakoRestraintReportRepository {
         .bind(month_end)
         .fetch_all(&mut *tc.conn)
         .await
-    }
-
-    async fn list_drivers_with_cd(
-        &self,
-        tenant_id: Uuid,
-    ) -> Result<Vec<(Uuid, Option<String>, String)>, sqlx::Error> {
-        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
-        sqlx::query_as("SELECT id, driver_cd, name FROM alc_api.employees WHERE tenant_id = $1 AND driver_cd IS NOT NULL AND deleted_at IS NULL")
-            .bind(tenant_id)
-            .fetch_all(&mut *tc.conn)
-            .await
     }
 }

@@ -66,8 +66,6 @@ impl sqlx::error::DatabaseError for MockDbError {
 
 pub struct MockDtakoRestraintReportRepository {
     pub fail_next: AtomicBool,
-    pub return_driver_name: AtomicBool,
-    pub drivers_with_cd: std::sync::Mutex<Vec<(Uuid, Option<String>, String)>>,
     pub segments: std::sync::Mutex<Vec<SegmentRow>>,
     pub daily_work_hours: std::sync::Mutex<Vec<DailyWorkHoursRow>>,
     pub op_times: std::sync::Mutex<Vec<OpTimesRow>>,
@@ -79,8 +77,6 @@ impl Default for MockDtakoRestraintReportRepository {
     fn default() -> Self {
         Self {
             fail_next: AtomicBool::new(false),
-            return_driver_name: AtomicBool::new(false),
-            drivers_with_cd: std::sync::Mutex::new(vec![]),
             segments: std::sync::Mutex::new(vec![]),
             daily_work_hours: std::sync::Mutex::new(vec![]),
             op_times: std::sync::Mutex::new(vec![]),
@@ -92,19 +88,6 @@ impl Default for MockDtakoRestraintReportRepository {
 
 #[async_trait::async_trait]
 impl DtakoRestraintReportRepository for MockDtakoRestraintReportRepository {
-    async fn get_driver_name(
-        &self,
-        _tenant_id: Uuid,
-        _driver_id: Uuid,
-    ) -> Result<Option<String>, sqlx::Error> {
-        check_fail!(self);
-        if self.return_driver_name.load(Ordering::SeqCst) {
-            Ok(Some("テスト太郎".to_string()))
-        } else {
-            Ok(None)
-        }
-    }
-
     async fn get_segments(
         &self,
         _tenant_id: Uuid,
@@ -157,14 +140,6 @@ impl DtakoRestraintReportRepository for MockDtakoRestraintReportRepository {
     ) -> Result<Vec<OpTimesRow>, sqlx::Error> {
         check_fail!(self);
         Ok(self.op_times.lock().unwrap().clone())
-    }
-
-    async fn list_drivers_with_cd(
-        &self,
-        _tenant_id: Uuid,
-    ) -> Result<Vec<(Uuid, Option<String>, String)>, sqlx::Error> {
-        check_fail!(self);
-        Ok(self.drivers_with_cd.lock().unwrap().clone())
     }
 }
 

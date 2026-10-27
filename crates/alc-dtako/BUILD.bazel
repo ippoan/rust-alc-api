@@ -8,7 +8,6 @@ rust_library(
     deps = all_crate_deps(normal = True) + [
         "//crates/alc-core",
         "//crates/alc-pdf",
-        "@crates//:alc-compare",
     ],
     proc_macro_deps = all_crate_deps(proc_macro = True),
     visibility = ["//visibility:public"],
