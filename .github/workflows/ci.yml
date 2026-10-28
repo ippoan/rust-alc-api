@@ -304,13 +304,11 @@ jobs:
           # coverage 再ビルドになる (詳細は .bazelrc のコメント、Refs #515)。
           - { name: monolith, target: "//:unit_tests", coverage: "cov-monolith" }
           - { name: mock-misc, target: "//:mock_misc", coverage: "cov-mock-misc" }
-          - { name: mock-tenko, target: "//:mock_tenko", coverage: "cov-mock-tenko" }
           - { name: auth-jwt, target: "//crates/alc-auth-jwt:alc-auth-jwt_test", coverage: "cov-auth-jwt" }
           - { name: core, target: "//crates/alc-core:alc-core_test", coverage: "cov-core" }
           - { name: misc, target: "//crates/alc-misc:alc-misc_test", coverage: "cov-misc" }
           - { name: notify, target: "//crates/alc-notify:alc-notify_test", pdfium: true, coverage: "cov-notify" }
           - { name: storage, target: "//crates/alc-storage:alc-storage_test" }
-          - { name: tenko, target: "//crates/alc-tenko:alc-tenko_test", coverage: "cov-tenko" }
     steps:
       - uses: actions/checkout@v4
       - uses: ippoan/setup-bazel@main
@@ -388,12 +386,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # driver_info の「ト 車両整備状況」節 (recent_maintenance_records、Refs #c651-7)。
-          # tenko_sessions.carins_vehicle_id → maintenance_vehicles.car_id →
-          # maintenance_records の解決は 1 CTE の生 SQL なので mock では 1 行も通らない。
-          # ci.yml の bazel-test-db と cache-warm.yml を同じ内容にすること
-          # (check_bazel_test_matrix.sh が pair 一致を検査する)
-          - { name: db-driver-info-maintenance, target: "//:driver_info_maintenance_test" }
           - { name: db-archive, target: "//:archive_repo_test", coverage: "cov-db-archive" }
           # theearth DVR 動画通知の受け皿 (Refs ohishi-exp/nuxt-dtako-admin#1094)。
           # 自然キーの冪等性とテナント分離 (id は X-Tenant-ID と対で突合) を実 DB で固定する。
@@ -419,30 +411,12 @@ jobs:
           # RLS と関数は実 DB にしか無いので mock では 1 行も通らない。ci.yml の bazel-test-db と
           # cache-warm.yml を同じ内容にすること (check_bazel_test_matrix.sh が pair 一致を検査する)
           - { name: db-runtime-role, target: "//:runtime_role_test" }
-          # Refs ippoan/alc-app#238 / ippoan/alc-app-s3#135: 通常点呼を点呼記録に載せる。
-          # 冪等の担保は migration 140 の部分 unique + ON CONFLICT DO NOTHING に
-          # 任せているので mock では 1 行も通らない。ci.yml の bazel-test-db と
-          # cache-warm.yml を同じ内容にすること
-          # (check_bazel_test_matrix.sh が pair 一致を検査する)
-          - { name: db-normal-tenko-record, target: "//:normal_tenko_record_test" }
           # Refs ippoan/alc-app#387: dev端末の印 (X-Device-Dev) が DB の接続まで通り、
           # dev の行と本番の行が分かれること。行の出し分けは列の既定値と RLS
           # (alc-migrations 153) が担うので mock では 1 行も通らない。
           # ci.yml の bazel-test-db と cache-warm.yml を同じ内容にすること
           # (check_bazel_test_matrix.sh が pair 一致を検査する)
           - { name: db-device-dev-axis, target: "//:device_dev_axis_test" }
-          # Refs ippoan/alc-app-s3#135: 端末ごとの血圧計 (Omron) 使用設定。
-          # GET /api/devices/settings/{id} は 063/114 の SECURITY DEFINER 関数
-          # get_device_settings_by_id() 経由でしか devices を読めないので、mock
-          # (repository 差し替え) では関数の列挙漏れを検出できない。
-          # ci.yml の bazel-test-db と cache-warm.yml を同じ内容にすること
-          # (check_bazel_test_matrix.sh が pair 一致を検査する)
-          # Refs ippoan/alc-app-s3#135: 自動点呼タブの血圧必須化 + 遠隔点呼への切り替え
-          # (migration 144)。CHECK 制約の拡張 (tenko_method に '遠隔点呼' を追加) と
-          # escalate-remote の UPDATE は mock では 1 行も通らない。
-          # ci.yml の bazel-test-db と cache-warm.yml を同じ内容にすること
-          # (check_bazel_test_matrix.sh が pair 一致を検査する)
-          - { name: db-tenko-bp-required-escalate, target: "//:tenko_bp_required_escalate_test" }
           # Refs #685: テスト DB の alc_api_app の権限を本番に揃えた上で、SELECT の無い
           # alc_api の表 = 0 件を確かめる (新しい表の GRANT 付け忘れを落とす)。
           # ci.yml の bazel-test-db と cache-warm.yml を同じ内容にすること

@@ -20,7 +20,6 @@ pub mod repository;
 pub mod serde_helpers;
 pub mod storage;
 pub mod tenant;
-pub mod webhook;
 
 use std::sync::Arc;
 
@@ -36,7 +35,6 @@ pub struct AppState {
     pub auth: Arc<dyn AuthRepository>,
     pub bot_admin: Arc<dyn BotAdminRepository>,
     pub storage: Arc<dyn StorageBackend>,
-    pub webhook: Option<Arc<dyn webhook::WebhookService>>,
     pub notify_recipients: Arc<dyn NotifyRecipientRepository>,
     pub notify_documents: Arc<dyn NotifyDocumentRepository>,
     pub notify_deliveries: Arc<dyn NotifyDeliveryRepository>,

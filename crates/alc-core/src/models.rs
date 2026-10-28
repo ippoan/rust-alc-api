@@ -73,49 +73,6 @@ pub struct User {
     pub created_at: DateTime<Utc>,
 }
 
-// --- Webhook ---
-
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct WebhookConfig {
-    pub id: Uuid,
-    pub tenant_id: Uuid,
-    pub event_type: String,
-    pub url: String,
-    #[serde(skip_serializing)]
-    pub secret: Option<String>,
-    pub enabled: bool,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct CreateWebhookConfig {
-    pub event_type: String,
-    pub url: String,
-    pub secret: Option<String>,
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-}
-
-fn default_true() -> bool {
-    true
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-pub struct WebhookDelivery {
-    pub id: Uuid,
-    pub tenant_id: Uuid,
-    pub config_id: Uuid,
-    pub event_type: String,
-    pub payload: serde_json::Value,
-    pub status_code: Option<i32>,
-    pub response_body: Option<String>,
-    pub attempt: i32,
-    pub delivered_at: Option<DateTime<Utc>>,
-    pub created_at: DateTime<Utc>,
-    pub success: bool,
-}
-
 // --- Dtako: Office ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]

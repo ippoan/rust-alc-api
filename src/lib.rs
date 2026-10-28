@@ -10,6 +10,5 @@ pub mod db;
 pub mod middleware;
 pub mod routes;
 pub mod storage;
-pub mod webhook;
 
 pub use alc_core::AppState;

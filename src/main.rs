@@ -16,12 +16,7 @@ use alc_notify::repo::{
     PgLineworksChannelsRepository, PgNotifyDeliveryRepository, PgNotifyDocumentRepository,
     PgNotifyRecipientRepository,
 };
-use rust_alc_api::db::repository::{
-    PgAuthRepository, PgBotAdminRepository, PgDailyHealthRepository, PgDriverInfoRepository,
-    PgEquipmentFailuresRepository, PgHealthBaselinesRepository, PgTenkoCallRepository,
-    PgTenkoRecordsRepository, PgTenkoSchedulesRepository, PgTenkoSessionRepository,
-    PgTenkoWebhooksRepository,
-};
+use rust_alc_api::db::repository::{PgAuthRepository, PgBotAdminRepository};
 use rust_alc_api::storage::StorageBackend;
 use rust_alc_api::AppState;
 
@@ -100,15 +95,6 @@ async fn main() -> anyhow::Result<()> {
 
     let auth = Arc::new(PgAuthRepository::new(pool.clone()));
     let bot_admin = Arc::new(PgBotAdminRepository::new(pool.clone()));
-    let daily_health = Arc::new(PgDailyHealthRepository::new(pool.clone()));
-    let driver_info = Arc::new(PgDriverInfoRepository::new(pool.clone()));
-    let equipment_failures = Arc::new(PgEquipmentFailuresRepository::new(pool.clone()));
-    let health_baselines = Arc::new(PgHealthBaselinesRepository::new(pool.clone()));
-    let tenko_call = Arc::new(PgTenkoCallRepository::new(pool.clone()));
-    let tenko_records = Arc::new(PgTenkoRecordsRepository::new(pool.clone()));
-    let tenko_schedules = Arc::new(PgTenkoSchedulesRepository::new(pool.clone()));
-    let tenko_sessions = Arc::new(PgTenkoSessionRepository::new(pool.clone()));
-    let tenko_webhooks = Arc::new(PgTenkoWebhooksRepository::new(pool.clone()));
     let notify_recipients = Arc::new(PgNotifyRecipientRepository::new(pool.clone()));
     let notify_documents = Arc::new(PgNotifyDocumentRepository::new(pool.clone()));
     let notify_deliveries = Arc::new(PgNotifyDeliveryRepository::new(pool.clone()));
@@ -132,30 +118,6 @@ async fn main() -> anyhow::Result<()> {
             ) as Arc<dyn StorageBackend>
         });
 
-    let webhook_service: Option<Arc<dyn rust_alc_api::webhook::WebhookService>> = {
-        let wh_repo: Arc<dyn rust_alc_api::db::repository::WebhookRepository> = Arc::new(
-            rust_alc_api::db::repository::PgWebhookRepository::new(pool.clone()),
-        );
-        let wh_http: Arc<dyn rust_alc_api::webhook::WebhookHttpClient> =
-            Arc::new(rust_alc_api::webhook::ReqwestWebhookClient);
-        Some(Arc::new(rust_alc_api::webhook::PgWebhookService::new(
-            wh_repo, wh_http,
-        )))
-    };
-
-    let tenko_state = alc_tenko::TenkoState {
-        tenko_call,
-        tenko_records,
-        tenko_schedules,
-        tenko_sessions,
-        tenko_webhooks,
-        daily_health,
-        health_baselines,
-        equipment_failures,
-        driver_info,
-        webhook: webhook_service.clone(),
-    };
-
     let state = AppState {
         pool: Some(pool.clone()),
         auth,
@@ -168,7 +130,6 @@ async fn main() -> anyhow::Result<()> {
         notify_storage,
         redact_broadcaster: alc_core::redact_broadcast::RedactBroadcaster::from_env().map(Arc::new),
         realtime_bus: alc_core::realtime_bus::RealtimeBus::from_env().map(Arc::new),
-        webhook: webhook_service,
     };
 
     // CORS: 任意オリジン全開放 (allow_origin(Any)) をやめ、ippoan 系フロントの
@@ -216,8 +177,7 @@ async fn main() -> anyhow::Result<()> {
         ])
         .allow_headers(Any);
 
-    let api_router =
-        rust_alc_api::routes::router(rust_alc_api::routes::internal_oidc_trust(), tenko_state);
+    let api_router = rust_alc_api::routes::router(rust_alc_api::routes::internal_oidc_trust());
 
     let app = Router::new()
         .nest("/api", api_router)

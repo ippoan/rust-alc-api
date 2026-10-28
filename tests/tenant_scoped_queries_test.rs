@@ -14,9 +14,7 @@ use chrono::Utc;
 use sqlx::postgres::PgPoolOptions;
 use uuid::Uuid;
 
-use rust_alc_api::db::repository::{
-    AuthRepository, PgAuthRepository, PgTenkoCallRepository, TenkoCallRepository,
-};
+use rust_alc_api::db::repository::{AuthRepository, PgAuthRepository};
 
 async fn setup() -> sqlx::PgPool {
     let pool = PgPoolOptions::new()
@@ -127,44 +125,4 @@ async fn auth_repo_writes_are_tenant_scoped() {
     .await
     .unwrap();
     assert_eq!(recipient_tenant, tenant_a);
-}
-
-/// 点呼用電話番号の削除は、渡したテナントの行だけ (予定超過の確認は W7c で alc-tenko-worker へ移った)。
-#[tokio::test]
-async fn tenko_repos_are_tenant_scoped() {
-    let pool = setup().await;
-    let tenko_call = PgTenkoCallRepository::new(pool.clone());
-    let tenant_a = common::create_test_tenant(&pool, "Scoped Tenko A").await;
-    let tenant_b = common::create_test_tenant(&pool, "Scoped Tenko B").await;
-
-    // --- delete_number ---
-    let call_number = unique("call");
-    let number_id = tenko_call
-        .create_number(&call_number, &tenant_a.to_string(), None)
-        .await
-        .expect("create_number failed");
-
-    tenko_call
-        .delete_number(&tenant_b.to_string(), number_id)
-        .await
-        .expect("delete_number (other tenant) failed");
-    let left: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM alc_api.tenko_call_numbers WHERE id = $1")
-            .bind(number_id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-    assert_eq!(left, 1, "別テナントからは電話番号を消せないこと");
-
-    tenko_call
-        .delete_number(&tenant_a.to_string(), number_id)
-        .await
-        .expect("delete_number failed");
-    let left: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM alc_api.tenko_call_numbers WHERE id = $1")
-            .bind(number_id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-    assert_eq!(left, 0);
 }

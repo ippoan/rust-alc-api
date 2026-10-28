@@ -9,15 +9,6 @@ pub use alc_notify::lineworks_channels as notify_lineworks_channels;
 pub use alc_notify::read_tracker as notify_read_tracker;
 pub use alc_notify::test_endpoints as notify_test_endpoints;
 pub use alc_notify::viewer as notify_viewer;
-pub use alc_tenko::daily_health;
-pub use alc_tenko::driver_info;
-pub use alc_tenko::equipment_failures;
-pub use alc_tenko::health_baselines;
-pub use alc_tenko::tenko_call;
-pub use alc_tenko::tenko_records;
-pub use alc_tenko::tenko_schedules;
-pub use alc_tenko::tenko_sessions;
-pub use alc_tenko::tenko_webhooks;
 
 pub mod rls_check;
 
@@ -39,10 +30,7 @@ pub fn internal_oidc_trust() -> InternalOidcTrust {
     }
 }
 
-pub fn router(
-    internal_oidc: InternalOidcTrust,
-    tenko_state: alc_tenko::TenkoState,
-) -> Router<AppState> {
+pub fn router(internal_oidc: InternalOidcTrust) -> Router<AppState> {
     // 管理者ルート — 注入 identity (X-User-*) を信頼 (Refs #434)。
     // 前段 proxy / gateway が introspect 検証済みの identity を注入する前提。
     // role 判定は各ハンドラが AuthUser から行う。
@@ -85,29 +73,11 @@ pub fn router(
         .merge(notify_read_tracker::public_router())
         .merge(notify_viewer::public_router());
 
-    // tenko ドメイン (Refs #513) — AppState から分離した TenkoState でマウントする。
-    // tenant 系ルートには monolith 本体と同じ require_tenant_header を張る。
-    let tenko_tenant: Router<AppState> = Router::new()
-        .merge(tenko_schedules::tenant_router())
-        .merge(tenko_sessions::tenant_router())
-        .merge(tenko_records::tenant_router())
-        .merge(health_baselines::tenant_router())
-        .merge(equipment_failures::tenant_router())
-        .merge(tenko_webhooks::tenant_router())
-        .merge(tenko_call::tenant_router())
-        .merge(daily_health::tenant_router())
-        .merge(driver_info::tenant_router())
-        .layer(axum_middleware::from_fn(require_tenant_header))
-        .with_state(tenko_state.clone());
-    let tenko_public: Router<AppState> = tenko_call::public_router().with_state(tenko_state);
-
     Router::new()
         .merge(public_routes)
-        .merge(tenko_public)
         .merge(jwt_protected)
         .merge(internal_protected)
         .merge(tenant_protected)
-        .merge(tenko_tenant)
 }
 
 #[cfg(test)]
