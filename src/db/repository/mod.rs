@@ -18,8 +18,8 @@ pub use alc_core::tenant::TenantConn;
 pub use alc_core::repo::auth;
 pub use alc_misc::repo::{bot_admin, webhook};
 pub use alc_tenko::repo::{
-    daily_health, driver_info, equipment_failures, health_baselines, overdue, tenko_call,
-    tenko_records, tenko_schedules, tenko_sessions, tenko_webhooks,
+    daily_health, driver_info, equipment_failures, health_baselines, tenko_call, tenko_records,
+    tenko_schedules, tenko_sessions, tenko_webhooks,
 };
 
 // Re-export notify submodules and Pg implementations
@@ -36,7 +36,6 @@ pub use alc_core::repo::PgAuthRepository;
 pub use alc_misc::repo::{PgBotAdminRepository, PgWebhookRepository};
 pub use alc_tenko::repo::{
     PgDailyHealthRepository, PgDriverInfoRepository, PgEquipmentFailuresRepository,
-    PgHealthBaselinesRepository, PgTenkoCallRepository, PgTenkoOverdueRepository,
-    PgTenkoRecordsRepository, PgTenkoSchedulesRepository, PgTenkoSessionRepository,
-    PgTenkoWebhooksRepository,
+    PgHealthBaselinesRepository, PgTenkoCallRepository, PgTenkoRecordsRepository,
+    PgTenkoSchedulesRepository, PgTenkoSessionRepository, PgTenkoWebhooksRepository,
 };

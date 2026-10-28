@@ -51,10 +51,6 @@ path = "crates/alc-tenko/src/daily_health.rs"
 type = "mock"
 
 [[files]]
-path = "crates/alc-tenko/src/overdue.rs"
-type = "unit"
-
-[[files]]
 path = "crates/alc-tenko/src/equipment_failures.rs"
 type = "mock"
 

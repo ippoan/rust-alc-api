@@ -19,15 +19,11 @@
 
 mod common;
 
-use std::sync::atomic::{AtomicUsize, Ordering};
-
 use serde_json::{json, Value};
 use uuid::Uuid;
 
 use alc_core::tenant::TenantConn;
-use rust_alc_api::db::repository::{
-    AuthRepository, PgAuthRepository, PgTenkoOverdueRepository, PgWebhookRepository,
-};
+use rust_alc_api::db::repository::{AuthRepository, PgAuthRepository};
 
 struct Ctx {
     /// RLS を素通りする pool (行の準備と検証用)
@@ -161,96 +157,6 @@ async fn runtime_role_is_subject_to_rls() {
             .await
             .expect("tenant_allowed_emails は tenant 無しでもエラーにならない");
     assert_eq!(invisible, 0);
-}
-
-// ============================================================
-// 5. 超過検知の 1 tick
-// ============================================================
-
-/// 外部への送信を数えるだけの HTTP クライアント
-#[derive(Default)]
-struct CountingHttp {
-    calls: AtomicUsize,
-}
-
-#[async_trait::async_trait]
-impl rust_alc_api::webhook::WebhookHttpClient for CountingHttp {
-    async fn deliver(
-        &self,
-        _url: &str,
-        _event_type: &str,
-        _payload: &Value,
-        _secret: Option<&str>,
-    ) -> Result<(Option<i32>, Option<String>, bool), anyhow::Error> {
-        self.calls.fetch_add(1, Ordering::SeqCst);
-        Ok((Some(200), Some("ok".to_string()), true))
-    }
-}
-
-/// 全テナントの設定の列挙 → 超過した予定 → 乗務員の名前 → 通知済みの印 → 配信の記録、の 1 周
-#[tokio::test]
-async fn overdue_tick_marks_and_delivers() {
-    let ctx = setup().await;
-    let tenant = common::create_test_tenant(&ctx.admin, "RT Overdue").await;
-    sqlx::query(
-        "INSERT INTO alc_api.webhook_configs (tenant_id, event_type, url, enabled)
-         VALUES ($1, 'tenko_overdue', 'https://example.com/hook', TRUE)",
-    )
-    .bind(tenant)
-    .execute(&ctx.admin)
-    .await
-    .unwrap();
-    let employee: Uuid = sqlx::query_scalar(
-        "INSERT INTO alc_api.employees (tenant_id, nfc_id, name) VALUES ($1, $2, $3) RETURNING id",
-    )
-    .bind(tenant)
-    .bind(Uuid::new_v4().to_string())
-    .bind("RT Driver")
-    .fetch_one(&ctx.admin)
-    .await
-    .unwrap();
-    let schedule: Uuid = sqlx::query_scalar(
-        "INSERT INTO alc_api.tenko_schedules
-            (tenant_id, employee_id, tenko_type, responsible_manager_name, scheduled_at, instruction)
-         VALUES ($1, $2, 'pre_operation', 'Manager', NOW() - INTERVAL '2 hours', 'note')
-         RETURNING id",
-    )
-    .bind(tenant)
-    .bind(employee)
-    .fetch_one(&ctx.admin)
-    .await
-    .unwrap();
-
-    let http = CountingHttp::default();
-    rust_alc_api::webhook::check_overdue_schedules(
-        &PgWebhookRepository::new(ctx.app.clone()),
-        &PgTenkoOverdueRepository::new(ctx.app.clone()),
-        &http,
-    )
-    .await
-    .expect("check_overdue_schedules failed");
-
-    let notified: bool = sqlx::query_scalar(
-        "SELECT overdue_notified_at IS NOT NULL FROM alc_api.tenko_schedules WHERE id = $1",
-    )
-    .bind(schedule)
-    .fetch_one(&ctx.admin)
-    .await
-    .unwrap();
-    assert!(notified, "超過した予定に通知済みの印が付く");
-    assert!(http.calls.load(Ordering::SeqCst) >= 1);
-
-    let (deliveries, employee_name): (i64, Option<String>) = sqlx::query_as(
-        "SELECT count(*), max(payload->'data'->>'employee_name') \
-         FROM alc_api.webhook_deliveries \
-         WHERE tenant_id = $1 AND event_type = 'tenko_overdue' AND success",
-    )
-    .bind(tenant)
-    .fetch_one(&ctx.admin)
-    .await
-    .unwrap();
-    assert_eq!(deliveries, 1);
-    assert_eq!(employee_name.as_deref(), Some("RT Driver"));
 }
 
 // ============================================================

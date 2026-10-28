@@ -14,10 +14,8 @@ use chrono::Utc;
 use sqlx::postgres::PgPoolOptions;
 use uuid::Uuid;
 
-use alc_tenko::overdue::TenkoOverdueRepository;
 use rust_alc_api::db::repository::{
-    AuthRepository, PgAuthRepository, PgTenkoCallRepository, PgTenkoOverdueRepository,
-    TenkoCallRepository,
+    AuthRepository, PgAuthRepository, PgTenkoCallRepository, TenkoCallRepository,
 };
 
 async fn setup() -> sqlx::PgPool {
@@ -32,18 +30,6 @@ async fn setup() -> sqlx::PgPool {
 
 fn unique(prefix: &str) -> String {
     format!("{prefix}-{}", Uuid::new_v4().simple())
-}
-
-async fn insert_employee(pool: &sqlx::PgPool, tenant_id: Uuid, name: &str) -> Uuid {
-    sqlx::query_scalar(
-        "INSERT INTO alc_api.employees (tenant_id, nfc_id, name) VALUES ($1, $2, $3) RETURNING id",
-    )
-    .bind(tenant_id)
-    .bind(Uuid::new_v4().to_string())
-    .bind(name)
-    .fetch_one(pool)
-    .await
-    .expect("employee insert failed")
 }
 
 /// 招待の消費 (`delete_invitation`) とログアウト (`clear_refresh_token`) は、
@@ -143,71 +129,13 @@ async fn auth_repo_writes_are_tenant_scoped() {
     assert_eq!(recipient_tenant, tenant_a);
 }
 
-/// 超過検知の従業員名の取得・通知済みの印と、点呼用電話番号の削除は、渡したテナントの行だけ。
+/// 点呼用電話番号の削除は、渡したテナントの行だけ (予定超過の確認は W7c で alc-tenko-worker へ移った)。
 #[tokio::test]
 async fn tenko_repos_are_tenant_scoped() {
     let pool = setup().await;
-    let overdue = PgTenkoOverdueRepository::new(pool.clone());
     let tenko_call = PgTenkoCallRepository::new(pool.clone());
     let tenant_a = common::create_test_tenant(&pool, "Scoped Tenko A").await;
     let tenant_b = common::create_test_tenant(&pool, "Scoped Tenko B").await;
-
-    // --- get_employee_name / mark_overdue_notified ---
-    let employee = insert_employee(&pool, tenant_a, "Scoped Driver").await;
-    let schedule: Uuid = sqlx::query_scalar(
-        "INSERT INTO alc_api.tenko_schedules
-            (tenant_id, employee_id, tenko_type, responsible_manager_name, scheduled_at, instruction)
-         VALUES ($1, $2, 'pre_operation', 'Manager', NOW() - INTERVAL '2 hours', 'note')
-         RETURNING id",
-    )
-    .bind(tenant_a)
-    .bind(employee)
-    .fetch_one(&pool)
-    .await
-    .expect("schedule insert failed");
-
-    assert_eq!(
-        overdue
-            .get_employee_name(tenant_a, employee)
-            .await
-            .expect("get_employee_name failed")
-            .as_deref(),
-        Some("Scoped Driver")
-    );
-    assert_eq!(
-        overdue
-            .get_employee_name(tenant_b, employee)
-            .await
-            .expect("get_employee_name (other tenant) failed"),
-        None,
-        "別テナントからは従業員名を引けないこと"
-    );
-
-    overdue
-        .mark_overdue_notified(tenant_b, schedule)
-        .await
-        .expect("mark_overdue_notified (other tenant) failed");
-    let notified: bool = sqlx::query_scalar(
-        "SELECT overdue_notified_at IS NOT NULL FROM alc_api.tenko_schedules WHERE id = $1",
-    )
-    .bind(schedule)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
-    assert!(!notified, "別テナントからは通知済みにできないこと");
-
-    overdue
-        .mark_overdue_notified(tenant_a, schedule)
-        .await
-        .expect("mark_overdue_notified failed");
-    let notified: bool = sqlx::query_scalar(
-        "SELECT overdue_notified_at IS NOT NULL FROM alc_api.tenko_schedules WHERE id = $1",
-    )
-    .bind(schedule)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
-    assert!(notified);
 
     // --- delete_number ---
     let call_number = unique("call");
