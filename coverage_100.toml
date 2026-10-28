@@ -83,9 +83,3 @@ path = "src/archive/dtako.rs"
 type = "unit"
 
 # src/archive/repo.rs — temporarily excluded: PgArchiveDb Phase B methods need integration tests
-
-# --- alc-notify ---
-
-[[files]]
-path = "crates/alc-notify/src/clients/line.rs"
-type = "unit"

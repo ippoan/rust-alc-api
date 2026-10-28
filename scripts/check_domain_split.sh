@@ -85,7 +85,7 @@ guard_appstate_fields trouble "ippoan/alc-trouble-worker" \
 
 # --- notify (Worker へ移した口。Refs #747) ---
 # 宛先・グループ・LINE の設定の口は ippoan/alc-notify-worker に移った。
-# Cloud Run に残る notify の口 (文書・ingest・viewer・LINE の webhook 等) は使わない。
+# Cloud Run に残る notify の口 (文書・ingest 等) は使わない。
 guard_repository_modules notify "ippoan/alc-notify-worker" \
   notify_groups notify_line_config
 guard_appstate_fields notify "ippoan/alc-notify-worker" \
@@ -110,6 +110,25 @@ if [ -n "$hits" ]; then
   echo "$hits"
   err "domain-split: alc-core の notify_deliveries に閲覧の口の repository が再流入しています。閲覧は ippoan/nuxt-notify の Worker に置いてください (Refs #680)"
 fi
+
+# --- LINE・LINE WORKS の webhook の受け口 (消した。W8b、Refs #680) ---
+# LINE の webhook (公開の /notify/line/webhook と /internal/notify/line/webhook) と LINE WORKS の 2 口
+# (/internal/lineworks/bot-secret/{bot_id}・/internal/lineworks/event) は ippoan/alc-notify-worker に移った
+# (auth-worker が Service Binding ALC_NOTIFY で呼ぶ)。module・route・repository・AppState の欄の再流入を落とす。
+for m in line_webhook lineworks_channels clients/line; do
+  if [ -e "crates/alc-notify/src/${m}.rs" ]; then
+    err "domain-split: crates/alc-notify/src/${m}.rs が再作成されています。LINE・LINE WORKS の受け口は ippoan/alc-notify-worker に置いてください (Refs #680)"
+  fi
+done
+hits=$(grep -rnE '"/notify/line/webhook"|"/internal/notify/line/webhook"|"/internal/lineworks/bot-secret/|"/internal/lineworks/event"' crates src || true)
+if [ -n "$hits" ]; then
+  echo "$hits"
+  err "domain-split: LINE・LINE WORKS の受け口が再登録されています。ippoan/alc-notify-worker に置いてください (Refs #680)"
+fi
+guard_repository_modules notify "ippoan/alc-notify-worker" \
+  notify_recipients lineworks_channels
+guard_appstate_fields notify "ippoan/alc-notify-worker" \
+  'notify_recipients|lineworks_channels'
 
 # --- dtako (Worker へ移した。Refs #680) ---
 # dtako の口は全部 ippoan/alc-dtako-worker に移り (最後が W5c-5 の起票 dtako_tickets)、alc-dtako crate は消した。
@@ -169,4 +188,4 @@ if [ "$fail" != 0 ]; then
   echo "::error::domain split guard failed — ドメインコードは alc-core ではなく各ドメイン crate に追加してください (設計: issue #513)"
   exit 1
 fi
-echo "domain split guard OK (tenko, trouble, notify, notify viewer, dtako, hub, devices, admin, carins)"
+echo "domain split guard OK (tenko, trouble, notify, notify viewer, notify line/lineworks inbound, dtako, hub, devices, admin, carins)"
