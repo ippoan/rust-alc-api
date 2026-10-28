@@ -171,31 +171,6 @@ async fn main() -> anyhow::Result<()> {
         webhook: webhook_service,
     };
 
-    // 点呼予定超過チェック バックグラウンドタスク
-    let overdue_repo: Arc<dyn rust_alc_api::db::repository::WebhookRepository> = Arc::new(
-        rust_alc_api::db::repository::PgWebhookRepository::new(pool.clone()),
-    );
-    let overdue_tenko: Arc<dyn alc_tenko::overdue::TenkoOverdueRepository> = Arc::new(
-        rust_alc_api::db::repository::PgTenkoOverdueRepository::new(pool),
-    );
-    let overdue_http: Arc<dyn rust_alc_api::webhook::WebhookHttpClient> =
-        Arc::new(rust_alc_api::webhook::ReqwestWebhookClient);
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
-        loop {
-            interval.tick().await;
-            if let Err(e) = rust_alc_api::webhook::check_overdue_schedules(
-                &*overdue_repo,
-                &*overdue_tenko,
-                &*overdue_http,
-            )
-            .await
-            {
-                tracing::error!("Overdue check failed: {e}");
-            }
-        }
-    });
-
     // CORS: 任意オリジン全開放 (allow_origin(Any)) をやめ、ippoan 系フロントの
     // オリジンだけ許可する。Origin は `scheme://host[:port]` 形式 (path/userinfo
     // なし) なので host 抽出は単純分割で安全。許可 suffix は env

@@ -1,6 +1,6 @@
 ---
 name: rust-alc-api-map
-generated-from: rust-alc-api:50eac01f92cafd4acd770bece53cf7f651d4702c
+generated-from: rust-alc-api:e1f8fcab85e1af9665c00a3aaa20a9a988861d1d
 paths: [crates/, src/, tests/]
 description: rust-alc-api (アルコールチェッカー基盤の Rust/Axum Cargo workspace — domain crate 群 + monolith 単一バイナリ、PostgreSQL+RLS、Cloud Run) の構造ナビゲーション。どの crate に何のルートがあるか / monolith (rust-alc-api) 一本化 (gateway + per-domain は #556 で廃止) / RLS・migration・deploy/release 分離の gotcha を 1 枚にまとめる。トリガー:「rust-alc-api」「alc-api」「alc-notify」「alc-tenko」「alc-carins」「alc-dtako」「gateway」「tenko-api」「carins-api」「dtako-api」「trouble-api」(trouble は ippoan/alc-trouble-worker へ移設済み)「RLS テナント」「sqlx migration」「ts-rs」「Release Wave」「Bazel」等。
 ---
@@ -56,8 +56,8 @@ router 実装として存続。旧 per-domain は同じ domain crate を単独 m
   (tenko 系 9 repo) を組み立て、
   `.nest("/api", rust_alc_api::routes::router(internal_oidc_trust(), tenko_state))`。
   各 domain の route 群は router 内で `.with_state(...)` マウント (FromRef 変換は廃止)。trouble の `TroubleState`・
-  `TROUBLE_R2_BUCKET`・`SCHEDULE_ALARM_URL` は #747 で消した (`cloudrun/render.sh` の env と trouble の R2 キーの secretKeyRef も)。背景 task: 60s ごと
-  `alc_tenko::overdue::check_overdue_schedules` (WebhookRepository + TenkoOverdueRepository + http の 3 引数)。
+  `TROUBLE_R2_BUCKET`・`SCHEDULE_ALARM_URL` は #747 で消した (`cloudrun/render.sh` の env と trouble の R2 キーの secretKeyRef も)。背景 task は無い (60s ごとの予定超過の確認
+  `check_overdue_schedules` は W7c で ippoan/alc-tenko-worker の Cron Trigger (毎分、通知済みの印を先に付ける形) へ移して消した)。
 - **router 本体**: `src/routes/mod.rs` — 各 domain crate のルートを re-export し `router()` で結線。
   middleware: `require_tenant_header` (tenant/admin 共通、注入 identity 信頼) / `require_internal_jwt`
   (auth-worker→internal ingest、aud=alc-api-internal。**#479 で HS256 dual-accept を撤去し
@@ -201,8 +201,7 @@ router 実装として存続。旧 per-domain は同じ domain crate を単独 m
     `req.tenant_id` が無ければ 400「無効なトークンです」) / `list_tenant_fcm_tokens_except`。
     **`get_fcm_token_bypass_rls` は消した** — 設定変更の通知 (`update_call_settings`) は tenant 付きの
     `get_device_fcm_token(tenant_id, id)` でトークンを引く
-  - `alc-tenko`: `TenkoOverdueRepository::get_employee_name(tenant_id, employee_id)` /
-    `mark_overdue_notified(tenant_id, schedule_id)` (`check_overdue_schedules` が `config.tenant_id` を渡す) /
+  - `alc-tenko`: (予定超過の `TenkoOverdueRepository` は W7c で消した) /
     `TenkoCallRepository::delete_number(tenant_id, id)` (handler が `Extension<TenantId>` を取る。
     `tenko_call_numbers.tenant_id` は TEXT なので `&str`)
   - `alc-misc/src/access_requests.rs`: 一覧・承認・却下は helper `tenant_conn` (`auth_user.tenant_id`) の接続で叩く。
@@ -217,7 +216,7 @@ router 実装として存続。旧 per-domain は同じ domain crate を単独 m
     `find_invitation_by_email` → `alc_api.find_invitation_by_email($1)` /
     `list_fcm_devices` → `alc_api.list_fcm_devices()` / `list_all_callable_devices` → `alc_api.list_all_callable_devices()` /
     `list_dev_device_tenant_ids` → `SELECT t::text FROM alc_api.list_dev_device_tenant_ids() t` (関数は uuid を返す。
-    Rust 側は String のまま) / `find_overdue_configs` → `alc_api.list_tenko_overdue_webhook_configs()` /
+    Rust 側は String のまま) / (W7c で消した) `find_overdue_configs` → `alc_api.list_tenko_overdue_webhook_configs()` /
     `create_request` の INSERT → `alc_api.create_access_request($1, $2)` (tenant_id, user_id)。
     **既存の関数に寄せた 2 つ** (W6b で消した `alc-devices/src/repo/devices.rs`): `get_registration_status` は `devices` への JOIN を
     やめ、request を引いた後 `device_id` が在るときだけ `get_device_re_pair_state` (migration 122) で `settings_token` を取る
@@ -277,7 +276,7 @@ router 実装として存続。旧 per-domain は同じ domain crate を単独 m
     `set_current_tenant($1)` の**後に**、`device_dev::is_device_dev()` が true のときだけ
     `set_config('app.device_dev', '1', false)` を打つ (SQL 関数が毎回 `''` に戻すので逆順は不可)。
     dev でないときは追加の文を打たない
-  - **スコープの外は dev でない**: 公開 route / 認証前 / バッチ (`check_overdue_schedules`) /
+  - **スコープの外は dev でない**: 公開 route / 認証前 / バッチ (予定超過の確認。W7c で worker の Cron へ移した) /
     **`tokio::spawn` の先**。spawn の先で書いた行は本番の行になるので、dev かどうかは spawn の前に取る
   - **dev の要求では点呼の webhook を発火しない**: `alc-tenko/src/tenko_sessions.rs::spawn_webhook`
     (点呼の 5 か所の発火を 1 つにまとめた関数) が spawn の前に判定し、dev なら配信の行も作らず外部へも
