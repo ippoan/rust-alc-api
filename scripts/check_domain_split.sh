@@ -130,6 +130,28 @@ guard_repository_modules notify "ippoan/alc-notify-worker" \
 guard_appstate_fields notify "ippoan/alc-notify-worker" \
   'notify_recipients|lineworks_channels'
 
+# --- notify の文書とメールの閲覧の口 (消した。W8c-1、Refs #680) ---
+# 文書の一覧・1 件・preview・download とメールの一覧・1 件 (GET /notify/documents・/notify/documents/{id}・/preview・
+# /download・/notify/emails・/notify/emails/{message_id}) は ippoan/alc-notify-worker に移った (auth-worker が GET だけ
+# Service Binding ALC_NOTIFY へ回す)。呼び手の無い search は移さず消した。同じ path の DELETE と upload・recompute
+# (POST) は W8c-2 まで残るので、GET の route と閲覧用の repository の再流入だけを落とす。
+hits=$(grep -rnE '"/notify/documents"|"/notify/documents/search"|"/notify/documents/\{id\}/(preview|download)"|"/notify/emails' crates src || true)
+if [ -n "$hits" ]; then
+  echo "$hits"
+  err "domain-split: notify の文書・メールの閲覧の口が再登録されています。ippoan/alc-notify-worker に置いてください (Refs #680)"
+fi
+hits=$(grep -rlPz '"/notify/documents/\{id\}",\s*axum::routing::get' crates src || true)
+if [ -n "$hits" ]; then
+  echo "$hits"
+  err "domain-split: GET /notify/documents/{id} が再登録されています。ippoan/alc-notify-worker に置いてください (Refs #680)"
+fi
+hits=$(grep -nE 'pub struct NotifyDeliveryWithRecipient|fn (list_by_document|search|list)\(' \
+  crates/alc-core/src/repository/notify_deliveries.rs crates/alc-core/src/repository/notify_documents.rs || true)
+if [ -n "$hits" ]; then
+  echo "$hits"
+  err "domain-split: alc-core の notify_documents / notify_deliveries に閲覧の口の repository が再流入しています。ippoan/alc-notify-worker に置いてください (Refs #680)"
+fi
+
 # --- dtako (Worker へ移した。Refs #680) ---
 # dtako の口は全部 ippoan/alc-dtako-worker に移り (最後が W5c-5 の起票 dtako_tickets)、alc-dtako crate は消した。
 # crate の再作成と、alc-core への起票の repository / model / AppState field の再流入を落とす
@@ -188,4 +210,4 @@ if [ "$fail" != 0 ]; then
   echo "::error::domain split guard failed — ドメインコードは alc-core ではなく各ドメイン crate に追加してください (設計: issue #513)"
   exit 1
 fi
-echo "domain split guard OK (tenko, trouble, notify, notify viewer, notify line/lineworks inbound, dtako, hub, devices, admin, carins)"
+echo "domain split guard OK (tenko, trouble, notify, notify viewer, notify line/lineworks inbound, notify documents read, dtako, hub, devices, admin, carins)"

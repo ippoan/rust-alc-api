@@ -359,17 +359,6 @@ mod tests {
         async fn get(&self, _t: Uuid, _id: Uuid) -> Result<Option<NotifyDocument>, sqlx::Error> {
             Ok(self.doc.lock().unwrap().clone())
         }
-        async fn list(
-            &self,
-            _t: Uuid,
-            _l: i64,
-            _o: i64,
-        ) -> Result<Vec<NotifyDocument>, sqlx::Error> {
-            unimplemented!()
-        }
-        async fn search(&self, _t: Uuid, _q: &str) -> Result<Vec<NotifyDocument>, sqlx::Error> {
-            unimplemented!()
-        }
         async fn update_extraction(
             &self,
             _t: Uuid,

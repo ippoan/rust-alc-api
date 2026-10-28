@@ -17,26 +17,6 @@ pub struct NotifyDelivery {
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
-/// 配信記録 + 受信者名 + 送信実行者 (一覧表示用)
-#[derive(Debug, Clone, sqlx::FromRow, serde::Serialize)]
-pub struct NotifyDeliveryWithRecipient {
-    pub id: Uuid,
-    pub document_id: Uuid,
-    pub recipient_id: Uuid,
-    pub provider: String,
-    pub status: String,
-    pub error_message: Option<String>,
-    pub attempt: i32,
-    pub sent_at: Option<chrono::DateTime<chrono::Utc>>,
-    pub read_at: Option<chrono::DateTime<chrono::Utc>>,
-    pub read_token: Uuid,
-    pub created_at: chrono::DateTime<chrono::Utc>,
-    pub recipient_name: String,
-    pub triggered_by_user_id: Option<Uuid>,
-    pub triggered_by_name: Option<String>,
-    pub triggered_by_email: Option<String>,
-}
-
 #[async_trait]
 pub trait NotifyDeliveryRepository: Send + Sync {
     /// ドキュメントに対して全受信者分の配信レコードを一括作成
@@ -56,12 +36,6 @@ pub trait NotifyDeliveryRepository: Send + Sync {
     ) -> Result<(), sqlx::Error>;
 
     async fn mark_sent(&self, tenant_id: Uuid, id: Uuid) -> Result<(), sqlx::Error>;
-
-    async fn list_by_document(
-        &self,
-        tenant_id: Uuid,
-        document_id: Uuid,
-    ) -> Result<Vec<NotifyDeliveryWithRecipient>, sqlx::Error>;
 
     async fn list_pending(
         &self,

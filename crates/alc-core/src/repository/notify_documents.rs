@@ -79,19 +79,6 @@ pub trait NotifyDocumentRepository: Send + Sync {
 
     async fn get(&self, tenant_id: Uuid, id: Uuid) -> Result<Option<NotifyDocument>, sqlx::Error>;
 
-    async fn list(
-        &self,
-        tenant_id: Uuid,
-        limit: i64,
-        offset: i64,
-    ) -> Result<Vec<NotifyDocument>, sqlx::Error>;
-
-    async fn search(
-        &self,
-        tenant_id: Uuid,
-        query: &str,
-    ) -> Result<Vec<NotifyDocument>, sqlx::Error>;
-
     async fn update_extraction(
         &self,
         tenant_id: Uuid,

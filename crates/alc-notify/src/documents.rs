@@ -1,7 +1,11 @@
+//! 文書の書きの口 (upload・redact-recompute・extract-recompute)。W8c-2 まで Cloud Run に残る。
+//!
+//! 閲覧の口 (一覧・1 件・preview・search) は ippoan/alc-notify-worker へ移した (search は呼び手が無いので移さず消した。
+//! W8c-1、Refs #680)。preview の Content-Type の決め方は worker の `crates/notify/src/documents.rs` の `guess_content_type`。
+
 use axum::{
-    extract::{Multipart, Path, Query, State},
-    http::{header, HeaderMap, StatusCode},
-    response::{IntoResponse, Response},
+    extract::{Multipart, Path, State},
+    http::StatusCode,
     Extension, Json, Router,
 };
 use uuid::Uuid;
@@ -14,14 +18,7 @@ use crate::ingest::sanitize_filename;
 
 pub fn tenant_router() -> Router<AppState> {
     Router::new()
-        .route("/notify/documents", axum::routing::get(list))
-        .route("/notify/documents/search", axum::routing::get(search))
         .route("/notify/documents/upload", axum::routing::post(upload))
-        .route("/notify/documents/{id}", axum::routing::get(get))
-        .route(
-            "/notify/documents/{id}/preview",
-            axum::routing::get(preview),
-        )
         .route(
             "/notify/documents/{id}/redact-recompute",
             axum::routing::post(redact_recompute),
@@ -30,79 +27,6 @@ pub fn tenant_router() -> Router<AppState> {
             "/notify/documents/{id}/extract-recompute",
             axum::routing::post(extract_recompute),
         )
-}
-
-#[derive(serde::Deserialize)]
-struct ListQuery {
-    limit: Option<i64>,
-    offset: Option<i64>,
-}
-
-async fn list(
-    State(state): State<AppState>,
-    Extension(tenant): Extension<TenantId>,
-    Query(q): Query<ListQuery>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
-    let docs = state
-        .notify_documents
-        .list(tenant.0, q.limit.unwrap_or(50), q.offset.unwrap_or(0))
-        .await
-        .map_err(|e| {
-            tracing::error!("list notify_documents: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-    Ok(Json(serde_json::to_value(docs).unwrap()))
-}
-
-#[derive(serde::Deserialize)]
-struct SearchQuery {
-    q: String,
-}
-
-async fn search(
-    State(state): State<AppState>,
-    Extension(tenant): Extension<TenantId>,
-    Query(sq): Query<SearchQuery>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
-    let docs = state
-        .notify_documents
-        .search(tenant.0, &sq.q)
-        .await
-        .map_err(|e| {
-            tracing::error!("search notify_documents: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-    Ok(Json(serde_json::to_value(docs).unwrap()))
-}
-
-async fn get(
-    State(state): State<AppState>,
-    Extension(tenant): Extension<TenantId>,
-    Path(id): Path<uuid::Uuid>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
-    let doc = state
-        .notify_documents
-        .get(tenant.0, id)
-        .await
-        .map_err(|e| {
-            tracing::error!("get notify_document: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?
-        .ok_or(StatusCode::NOT_FOUND)?;
-
-    let deliveries = state
-        .notify_deliveries
-        .list_by_document(tenant.0, id)
-        .await
-        .map_err(|e| {
-            tracing::error!("list deliveries for document: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-
-    Ok(Json(serde_json::json!({
-        "document": doc,
-        "deliveries": deliveries,
-    })))
 }
 
 const MAX_UPLOAD_FILES: usize = 20;
@@ -247,67 +171,6 @@ async fn upload(
     ))
 }
 
-/// admin auth 付き redacted (or 原本) PDF inline ストリーム。
-///
-/// nuxt-notify の管理者ページで「ドキュメント詳細 → プレビュー」が呼ぶ。
-/// `?original=true` で原本 PDF も取得可能 (admin 用、監査ログ用途)。
-/// `redacted_r2_key` が NULL (まだ redact してない / skipped) の場合は原本にフォールバック。
-#[derive(serde::Deserialize)]
-struct PreviewQuery {
-    original: Option<bool>,
-}
-
-async fn preview(
-    State(state): State<AppState>,
-    Extension(tenant): Extension<TenantId>,
-    Path(id): Path<Uuid>,
-    Query(q): Query<PreviewQuery>,
-) -> Result<Response, StatusCode> {
-    let doc = state
-        .notify_documents
-        .get(tenant.0, id)
-        .await
-        .map_err(|e| {
-            tracing::error!("preview: get notify_document: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?
-        .ok_or(StatusCode::NOT_FOUND)?;
-
-    let storage = state.notify_storage.as_ref().ok_or_else(|| {
-        tracing::error!("preview: notify_storage not configured");
-        StatusCode::SERVICE_UNAVAILABLE
-    })?;
-
-    let want_original = q.original.unwrap_or(false);
-    let key = if want_original {
-        doc.r2_key.as_str()
-    } else {
-        doc.redacted_r2_key.as_deref().unwrap_or(&doc.r2_key)
-    };
-
-    let bytes = storage.download(key).await.map_err(|e| {
-        tracing::error!("preview: storage download: {e}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    // Content-Type は **実際の R2 key の拡張子** で決める。
-    // doc.file_name (原本ファイル名 e.g. "3164_001.pdf") で判定すると、
-    // redacted が .jpg になっていても application/pdf が返ってフロント側の
-    // PDF.js が "Invalid PDF structure" でコケる。
-    let mut headers = HeaderMap::new();
-    let content_type = guess_content_type(Some(key));
-    if let Ok(v) = content_type.parse() {
-        headers.insert(header::CONTENT_TYPE, v);
-    }
-    // download 時のファイル名は原本ファイル名 (UX の都合) で出す。
-    let cd = build_inline_disposition(doc.file_name.as_deref());
-    if let Ok(v) = cd.parse() {
-        headers.insert(header::CONTENT_DISPOSITION, v);
-    }
-
-    Ok((StatusCode::OK, headers, bytes).into_response())
-}
-
 /// force re-redact: redaction_status を pending に戻して spawn。即 202 Accepted。
 ///
 /// 結果は redaction_status を polling で追跡する (UI 側で 5 秒間隔リフレッシュを想定)。
@@ -380,105 +243,9 @@ fn is_allowed_extension(filename: &str) -> bool {
         .any(|ext| lower.ends_with(&format!(".{ext}")))
 }
 
-/// ファイル名から content-type を推測する。
-/// PDF が圧倒的多数なので不明拡張子は `application/pdf` に倒す。
-pub(crate) fn guess_content_type(file_name: Option<&str>) -> &'static str {
-    let name = file_name.unwrap_or("").to_ascii_lowercase();
-    if name.ends_with(".pdf") {
-        "application/pdf"
-    } else if name.ends_with(".png") {
-        "image/png"
-    } else if name.ends_with(".jpg") || name.ends_with(".jpeg") {
-        "image/jpeg"
-    } else if name.ends_with(".gif") {
-        "image/gif"
-    } else if name.ends_with(".webp") {
-        "image/webp"
-    } else if name.ends_with(".svg") {
-        "image/svg+xml"
-    } else if name.ends_with(".txt") {
-        "text/plain; charset=utf-8"
-    } else {
-        "application/pdf"
-    }
-}
-
-/// `Content-Disposition: inline; filename="..."; filename*=UTF-8''...` を組み立てる。
-/// RFC 5987 形式で UTF-8 ファイル名を安全にエンコードする。
-pub(crate) fn build_inline_disposition(file_name: Option<&str>) -> String {
-    let display = file_name.unwrap_or("attachment");
-    let encoded = urlencoding::encode(display);
-    format!(
-        "inline; filename=\"{}\"; filename*=UTF-8''{}",
-        display.replace('"', "_"),
-        encoded
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn guess_content_type_pdf() {
-        assert_eq!(guess_content_type(Some("a.pdf")), "application/pdf");
-        assert_eq!(guess_content_type(Some("A.PDF")), "application/pdf");
-    }
-
-    #[test]
-    fn guess_content_type_images() {
-        assert_eq!(guess_content_type(Some("a.png")), "image/png");
-        assert_eq!(guess_content_type(Some("a.jpg")), "image/jpeg");
-        assert_eq!(guess_content_type(Some("a.jpeg")), "image/jpeg");
-        assert_eq!(guess_content_type(Some("a.gif")), "image/gif");
-        assert_eq!(guess_content_type(Some("a.webp")), "image/webp");
-        assert_eq!(guess_content_type(Some("a.svg")), "image/svg+xml");
-    }
-
-    #[test]
-    fn guess_content_type_text() {
-        assert_eq!(
-            guess_content_type(Some("note.txt")),
-            "text/plain; charset=utf-8"
-        );
-    }
-
-    #[test]
-    fn guess_content_type_unknown_falls_back_to_pdf() {
-        assert_eq!(guess_content_type(Some("a.xlsx")), "application/pdf");
-        assert_eq!(guess_content_type(Some("noext")), "application/pdf");
-        assert_eq!(guess_content_type(None), "application/pdf");
-    }
-
-    #[test]
-    fn build_inline_disposition_basic() {
-        let cd = build_inline_disposition(Some("hello.pdf"));
-        assert!(cd.starts_with("inline; "));
-        assert!(cd.contains("filename=\"hello.pdf\""));
-        assert!(cd.contains("filename*=UTF-8''hello.pdf"));
-    }
-
-    #[test]
-    fn build_inline_disposition_utf8() {
-        let cd = build_inline_disposition(Some("点呼.pdf"));
-        assert!(cd.starts_with("inline; "));
-        // RFC 5987 形式で URL エンコードされる
-        assert!(cd.contains("filename*=UTF-8''"));
-        assert!(cd.contains("%E7%82%B9%E5%91%BC.pdf"));
-    }
-
-    #[test]
-    fn build_inline_disposition_quote_escape() {
-        let cd = build_inline_disposition(Some("a\"b.pdf"));
-        // inline 内のダブルクォートは _ に置換される
-        assert!(cd.contains("filename=\"a_b.pdf\""));
-    }
-
-    #[test]
-    fn build_inline_disposition_default_name() {
-        let cd = build_inline_disposition(None);
-        assert!(cd.contains("filename=\"attachment\""));
-    }
 
     #[test]
     fn allowed_extensions_basic() {
