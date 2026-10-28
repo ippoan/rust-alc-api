@@ -282,20 +282,12 @@ impl NotifyDocumentRepository for MockNotifyDocumentRepository {
 
 pub struct MockNotifyDeliveryRepository {
     pub fail_next: AtomicBool,
-    /// Some(x) で get_for_view の戻り値を上書き (内側 None = 404 を再現)。
-    /// None なら下記 default の Some(...) を返す。
-    pub view_override: Mutex<Option<Option<DeliveryViewInfo>>>,
-    /// true で mark_read が Ok(None) を返す (404 を再現)。ReadResult は
-    /// Clone 非対応なので値上書きではなく bool で None だけ再現する。
-    pub mark_read_none: AtomicBool,
 }
 
 impl Default for MockNotifyDeliveryRepository {
     fn default() -> Self {
         Self {
             fail_next: AtomicBool::new(false),
-            view_override: Mutex::new(None),
-            mark_read_none: AtomicBool::new(false),
         }
     }
 }
@@ -344,38 +336,6 @@ impl NotifyDeliveryRepository for MockNotifyDeliveryRepository {
     async fn mark_sent(&self, _tenant_id: Uuid, _id: Uuid) -> Result<(), sqlx::Error> {
         check_fail!(self);
         Ok(())
-    }
-    async fn mark_read(&self, _read_token: Uuid) -> Result<Option<ReadResult>, sqlx::Error> {
-        check_fail!(self);
-        if self.mark_read_none.load(Ordering::SeqCst) {
-            return Ok(None);
-        }
-        Ok(Some(ReadResult {
-            document_id: Uuid::new_v4(),
-            tenant_id: Uuid::new_v4(),
-            r2_key: "mock/key".into(),
-            expire_at: chrono::Utc::now() + chrono::Duration::days(7),
-        }))
-    }
-    async fn get_for_view(
-        &self,
-        _read_token: Uuid,
-    ) -> Result<Option<DeliveryViewInfo>, sqlx::Error> {
-        check_fail!(self);
-        if let Some(ov) = self.view_override.lock().unwrap().clone() {
-            return Ok(ov);
-        }
-        Ok(Some(DeliveryViewInfo {
-            document_id: Uuid::new_v4(),
-            tenant_id: Uuid::new_v4(),
-            r2_key: "mock/key".into(),
-            file_name: Some("mock.pdf".into()),
-            file_size_bytes: Some(1024),
-            source_subject: Some("Mock subject".into()),
-            source_sender: Some("sender@example.com".into()),
-            source_received_at: Some(chrono::Utc::now()),
-            expire_at: chrono::Utc::now() + chrono::Duration::days(7),
-        }))
     }
     async fn list_by_document(
         &self,

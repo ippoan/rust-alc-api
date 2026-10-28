@@ -12,9 +12,8 @@
 //!
 //! 配信時は `crates/alc-notify/src/distribute.rs` の pre-check が
 //! `completed` / `skipped` 以外を弾いて誤って原本を送信しないようにする。
-//! 公開 viewer (`viewer.rs`) は migration 109 の `lookup_delivery_for_view`
-//! が `COALESCE(redacted_r2_key, r2_key)` を返すので、redacted があれば
-//! 自動的にそちらが配信される。
+//! 閲覧は nuxt-notify の Worker (KV + R2) が配信する (rust の閲覧の口は
+//! W8a で消した。Refs #680)。
 //!
 //! テスト容易性のため、コアロジックは `redact_document_with_deps` に切り出し
 //! `&dyn NotifyDocumentRepository` + `&dyn StorageBackend` + endpoint override

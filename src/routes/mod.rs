@@ -6,9 +6,7 @@ pub use alc_notify::email_documents as notify_email_documents;
 pub use alc_notify::ingest as notify_ingest;
 pub use alc_notify::line_webhook as notify_line_webhook;
 pub use alc_notify::lineworks_channels as notify_lineworks_channels;
-pub use alc_notify::read_tracker as notify_read_tracker;
 pub use alc_notify::test_endpoints as notify_test_endpoints;
-pub use alc_notify::viewer as notify_viewer;
 
 pub mod rls_check;
 
@@ -41,7 +39,6 @@ pub fn router(internal_oidc: InternalOidcTrust) -> Router<AppState> {
     // 内部 API ルート (auth-worker 等の信頼できる呼び出し元のみ、aud=alc-api-internal)
     let internal_protected = Router::new()
         .merge(notify_lineworks_channels::internal_router())
-        .merge(notify_viewer::internal_router())
         .merge(notify_line_webhook::internal_router())
         // device_id から有効な端末の tenant を返す内部口。auth-worker の
         // pair-internal が tenant 決定に使う (Refs ippoan/auth-worker#544)。
@@ -69,9 +66,7 @@ pub fn router(internal_oidc: InternalOidcTrust) -> Router<AppState> {
     let public_routes = Router::new()
         .merge(health::router())
         .merge(notify_ingest::public_router())
-        .merge(notify_line_webhook::public_router())
-        .merge(notify_read_tracker::public_router())
-        .merge(notify_viewer::public_router());
+        .merge(notify_line_webhook::public_router());
 
     Router::new()
         .merge(public_routes)

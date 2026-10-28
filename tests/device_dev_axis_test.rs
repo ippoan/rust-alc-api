@@ -53,20 +53,21 @@ async fn test_public_route_ignores_the_header() {
         {
             // after_release なしの 1 接続にして、要求の後の接続の状態をそのまま見る
             let ctx = setup(1, false).await;
-            // 公開の口 (文書の閲覧の token の引き当て。DB を読む)。端末の登録の口は alc-devices-worker へ (W6b)、
+            // 公開の口 (LINE の webhook。署名の照合の前に設定の一覧を DB から読む)。
+            // 文書の閲覧の口は nuxt-notify の Worker へ (W8a)、端末の登録の口は alc-devices-worker へ (W6b)、
             // テナントの slug の引き当ては alc-auth-worker へ (W2c) 移った
             let res = ctx
                 .client
-                .get(format!(
-                    "{}/api/notify/v/{}",
-                    ctx.base_url,
-                    uuid::Uuid::new_v4()
-                ))
+                .post(format!("{}/api/notify/line/webhook", ctx.base_url))
                 .header("X-Device-Dev", "1")
+                .header("x-line-signature", "not-a-signature")
+                .header("content-type", "application/json")
+                .body(r#"{"events":[]}"#)
                 .send()
                 .await
                 .unwrap();
-            assert_ne!(res.status(), 401, "公開 route なので認証では弾かれない");
+            // 署名が合わないので 2xx にはならない (401 は署名の照合の結果で、認証の層ではない)
+            assert!(!res.status().is_success());
             assert_eq!(device_dev_on_connection(&ctx).await, "");
         }
     );

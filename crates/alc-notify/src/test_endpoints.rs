@@ -7,8 +7,7 @@
 //! 3. lopdf で白矩形オーバーレイ
 //! 4. R2 に redacted PDF を upload
 //! 5. notify_documents + notify_deliveries に行追加 (recipient_id = NULL、migration 108)
-//! 6. `{API_ORIGIN}/api/notify/v/{read_token}/file` を返す
-//!    → 既存 viewer.rs (R2 inline ストリーム) がそのまま配信。expire_at 後は 410 Gone
+//! 6. document_id・R2 の key・expire_at を返す (rust の閲覧の口は W8a で消した。Refs #680)
 //!
 //! `GEMINI_API_KEY` env が設定されていなければ 503 を返す。
 //!
@@ -44,7 +43,6 @@ struct RedactResponse {
     document_id: Uuid,
     original_r2_key: String,
     redacted_r2_key: String,
-    view_url: String,
     expire_at: chrono::DateTime<chrono::Utc>,
     redactions_applied: usize,
 }
@@ -237,7 +235,7 @@ async fn redact_pdf_test(
         )
     })?;
 
-    let (read_token, expire_at): (Uuid, chrono::DateTime<chrono::Utc>) = sqlx::query_as(
+    let expire_at: chrono::DateTime<chrono::Utc> = sqlx::query_scalar(
         r#"
         INSERT INTO notify_deliveries (
             tenant_id, document_id, recipient_id,
@@ -245,7 +243,7 @@ async fn redact_pdf_test(
             expire_at
         )
         VALUES ($1, $2, NULL, 'test', 'pending', NOW() + ($3::text || ' hours')::interval)
-        RETURNING read_token, expire_at
+        RETURNING expire_at
         "#,
     )
     .bind(tenant.0)
@@ -261,17 +259,12 @@ async fn redact_pdf_test(
         )
     })?;
 
-    let api_origin =
-        std::env::var("API_ORIGIN").unwrap_or_else(|_| "https://localhost:8080".into());
-    let view_url = format!("{api_origin}/api/notify/v/{read_token}/file");
-
     Ok((
         StatusCode::CREATED,
         Json(RedactResponse {
             document_id,
             original_r2_key,
             redacted_r2_key: r2_key,
-            view_url,
             expire_at,
             redactions_applied: redactions.len(),
         }),
