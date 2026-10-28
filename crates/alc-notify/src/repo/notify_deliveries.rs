@@ -80,32 +80,6 @@ impl NotifyDeliveryRepository for PgNotifyDeliveryRepository {
         Ok(())
     }
 
-    async fn list_by_document(
-        &self,
-        tenant_id: Uuid,
-        document_id: Uuid,
-    ) -> Result<Vec<NotifyDeliveryWithRecipient>, sqlx::Error> {
-        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
-        sqlx::query_as::<_, NotifyDeliveryWithRecipient>(
-            r#"
-            SELECT d.id, d.document_id, d.recipient_id, d.provider, d.status,
-                   d.error_message, d.attempt, d.sent_at, d.read_at, d.read_token, d.created_at,
-                   r.name AS recipient_name,
-                   d.triggered_by_user_id,
-                   u.name AS triggered_by_name,
-                   u.email AS triggered_by_email
-            FROM notify_deliveries d
-            JOIN notify_recipients r ON r.id = d.recipient_id
-            LEFT JOIN users u ON u.id = d.triggered_by_user_id
-            WHERE d.document_id = $1
-            ORDER BY d.created_at DESC, r.name
-            "#,
-        )
-        .bind(document_id)
-        .fetch_all(&mut *tc.conn)
-        .await
-    }
-
     async fn list_pending(
         &self,
         tenant_id: Uuid,

@@ -49,46 +49,6 @@ impl NotifyDocumentRepository for PgNotifyDocumentRepository {
             .await
     }
 
-    async fn list(
-        &self,
-        tenant_id: Uuid,
-        limit: i64,
-        offset: i64,
-    ) -> Result<Vec<NotifyDocument>, sqlx::Error> {
-        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
-        sqlx::query_as::<_, NotifyDocument>(
-            "SELECT * FROM notify_documents ORDER BY created_at DESC LIMIT $1 OFFSET $2",
-        )
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(&mut *tc.conn)
-        .await
-    }
-
-    async fn search(
-        &self,
-        tenant_id: Uuid,
-        query: &str,
-    ) -> Result<Vec<NotifyDocument>, sqlx::Error> {
-        let mut tc = TenantConn::acquire(&self.pool, &tenant_id.to_string()).await?;
-        let pattern = format!("%{}%", query);
-        sqlx::query_as::<_, NotifyDocument>(
-            r#"
-            SELECT * FROM notify_documents
-            WHERE extracted_title ILIKE $1
-               OR extracted_summary ILIKE $1
-               OR source_subject ILIKE $1
-               OR $2 = ANY(extracted_phone_numbers)
-            ORDER BY created_at DESC
-            LIMIT 100
-            "#,
-        )
-        .bind(&pattern)
-        .bind(query)
-        .fetch_all(&mut *tc.conn)
-        .await
-    }
-
     async fn update_extraction(
         &self,
         tenant_id: Uuid,

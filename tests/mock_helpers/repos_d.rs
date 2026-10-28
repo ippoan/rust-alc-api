@@ -78,23 +78,6 @@ impl NotifyDocumentRepository for MockNotifyDocumentRepository {
         check_fail!(self);
         Ok(Some(mock_document(tenant_id)))
     }
-    async fn list(
-        &self,
-        tenant_id: Uuid,
-        _limit: i64,
-        _offset: i64,
-    ) -> Result<Vec<NotifyDocument>, sqlx::Error> {
-        check_fail!(self);
-        Ok(vec![mock_document(tenant_id)])
-    }
-    async fn search(
-        &self,
-        tenant_id: Uuid,
-        _query: &str,
-    ) -> Result<Vec<NotifyDocument>, sqlx::Error> {
-        check_fail!(self);
-        Ok(vec![mock_document(tenant_id)])
-    }
     async fn update_extraction(
         &self,
         _tenant_id: Uuid,
@@ -213,30 +196,6 @@ impl NotifyDeliveryRepository for MockNotifyDeliveryRepository {
     async fn mark_sent(&self, _tenant_id: Uuid, _id: Uuid) -> Result<(), sqlx::Error> {
         check_fail!(self);
         Ok(())
-    }
-    async fn list_by_document(
-        &self,
-        _tenant_id: Uuid,
-        document_id: Uuid,
-    ) -> Result<Vec<NotifyDeliveryWithRecipient>, sqlx::Error> {
-        check_fail!(self);
-        Ok(vec![NotifyDeliveryWithRecipient {
-            id: Uuid::new_v4(),
-            document_id,
-            recipient_id: Uuid::new_v4(),
-            provider: "line".into(),
-            status: "sent".into(),
-            error_message: None,
-            attempt: 1,
-            sent_at: Some(chrono::Utc::now()),
-            read_at: None,
-            read_token: Uuid::new_v4(),
-            created_at: chrono::Utc::now(),
-            recipient_name: "Test".into(),
-            triggered_by_user_id: None,
-            triggered_by_name: None,
-            triggered_by_email: None,
-        }])
     }
     async fn list_pending(
         &self,
