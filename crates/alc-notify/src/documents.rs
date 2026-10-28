@@ -295,12 +295,12 @@ async fn preview(
     // redacted が .jpg になっていても application/pdf が返ってフロント側の
     // PDF.js が "Invalid PDF structure" でコケる。
     let mut headers = HeaderMap::new();
-    let content_type = crate::viewer::guess_content_type(Some(key));
+    let content_type = guess_content_type(Some(key));
     if let Ok(v) = content_type.parse() {
         headers.insert(header::CONTENT_TYPE, v);
     }
     // download 時のファイル名は原本ファイル名 (UX の都合) で出す。
-    let cd = crate::viewer::build_inline_disposition(doc.file_name.as_deref());
+    let cd = build_inline_disposition(doc.file_name.as_deref());
     if let Ok(v) = cd.parse() {
         headers.insert(header::CONTENT_DISPOSITION, v);
     }
@@ -380,9 +380,105 @@ fn is_allowed_extension(filename: &str) -> bool {
         .any(|ext| lower.ends_with(&format!(".{ext}")))
 }
 
+/// ファイル名から content-type を推測する。
+/// PDF が圧倒的多数なので不明拡張子は `application/pdf` に倒す。
+pub(crate) fn guess_content_type(file_name: Option<&str>) -> &'static str {
+    let name = file_name.unwrap_or("").to_ascii_lowercase();
+    if name.ends_with(".pdf") {
+        "application/pdf"
+    } else if name.ends_with(".png") {
+        "image/png"
+    } else if name.ends_with(".jpg") || name.ends_with(".jpeg") {
+        "image/jpeg"
+    } else if name.ends_with(".gif") {
+        "image/gif"
+    } else if name.ends_with(".webp") {
+        "image/webp"
+    } else if name.ends_with(".svg") {
+        "image/svg+xml"
+    } else if name.ends_with(".txt") {
+        "text/plain; charset=utf-8"
+    } else {
+        "application/pdf"
+    }
+}
+
+/// `Content-Disposition: inline; filename="..."; filename*=UTF-8''...` を組み立てる。
+/// RFC 5987 形式で UTF-8 ファイル名を安全にエンコードする。
+pub(crate) fn build_inline_disposition(file_name: Option<&str>) -> String {
+    let display = file_name.unwrap_or("attachment");
+    let encoded = urlencoding::encode(display);
+    format!(
+        "inline; filename=\"{}\"; filename*=UTF-8''{}",
+        display.replace('"', "_"),
+        encoded
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn guess_content_type_pdf() {
+        assert_eq!(guess_content_type(Some("a.pdf")), "application/pdf");
+        assert_eq!(guess_content_type(Some("A.PDF")), "application/pdf");
+    }
+
+    #[test]
+    fn guess_content_type_images() {
+        assert_eq!(guess_content_type(Some("a.png")), "image/png");
+        assert_eq!(guess_content_type(Some("a.jpg")), "image/jpeg");
+        assert_eq!(guess_content_type(Some("a.jpeg")), "image/jpeg");
+        assert_eq!(guess_content_type(Some("a.gif")), "image/gif");
+        assert_eq!(guess_content_type(Some("a.webp")), "image/webp");
+        assert_eq!(guess_content_type(Some("a.svg")), "image/svg+xml");
+    }
+
+    #[test]
+    fn guess_content_type_text() {
+        assert_eq!(
+            guess_content_type(Some("note.txt")),
+            "text/plain; charset=utf-8"
+        );
+    }
+
+    #[test]
+    fn guess_content_type_unknown_falls_back_to_pdf() {
+        assert_eq!(guess_content_type(Some("a.xlsx")), "application/pdf");
+        assert_eq!(guess_content_type(Some("noext")), "application/pdf");
+        assert_eq!(guess_content_type(None), "application/pdf");
+    }
+
+    #[test]
+    fn build_inline_disposition_basic() {
+        let cd = build_inline_disposition(Some("hello.pdf"));
+        assert!(cd.starts_with("inline; "));
+        assert!(cd.contains("filename=\"hello.pdf\""));
+        assert!(cd.contains("filename*=UTF-8''hello.pdf"));
+    }
+
+    #[test]
+    fn build_inline_disposition_utf8() {
+        let cd = build_inline_disposition(Some("点呼.pdf"));
+        assert!(cd.starts_with("inline; "));
+        // RFC 5987 形式で URL エンコードされる
+        assert!(cd.contains("filename*=UTF-8''"));
+        assert!(cd.contains("%E7%82%B9%E5%91%BC.pdf"));
+    }
+
+    #[test]
+    fn build_inline_disposition_quote_escape() {
+        let cd = build_inline_disposition(Some("a\"b.pdf"));
+        // inline 内のダブルクォートは _ に置換される
+        assert!(cd.contains("filename=\"a_b.pdf\""));
+    }
+
+    #[test]
+    fn build_inline_disposition_default_name() {
+        let cd = build_inline_disposition(None);
+        assert!(cd.contains("filename=\"attachment\""));
+    }
 
     #[test]
     fn allowed_extensions_basic() {
