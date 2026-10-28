@@ -11,5 +11,3 @@ mod mock_auth_test;
 mod mock_bot_admin_test;
 #[path = "../mock_tests/mock_health_test.rs"]
 mod mock_health_test;
-#[path = "../mock_tests/mock_lineworks_internal_test.rs"]
-mod mock_lineworks_internal_test;

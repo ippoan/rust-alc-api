@@ -24,8 +24,7 @@ pub mod tenant;
 use std::sync::Arc;
 
 use repository::{
-    AuthRepository, BotAdminRepository, LineworksChannelsRepository, NotifyDeliveryRepository,
-    NotifyDocumentRepository, NotifyRecipientRepository,
+    AuthRepository, BotAdminRepository, NotifyDeliveryRepository, NotifyDocumentRepository,
 };
 use storage::StorageBackend;
 
@@ -35,10 +34,8 @@ pub struct AppState {
     pub auth: Arc<dyn AuthRepository>,
     pub bot_admin: Arc<dyn BotAdminRepository>,
     pub storage: Arc<dyn StorageBackend>,
-    pub notify_recipients: Arc<dyn NotifyRecipientRepository>,
     pub notify_documents: Arc<dyn NotifyDocumentRepository>,
     pub notify_deliveries: Arc<dyn NotifyDeliveryRepository>,
-    pub lineworks_channels: Arc<dyn LineworksChannelsRepository>,
     pub notify_storage: Option<Arc<dyn StorageBackend>>,
     /// `RedactBroadcaster::from_env()` で env vars (`NOTIFY_REDACT_BROADCAST_URL` /
     /// `NOTIFY_REDACT_BROADCAST_SECRET`) が揃った時のみ Some。background_redaction.rs

@@ -12,10 +12,7 @@ use tower_http::set_header::SetResponseHeaderLayer;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
-use alc_notify::repo::{
-    PgLineworksChannelsRepository, PgNotifyDeliveryRepository, PgNotifyDocumentRepository,
-    PgNotifyRecipientRepository,
-};
+use alc_notify::repo::{PgNotifyDeliveryRepository, PgNotifyDocumentRepository};
 use rust_alc_api::db::repository::{PgAuthRepository, PgBotAdminRepository};
 use rust_alc_api::storage::StorageBackend;
 use rust_alc_api::AppState;
@@ -95,10 +92,8 @@ async fn main() -> anyhow::Result<()> {
 
     let auth = Arc::new(PgAuthRepository::new(pool.clone()));
     let bot_admin = Arc::new(PgBotAdminRepository::new(pool.clone()));
-    let notify_recipients = Arc::new(PgNotifyRecipientRepository::new(pool.clone()));
     let notify_documents = Arc::new(PgNotifyDocumentRepository::new(pool.clone()));
     let notify_deliveries = Arc::new(PgNotifyDeliveryRepository::new(pool.clone()));
-    let lineworks_channels = Arc::new(PgLineworksChannelsRepository::new(pool.clone()));
 
     // notify 用 R2 (optional)
     let notify_storage: Option<Arc<dyn StorageBackend>> =
@@ -123,10 +118,8 @@ async fn main() -> anyhow::Result<()> {
         auth,
         bot_admin,
         storage,
-        notify_recipients,
         notify_documents,
         notify_deliveries,
-        lineworks_channels,
         notify_storage,
         redact_broadcaster: alc_core::redact_broadcast::RedactBroadcaster::from_env().map(Arc::new),
         realtime_bus: alc_core::realtime_bus::RealtimeBus::from_env().map(Arc::new),

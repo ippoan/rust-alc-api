@@ -3,10 +3,8 @@ use std::sync::Mutex;
 
 use uuid::Uuid;
 
-use rust_alc_api::db::repository::lineworks_channels::*;
 use rust_alc_api::db::repository::notify_deliveries::*;
 use rust_alc_api::db::repository::notify_documents::*;
-use rust_alc_api::db::repository::notify_recipients::*;
 
 macro_rules! check_fail {
     ($self:expr) => {
@@ -14,127 +12,6 @@ macro_rules! check_fail {
             return Err(sqlx::Error::RowNotFound);
         }
     };
-}
-
-// ============================================================
-// MockLineworksChannelsRepository
-// ============================================================
-
-pub struct MockLineworksChannelsRepository {
-    pub fail_next: AtomicBool,
-    /// `lookup_bot_config_for_webhook` の戻り値を注入できる。
-    /// `None` なら従来通り bot_not_found 相当 (`Ok(None)`) を返す。
-    pub bot_config: Mutex<Option<BotConfigForWebhook>>,
-    /// `upsert_joined` の呼び出し回数 (テスト assertion 用)
-    pub upsert_joined_calls: std::sync::atomic::AtomicUsize,
-    /// `mark_left` の呼び出し回数 (テスト assertion 用)
-    pub mark_left_calls: std::sync::atomic::AtomicUsize,
-}
-
-impl Default for MockLineworksChannelsRepository {
-    fn default() -> Self {
-        Self {
-            fail_next: AtomicBool::new(false),
-            bot_config: Mutex::new(None),
-            upsert_joined_calls: std::sync::atomic::AtomicUsize::new(0),
-            mark_left_calls: std::sync::atomic::AtomicUsize::new(0),
-        }
-    }
-}
-
-fn mock_lineworks_channel(tenant_id: Uuid) -> LineworksChannel {
-    LineworksChannel {
-        id: Uuid::new_v4(),
-        tenant_id,
-        bot_config_id: Uuid::new_v4(),
-        channel_id: "ch_mock".into(),
-        title: Some("Mock Group".into()),
-        channel_type: Some("group".into()),
-        joined_at: chrono::Utc::now(),
-        active: true,
-        created_at: chrono::Utc::now(),
-        updated_at: chrono::Utc::now(),
-    }
-}
-
-#[async_trait::async_trait]
-impl LineworksChannelsRepository for MockLineworksChannelsRepository {
-    async fn upsert_joined(
-        &self,
-        tenant_id: Uuid,
-        _bot_config_id: Uuid,
-        _channel_id: &str,
-        _channel_type: Option<&str>,
-        _title: Option<&str>,
-    ) -> Result<LineworksChannel, sqlx::Error> {
-        check_fail!(self);
-        self.upsert_joined_calls
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        Ok(mock_lineworks_channel(tenant_id))
-    }
-    async fn mark_left(
-        &self,
-        _tenant_id: Uuid,
-        _bot_config_id: Uuid,
-        _channel_id: &str,
-    ) -> Result<(), sqlx::Error> {
-        check_fail!(self);
-        self.mark_left_calls
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        Ok(())
-    }
-    async fn lookup_bot_config_for_webhook(
-        &self,
-        _bot_id: &str,
-    ) -> Result<Option<BotConfigForWebhook>, sqlx::Error> {
-        check_fail!(self);
-        Ok(self.bot_config.lock().unwrap().clone())
-    }
-}
-
-// ============================================================
-// MockNotifyRecipientRepository
-// ============================================================
-
-pub struct MockNotifyRecipientRepository {
-    pub fail_next: AtomicBool,
-}
-
-impl Default for MockNotifyRecipientRepository {
-    fn default() -> Self {
-        Self {
-            fail_next: AtomicBool::new(false),
-        }
-    }
-}
-
-fn mock_recipient(tenant_id: Uuid) -> NotifyRecipient {
-    NotifyRecipient {
-        id: Uuid::new_v4(),
-        tenant_id,
-        name: "Test Recipient".into(),
-        provider: "line".into(),
-        lineworks_user_id: None,
-        line_user_id: Some("U1234567890".into()),
-        phone_number: None,
-        email: None,
-        enabled: true,
-        created_at: chrono::Utc::now(),
-        updated_at: chrono::Utc::now(),
-    }
-}
-
-#[async_trait::async_trait]
-impl NotifyRecipientRepository for MockNotifyRecipientRepository {
-    async fn upsert_by_line_user_id(
-        &self,
-        tenant_id: Uuid,
-        _line_user_id: &str,
-        _name: &str,
-    ) -> Result<NotifyRecipient, sqlx::Error> {
-        check_fail!(self);
-        Ok(mock_recipient(tenant_id))
-    }
 }
 
 // ============================================================

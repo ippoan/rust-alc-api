@@ -1,7 +1,6 @@
 // Re-export traits from alc-core
 pub use alc_core::repository::{
-    AuthRepository, BotAdminRepository, LineworksChannelsRepository, NotifyDeliveryRepository,
-    NotifyDocumentRepository, NotifyRecipientRepository,
+    AuthRepository, BotAdminRepository, NotifyDeliveryRepository, NotifyDocumentRepository,
 };
 
 // Re-export TenantConn from alc-core
@@ -12,13 +11,8 @@ pub use alc_core::repo::auth;
 pub use alc_misc::repo::bot_admin;
 
 // Re-export notify submodules and Pg implementations
-pub use alc_core::repository::{
-    lineworks_channels, notify_deliveries, notify_documents, notify_recipients,
-};
-pub use alc_notify::repo::{
-    PgLineworksChannelsRepository, PgNotifyDeliveryRepository, PgNotifyDocumentRepository,
-    PgNotifyRecipientRepository,
-};
+pub use alc_core::repository::{notify_deliveries, notify_documents};
+pub use alc_notify::repo::{PgNotifyDeliveryRepository, PgNotifyDocumentRepository};
 
 // Re-export Pg implementations
 pub use alc_core::repo::PgAuthRepository;

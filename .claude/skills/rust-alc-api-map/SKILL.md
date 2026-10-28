@@ -1,6 +1,6 @@
 ---
 name: rust-alc-api-map
-generated-from: rust-alc-api:37a245edeab0e1e56dd863e40c2992f069769b0c
+generated-from: rust-alc-api:a1f0c958177d58f54059434d5d32dc5b4dc7c318
 paths: [crates/, src/, tests/]
 description: rust-alc-api (アルコールチェッカー基盤の Rust/Axum Cargo workspace — domain crate 群 + monolith 単一バイナリ、PostgreSQL+RLS、Cloud Run) の構造ナビゲーション。どの crate に何のルートがあるか / monolith (rust-alc-api) 一本化 (gateway + per-domain は #556 で廃止) / RLS・migration・deploy/release 分離の gotcha を 1 枚にまとめる。トリガー:「rust-alc-api」「alc-api」「alc-notify」「alc-tenko」「alc-carins」「alc-dtako」「gateway」「tenko-api」「carins-api」「dtako-api」「trouble-api」(trouble は ippoan/alc-trouble-worker へ移設済み)「RLS テナント」「sqlx migration」「ts-rs」「Release Wave」「Bazel」等。
 ---
@@ -41,7 +41,7 @@ router 実装として存続。旧 per-domain は同じ domain crate を単独 m
 | ~~`alc-dtako`~~ | **削除済み (W5c-5、Refs #680)**。dtako の口は全部 ippoan/alc-dtako-worker (Cloudflare Worker `alc-dtako`、route の crate `crates/alc-dtako-upload/`) に移り、本番は auth-worker の振り分けで Worker に回る。最後に残っていた起票 `dtako_tickets` の 5 口 (`POST /api/dtako/tickets`・`PATCH /api/dtako/tickets/{id}/scraped` = email-receiver の内部用、`GET /api/dtako/tickets`・`GET /api/dtako/tickets/{id}`・`POST /api/dtako/tickets/close` = 画面用) も worker の `tickets.rs` (v0.3.15、auth-worker v0.2.349)。それまでに移したもの: upload・split・再計算・履歴の 10 口 (#725)、機械の取り込み (W5a)、勤怠向けの読み取り (W5b)、画面向けの読み取りと分類の更新 20 口 (W5c-1)、Y時間 export (W5c-2)、拘束時間の帳票 (W5c-3) とその PDF (W5c-4、`alc-pdf` とフォントも worker へ)。車輛設定 dump の口は呼び手が無く消した (W5-0)。`AppState` の `dtako_tickets`・`dtako_storage` (dtako の R2) と `tests/mock_dtako` も消した。alc-core に残る Dtako の型は `DtakologRow` (アーカイブの Job) と `DtakoDailyWorkHours` (点呼の乗務員情報) など。crate の再作成と起票の型の再流入は `scripts/check_domain_split.sh` が落とす。直すときは ippoan/alc-dtako-worker へ |
 **機械の取り込み (DVR の動画通知 `/api/dvr/notifications`・`/api/dvr/files/{id}` と車両の現在地のログ `POST /api/dtako-logs/bulk`) は ippoan/alc-dtako-worker へ移り (W5a、v0.3.7。auth-worker v0.2.339 で本番切り替え済み)、ハンドラ・`DtakoLogsRepository::bulk_upsert`・`DtakologInput`・`BulkUpsertResponse` はこの repo から消した** (Refs #680)。表 `dvr_notifications`・`dtakologs` は残り、dtako-logs の読み取りも W5c-1 で worker へ移した。直すときは worker の `crates/alc-dtako-upload/src/{logs,dvr}.rs` へ。
 | ~~`alc-trouble`~~ | **削除済み (Refs #747)**。trouble (tickets / files / workflow / schedules / tasks / notifier / lineworks_members 等) は全部 ippoan/alc-trouble-worker に移り、本番は auth-worker の振り分け (`/api/trouble/` prefix と fire) で Worker に回る。rust 側に trouble の route・repo・`TroubleState`・テストは無い。カメラ停止の自動チケットだけは `alc-camera` の `HttpDownTicketSink` が trouble-worker の内部口を HTTP で叩く。crate の再作成は `scripts/check_domain_split.sh` が落とす |
-| `alc-notify` | LINE/LINE WORKS 配信のうち Cloud Run に残る口: documents / ingest / line_webhook / email_documents / test_endpoints / extract / redact / background_extract / background_redaction / lineworks_channels (internal の 2 口だけ)。**宛先 (recipients)・グループ (groups)・LINE の設定 (line-config)・LINE WORKS のトークルーム (`/notify/lineworks/channels`)・メンバー (`/notify/lineworks/users`)・ログイン状況 (`/notify/lineworks/login-activity`)・配信 (`/notify/documents/{id}/distribute`・`/notify/test-distribute`) は ippoan/alc-notify-worker、`POST /api/internal/lineworks/send` は alc-lineworks に移り、Cloud Run 側の口と、それだけが使っていた module (`distribute` / `recipients` / `groups` / `line_config` / `lineworks_directory` / `lineworks_login_activity` / `lineworks_config`)・repo (`notify_groups` / `notify_line_config` と、`notify_recipients` / `lineworks_channels` の CRUD・`get_for_send`)・AppState field は消した (Refs #747)**。使い手が無くなった `viewer_register` と、trouble の通知だけが使っていた `clients/lineworks.rs` (`LineworksBotClient`) も消した (Refs #747)。`clients/` に残るのは LINE (`line.rs`) だけ。閲覧の口 (`viewer`・`read_tracker`) と、それだけが使っていた repo の `mark_read`・`get_for_view` (`ReadResult`・`DeliveryViewInfo`) は W8a で消した (閲覧は nuxt-notify の Worker。Refs #680)。**`line_webhook` は #434 lockdown で internal_router 併設**: `/api/internal/notify/line/webhook` (`require_internal_jwt`、auth-worker の public 受け口が OIDC mint で forward)。署名検証 (全テナント channel secret 照合) は rust 側で、**`list_enabled_line_configs()` SECURITY DEFINER 関数経由で RLS バイパス** (migration 117。生クエリだと未認証パスで `app.current_tenant_id=''` → `''::UUID` キャストが 500 する既知罠)。**ただし 072 の `FORCE ROW LEVEL SECURITY` があると所有者=SECURITY DEFINER 実行ロールにも RLS が効いて関数経由でも 500 するため、migration 118 で `NO FORCE` にして所有者バイパスを効かせている** (devices は元から FORCE 無し)。app ロール (非所有者) には RLS 維持。follow イベントで `notify_recipients::upsert_by_line_user_id` を呼ぶ (`NotifyRecipientRepository` に残る唯一のメソッド)。`public_router` (`/notify/line/webhook`) は LINE Console URL 切替 + allUsers 削除までの移行期間 dual-mount。**`lineworks_channels` の internal_router** (`require_internal_jwt` 配下) は auth-worker の LINE WORKS webhook の DO が叩く 2 口: `GET /api/internal/lineworks/bot-secret/{bot_id}` (bot_secret_encrypted を返す。復号は auth-worker) と `POST /api/internal/lineworks/event` (検証済みの join/leave を `upsert_joined` / `mark_left`)。bot_id からの解決は SECURITY DEFINER 関数 `lookup_bot_config_for_webhook` |
+| `alc-notify` | notify のうち Cloud Run に残る口: documents / ingest / email_documents / test_endpoints / extract / redact / background_extract / background_redaction。**宛先 (recipients)・グループ (groups)・LINE の設定 (line-config)・LINE WORKS のトークルーム (`/notify/lineworks/channels`)・メンバー (`/notify/lineworks/users`)・ログイン状況 (`/notify/lineworks/login-activity`)・配信 (`/notify/documents/{id}/distribute`・`/notify/test-distribute`) は ippoan/alc-notify-worker、`POST /api/internal/lineworks/send` は alc-lineworks に移り、Cloud Run 側の口と、それだけが使っていた module (`distribute` / `recipients` / `groups` / `line_config` / `lineworks_directory` / `lineworks_login_activity` / `lineworks_config`)・repo (`notify_groups` / `notify_line_config` と、`notify_recipients` / `lineworks_channels` の CRUD・`get_for_send`)・AppState field は消した (Refs #747)**。使い手が無くなった `viewer_register` と、trouble の通知だけが使っていた `clients/lineworks.rs` (`LineworksBotClient`) も消した (Refs #747)。閲覧の口 (`viewer`・`read_tracker`) と、それだけが使っていた repo の `mark_read`・`get_for_view` (`ReadResult`・`DeliveryViewInfo`) は W8a で消した (閲覧は nuxt-notify の Worker。Refs #680)。**LINE・LINE WORKS の webhook の受け口は W8b で ippoan/alc-notify-worker へ移して消した** (Refs #680): LINE の webhook (公開の `/notify/line/webhook` と `/internal/notify/line/webhook`) と LINE WORKS の DO が叩く 2 口 (`/internal/lineworks/bot-secret/{bot_id}`・`/internal/lineworks/event`)。auth-worker の `line-webhook.ts`・`LineworksWebhookDO` は Service Binding `ALC_NOTIFY` で worker を呼ぶ。一緒に `line_webhook.rs`・`lineworks_channels.rs`・LINE の client (`clients/`、example `line_token_issue`)・repo (`notify_recipients`・`lineworks_channels`、alc-core の trait と model)・AppState の `notify_recipients`・`lineworks_channels`・mock (`MockNotifyRecipientRepository`・`MockLineworksChannelsRepository`・`mock_lineworks_internal_test`) も消した。再作成・再流入は `scripts/check_domain_split.sh` が落とす。**LINE の JWT・送信・webhook を直すときは ippoan/alc-notify-worker の `crates/notify/src/line.rs`・`line_webhook.rs`・`lineworks_webhook.rs` へ** |
 | ~~`alc-devices`~~ | **削除済み (W6b、Refs #680)**。端末の登録・管理・報告 (W6b-a)、kiosk の再ペアリング (W6b-b。発行は auth-worker の `DevicePairEntrypoint` を Service Binding で呼ぶ)、FCM で端末に送る口と着信の設定 (W6b-c。FCM の送信専用の既存の鍵を Secrets Store から共有) は全部 ippoan/alc-devices-worker にある。端末の測定 `hub/measurements` は W6a で alc-people-worker へ。`AppState` の `devices`・`fcm`・`device_pair_client`、alc-core の `repository/devices.rs`・`fcm.rs`・`device_pair_client.rs`、alc-notify の `fcm.rs`、`tests/mock_devices`・devices の結合テストも消した。移さずに消した 5 口: 共有の秘密 `FCM_INTERNAL_SECRET` (本番に無い) を照合する `fcm-notify-call`・`test-fcm-all-exclude`・`trigger-update-dev` と、どの経路からも届かない `register/request`・`register/status/{code}`。crate の再作成と再流入は `scripts/check_domain_split.sh` が落とす |
 | ~~`alc-camera`~~ | **削除済み (Refs #680)**。監視カメラの死活監視 (#345。拠点タブレットが ONVIF で生死を `camera_health_logs` に書き、連続失敗で trouble に障害を自動起票) は、書き手のチェッカー (ippoan/alc-app#27) が実装されないまま 60 日間 health-logs への書き込みが 0 件だったため、worker に移さず消した。カメラの台帳 `alc_api.cameras` は alc-cam-sd-ingest (ippoan/alc-cam の ingest/) が `/api/cam-clips/cameras` で持つ。死活監視が要るなら alc-cam 側で作り直す |
 | `alc-storage` | StorageBackend trait + R2 / GCS / HttpProxy 実装。`list(prefix)` (Refs #205 の 13) はデフォルト未対応 (`StorageError::Config`) の trait メソッドで、R2Backend だけが `rust-s3` の `Bucket::list` (自動ページング、ETag のクォート除去込み) で実装。GCS/HttpProxy は現状未対応のまま |
@@ -285,8 +285,9 @@ router 実装として存続。旧 per-domain は同じ domain crate を単独 m
     RESET app.device_dev` を 1 往復) を `src/main.rs` の `after_release` が呼ぶ
   - **`hub_measurements` (端末の測定・打刻) はこの repo に無い** — W6a で ippoan/alc-people-worker の `crates/people/src/hub.rs` へ移った
     (重複判定は軸ごとの 4 列 `ON CONFLICT (tenant_id, device_id, seq, is_dev)`。3 列だと 42P10 で全件落ちる。直すときはそちら)
-  - **テスト**: `tests/device_dev_axis_test.rs` (実 DB。dev の運行管理者の鍵の判定もここ。hub の軸のテストは alc-people-worker の `tests/hub_db.rs` へ移った)。ほかの DB テストは superuser で繋ぐので RLS を
-    素通りする — ここと `tests/runtime_role_test.rs` だけ `common::setup_app_state_as_app_role` (接続ごとに
+  - **テスト**: dev の軸の実 DB のテストはこの repo にもう無い (`tests/device_dev_axis_test.rs` は W8b で消した。最後の標本だった
+    公開の LINE の webhook が alc-notify-worker へ移ったため。hub の軸のテストは alc-people-worker の `tests/hub_db.rs`)。ほかの DB テストは superuser で繋ぐので RLS を
+    素通りする — `tests/runtime_role_test.rs` だけ `common::setup_app_state_as_app_role` (接続ごとに
     `SET ROLE alc_api_rt` = alc-migrations 158 の実行用ロール。テスト DB の表の所有者は postgres なので非所有者 =
     本番で接続を切り替えた後と同じ立場) で走らせる。**staging も superuser 接続なので、staging では dev の行の読み出しは分かれない**
     (書いた行の `is_dev` は立つ。上の「staging は RLS 完全 bypass」と同じ理由)
@@ -865,52 +866,13 @@ Google OAuth 以外の端末登録フローを3種類サポート。
 - **devices テーブル SELECT ポリシー**: `migrations/063_fix_devices_select_policy.sql` で `USING(true)` を DROP し、SECURITY DEFINER 関数 (`lookup_device_tenant`, `get_device_settings_by_id`) に置換済み
 - **tenko_call_numbers INSERT/DELETE 権限**: `migrations/064_fix_tenko_call_numbers_grants.sql` で GRANT 追加済み
 
-## LINE 配信 (alc-notify) 仕様とデバッグ
+## LINE 配信 仕様とデバッグ
 
-### Channel Access Token v2.1 — JWT assertion の落とし穴
-
-2026-04-22 に LINE push 全体が静かに失敗していた (PR #265/#266)。原因は `alc_notify::clients::line::JwtClaims` の仕様誤解。同じ罠を避けるため:
-
-| claim | 型 | 意味 | 範囲 |
-|---|---|---|---|
-| `exp` | UNIX 秒 (絶対時刻) | JWT assertion の有効期限 | `now` 以降、最大 30分先 |
-| `token_exp` | **秒数 (duration)** | 発行される access token の有効期間 | 30s 〜 30日 (2592000) |
-
-- `token_exp` は **duration** (例: `86400` = 1日、`60*60*24*30` = 30日)。`now + 86400` のような絶対時刻を渡すと LINE が `{"error":"invalid_client","error_description":"Invalid token_exp"}` を返す。
-- 両 claim を落とすと `"JWT payload must contain token_exp"`。
-- 公式仕様: https://developers.line.biz/ja/docs/messaging-api/generate-json-web-token/
-
-### ローカル検証 (リリース不要)
-
-LINE 送信系のバグはリリース → 本番試験だと 1 サイクル 〜5分かかる。これを避けるため example バイナリがある:
-
-```bash
-export LINE_CHANNEL_ID=1234567890
-export LINE_KEY_ID=<uuid>
-export LINE_PRIVATE_KEY_PATH=/path/to/private.pem  # PKCS#1/PKCS#8 どちらも可
-cargo run -p alc-notify --example line_token_issue
-
-# push まで試す場合
-cargo run -p alc-notify --example line_token_issue -- --push Uxxxxxx "hello"
-```
-
-DB 非依存、本物の LINE API を直接叩く。`invalid_client` 等は即時に stderr に出る。秘密鍵は Secret Manager (`google-ai-studio/line-*` or 本番環境) から `gcloud secrets versions access` で取得して PEM に保存。
-
-### 静かな失敗の検知
-
-LINE push は backend 内で `failed += 1` するだけでテナント管理画面には「失敗 1」としか出ない。根本原因は Cloud Run ログのみに出る:
-
-```bash
-gcloud logging read \
-  'resource.type="cloud_run_revision" AND resource.labels.service_name="rust-alc-api" AND textPayload:"LINE token"' \
-  --project cloudsql-sv --limit 10 --freshness=15m
-```
-
-`alc_notify::clients::line` / `alc_notify::line_webhook` から ERROR が出ていたら LINE 側で rejected されている。
-
-### カバレッジガード
-
-`crates/alc-notify/src/clients/line.rs` は 100% に登録済み (`coverage_100.toml`, `unit` 型)。テストは wiremock で token/push エンドポイントをモックし、`build_jwt_assertion` の claim 値 (`exp` は絶対、`token_exp` は `[30, 2592000]` のレンジ) も直接 assertion する。**JWT 仕様回帰はこの CI で捕まる。**
+**LINE の client (JWT assertion・token・push・profile) と webhook の受け口は rust-alc-api に無い** — 配信は ippoan/alc-notify-worker
+(`crates/notify/src/line.rs`・`distribute.rs`)、受け口は同じ worker の `crates/notify/src/line_webhook.rs` (W8b で `clients/line.rs`・
+`line_webhook.rs`・example `line_token_issue` を消した)。Channel Access Token v2.1 の JWT の claim の罠 (`exp` は UNIX 秒の絶対時刻、
+`token_exp` は**秒数**で 30s〜2592000。絶対時刻を渡すと `Invalid token_exp`。2026-04-22 の PR #265/#266) は worker の `line.rs` の
+テスト (`jwt_assertion_has_kid_and_line_claims`) が固定している。公式仕様: https://developers.line.biz/ja/docs/messaging-api/generate-json-web-token/
 
 ## 外部 API 連携の開発フロー
 
@@ -922,14 +884,8 @@ LINE / LINE WORKS / FCM / e-Gov など外部 API を叩くコードは、バグ�
 
 - DB 非依存、秘密は env + Secret Manager から手動取得
 - **1 イテレーション 10 秒以下**、claim の型ミスや auth 失敗を即時に確認
-- 参考: `crates/alc-notify/examples/line_token_issue.rs`
+- 参考: (LINE の example `line_token_issue` は W8b で client ごと消した。いま rust に残る外部 API の例は `crates/alc-notify/examples/` の redact 系)
 
-```bash
-# 秘密を Secret Manager から .env に書き出す例
-gcloud secrets versions access latest --secret=line-private-key > /tmp/pk.pem
-export LINE_CHANNEL_ID=... LINE_KEY_ID=... LINE_PRIVATE_KEY_PATH=/tmp/pk.pem
-cargo run -p alc-notify --example line_token_issue
-```
 
 ### 2. モジュール分割 (テスト可能な形に)
 
@@ -939,7 +895,7 @@ example で挙動を確認したら、本体コードを次の粒度で分ける
 - **エンドポイント** は `const PROD_URL` を直接使わず、クライアント構造体のフィールドにして `new_with_endpoints(...)` で注入できるようにする → wiremock がローカル HTTP サーバーで差し替え可能になる
 - クライアントの `new()` は `with_endpoints(PROD_URL, ...)` を呼ぶシンプルなラッパーに
 
-参考実装: `crates/alc-notify/src/clients/line.rs` の `LineClient::with_endpoints` + `build_jwt_assertion`。
+参考実装: ippoan/alc-notify-worker の `crates/notify/src/line.rs` (`LineEndpoints` で URL を注入 + `build_jwt_assertion`)。
 
 ### 3. 単体テストで固める (wiremock)
 
