@@ -2,7 +2,7 @@
 # ドメイン分割ガード (Refs #513)
 #
 # alc-core はドメイン非依存の共有基盤 (tenant / auth_middleware / storage /
-# webhook generic / 共有 models) に限定する。ドメイン専用の repository trait /
+# 共有 models) に限定する。ドメイン専用の repository trait /
 # models / AppState field が alc-core に「再流入」したら CI を loud fail させる。
 #
 # 分割が進むたび (Phase B: trouble (後に Worker へ移設), Phase C: dtako/notify/carins) に
@@ -49,14 +49,23 @@ guard_appstate_fields() {
   fi
 }
 
-# --- tenko (Phase A) ---
-guard_repository_modules tenko "crates/alc-tenko/src/repository/" \
+# --- tenko (Worker へ移した。W7a〜W7d、Refs #680) ---
+# 点呼の口 (/api/tenko・/api/tenko-call) と予定超過の確認は全部 ippoan/alc-tenko-worker に移り、点呼の crate は消した。
+# 点呼の webhook (alc-core の webhook.rs・WebhookRepository・AppState の欄) も使い手が無くなったので一緒に消した。
+# crate の再作成と、alc-core への点呼の repository / model / webhook / AppState の欄の再流入を落とす。
+if [ -e crates/alc-tenko ]; then
+  err "domain-split: 点呼の crate が再作成されています。点呼は ippoan/alc-tenko-worker に置いてください (Refs #680)"
+fi
+if [ -e crates/alc-core/src/webhook.rs ]; then
+  err "domain-split: alc-core に点呼の webhook.rs が再流入しています。ippoan/alc-tenko-worker に置いてください (Refs #680)"
+fi
+guard_repository_modules tenko "ippoan/alc-tenko-worker" \
   tenko_call tenko_records tenko_schedules tenko_sessions tenko_webhooks \
-  daily_health health_baselines equipment_failures driver_info
-guard_model_structs tenko "crates/alc-tenko/src/models.rs" \
-  'Tenko|CreateTenkoSchedule|UpdateTenkoSchedule|EmployeeHealthBaseline|CreateHealthBaseline|UpdateHealthBaseline|EquipmentFailure|CreateEquipmentFailure|UpdateEquipmentFailure|SelfDeclaration|SubmitSelfDeclaration|SafetyJudgment'
-guard_appstate_fields tenko "alc_tenko::TenkoState" \
-  'tenko_call|tenko_records|tenko_schedules|tenko_sessions|tenko_webhooks|daily_health|health_baselines|equipment_failures|driver_info'
+  daily_health health_baselines equipment_failures driver_info webhook
+guard_model_structs tenko "ippoan/alc-tenko-worker" \
+  'Tenko|CreateTenkoSchedule|UpdateTenkoSchedule|EmployeeHealthBaseline|CreateHealthBaseline|UpdateHealthBaseline|EquipmentFailure|CreateEquipmentFailure|UpdateEquipmentFailure|SelfDeclaration|SubmitSelfDeclaration|SafetyJudgment|Webhook|CreateWebhook'
+guard_appstate_fields tenko "ippoan/alc-tenko-worker" \
+  'tenko_call|tenko_records|tenko_schedules|tenko_sessions|tenko_webhooks|daily_health|health_baselines|equipment_failures|driver_info|webhook'
 
 # --- trouble (Worker へ移した。Refs #747) ---
 # trouble は全部 ippoan/alc-trouble-worker に移り、alc-trouble crate は消した。
@@ -126,8 +135,7 @@ guard_appstate_fields admin "ippoan/alc-auth-worker" 'sso_admin|tenant_users'
 
 # --- carins・maintenance (Worker へ移した。W3、Refs #680) ---
 # 車検証・ファイル・NFC タグ・車両整備の口は全部 ippoan/alc-carins-worker に移り、alc-carins・alc-maintenance crate は消した。
-# crate の再作成と、alc-core への carins の repository / model / AppState field の再流入を落とす
-# (点呼 alc-tenko が整備の表を生 SQL で読むのは点呼の機能なので対象外)。
+# crate の再作成と、alc-core への carins の repository / model / AppState field の再流入を落とす。
 for c in alc-carins alc-maintenance; do
   if [ -e "crates/$c" ]; then
     err "domain-split: crates/$c が再作成されています。carins・maintenance は ippoan/alc-carins-worker に置いてください (Refs #680)"

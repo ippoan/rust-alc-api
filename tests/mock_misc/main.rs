@@ -9,8 +9,6 @@ mod mock_helpers;
 mod mock_auth_test;
 #[path = "../mock_tests/mock_bot_admin_test.rs"]
 mod mock_bot_admin_test;
-#[path = "../mock_tests/mock_driver_info_test.rs"]
-mod mock_driver_info_test;
 #[path = "../mock_tests/mock_health_test.rs"]
 mod mock_health_test;
 #[path = "../mock_tests/mock_lineworks_internal_test.rs"]

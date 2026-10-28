@@ -37,56 +37,14 @@ path = "crates/alc-core/src/auth_lineworks.rs"
 type = "combined"
 
 [[files]]
-path = "crates/alc-core/src/webhook.rs"
-type = "combined"
-
-[[files]]
 path = "crates/alc-core/src/redact_broadcast.rs"
 type = "unit"
-
-# --- alc-tenko ---
-
-[[files]]
-path = "crates/alc-tenko/src/daily_health.rs"
-type = "mock"
-
-[[files]]
-path = "crates/alc-tenko/src/equipment_failures.rs"
-type = "mock"
-
-[[files]]
-path = "crates/alc-tenko/src/health_baselines.rs"
-type = "mock"
-
-[[files]]
-path = "crates/alc-tenko/src/tenko_call.rs"
-type = "mock"
-
-[[files]]
-path = "crates/alc-tenko/src/tenko_records.rs"
-type = "mock"
-
-[[files]]
-path = "crates/alc-tenko/src/tenko_schedules.rs"
-type = "mock"
-
-[[files]]
-path = "crates/alc-tenko/src/tenko_webhooks.rs"
-type = "mock"
-
-[[files]]
-path = "crates/alc-tenko/src/tenko_sessions.rs"
-type = "combined"
 
 # --- alc-misc ---
 
 # Bot 設定の export だけ (一覧・保存・削除は alc-lineworks-worker へ。W2c)
 [[files]]
 path = "crates/alc-misc/src/bot_admin.rs"
-type = "mock"
-
-[[files]]
-path = "crates/alc-tenko/src/driver_info.rs"
 type = "mock"
 
 [[files]]

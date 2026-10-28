@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/alc-auth-jwt", "crates/alc-core", "crates/alc-misc", "crates/alc-notify", "crates/alc-storage", "crates/alc-tenko"]
+members = [".", "crates/alc-auth-jwt", "crates/alc-core", "crates/alc-misc", "crates/alc-notify", "crates/alc-storage"]
 resolver = "2"
 
 # 暗号 bignum crate だけ opt-level=3 で最適化 (Refs #438)。
@@ -40,7 +40,6 @@ unexpected_cfgs = { level = "allow", check-cfg = ['cfg(coverage)'] }
 alc-core = { path = "crates/alc-core" }
 alc-misc = { path = "crates/alc-misc" }
 alc-notify = { path = "crates/alc-notify" }
-alc-tenko = { path = "crates/alc-tenko" }
 alc-storage = { path = "crates/alc-storage" }
 # 共通の計算 crate の正本は ippoan/alc-dtako-worker (Refs #736)。rev で固定し、2 か所 (ここ・alc-core) は同じ rev にそろえる (出どころを 2 つにしない)。
 alc-csv-parser = { git = "https://github.com/ippoan/alc-dtako-worker", rev = "eec0231cb584e456ae56b2b766f450d7b6ecaeaf" }

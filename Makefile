@@ -48,7 +48,7 @@ cov-check-mock:
 
 # --- Mock テスト (DB 不要) ---
 
-MOCK_TESTS := --test mock_tenko --test mock_misc
+MOCK_TESTS := --test mock_misc
 
 mock-test:
 	cargo test $(MOCK_TESTS)

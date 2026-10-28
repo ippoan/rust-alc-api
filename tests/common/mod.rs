@@ -13,11 +13,8 @@ use sqlx::postgres::PgPoolOptions;
 use uuid::Uuid;
 
 use rust_alc_api::db::repository::{
-    PgAuthRepository, PgBotAdminRepository, PgDailyHealthRepository, PgDriverInfoRepository,
-    PgEquipmentFailuresRepository, PgHealthBaselinesRepository, PgLineworksChannelsRepository,
+    PgAuthRepository, PgBotAdminRepository, PgLineworksChannelsRepository,
     PgNotifyDeliveryRepository, PgNotifyDocumentRepository, PgNotifyRecipientRepository,
-    PgTenkoCallRepository, PgTenkoRecordsRepository, PgTenkoSchedulesRepository,
-    PgTenkoSessionRepository, PgTenkoWebhooksRepository,
 };
 use rust_alc_api::AppState;
 
@@ -278,7 +275,6 @@ fn build_app_state(
         notify_storage: None,
         redact_broadcaster: None,
         realtime_bus: None,
-        webhook: None,
     }
 }
 
@@ -542,35 +538,7 @@ fn internal_oidc_trust_for_tests() -> rust_alc_api::middleware::auth::InternalOi
 }
 
 /// テスト用 axum サーバーを起動し、base URL を返す
-/// pool ベースの Pg TenkoState を合成する (integration test 用、Refs #513)
-pub fn pg_tenko_state(state: &AppState) -> alc_tenko::TenkoState {
-    let pool = state
-        .pool
-        .clone()
-        .expect("spawn_test_server: state.pool is None — mock state は spawn_test_server_with_tenko を使うこと");
-    alc_tenko::TenkoState {
-        tenko_call: Arc::new(PgTenkoCallRepository::new(pool.clone())),
-        tenko_records: Arc::new(PgTenkoRecordsRepository::new(pool.clone())),
-        tenko_schedules: Arc::new(PgTenkoSchedulesRepository::new(pool.clone())),
-        tenko_sessions: Arc::new(PgTenkoSessionRepository::new(pool.clone())),
-        tenko_webhooks: Arc::new(PgTenkoWebhooksRepository::new(pool.clone())),
-        daily_health: Arc::new(PgDailyHealthRepository::new(pool.clone())),
-        health_baselines: Arc::new(PgHealthBaselinesRepository::new(pool.clone())),
-        equipment_failures: Arc::new(PgEquipmentFailuresRepository::new(pool.clone())),
-        driver_info: Arc::new(PgDriverInfoRepository::new(pool.clone())),
-        webhook: state.webhook.clone(),
-    }
-}
-
 pub async fn spawn_test_server(state: AppState) -> String {
-    let tenko_state = pg_tenko_state(&state);
-    spawn_test_server_with_states(state, tenko_state).await
-}
-
-pub async fn spawn_test_server_with_states(
-    state: AppState,
-    tenko_state: alc_tenko::TenkoState,
-) -> String {
     use axum::{Extension, Router};
     use rust_alc_api::auth::google::GoogleTokenVerifier;
     use tower_http::cors::{Any, CorsLayer};
@@ -597,7 +565,7 @@ pub async fn spawn_test_server_with_states(
     let app = Router::new()
         .nest(
             "/api",
-            rust_alc_api::routes::router(internal_oidc_trust_for_tests(), tenko_state),
+            rust_alc_api::routes::router(internal_oidc_trust_for_tests()),
         )
         // テスト用 proxy emulation (Refs #434)。#434 で rust-alc-api は JWT 検証を
         // 撤去し、注入された identity ヘッダー (X-Tenant-ID / X-User-*) を信頼する

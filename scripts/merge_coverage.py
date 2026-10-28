@@ -3,7 +3,7 @@
 
 For each source file, takes the maximum execution count per line.
 This allows combining coverage from parallel matrix jobs
-(e.g., lib tests + mock_tenko + mock_dtako).
+(e.g., lib tests + mock_misc).
 
 Usage:
     python3 scripts/merge_coverage.py part1.txt part2.txt ... > merged.txt
