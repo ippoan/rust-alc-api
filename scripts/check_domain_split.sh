@@ -83,74 +83,29 @@ guard_model_structs trouble "ippoan/alc-trouble-worker" \
 guard_appstate_fields trouble "ippoan/alc-trouble-worker" \
   'trouble_tickets|trouble_files|trouble_workflow|trouble_categories|trouble_offices|trouble_progress_statuses|trouble_notification_prefs|trouble_schedules|trouble_tasks|trouble_task_types|trouble_task_statuses|trouble_field_layouts|trouble_storage'
 
-# --- notify (Worker へ移した口。Refs #747) ---
-# 宛先・グループ・LINE の設定の口は ippoan/alc-notify-worker に移った。
-# Cloud Run に残る notify の口 (文書・ingest 等) は使わない。
-guard_repository_modules notify "ippoan/alc-notify-worker" \
-  notify_groups notify_line_config
-guard_appstate_fields notify "ippoan/alc-notify-worker" \
-  'notify_groups|notify_line_config'
-
-# --- notify の閲覧の口 (消した。W8a、Refs #680・#648) ---
-# 閲覧は nuxt-notify の Worker (KV・R2) が配信し、rust の閲覧の口 (/notify/v/{token}・/notify/read/{token}・
-# /internal/notify/view/{token}) と viewer.rs・read_tracker.rs は消した (token を URL のパスに載せる口、#648)。
-# module の再作成・route の再登録・閲覧用の repository の型の再流入を落とす。
-for m in viewer read_tracker; do
-  if [ -e "crates/alc-notify/src/${m}.rs" ]; then
-    err "domain-split: crates/alc-notify/src/${m}.rs が再作成されています。閲覧は ippoan/nuxt-notify の Worker に置いてください (Refs #680)"
-  fi
-done
-hits=$(grep -rnE '"/notify/v/|"/notify/read/|"/internal/notify/view/' crates src || true)
-if [ -n "$hits" ]; then
-  echo "$hits"
-  err "domain-split: notify の閲覧の口が再登録されています。閲覧は ippoan/nuxt-notify の Worker に置いてください (Refs #680)"
+# --- notify (Worker へ移した。Refs #747・#680) ---
+# notify の口は全部 Worker に移り、alc-notify crate は消した (W8c-2): 宛先・グループ・LINE の設定・LINE WORKS・配信・
+# LINE と LINE WORKS の webhook の受け口・文書とメールの閲覧と書き (upload・DELETE・recompute)・メールの取り込み (ingest)・
+# 抽出 (Gemini) と黒塗り (pdfium) の背景処理は ippoan/alc-notify-worker (抽出と黒塗りの本体は GCP の ippoan/alc-redact)、
+# 閲覧 (/notify/v/{token}・/notify/read/{token}) は ippoan/nuxt-notify の Worker。
+# crate の再作成・notify の route の再登録・alc-core への repository / WS の broadcaster / AppState の欄の再流入を落とす。
+if [ -e crates/alc-notify ]; then
+  err "domain-split: crates/alc-notify が再作成されています。notify は ippoan/alc-notify-worker に置いてください (Refs #680)"
 fi
-hits=$(grep -nE 'pub struct (ReadResult|DeliveryViewInfo)|fn (mark_read|get_for_view)\(' crates/alc-core/src/repository/notify_deliveries.rs || true)
+hits=$(grep -rnE '"/notify/|"/internal/notify/|"/internal/lineworks/(bot-secret|event)' crates src || true)
 if [ -n "$hits" ]; then
   echo "$hits"
-  err "domain-split: alc-core の notify_deliveries に閲覧の口の repository が再流入しています。閲覧は ippoan/nuxt-notify の Worker に置いてください (Refs #680)"
-fi
-
-# --- LINE・LINE WORKS の webhook の受け口 (消した。W8b、Refs #680) ---
-# LINE の webhook (公開の /notify/line/webhook と /internal/notify/line/webhook) と LINE WORKS の 2 口
-# (/internal/lineworks/bot-secret/{bot_id}・/internal/lineworks/event) は ippoan/alc-notify-worker に移った
-# (auth-worker が Service Binding ALC_NOTIFY で呼ぶ)。module・route・repository・AppState の欄の再流入を落とす。
-for m in line_webhook lineworks_channels clients/line; do
-  if [ -e "crates/alc-notify/src/${m}.rs" ]; then
-    err "domain-split: crates/alc-notify/src/${m}.rs が再作成されています。LINE・LINE WORKS の受け口は ippoan/alc-notify-worker に置いてください (Refs #680)"
-  fi
-done
-hits=$(grep -rnE '"/notify/line/webhook"|"/internal/notify/line/webhook"|"/internal/lineworks/bot-secret/|"/internal/lineworks/event"' crates src || true)
-if [ -n "$hits" ]; then
-  echo "$hits"
-  err "domain-split: LINE・LINE WORKS の受け口が再登録されています。ippoan/alc-notify-worker に置いてください (Refs #680)"
+  err "domain-split: notify の口が再登録されています。ippoan/alc-notify-worker に置いてください (Refs #680)"
 fi
 guard_repository_modules notify "ippoan/alc-notify-worker" \
-  notify_recipients lineworks_channels
+  notify_groups notify_line_config notify_recipients lineworks_channels notify_documents notify_deliveries
+for m in redact_broadcast realtime_bus; do
+  if [ -e "crates/alc-core/src/${m}.rs" ]; then
+    err "domain-split: alc-core に notify の ${m}.rs が再流入しています。WS の push は ippoan/alc-notify-worker に置いてください (Refs #680)"
+  fi
+done
 guard_appstate_fields notify "ippoan/alc-notify-worker" \
-  'notify_recipients|lineworks_channels'
-
-# --- notify の文書とメールの閲覧の口 (消した。W8c-1、Refs #680) ---
-# 文書の一覧・1 件・preview・download とメールの一覧・1 件 (GET /notify/documents・/notify/documents/{id}・/preview・
-# /download・/notify/emails・/notify/emails/{message_id}) は ippoan/alc-notify-worker に移った (auth-worker が GET だけ
-# Service Binding ALC_NOTIFY へ回す)。呼び手の無い search は移さず消した。同じ path の DELETE と upload・recompute
-# (POST) は W8c-2 まで残るので、GET の route と閲覧用の repository の再流入だけを落とす。
-hits=$(grep -rnE '"/notify/documents"|"/notify/documents/search"|"/notify/documents/\{id\}/(preview|download)"|"/notify/emails' crates src || true)
-if [ -n "$hits" ]; then
-  echo "$hits"
-  err "domain-split: notify の文書・メールの閲覧の口が再登録されています。ippoan/alc-notify-worker に置いてください (Refs #680)"
-fi
-hits=$(grep -rlPz '"/notify/documents/\{id\}",\s*axum::routing::get' crates src || true)
-if [ -n "$hits" ]; then
-  echo "$hits"
-  err "domain-split: GET /notify/documents/{id} が再登録されています。ippoan/alc-notify-worker に置いてください (Refs #680)"
-fi
-hits=$(grep -nE 'pub struct NotifyDeliveryWithRecipient|fn (list_by_document|search|list)\(' \
-  crates/alc-core/src/repository/notify_deliveries.rs crates/alc-core/src/repository/notify_documents.rs || true)
-if [ -n "$hits" ]; then
-  echo "$hits"
-  err "domain-split: alc-core の notify_documents / notify_deliveries に閲覧の口の repository が再流入しています。ippoan/alc-notify-worker に置いてください (Refs #680)"
-fi
+  'notify_groups|notify_line_config|notify_recipients|lineworks_channels|notify_documents|notify_deliveries|notify_storage|redact_broadcaster|realtime_bus'
 
 # --- dtako (Worker へ移した。Refs #680) ---
 # dtako の口は全部 ippoan/alc-dtako-worker に移り (最後が W5c-5 の起票 dtako_tickets)、alc-dtako crate は消した。
@@ -210,4 +165,4 @@ if [ "$fail" != 0 ]; then
   echo "::error::domain split guard failed — ドメインコードは alc-core ではなく各ドメイン crate に追加してください (設計: issue #513)"
   exit 1
 fi
-echo "domain split guard OK (tenko, trouble, notify, notify viewer, notify line/lineworks inbound, notify documents read, dtako, hub, devices, admin, carins)"
+echo "domain split guard OK (tenko, trouble, notify, dtako, hub, devices, admin, carins)"

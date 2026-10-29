@@ -67,24 +67,6 @@ fi
 # JWT の発行・検証は auth-worker に完全移管され、rust-alc-api は HS256 鍵を
 # 一切持たない (internal 認証は Google OIDC / aud=alc-api-internal のみ)。
 
-notify_worker_secret_name() {
-  if [[ "$ENV" == "staging" ]]; then echo "notify-worker-secret-staging"
-  else echo "notify-worker-secret"; fi
-}
-
-notify_redact_broadcast_url() {
-  if [[ "$ENV" == "staging" ]]; then
-    echo "https://realtime.notify-staging.ippoan.org/broadcast"
-  else
-    echo "https://realtime.notify.ippoan.org/broadcast"
-  fi
-}
-
-notify_redact_broadcast_secret_name() {
-  if [[ "$ENV" == "staging" ]]; then echo "notify-redact-broadcast-secret-staging"
-  else echo "notify-redact-broadcast-secret"; fi
-}
-
 # ---------------------------------------------------------------------------
 # Per-service env vars and secrets — THE SINGLE SOURCE OF TRUTH
 # ---------------------------------------------------------------------------
@@ -107,14 +89,6 @@ emit_env_backend() {
               value: "${ENV_CARINS_R2_BUCKET:-carins-files}"
             - name: DTAKO_R2_BUCKET
               value: "${ENV_DTAKO_R2_BUCKET:-ohishi-dtako-apac}"
-            - name: NOTIFY_R2_BUCKET
-              value: "$( [[ "$ENV" == "staging" ]] && echo "notify-files-staging" || echo "notify-files" )"
-            - name: NOTIFY_FRONTEND_URL
-              value: "$( [[ "$ENV" == "staging" ]] && echo "https://notify-staging.ippoan.org" || echo "https://notify.ippoan.org" )"
-            - name: NOTIFY_REDACT_BROADCAST_URL
-              value: "$(notify_redact_broadcast_url)"
-            - name: NOTIFY_REDACT_2STAGE
-              value: "1"
             - name: FCM_PROJECT_ID
               value: "alc-fcm"
             - name: STAGING_MODE
@@ -184,16 +158,6 @@ YAML
                 secretKeyRef:
                   key: latest
                   name: dtako-r2-secret-key
-            - name: NOTIFY_R2_ACCESS_KEY
-              valueFrom:
-                secretKeyRef:
-                  key: latest
-                  name: carins-r2-access-key
-            - name: NOTIFY_R2_SECRET_KEY
-              valueFrom:
-                secretKeyRef:
-                  key: latest
-                  name: carins-r2-secret-key
             - name: LINE_LOGIN_CHANNEL_ID
               valueFrom:
                 secretKeyRef:
@@ -214,21 +178,6 @@ YAML
                 secretKeyRef:
                   key: latest
                   name: sso-encryption-key
-            - name: NOTIFY_WORKER_SECRET
-              valueFrom:
-                secretKeyRef:
-                  key: latest
-                  name: $(notify_worker_secret_name)
-            - name: NOTIFY_REDACT_BROADCAST_SECRET
-              valueFrom:
-                secretKeyRef:
-                  key: latest
-                  name: $(notify_redact_broadcast_secret_name)
-            - name: GEMINI_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  key: latest
-                  name: gemini-api-key
             # email-receiver Worker からの internal ingest (POST /api/dtako/tickets) 用。
             # empty なら src/routes/mod.rs::internal_shared_secret_router が empty router
             # を返し、ingest route が disable される safe fallback (Refs ippoan/email-receiver#1)。

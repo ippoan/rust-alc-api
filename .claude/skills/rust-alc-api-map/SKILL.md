@@ -1,8 +1,8 @@
 ---
 name: rust-alc-api-map
-generated-from: rust-alc-api:91a9cabad22384d9632266b7b6e081f0b27abf55
+generated-from: rust-alc-api:0db79f70f69a839b5fd96935a76eb2ddad6c974c
 paths: [crates/, src/, tests/]
-description: rust-alc-api (アルコールチェッカー基盤の Rust/Axum Cargo workspace — domain crate 群 + monolith 単一バイナリ、PostgreSQL+RLS、Cloud Run) の構造ナビゲーション。どの crate に何のルートがあるか / monolith (rust-alc-api) 一本化 (gateway + per-domain は #556 で廃止) / RLS・migration・deploy/release 分離の gotcha を 1 枚にまとめる。トリガー:「rust-alc-api」「alc-api」「alc-notify」「alc-tenko」「alc-carins」「alc-dtako」「gateway」「tenko-api」「carins-api」「dtako-api」「trouble-api」(trouble は ippoan/alc-trouble-worker へ移設済み)「RLS テナント」「sqlx migration」「ts-rs」「Release Wave」「Bazel」等。
+description: rust-alc-api (アルコールチェッカー基盤の Rust/Axum Cargo workspace — domain crate 群 + monolith 単一バイナリ、PostgreSQL+RLS、Cloud Run) の構造ナビゲーション。どの crate に何のルートがあるか / monolith (rust-alc-api) 一本化 (gateway + per-domain は #556 で廃止) / RLS・migration・deploy/release 分離の gotcha を 1 枚にまとめる。トリガー:「rust-alc-api」「alc-api」「alc-notify」(notify は ippoan/alc-notify-worker へ移設済み)「alc-tenko」「alc-carins」「alc-dtako」「gateway」「tenko-api」「carins-api」「dtako-api」「trouble-api」(trouble は ippoan/alc-trouble-worker へ移設済み)「RLS テナント」「sqlx migration」「ts-rs」「Release Wave」「Bazel」等。
 ---
 
 # rust-alc-api-map — rust-alc-api 構造ナビゲーション
@@ -18,13 +18,13 @@ Google OAuth + LINE WORKS。Cloud Run にデプロイ。
 
 | 系統 | バイナリ | 役割 |
 |---|---|---|
-| **monolith** | `rust-alc-api` (`src/main.rs`) | 全 domain crate の router を `/api` 下に一括 nest。全 domain (tenko/carins/dtako/notify/misc/auth) を 1 プロセスで提供 (trouble は ippoan/alc-trouble-worker へ移設、Refs #747。camera は削除、Refs #680) |
+| **monolith** | `rust-alc-api` (`src/main.rs`) | 全 domain crate の router を `/api` 下に一括 nest。いま残る domain は misc (health・Bot 設定の export) と内部用の rls-check だけ (tenko・carins・dtako・notify・auth・devices・trouble は各 Worker へ移設、camera は削除。Refs #680 / #747) |
 | **CLI** | `migrate` (`src/bin/migrate.rs`) / `archive` (`src/bin/archive.rs`) | sqlx migration 実行 (staging の起動時とテスト用。本番は alc-migrations 側が流す) / アーカイブ Job (dtako の R2 は `DTAKO_R2_BUCKET`、本番既定は `ohishi-dtako-apac`) |
 
 **gateway (`crates/gateway`) + per-domain API (`tenko-api` / `carins-api` / `dtako-api` /
 `trouble-api` / `alc-camera-api`) は #556 で廃止** (本番・staging とも休眠していたため、
 attack surface と CI 時間削減で monolith に集約)。`alc-api.ippoan.org` は monolith に
-domain-mapping。domain crate (`alc-notify` 等) は monolith が `.with_state` でマウントする
+domain-mapping。domain crate (`alc-misc` 等) は monolith が `.with_state` でマウントする
 router 実装として存続。旧 per-domain は同じ domain crate を単独 main で立てていたが、
 その薄い main (bin crate) だけを削除した。
 
@@ -32,7 +32,7 @@ router 実装として存続。旧 per-domain は同じ domain crate を単独 m
 
 | crate | 役割 / 主要ルート群 |
 |---|---|
-| `alc-core` | 共通基盤: **共有** models / **共有** repository trait / `auth_middleware` / `tenant` / `realtime_bus` / `redact_broadcast` / **`api_error`** (理由付きエラーレスポンス `(StatusCode, Json<Value>)` の共通ヘルパー — `bad_request`/`not_found`/`upstream_error`/`internal_error`/`internal_error_msg`。alc-auth::internal / alc-notify::lineworks_channels / lineworks_config に散っていた同型定義を Refs #668 で統合。**新しいハンドラの理由付きエラーはここを使う。同型定義を crate 内に増やさないこと**)。**`master_data` / `master_handlers` は削除済み** (テナントごとのマスタの generic CRUD。最後の利用者だった整備カテゴリが W3 で ippoan/alc-carins-worker へ移った)。**port 化進行中 (Refs #539)**: `fcm` / `device_pair_client` は **trait (port) だけが core に残り、実装 (adapter) は alc-notify / alc-devices へ移設済み**。`auth_google` は internal OIDC 専用に縮小 (login 用 `verify()`/`extra_client_ids` は削除)。ts-rs 型 export 元。**tenko は ippoan/alc-tenko-worker (W7d)、trouble は ippoan/alc-trouble-worker へ移設済み** (Refs #680 / #747、alc-core への再流入と crate の再作成は `scripts/check_domain_split.sh` が CI で loud fail)。**新機能は原則ドメイン crate (無ければ新 crate) に置く** — alc-core に足してよいのは全ドメイン共有の基盤だけ。alc-core に struct 1 個足すと 12 test shard + 7 Builds が再ビルドされる (コストは CI 時間で可視) **`api_error` / `TenantId` / `AuthUser` / `require_tenant_header` の実体は `alc-core-wasm` (wasm32 でもビルドできる共有部分)。alc-core は元のパス (`alc_core::api_error::*` / `middleware::{TenantId,AuthUser}` / `auth_middleware::require_tenant_header`) のまま re-export するので import は変えない (Refs #681)** |
+| `alc-core` | 共通基盤: **共有** models / **共有** repository trait / `auth_middleware` / `tenant` / **`api_error`** (理由付きエラーレスポンス `(StatusCode, Json<Value>)` の共通ヘルパー — `bad_request`/`not_found`/`upstream_error`/`internal_error`/`internal_error_msg`。alc-auth::internal / alc-notify::lineworks_channels / lineworks_config に散っていた同型定義を Refs #668 で統合。**新しいハンドラの理由付きエラーはここを使う。同型定義を crate 内に増やさないこと**)。**`master_data` / `master_handlers` は削除済み** (テナントごとのマスタの generic CRUD。最後の利用者だった整備カテゴリが W3 で ippoan/alc-carins-worker へ移った)。**port 化進行中 (Refs #539)**: `fcm` / `device_pair_client` は **trait (port) だけが core に残り、実装 (adapter) は alc-notify / alc-devices へ移設済み (どちらの crate も後に Worker へ移して消した)**。`auth_google` は internal OIDC 専用に縮小 (login 用 `verify()`/`extra_client_ids` は削除)。ts-rs 型 export 元。**tenko は ippoan/alc-tenko-worker (W7d)、trouble は ippoan/alc-trouble-worker へ移設済み** (Refs #680 / #747、alc-core への再流入と crate の再作成は `scripts/check_domain_split.sh` が CI で loud fail)。**新機能は原則ドメイン crate (無ければ新 crate) に置く** — alc-core に足してよいのは全ドメイン共有の基盤だけ。alc-core に struct 1 個足すと 12 test shard + 7 Builds が再ビルドされる (コストは CI 時間で可視) **`api_error` / `TenantId` / `AuthUser` / `require_tenant_header` の実体は `alc-core-wasm` (wasm32 でもビルドできる共有部分)。alc-core は元のパス (`alc_core::api_error::*` / `middleware::{TenantId,AuthUser}` / `auth_middleware::require_tenant_header`) のまま re-export するので import は変えない (Refs #681)** |
 | `alc-core-wasm` | **この repo には無い。正本は ippoan/alc-worker-kit の crate `alc-core-wasm`** (Refs #736。rust-alc-api d28944e から写した)。`crates/alc-core` の 1 か所が git 依存 (rev 固定、feature `sqlx`) で引く (Bazel は `@crates//:alc-core-wasm`)。**直すときは ippoan/alc-worker-kit に PR → ここの rev を上げる** (`cargo tree -i alc-core-wasm` で出どころが 1 つを確かめる。分割 worker も同じ kit の rev から引く)。中身: `api_error` (理由付きエラー) / `TenantId`・`AuthUser` / `require_tenant_header` (X-Tenant-ID 解釈を monolith と worker で 1 か所に) / `DbError` (`From<sqlx::Error>` は feature `sqlx`) / `device_dev`。alc-core は元のパスのまま re-export する。wasm32 のビルドと行カバレッジ 100% の gate は kit の CI が持つ (この repo の `wasm-build` job・core-wasm の Bazel shard・`coverage_100.toml` の登録は外した) |
 | ~~`alc-auth`~~ | **削除済み (W2b、Refs #680)**。認証 JWT の発行・検証とログインの口は auth-worker / alc-auth-worker (#479 PR-3・Refs #680)、最後に残っていた `GET /api/auth/me`・`POST /api/auth/logout`・`POST /api/my-orgs` も本番は auth-worker の `ALC_AUTH_SESSION=1` (v0.2.328) で alc-auth-worker から組んでいるので crate ごと消した。`AuthRepository` (alc-core) は alc-notify 等がまだ使うので残る。crate の再作成は `scripts/check_domain_split.sh` が落とす |
 | `alc-misc` | health (`/health` + `/health/secret-fingerprint?name=&expected=` = 任意 env の sha256[0..8] と `expected` 突合、`{match: bool}` のみ返し oracle 防止。cross-store drift を CI で自動検出、Refs ippoan/rust-alc-api#424 / ippoan/ci-workflows#131。health_canary = JWT_SECRET drift 検知は #479 PR-3 の JWT_SECRET 全撤去に伴い削除) / bot_admin (**開発者だけの export `GET /admin/bot/configs/export` だけ**。auth-worker の `handleBotConfigExport` が呼ぶ。一覧・保存・削除は ippoan/alc-lineworks-worker)。**ユーザー・招待・SSO 設定・参加の申請・`tenants/by-slug` (sso_admin / tenant_users / access_requests) は削除済み** (W2c、Refs #680。ippoan/alc-auth-worker が持ち、auth-worker が認可して呼ぶ)。再流入は `scripts/check_domain_split.sh` が落とす |
@@ -41,7 +41,7 @@ router 実装として存続。旧 per-domain は同じ domain crate を単独 m
 | ~~`alc-dtako`~~ | **削除済み (W5c-5、Refs #680)**。dtako の口は全部 ippoan/alc-dtako-worker (Cloudflare Worker `alc-dtako`、route の crate `crates/alc-dtako-upload/`) に移り、本番は auth-worker の振り分けで Worker に回る。最後に残っていた起票 `dtako_tickets` の 5 口 (`POST /api/dtako/tickets`・`PATCH /api/dtako/tickets/{id}/scraped` = email-receiver の内部用、`GET /api/dtako/tickets`・`GET /api/dtako/tickets/{id}`・`POST /api/dtako/tickets/close` = 画面用) も worker の `tickets.rs` (v0.3.15、auth-worker v0.2.349)。それまでに移したもの: upload・split・再計算・履歴の 10 口 (#725)、機械の取り込み (W5a)、勤怠向けの読み取り (W5b)、画面向けの読み取りと分類の更新 20 口 (W5c-1)、Y時間 export (W5c-2)、拘束時間の帳票 (W5c-3) とその PDF (W5c-4、`alc-pdf` とフォントも worker へ)。車輛設定 dump の口は呼び手が無く消した (W5-0)。`AppState` の `dtako_tickets`・`dtako_storage` (dtako の R2) と `tests/mock_dtako` も消した。alc-core に残る Dtako の型は `DtakologRow` (アーカイブの Job) と `DtakoDailyWorkHours` (点呼の乗務員情報) など。crate の再作成と起票の型の再流入は `scripts/check_domain_split.sh` が落とす。直すときは ippoan/alc-dtako-worker へ |
 **機械の取り込み (DVR の動画通知 `/api/dvr/notifications`・`/api/dvr/files/{id}` と車両の現在地のログ `POST /api/dtako-logs/bulk`) は ippoan/alc-dtako-worker へ移り (W5a、v0.3.7。auth-worker v0.2.339 で本番切り替え済み)、ハンドラ・`DtakoLogsRepository::bulk_upsert`・`DtakologInput`・`BulkUpsertResponse` はこの repo から消した** (Refs #680)。表 `dvr_notifications`・`dtakologs` は残り、dtako-logs の読み取りも W5c-1 で worker へ移した。直すときは worker の `crates/alc-dtako-upload/src/{logs,dvr}.rs` へ。
 | ~~`alc-trouble`~~ | **削除済み (Refs #747)**。trouble (tickets / files / workflow / schedules / tasks / notifier / lineworks_members 等) は全部 ippoan/alc-trouble-worker に移り、本番は auth-worker の振り分け (`/api/trouble/` prefix と fire) で Worker に回る。rust 側に trouble の route・repo・`TroubleState`・テストは無い。カメラ停止の自動チケットだけは `alc-camera` の `HttpDownTicketSink` が trouble-worker の内部口を HTTP で叩く。crate の再作成は `scripts/check_domain_split.sh` が落とす |
-| `alc-notify` | notify のうち Cloud Run に残る口: documents (upload・redact-recompute・extract-recompute) / ingest / email_documents (文書の DELETE だけ) / test_endpoints / extract / redact / background_extract / background_redaction。**文書とメールの閲覧の口 (GET `/notify/documents`・`/{id}`・`/{id}/preview`・`/{id}/download`・`/notify/emails`・`/{message_id}`) は W8c-1 で ippoan/alc-notify-worker (`crates/notify/src/documents.rs`、R2 の binding `NOTIFY_R2`) へ移して消した** (Refs #680。auth-worker が画面用の GET だけ回す。呼び手の無い search は移さず消した。使い手が無くなった repo の `list`・`search`・`list_by_document` と `NotifyDeliveryWithRecipient`・mock も消した。再流入は `scripts/check_domain_split.sh` が落とす)。**宛先 (recipients)・グループ (groups)・LINE の設定 (line-config)・LINE WORKS のトークルーム (`/notify/lineworks/channels`)・メンバー (`/notify/lineworks/users`)・ログイン状況 (`/notify/lineworks/login-activity`)・配信 (`/notify/documents/{id}/distribute`・`/notify/test-distribute`) は ippoan/alc-notify-worker、`POST /api/internal/lineworks/send` は alc-lineworks に移り、Cloud Run 側の口と、それだけが使っていた module (`distribute` / `recipients` / `groups` / `line_config` / `lineworks_directory` / `lineworks_login_activity` / `lineworks_config`)・repo (`notify_groups` / `notify_line_config` と、`notify_recipients` / `lineworks_channels` の CRUD・`get_for_send`)・AppState field は消した (Refs #747)**。使い手が無くなった `viewer_register` と、trouble の通知だけが使っていた `clients/lineworks.rs` (`LineworksBotClient`) も消した (Refs #747)。閲覧の口 (`viewer`・`read_tracker`) と、それだけが使っていた repo の `mark_read`・`get_for_view` (`ReadResult`・`DeliveryViewInfo`) は W8a で消した (閲覧は nuxt-notify の Worker。Refs #680)。**LINE・LINE WORKS の webhook の受け口は W8b で ippoan/alc-notify-worker へ移して消した** (Refs #680): LINE の webhook (公開の `/notify/line/webhook` と `/internal/notify/line/webhook`) と LINE WORKS の DO が叩く 2 口 (`/internal/lineworks/bot-secret/{bot_id}`・`/internal/lineworks/event`)。auth-worker の `line-webhook.ts`・`LineworksWebhookDO` は Service Binding `ALC_NOTIFY` で worker を呼ぶ。一緒に `line_webhook.rs`・`lineworks_channels.rs`・LINE の client (`clients/`、example `line_token_issue`)・repo (`notify_recipients`・`lineworks_channels`、alc-core の trait と model)・AppState の `notify_recipients`・`lineworks_channels`・mock (`MockNotifyRecipientRepository`・`MockLineworksChannelsRepository`・`mock_lineworks_internal_test`) も消した。再作成・再流入は `scripts/check_domain_split.sh` が落とす。**LINE の JWT・送信・webhook を直すときは ippoan/alc-notify-worker の `crates/notify/src/line.rs`・`line_webhook.rs`・`lineworks_webhook.rs` へ** |
+| ~~`alc-notify`~~ | **削除済み (W8c-2、Refs #680)**。notify の口は全部 ippoan/alc-notify-worker にある: 宛先・グループ・LINE の設定・LINE WORKS のトークルームとメンバー・配信 (#747)、LINE・LINE WORKS の webhook の受け口 (W8b)、文書とメールの閲覧 (W8c-1)、文書の upload・DELETE・抽出と黒塗りのやり直し・メールの取り込み (ingest) と、抽出 (Gemini) と黒塗り (pdfium) の背景処理 (W8c-2。Cloudflare Queues の consumer が auth-worker の RPC `AlcRedactEntrypoint` 越しに GCP の ippoan/alc-redact を呼ぶ)。閲覧の viewer (`/notify/v/*`・`/notify/read/*`) は ippoan/nuxt-notify の Worker (W8a)。email-receiver は Service Binding で worker の ingest を呼び、共有の秘密 `NOTIFY_WORKER_SECRET` は使わない。一緒に alc-core の `repository/notify_documents.rs`・`notify_deliveries.rs`・`redact_broadcast.rs` (`RedactBroadcaster`)・`realtime_bus.rs` (`RealtimeBus`、使い手 0)、AppState の `notify_documents`・`notify_deliveries`・`notify_storage`・`redact_broadcaster`・`realtime_bus`、mock (`tests/mock_helpers/repos_d.rs`)、PDFium (Dockerfile・CI の install)、render.sh / deploy.sh の notify の env と secret (`NOTIFY_*`・`GEMINI_API_KEY`)、deploy.yml の ingest の smoke も消した。crate の再作成・notify の route・repository・AppState の欄の再流入は `scripts/check_domain_split.sh` が落とす。**直すときは ippoan/alc-notify-worker (抽出と黒塗りの本体は ippoan/alc-redact) へ** |
 | ~~`alc-devices`~~ | **削除済み (W6b、Refs #680)**。端末の登録・管理・報告 (W6b-a)、kiosk の再ペアリング (W6b-b。発行は auth-worker の `DevicePairEntrypoint` を Service Binding で呼ぶ)、FCM で端末に送る口と着信の設定 (W6b-c。FCM の送信専用の既存の鍵を Secrets Store から共有) は全部 ippoan/alc-devices-worker にある。端末の測定 `hub/measurements` は W6a で alc-people-worker へ。`AppState` の `devices`・`fcm`・`device_pair_client`、alc-core の `repository/devices.rs`・`fcm.rs`・`device_pair_client.rs`、alc-notify の `fcm.rs`、`tests/mock_devices`・devices の結合テストも消した。移さずに消した 5 口: 共有の秘密 `FCM_INTERNAL_SECRET` (本番に無い) を照合する `fcm-notify-call`・`test-fcm-all-exclude`・`trigger-update-dev` と、どの経路からも届かない `register/request`・`register/status/{code}`。crate の再作成と再流入は `scripts/check_domain_split.sh` が落とす |
 | ~~`alc-camera`~~ | **削除済み (Refs #680)**。監視カメラの死活監視 (#345。拠点タブレットが ONVIF で生死を `camera_health_logs` に書き、連続失敗で trouble に障害を自動起票) は、書き手のチェッカー (ippoan/alc-app#27) が実装されないまま 60 日間 health-logs への書き込みが 0 件だったため、worker に移さず消した。カメラの台帳 `alc_api.cameras` は alc-cam-sd-ingest (ippoan/alc-cam の ingest/) が `/api/cam-clips/cameras` で持つ。死活監視が要るなら alc-cam 側で作り直す |
 | `alc-storage` | StorageBackend trait + R2 / GCS / HttpProxy 実装。`list(prefix)` (Refs #205 の 13) はデフォルト未対応 (`StorageError::Config`) の trait メソッドで、R2Backend だけが `rust-s3` の `Bucket::list` (自動ページング、ETag のクォート除去込み) で実装。GCS/HttpProxy は現状未対応のまま |
@@ -51,8 +51,8 @@ router 実装として存続。旧 per-domain は同じ domain crate を単独 m
 
 ## entrypoint / router
 
-- **monolith**: `src/main.rs` — DATABASE_URL で `PgPool`、Storage backend (`STORAGE_BACKEND` = r2/gcs、
-  notify は別バケット+別 R2 キー。dtako の R2 は W5c-5、carins の R2 は W3 で外した)、`AppState` (共有 repo 群) を組み立て、
+- **monolith**: `src/main.rs` — DATABASE_URL で `PgPool`、Storage backend (`STORAGE_BACKEND` = r2/gcs。
+  notify の R2 は W8c-2、dtako の R2 は W5c-5、carins の R2 は W3 で外した)、`AppState` (共有 repo 群) を組み立て、
   `.nest("/api", rust_alc_api::routes::router(internal_oidc_trust()))` (`TenkoState` は W7d で消した)。
   各 domain の route 群は router 内で `.with_state(...)` マウント (FromRef 変換は廃止)。trouble の `TroubleState`・
   `TROUBLE_R2_BUCKET`・`SCHEDULE_ALARM_URL` は #747 で消した (`cloudrun/render.sh` の env と trouble の R2 キーの secretKeyRef も)。背景 task は無い (60s ごとの予定超過の確認
@@ -320,7 +320,7 @@ router 実装として存続。旧 per-domain は同じ domain crate を単独 m
   `ts-bindings-${sha}` artifact は **test-lib job が生成** する (check job ではない。lib shard は
   #507 で test-matrix から DB なしの test-lib job に分離。Refs #482 / 下記 CI 節)。
 - **長時間 compute と Cloud Run**: `tokio::spawn` で background compute → fire-and-forget broadcast は
-  やらない (Cloud Run は応答後に CPU を絞る)。`RealtimeBus` / `RedactBroadcaster` で対処。CLAUDE.md 該当節参照。
+  やらない (Cloud Run は応答後に CPU を絞る)。CLAUDE.md 該当節参照 (背景処理が要るものは Worker の Queues などで。notify の抽出と黒塗りは W8c-2 で alc-notify-worker の Queues へ移した)。
 - **裸の `Err(StatusCode::BAD_REQUEST)` は本文もない 400 になる**: axum の
   `StatusCode` エラー型はレスポンス本文を持たないため、フロントには
   `API エラー (400):` としか出ず原因不明になる (`submit_medical` の 3 箇所で
@@ -348,7 +348,7 @@ router 実装として存続。旧 per-domain は同じ domain crate を単独 m
   と Cargo workspace の両方が存在 (`MODULE.bazel` / `.bazelrc`)。CI の merge gate は Cargo
   (`cargo llvm-cov nextest`)。`bazel test //... --build_tests_only` は観測用 job
   (`bazel-test-poc`) + main-push warm で全 unit test を回す (run 跨ぎ result cache、Refs #515)。
-  **dev-dependencies を持つ crate (alc-misc / alc-notify) の rust_test には
+  **dev-dependencies を持つ crate (alc-misc 等) の rust_test には
   `all_crate_deps(normal_dev/proc_macro_dev)` の配線が必須** — 無いと `#[tokio::test]` 等が
   unresolved で FAILED TO BUILD になる。
   **`rust_test` を足したら matrix を 2 箇所に足す** — `ci.yml` の実行 job
@@ -364,7 +364,7 @@ router 実装として存続。旧 per-domain は同じ domain crate を単独 m
   **production の tag release は新 revision を 0% (no-traffic) で deploy するだけ**で traffic は旧 revision に残す。
   実際の切替は **Release Wave flip** が行う。`verify-no-traffic` job がこの不変条件を検証 (latest revision が
   0% traffic でなければ FAIL)。
-- **単一 Dockerfile**: `Dockerfile` (monolith + migrate + archive + PDFium 同梱。migrate は他 repo の結合テスト用で、本番では起動しない) のみ。monolith が
+- **単一 Dockerfile**: `Dockerfile` (monolith + migrate + archive。PDFium は W8c-2 で外した。migrate は他 repo の結合テスト用で、本番では起動しない) のみ。monolith が
   単一 Cloud Run service (`rust-alc-api` / staging `rust-alc-api-staging`) として deploy される。
   `cloudrun/render.sh` が YAML 生成 (service は `backend` のみ受理)。gateway + per-domain の
   `Dockerfile.*` / per-service deploy は #556 で廃止。
@@ -555,7 +555,7 @@ DB プリミティブを `/api/internal/auth/*` (`require_internal_jwt` 配下) 
 - rust は cookie も browser JWT も**一切見ない** (dumb backend)。発行・検証・cookie は
   auth-worker が持つ。
 - 実装: 旧 `crates/alc-auth/src/internal.rs` (`internal_router`、Refs #680 で削除)。`require_internal_jwt` は
-  rls-check・端末の pairing-tenant・notify の内部口で使い続けている。
+  rls-check で使い続けている。
 
 ## ストレージバックエンド切り替え
 
@@ -884,7 +884,7 @@ LINE / LINE WORKS / FCM / e-Gov など外部 API を叩くコードは、バグ�
 
 - DB 非依存、秘密は env + Secret Manager から手動取得
 - **1 イテレーション 10 秒以下**、claim の型ミスや auth 失敗を即時に確認
-- 参考: (LINE の example `line_token_issue` は W8b で client ごと消した。いま rust に残る外部 API の例は `crates/alc-notify/examples/` の redact 系)
+- 参考: (LINE の example `line_token_issue` は W8b で client ごと消した。redact 系の example も W8c-2 で crate ごと消した。いま rust に外部 API の example は無い)
 
 
 ### 2. モジュール分割 (テスト可能な形に)
@@ -932,9 +932,6 @@ fetch のみに戻す)。
 1. **`gcloud run services update --no-cpu-throttling`** (instance-based billing)
    - asia-northeast1 で **+$20-60/月** (request 頻度依存、24/7 alive で +$63/月)
    - `deploy.sh` に固定する場合 user 承認必須
-   - 注意: `redact_broadcast.rs` (alc-notify の redact pipeline) は同じ pattern で動いている
-     はずなので、production で本当に最後まで完走しているか要検証 (Y時間と同様に部分失敗
-     している可能性あり)
 2. **Cloud Tasks queue + 別 Cloud Run worker サービス**
    - Tasks にタスク push → 別 worker が処理 → broadcast
    - 別サービス追加。月数 cents 〜 $1 程度
@@ -949,18 +946,10 @@ fetch のみに戻す)。
 - 5-15s なら sync HTTP で問題なし (Y時間 export は parallel R2 fetch 後 5-15s で済むため
   async 化せず sync で配信)
 
-### `crates/alc-core/src/realtime_bus.rs::RealtimeBus`
-
-汎用 broadcaster client (notify-realtime-bus Worker `/broadcast` への POST)。
-`RedactBroadcaster` (`crates/alc-core/src/redact_broadcast.rs`) と同 env vars
-(`NOTIFY_REDACT_BROADCAST_URL` / `NOTIFY_REDACT_BROADCAST_SECRET`) を共有。
-
-**現状の使用箇所**: なし (Y時間 export での利用は revert 済。Y時間 export は ippoan/alc-dtako-worker へ移った)。将来 Cloud Tasks や DO 経由
-の async pattern を再導入する際に再利用可能なように残してある (テスト 11 件付き)。
-
 新規 async endpoint を増やす際は、上記 3 選択肢のいずれかを採用すること。
-**`tokio::spawn` + `bus.broadcast()` を Cloud Run service の HTTP handler 内で直接
-呼び出さない** こと (background task が確実には完走しない)。
+**`tokio::spawn` + 外への broadcast を Cloud Run service の HTTP handler 内で直接
+呼び出さない** こと (background task が確実には完走しない)。汎用の broadcaster (`RealtimeBus`・`RedactBroadcaster`) は
+使い手が無くなったので W8c-2 で消した (WS の push は ippoan/alc-notify-worker が notify-realtime-bus の Service Binding で行う)。
 
 ### 並列 R2 fetch のパターン (Y時間 export 高速化、2026-05-10)
 
@@ -1274,14 +1263,14 @@ npx playwright test
 
 - **rust-alc-api の本番デプロイは `/tag-release patch` でタグを打つだけ** — `./deploy.sh` ローカル実行は使わない。CI ci.yml `deploy-production` ジョブが v* タグで自動実行 (GHCR → AR → Cloud Run migration + deploy) (`feedback_cloudrun_ci_deploy`)
 
-### Gemini API (notify redact / extract)
+### Gemini API (notify redact / extract。いまは ippoan/alc-redact)
 
 - **`generationConfig` には必ず `responseMimeType: "application/json"` + `responseSchema` の両方注入** — `responseMimeType` だけでは markdown wrap / 前置テキストで parse error 発生。`responseSchema` (OpenAPI 3.0 subset) が constraint として構造を強制 (`feedback_gemini_response_schema_required`)
   - 型 enum は **大文字** (`STRING / NUMBER / INTEGER / BOOLEAN / ARRAY / OBJECT`)
   - 配列の固定長は `minItems` + `maxItems` で挟む (`box_2d` の `[ymin, xmin, ymax, xmax]` は両方 4)
   - schema を test で pin (`assert_eq!(schema["properties"]["x"]["type"], "STRING")`)
   - parse error 時は raw response 先頭 1KB を `tracing::warn!` で残す
-  - 参考実装: `crates/alc-notify/src/redact.rs` の `redact_response_schema() / stage1_response_schema() / stage2_response_schema()` (PR #318)
+  - 参考実装: ippoan/alc-redact の `src/gemini.rs` (`redact_response_schema() / stage1_response_schema() / stage2_response_schema()`) と `src/extract.rs` (`logistics_response_schema()`)。rust の `crates/alc-notify` は W8c-2 で消した (PR #318 の時点の実装はそこに在った)
   - 事故事例: PR #313 で `responseSchema` 忘れ → Stage 1 parse 失敗 → 1-stage fallback → 3164 マスクズレが staging で再現せず、PR #318 で修正
 - **bbox / 構造化 output の検証は Python プローブ → 画像オーバーレイで 30 秒イテレーション** — staging deploy ループは 1 イテ 5-10 分かかるので、Rust に書く前に `/tmp/redact_probe.py` + `/tmp/visualize_bbox.py` で prompt を固める。`GEMINI_API_KEY` は `~/js/denchoho-invoice/.env` から拝借 (`feedback_local_gemini_bbox_iteration`、`notify_pdf_redact_design.md` 参照)
 
