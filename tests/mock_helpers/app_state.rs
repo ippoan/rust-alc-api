@@ -26,11 +26,6 @@ pub fn setup_mock_app_state() -> AppState {
         auth: Arc::new(MockAuthRepository::default()),
         bot_admin: Arc::new(MockBotAdminRepository::default()),
         storage,
-        notify_documents: Arc::new(MockNotifyDocumentRepository::default()),
-        notify_deliveries: Arc::new(MockNotifyDeliveryRepository::default()),
-        notify_storage: None,
-        redact_broadcaster: None,
-        realtime_bus: None,
     }
 }
 

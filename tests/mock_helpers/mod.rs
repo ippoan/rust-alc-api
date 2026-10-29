@@ -10,10 +10,7 @@
 
 #[macro_use]
 mod repos_a;
-#[macro_use]
-mod repos_d;
 pub mod app_state;
 
 pub use app_state::*;
 pub use repos_a::*;
-pub use repos_d::*;

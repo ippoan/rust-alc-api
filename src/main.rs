@@ -12,7 +12,6 @@ use tower_http::set_header::SetResponseHeaderLayer;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
-use alc_notify::repo::{PgNotifyDeliveryRepository, PgNotifyDocumentRepository};
 use rust_alc_api::db::repository::{PgAuthRepository, PgBotAdminRepository};
 use rust_alc_api::storage::StorageBackend;
 use rust_alc_api::AppState;
@@ -92,37 +91,12 @@ async fn main() -> anyhow::Result<()> {
 
     let auth = Arc::new(PgAuthRepository::new(pool.clone()));
     let bot_admin = Arc::new(PgBotAdminRepository::new(pool.clone()));
-    let notify_documents = Arc::new(PgNotifyDocumentRepository::new(pool.clone()));
-    let notify_deliveries = Arc::new(PgNotifyDeliveryRepository::new(pool.clone()));
-
-    // notify 用 R2 (optional)
-    let notify_storage: Option<Arc<dyn StorageBackend>> =
-        std::env::var("NOTIFY_R2_BUCKET").ok().map(|bucket| {
-            let account_id = std::env::var("R2_ACCOUNT_ID")
-                .expect("R2_ACCOUNT_ID required for NOTIFY_R2_BUCKET");
-            let access_key =
-                std::env::var("NOTIFY_R2_ACCESS_KEY").expect("NOTIFY_R2_ACCESS_KEY required");
-            let secret_key =
-                std::env::var("NOTIFY_R2_SECRET_KEY").expect("NOTIFY_R2_SECRET_KEY required");
-            tracing::info!("Notify storage: R2 (bucket={})", bucket);
-            Arc::new(
-                rust_alc_api::storage::R2Backend::new(
-                    bucket, account_id, access_key, secret_key, None,
-                )
-                .expect("Failed to init notify R2 backend"),
-            ) as Arc<dyn StorageBackend>
-        });
 
     let state = AppState {
         pool: Some(pool.clone()),
         auth,
         bot_admin,
         storage,
-        notify_documents,
-        notify_deliveries,
-        notify_storage,
-        redact_broadcaster: alc_core::redact_broadcast::RedactBroadcaster::from_env().map(Arc::new),
-        realtime_bus: alc_core::realtime_bus::RealtimeBus::from_env().map(Arc::new),
     };
 
     // CORS: 任意オリジン全開放 (allow_origin(Any)) をやめ、ippoan 系フロントの

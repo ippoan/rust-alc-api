@@ -1,10 +1,6 @@
 // Re-export route modules from domain crates
 pub use alc_misc::bot_admin;
 pub use alc_misc::health;
-pub use alc_notify::documents as notify_documents;
-pub use alc_notify::email_documents as notify_email_documents;
-pub use alc_notify::ingest as notify_ingest;
-pub use alc_notify::test_endpoints as notify_test_endpoints;
 
 pub mod rls_check;
 
@@ -47,27 +43,15 @@ pub fn router(internal_oidc: InternalOidcTrust) -> Router<AppState> {
         // with_test_claims) が注入する。
         .layer(Extension(internal_oidc));
 
-    // テナント対応ルート — 注入 identity (X-Tenant-ID + 任意 X-User-*) を信頼 (Refs #434)。
-    // 旧 require_tenant の bare X-Tenant-ID フォールバック / ローカル JWT 検証は撤去。
-    // キオスク経路も含め前段 proxy が introspect 検証 → header 注入する。
-    let tenant_protected = Router::new()
-        .merge(notify_documents::tenant_router())
-        .merge(notify_email_documents::tenant_router())
-        .merge(notify_test_endpoints::tenant_router())
-        .layer(axum_middleware::from_fn(require_tenant_header));
-
     // 公開ルート (認証不要)。旧ログイン経路 (auth::public_router = Google /
     // LINE / LINE WORKS OAuth / refresh / password login) は auth-worker へ
     // 完全移管したため撤去 (Refs #479 PR-3)。
-    let public_routes = Router::new()
-        .merge(health::router())
-        .merge(notify_ingest::public_router());
+    let public_routes = Router::new().merge(health::router());
 
     Router::new()
         .merge(public_routes)
         .merge(jwt_protected)
         .merge(internal_protected)
-        .merge(tenant_protected)
 }
 
 #[cfg(test)]

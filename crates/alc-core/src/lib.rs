@@ -13,8 +13,6 @@ pub mod constant_time;
 pub mod device_dev;
 pub mod middleware;
 pub mod models;
-pub mod realtime_bus;
-pub mod redact_broadcast;
 pub mod repo;
 pub mod repository;
 pub mod serde_helpers;
@@ -23,9 +21,7 @@ pub mod tenant;
 
 use std::sync::Arc;
 
-use repository::{
-    AuthRepository, BotAdminRepository, NotifyDeliveryRepository, NotifyDocumentRepository,
-};
+use repository::{AuthRepository, BotAdminRepository};
 use storage::StorageBackend;
 
 #[derive(Clone)]
@@ -34,20 +30,6 @@ pub struct AppState {
     pub auth: Arc<dyn AuthRepository>,
     pub bot_admin: Arc<dyn BotAdminRepository>,
     pub storage: Arc<dyn StorageBackend>,
-    pub notify_documents: Arc<dyn NotifyDocumentRepository>,
-    pub notify_deliveries: Arc<dyn NotifyDeliveryRepository>,
-    pub notify_storage: Option<Arc<dyn StorageBackend>>,
-    /// `RedactBroadcaster::from_env()` で env vars (`NOTIFY_REDACT_BROADCAST_URL` /
-    /// `NOTIFY_REDACT_BROADCAST_SECRET`) が揃った時のみ Some。background_redaction.rs
-    /// が terminal 状態で呼び、Cloudflare Worker (notify-realtime-bus) の DO 経由で
-    /// admin ブラウザに WS push する。未設定なら no-op (Phase 3 デプロイ前は空でも安全)。
-    pub redact_broadcaster: Option<Arc<redact_broadcast::RedactBroadcaster>>,
-    /// 任意の Serialize ペイロードを同 notify-realtime-bus Worker に流す汎用クライアント。
-    /// `RedactBroadcaster` と同じ env vars / 同じ Worker / 同じ secret を共有するが、
-    /// payload 型を選ばないので redact 以外の async job 完了通知 (Y時間 export 等)
-    /// にも使える。env vars 未設定なら None で no-op (POST /jobs 系は 503 返却で
-    /// 検知すること、silent に compute しないため)。
-    pub realtime_bus: Option<Arc<realtime_bus::RealtimeBus>>,
 }
 
 impl AppState {

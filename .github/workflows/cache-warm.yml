@@ -106,7 +106,6 @@ jobs:
           - { name: auth-jwt, target: "//crates/alc-auth-jwt:alc-auth-jwt_test", coverage: "cov-auth-jwt" }
           - { name: core, target: "//crates/alc-core:alc-core_test", coverage: "cov-core" }
           - { name: misc, target: "//crates/alc-misc:alc-misc_test", coverage: "cov-misc" }
-          - { name: notify, target: "//crates/alc-notify:alc-notify_test", pdfium: true, coverage: "cov-notify" }
           - { name: storage, target: "//crates/alc-storage:alc-storage_test" }
     steps:
       - uses: actions/checkout@v4
@@ -117,15 +116,6 @@ jobs:
           r2-bucket: ${{ vars.BAZEL_R2_BUCKET }}
           r2-access-key-id: ${{ secrets.BAZEL_R2_ACCESS_KEY_ID }}
           r2-secret-access-key: ${{ secrets.BAZEL_R2_SECRET_ACCESS_KEY }}
-      # alc-notify::redact が libpdfium.so を dlopen する (test-lib と同一 step、
-      # processwrapper-sandbox はシステムパスに到達できるので /usr/lib で足りる)
-      - name: Install PDFium (for redact tests)
-        if: matrix.pdfium == true
-        run: |
-          curl -fsSL "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/7825/pdfium-linux-x64.tgz" \
-            | sudo tar -xz -C /tmp
-          sudo cp /tmp/lib/libpdfium.so /usr/lib/libpdfium.so
-          sudo ldconfig
       # coverage 付き shard は PR 側 (bazel-test-poc) が plain `bazel test` を
       # 走らせない (coverage が test gate を兼ねる、Refs #568) ため、plain config の
       # warm も不要 — coverage 無し shard に限定して warm 時間と tar サイズを削る。

@@ -31,5 +31,4 @@ coverage:cov-mock-misc --instrumentation_filter=//crates/alc-misc,//crates/alc-c
 coverage:cov-auth-jwt --instrumentation_filter=//crates/alc-auth-jwt
 coverage:cov-core --instrumentation_filter=//crates/alc-core
 coverage:cov-misc --instrumentation_filter=//crates/alc-misc
-coverage:cov-notify --instrumentation_filter=//crates/alc-notify
 coverage:cov-db-archive --instrumentation_filter=^//:

@@ -12,9 +12,7 @@ use std::sync::Arc;
 use sqlx::postgres::PgPoolOptions;
 use uuid::Uuid;
 
-use rust_alc_api::db::repository::{
-    PgAuthRepository, PgBotAdminRepository, PgNotifyDeliveryRepository, PgNotifyDocumentRepository,
-};
+use rust_alc_api::db::repository::{PgAuthRepository, PgBotAdminRepository};
 use rust_alc_api::AppState;
 
 use mock_storage::MockStorage;
@@ -257,19 +255,12 @@ fn build_app_state(
 ) -> AppState {
     let auth = Arc::new(PgAuthRepository::new(pool.clone()));
     let bot_admin = Arc::new(PgBotAdminRepository::new(pool.clone()));
-    let notify_documents = Arc::new(PgNotifyDocumentRepository::new(pool.clone()));
-    let notify_deliveries = Arc::new(PgNotifyDeliveryRepository::new(pool.clone()));
 
     AppState {
         pool: Some(pool),
         auth,
         bot_admin,
         storage,
-        notify_documents,
-        notify_deliveries,
-        notify_storage: None,
-        redact_broadcaster: None,
-        realtime_bus: None,
     }
 }
 

@@ -36,10 +36,6 @@ type = "combined"
 path = "crates/alc-core/src/auth_lineworks.rs"
 type = "combined"
 
-[[files]]
-path = "crates/alc-core/src/redact_broadcast.rs"
-type = "unit"
-
 # --- alc-misc ---
 
 # Bot 設定の export だけ (一覧・保存・削除は alc-lineworks-worker へ。W2c)
